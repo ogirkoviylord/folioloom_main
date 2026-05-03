@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from translator_service.documents import DocumentFormat, DocumentUpload
-from translator_service.extractors import extract_text_from_txt
+from translator_service.extractors import extract_text_from_docx, extract_text_from_txt
 from translator_service.pricing import PricingRules, estimate_price
 from translator_service.text_analysis import estimate_text_volume
 
@@ -35,6 +35,13 @@ def estimate_order(
             pricing_rules=pricing_rules,
             max_fragment_chars=max_fragment_chars,
         )
+    if upload.document_format is DocumentFormat.DOCX:
+        return estimate_docx_order(
+            upload=upload,
+            content=content,
+            pricing_rules=pricing_rules,
+            max_fragment_chars=max_fragment_chars,
+        )
 
     raise DocumentEstimationNotReadyError(
         f"Estimation for {upload.document_format.value} documents is not ready yet"
@@ -52,6 +59,40 @@ def estimate_txt_order(
         raise ValueError("TXT estimator can only process TXT uploads")
 
     text = extract_text_from_txt(content)
+    return _estimate_extracted_text(
+        upload=upload,
+        text=text,
+        pricing_rules=pricing_rules,
+        max_fragment_chars=max_fragment_chars,
+    )
+
+
+def estimate_docx_order(
+    *,
+    upload: DocumentUpload,
+    content: bytes,
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
+    if upload.document_format is not DocumentFormat.DOCX:
+        raise ValueError("DOCX estimator can only process DOCX uploads")
+
+    text = extract_text_from_docx(content)
+    return _estimate_extracted_text(
+        upload=upload,
+        text=text,
+        pricing_rules=pricing_rules,
+        max_fragment_chars=max_fragment_chars,
+    )
+
+
+def _estimate_extracted_text(
+    *,
+    upload: DocumentUpload,
+    text: str,
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
     text_analysis = estimate_text_volume(text, max_fragment_chars=max_fragment_chars)
     price_estimate = estimate_price(text_analysis, pricing_rules)
 
