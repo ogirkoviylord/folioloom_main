@@ -17,6 +17,30 @@ class OrderEstimate:
     price_usd: float
 
 
+class DocumentEstimationNotReadyError(ValueError):
+    pass
+
+
+def estimate_order(
+    *,
+    upload: DocumentUpload,
+    content: bytes,
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
+    if upload.document_format is DocumentFormat.TXT:
+        return estimate_txt_order(
+            upload=upload,
+            content=content,
+            pricing_rules=pricing_rules,
+            max_fragment_chars=max_fragment_chars,
+        )
+
+    raise DocumentEstimationNotReadyError(
+        f"Estimation for {upload.document_format.value} documents is not ready yet"
+    )
+
+
 def estimate_txt_order(
     *,
     upload: DocumentUpload,
@@ -40,4 +64,3 @@ def estimate_txt_order(
         fragment_count=text_analysis.fragment_count,
         price_usd=price_estimate.price_usd,
     )
-
