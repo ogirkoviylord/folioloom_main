@@ -1,6 +1,10 @@
 import unittest
 
-from translator_service.bot.runtime import BotRuntimeConfig, build_default_pricing_rules
+from translator_service.bot.runtime import (
+    BotRuntimeConfig,
+    _is_language_button_text,
+    build_default_pricing_rules,
+)
 
 
 class BotRuntimeTest(unittest.TestCase):
@@ -19,6 +23,9 @@ class BotRuntimeTest(unittest.TestCase):
         self.assertEqual(config.target_language, "en")
         self.assertEqual(config.max_fragment_chars, 4_000)
         self.assertEqual(config.max_upload_mb, 50)
+
+    def test_language_button_filter_ignores_missing_message_text(self):
+        self.assertFalse(_is_language_button_text(None))
 
 
 if __name__ == "__main__":

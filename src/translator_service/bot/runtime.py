@@ -249,7 +249,7 @@ def _language_keyboard():
     )
 
 
-def _is_language_button_text(text: str) -> bool:
+def _is_language_button_text(text: str | None) -> bool:
     return find_language_by_button_text(text) is not None
 
 
