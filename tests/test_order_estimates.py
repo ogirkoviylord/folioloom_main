@@ -1,0 +1,59 @@
+import unittest
+
+from translator_service.documents import DocumentFormat, validate_document_upload
+from translator_service.order_estimates import estimate_txt_order
+from translator_service.pricing import PricingRules
+
+
+class TxtOrderEstimateTest(unittest.TestCase):
+    def test_estimates_valid_txt_order_before_payment(self):
+        upload = validate_document_upload(
+            file_name="notes.txt",
+            size_bytes=36,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_txt_order(
+            upload=upload,
+            content="Первый абзац.\n\nВторой абзац длиннее.".encode("utf-8"),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=20,
+        )
+
+        self.assertEqual(estimate.file_name, "notes.txt")
+        self.assertEqual(estimate.document_format, DocumentFormat.TXT)
+        self.assertEqual(estimate.character_count, 36)
+        self.assertEqual(estimate.estimated_input_tokens, 9)
+        self.assertEqual(estimate.fragment_count, 2)
+        self.assertEqual(estimate.price_usd, 0.10)
+
+    def test_rejects_non_txt_upload_for_txt_estimator(self):
+        upload = validate_document_upload(
+            file_name="book.epub",
+            size_bytes=100,
+            max_upload_mb=50,
+        )
+
+        with self.assertRaises(ValueError) as error:
+            estimate_txt_order(
+                upload=upload,
+                content=b"plain text",
+                pricing_rules=PricingRules(
+                    deepseek_input_usd_per_million_tokens=0.28,
+                    expected_output_multiplier=1.2,
+                    service_markup_multiplier=3.0,
+                    minimum_price_usd=0.10,
+                ),
+                max_fragment_chars=20,
+            )
+
+        self.assertIn("TXT", str(error.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()
