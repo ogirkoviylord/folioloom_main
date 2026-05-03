@@ -1,4 +1,5 @@
 from translator_service.job_runner import TranslationJob, TranslationJobStatus
+from translator_service.bot_translation_service import PendingTranslation
 from translator_service.order_estimates import OrderEstimate
 
 
@@ -32,6 +33,17 @@ def build_order_estimate_message(estimate: OrderEstimate) -> str:
         f"{estimate.estimated_output_tokens} output\n"
         f"Цена: ${estimate.price_usd:.2f}\n\n"
         "Нажмите «Подтвердить», чтобы поставить перевод в очередь."
+    )
+
+
+def build_pending_translation_message(pending: PendingTranslation) -> str:
+    return (
+        "Документ готов к переводу\n\n"
+        f"Файл: {pending.file_name}\n"
+        f"Направление: {pending.source_language} → {pending.target_language}\n"
+        f"Фрагментов: {pending.fragment_count}\n"
+        f"Цена: ${pending.price_usd:.2f}\n\n"
+        "Нажмите «Подтвердить», чтобы начать перевод."
     )
 
 
