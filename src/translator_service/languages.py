@@ -17,11 +17,13 @@ SUPPORTED_TARGET_LANGUAGES = [
 ]
 
 
-def find_language_by_button_text(text: str) -> LanguageOption | None:
+def find_language_by_button_text(text: str | None) -> LanguageOption | None:
+    if text is None:
+        return None
+
     normalized = text.strip().lower()
     for language in SUPPORTED_TARGET_LANGUAGES:
         if language.button_text.lower() == normalized:
             return language
 
     return None
-

@@ -28,6 +28,9 @@ class LanguagesTest(unittest.TestCase):
     def test_returns_none_for_unknown_language_button(self):
         self.assertIsNone(find_language_by_button_text("Deutsch"))
 
+    def test_returns_none_for_missing_message_text(self):
+        self.assertIsNone(find_language_by_button_text(None))
+
 
 if __name__ == "__main__":
     unittest.main()
