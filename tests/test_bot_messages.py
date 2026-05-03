@@ -1,11 +1,13 @@
 import unittest
 
 from translator_service.bot.messages import (
+    CONFIRM_TRANSLATION_TEXT,
     build_main_menu,
     build_order_estimate_message,
     build_pending_translation_message,
     build_start_message,
     build_translation_job_status_message,
+    is_confirm_translation_text,
 )
 from translator_service.bot_translation_service import PendingTranslation
 from translator_service.documents import DocumentFormat
@@ -109,7 +111,16 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("notes.txt", message)
         self.assertIn("$0.10", message)
         self.assertIn("2", message)
-        self.assertIn("Подтвердить", message)
+        self.assertIn(CONFIRM_TRANSLATION_TEXT, message)
+
+    def test_confirm_translation_text_accepts_button_text_and_command(self):
+        self.assertTrue(is_confirm_translation_text("Подтвердить"))
+        self.assertTrue(is_confirm_translation_text(" подтвердить "))
+        self.assertTrue(is_confirm_translation_text("/confirm"))
+
+    def test_confirm_translation_text_rejects_other_messages(self):
+        self.assertFalse(is_confirm_translation_text("да"))
+        self.assertFalse(is_confirm_translation_text("перевести"))
 
 
 if __name__ == "__main__":
