@@ -1,0 +1,43 @@
+from dataclasses import dataclass
+
+from translator_service.documents import DocumentFormat, DocumentUpload
+from translator_service.extractors import extract_text_from_txt
+from translator_service.pricing import PricingRules, estimate_price
+from translator_service.text_analysis import estimate_text_volume
+
+
+@dataclass(frozen=True)
+class OrderEstimate:
+    file_name: str
+    document_format: DocumentFormat
+    character_count: int
+    estimated_input_tokens: int
+    estimated_output_tokens: int
+    fragment_count: int
+    price_usd: float
+
+
+def estimate_txt_order(
+    *,
+    upload: DocumentUpload,
+    content: bytes,
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
+    if upload.document_format is not DocumentFormat.TXT:
+        raise ValueError("TXT estimator can only process TXT uploads")
+
+    text = extract_text_from_txt(content)
+    text_analysis = estimate_text_volume(text, max_fragment_chars=max_fragment_chars)
+    price_estimate = estimate_price(text_analysis, pricing_rules)
+
+    return OrderEstimate(
+        file_name=upload.file_name,
+        document_format=upload.document_format,
+        character_count=text_analysis.character_count,
+        estimated_input_tokens=price_estimate.estimated_input_tokens,
+        estimated_output_tokens=price_estimate.estimated_output_tokens,
+        fragment_count=text_analysis.fragment_count,
+        price_usd=price_estimate.price_usd,
+    )
+

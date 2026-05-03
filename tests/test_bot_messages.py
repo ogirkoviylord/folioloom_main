@@ -1,6 +1,12 @@
 import unittest
 
-from translator_service.bot.messages import build_main_menu, build_start_message
+from translator_service.bot.messages import (
+    build_main_menu,
+    build_order_estimate_message,
+    build_start_message,
+)
+from translator_service.documents import DocumentFormat
+from translator_service.order_estimates import OrderEstimate
 
 
 class BotMessagesTest(unittest.TestCase):
@@ -28,6 +34,26 @@ class BotMessagesTest(unittest.TestCase):
                 "Помощь",
             ],
         )
+
+    def test_order_estimate_message_shows_price_and_volume(self):
+        message = build_order_estimate_message(
+            OrderEstimate(
+                file_name="notes.txt",
+                document_format=DocumentFormat.TXT,
+                character_count=36,
+                estimated_input_tokens=9,
+                estimated_output_tokens=11,
+                fragment_count=2,
+                price_usd=0.10,
+            )
+        )
+
+        self.assertIn("notes.txt", message)
+        self.assertIn("TXT", message)
+        self.assertIn("36", message)
+        self.assertIn("2", message)
+        self.assertIn("$0.10", message)
+        self.assertIn("Подтвердить", message)
 
 
 if __name__ == "__main__":
