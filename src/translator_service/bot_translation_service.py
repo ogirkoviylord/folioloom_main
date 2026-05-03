@@ -64,7 +64,9 @@ class BotTranslationService:
         )
         document_kind = _document_kind_from_format(upload.document_format)
         if document_kind is None:
-            raise ValueError("Prototype bot currently supports TXT and DOCX translation only")
+            raise ValueError(
+                "Prototype bot currently supports TXT, DOCX, and EPUB translation only"
+            )
 
         pending_upload = PendingUpload(
             user_telegram_id=user_telegram_id,
@@ -117,7 +119,7 @@ class BotTranslationService:
             document_kind = _document_kind_from_format(upload.document_format)
             if document_kind is None:
                 raise ValueError(
-                    "Prototype bot currently supports TXT and DOCX translation only"
+                    "Prototype bot currently supports TXT, DOCX, and EPUB translation only"
                 )
 
         estimate = estimate_order(
@@ -164,7 +166,9 @@ class BotTranslationService:
         )
         document_kind = _document_kind_from_format(upload.document_format)
         if document_kind is None:
-            raise ValueError("Only TXT and DOCX confirmation is supported in the prototype")
+            raise ValueError(
+                "Only TXT, DOCX, and EPUB confirmation is supported in the prototype"
+            )
 
         queued_job = self._job_repository.create_job(
             document_kind=document_kind,
@@ -189,4 +193,6 @@ def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind 
         return DocumentKind.TXT
     if document_format is DocumentFormat.DOCX:
         return DocumentKind.DOCX
+    if document_format is DocumentFormat.EPUB:
+        return DocumentKind.EPUB
     return None

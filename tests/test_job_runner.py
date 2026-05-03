@@ -78,6 +78,37 @@ class JobRunnerTest(unittest.TestCase):
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
+    def test_runs_epub_job_and_stores_ready_epub_result(self):
+        repository = InMemoryTranslationJobRepository()
+        job = repository.create_job(
+            document_kind=DocumentKind.EPUB,
+            user_telegram_id=42,
+            file_name="book.epub",
+            content=_make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Hello book</p></body>
+                    </html>
+                    """
+                }
+            ),
+            source_language="en",
+            target_language="es",
+        )
+
+        result = run_translation_job(
+            repository=repository,
+            job_id=job.id,
+            max_fragment_chars=20,
+            translator=RecordingTranslator(),
+        )
+
+        stored_job = repository.get(job.id)
+        self.assertEqual(stored_job.status, TranslationJobStatus.READY)
+        self.assertEqual(stored_job.result_file_name, "book.es.epub")
+        self.assertEqual(result.content_type, "application/epub+zip")
+
     def test_marks_job_as_failed_when_translation_raises(self):
         repository = InMemoryTranslationJobRepository()
         job = repository.create_txt_job(
@@ -110,4 +141,14 @@ def _make_docx(document_xml: str) -> bytes:
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
         docx.writestr("[Content_Types].xml", "<Types />")
+    return archive.getvalue()
+
+
+def _make_epub(xhtml_items: dict[str, str]) -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr("META-INF/container.xml", "<container />")
+        for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
     return archive.getvalue()

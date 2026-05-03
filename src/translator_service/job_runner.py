@@ -5,6 +5,7 @@ from translator_service.translation_jobs import TextTranslator
 from translator_service.translation_runner import (
     TranslatedDocument,
     translate_docx_document,
+    translate_epub_document,
     translate_txt_document,
 )
 
@@ -12,6 +13,7 @@ from translator_service.translation_runner import (
 class DocumentKind(StrEnum):
     TXT = "txt"
     DOCX = "docx"
+    EPUB = "epub"
 
 
 class TranslationJobStatus(StrEnum):
@@ -161,6 +163,15 @@ def _translate_job(
 
     if job.document_kind is DocumentKind.DOCX:
         return translate_docx_document(
+            file_name=job.file_name,
+            content=job.content,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            translator=translator,
+        )
+
+    if job.document_kind is DocumentKind.EPUB:
+        return translate_epub_document(
             file_name=job.file_name,
             content=job.content,
             source_language=job.source_language,

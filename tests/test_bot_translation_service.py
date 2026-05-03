@@ -165,7 +165,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 target_language="uk",
             )
 
-        self.assertIn("TXT and DOCX", str(error.exception))
+        self.assertIn("TXT, DOCX, and EPUB", str(error.exception))
 
     def test_accepts_docx_upload_and_runs_docx_translation(self):
         repository = InMemoryTranslationJobRepository()
@@ -197,6 +197,38 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.document_kind, DocumentKind.DOCX)
         self.assertEqual(job.result_file_name, "contract.fr.docx")
 
+    def test_accepts_epub_upload_and_runs_epub_translation(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="book.epub",
+            content=_make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Hello book</p></body>
+                    </html>
+                    """
+                }
+            ),
+            source_language="en",
+        )
+        service.prepare_pending_upload(user_telegram_id=42, target_language="es")
+
+        job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+
+        self.assertEqual(job.document_kind, DocumentKind.EPUB)
+        self.assertEqual(job.result_file_name, "book.es.epub")
+
 
 def _pricing_rules() -> PricingRules:
     return PricingRules(
@@ -218,4 +250,17 @@ def _make_docx(document_xml: str) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
+    return archive.getvalue()
+
+
+def _make_epub(xhtml_items: dict[str, str]) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr("META-INF/container.xml", "<container />")
+        for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
     return archive.getvalue()
