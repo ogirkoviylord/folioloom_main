@@ -143,6 +143,9 @@ class BotMessagesTest(unittest.TestCase):
         self.assertFalse(is_confirm_translation_text("да"))
         self.assertFalse(is_confirm_translation_text("перевести"))
 
+    def test_confirm_translation_text_rejects_missing_message_text(self):
+        self.assertFalse(is_confirm_translation_text(None))
+
     def test_language_selection_message_lists_supported_languages(self):
         message = build_language_selection_message()
 
