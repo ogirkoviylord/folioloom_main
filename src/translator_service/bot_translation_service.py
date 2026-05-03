@@ -178,12 +178,16 @@ class BotTranslationService:
             source_language=pending.source_language,
             target_language=pending.target_language,
         )
-        run_translation_job(
-            repository=self._job_repository,
-            job_id=queued_job.id,
-            max_fragment_chars=self._max_fragment_chars,
-            translator=translator,
-        )
+        try:
+            run_translation_job(
+                repository=self._job_repository,
+                job_id=queued_job.id,
+                max_fragment_chars=self._max_fragment_chars,
+                translator=translator,
+            )
+        except Exception:
+            return self._job_repository.get(queued_job.id)
+
         self._pending.pop(user_telegram_id, None)
         return self._job_repository.get(queued_job.id)
 
