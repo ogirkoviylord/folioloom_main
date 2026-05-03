@@ -1,7 +1,11 @@
 import unittest
 
 from translator_service.documents import DocumentFormat, validate_document_upload
-from translator_service.order_estimates import estimate_txt_order
+from translator_service.order_estimates import (
+    DocumentEstimationNotReadyError,
+    estimate_order,
+    estimate_txt_order,
+)
 from translator_service.pricing import PricingRules
 
 
@@ -53,6 +57,50 @@ class TxtOrderEstimateTest(unittest.TestCase):
             )
 
         self.assertIn("TXT", str(error.exception))
+
+    def test_estimate_order_dispatches_txt_uploads(self):
+        upload = validate_document_upload(
+            file_name="notes.txt",
+            size_bytes=9,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=b"Some text",
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=100,
+        )
+
+        self.assertEqual(estimate.file_name, "notes.txt")
+        self.assertEqual(estimate.document_format, DocumentFormat.TXT)
+
+    def test_estimate_order_reports_formats_that_are_not_ready_yet(self):
+        upload = validate_document_upload(
+            file_name="book.epub",
+            size_bytes=100,
+            max_upload_mb=50,
+        )
+
+        with self.assertRaises(DocumentEstimationNotReadyError) as error:
+            estimate_order(
+                upload=upload,
+                content=b"not used yet",
+                pricing_rules=PricingRules(
+                    deepseek_input_usd_per_million_tokens=0.28,
+                    expected_output_multiplier=1.2,
+                    service_markup_multiplier=3.0,
+                    minimum_price_usd=0.10,
+                ),
+                max_fragment_chars=100,
+            )
+
+        self.assertIn("epub", str(error.exception))
 
 
 if __name__ == "__main__":
