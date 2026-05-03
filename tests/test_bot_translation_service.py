@@ -15,6 +15,11 @@ class RecordingTranslator:
         return f"[{target_language}] {text}"
 
 
+class FailingTranslator:
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        raise RuntimeError("network failed")
+
+
 class BotTranslationServiceTest(unittest.TestCase):
     def test_prepares_txt_estimate_for_uploaded_document(self):
         service = BotTranslationService(
@@ -133,6 +138,31 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.result_file_name, "notes.uk.txt")
         self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
         self.assertIsNone(service.get_pending(42))
+
+    def test_failed_translation_returns_failed_job_and_keeps_pending_retry(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+        )
+        pending = service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=FailingTranslator(),
+        )
+
+        self.assertEqual(job.status, TranslationJobStatus.FAILED)
+        self.assertEqual(job.error_message, "network failed")
+        self.assertEqual(service.get_pending(42), pending)
 
     def test_confirm_without_pending_translation_is_rejected(self):
         service = BotTranslationService(

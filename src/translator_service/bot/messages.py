@@ -36,7 +36,7 @@ MESSAGES = {
         "queued": "Файл {file_name} в очереди на перевод.",
         "translating": "Файл {file_name} переводится.",
         "ready": "Перевод готов: {result_name}.",
-        "failed": "Ошибка перевода: {error}",
+        "failed": "Ошибка перевода. Попробуйте еще раз позже.",
         "status": "Статус задачи: {status}",
         "confirm": "Подтвердить",
     },
@@ -68,7 +68,7 @@ MESSAGES = {
         "queued": "Файл {file_name} у черзі на переклад.",
         "translating": "Файл {file_name} перекладається.",
         "ready": "Переклад готовий: {result_name}.",
-        "failed": "Помилка перекладу: {error}",
+        "failed": "Помилка перекладу. Спробуйте ще раз пізніше.",
         "status": "Статус завдання: {status}",
         "confirm": "Підтвердити",
     },
@@ -100,7 +100,7 @@ MESSAGES = {
         "queued": "Le fichier {file_name} est en file d’attente.",
         "translating": "Le fichier {file_name} est en cours de traduction.",
         "ready": "Traduction prête : {result_name}.",
-        "failed": "Erreur de traduction : {error}",
+        "failed": "Erreur de traduction. Veuillez réessayer plus tard.",
         "status": "Statut de la tâche : {status}",
         "confirm": "Confirmer",
     },
@@ -132,7 +132,7 @@ MESSAGES = {
         "queued": "El archivo {file_name} está en cola para traducirse.",
         "translating": "El archivo {file_name} se está traduciendo.",
         "ready": "Traducción lista: {result_name}.",
-        "failed": "Error de traducción: {error}",
+        "failed": "Error de traducción. Inténtalo de nuevo más tarde.",
         "status": "Estado de la tarea: {status}",
         "confirm": "Confirmar",
     },
@@ -164,7 +164,7 @@ MESSAGES = {
         "queued": "File {file_name} is queued for translation.",
         "translating": "File {file_name} is being translated.",
         "ready": "Translation ready: {result_name}.",
-        "failed": "Translation error: {error}",
+        "failed": "Translation error. Please try again later.",
         "status": "Job status: {status}",
         "confirm": "Confirm",
     },
@@ -278,8 +278,7 @@ def build_translation_job_status_message(
         return messages["ready"].format(result_name=result_name)
 
     if job.status is TranslationJobStatus.FAILED:
-        error = job.error_message or "неизвестная ошибка"
-        return messages["failed"].format(error=error)
+        return messages["failed"]
 
     return messages["status"].format(status=job.status.value)
 

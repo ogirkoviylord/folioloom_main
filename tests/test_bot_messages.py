@@ -109,12 +109,13 @@ class BotMessagesTest(unittest.TestCase):
                 source_language="ru",
                 target_language="en",
                 status=TranslationJobStatus.FAILED,
-                error_message="provider failed",
+                error_message="DeepSeek API request failed",
             )
         )
 
         self.assertIn("ошибка", message.lower())
-        self.assertIn("provider failed", message)
+        self.assertNotIn("DeepSeek", message)
+        self.assertNotIn("API", message)
 
     def test_pending_translation_message_shows_confirm_instruction(self):
         message = build_pending_translation_message(
