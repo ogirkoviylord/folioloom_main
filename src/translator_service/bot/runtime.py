@@ -8,6 +8,7 @@ from translator_service.bot.messages import (
     build_language_selection_message,
     build_pending_translation_message,
     build_start_message,
+    build_translation_language_selection_message,
     build_translation_job_status_message,
     is_confirm_translation_text,
 )
@@ -82,8 +83,10 @@ def create_router(
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
-        await message.answer(build_start_message(), reply_markup=_language_keyboard())
-        await message.answer(build_language_selection_message())
+        await message.answer(
+            build_language_selection_message(),
+            reply_markup=_language_keyboard(),
+        )
 
     @router.message(Command("language"))
     async def language(message: Message) -> None:
@@ -99,11 +102,34 @@ def create_router(
             await message.answer(build_language_selection_message())
             return
 
-        service.set_target_language(
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        if pending_upload is not None:
+            try:
+                pending = service.prepare_pending_upload(
+                    user_telegram_id=message.from_user.id,
+                    target_language=language_option.code,
+                )
+            except (
+                DocumentEstimationNotReadyError,
+                TextExtractionError,
+                UnsupportedDocumentError,
+                ValueError,
+            ) as error:
+                await message.answer(str(error))
+                return
+
+            await message.answer(
+                build_pending_translation_message(pending),
+                reply_markup=_confirm_keyboard(),
+            )
+            return
+
+        service.set_interface_language(
             user_telegram_id=message.from_user.id,
-            target_language=language_option.code,
+            language_code=language_option.code,
         )
         await message.answer(build_language_selected_message(language_option.button_text))
+        await message.answer(build_start_message())
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
@@ -123,6 +149,14 @@ def create_router(
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        if pending_upload is not None:
+            await message.answer(
+                build_translation_language_selection_message(pending_upload.file_name),
+                reply_markup=_language_keyboard(),
+            )
+            return
+
         pending = service.get_pending(message.from_user.id)
         if pending is None:
             await message.answer("Активного ожидающего перевода нет.")
@@ -142,12 +176,11 @@ def create_router(
         content = downloaded.read()
 
         try:
-            pending = service.prepare_document(
+            pending_upload = service.store_uploaded_document(
                 user_telegram_id=message.from_user.id,
                 file_name=document.file_name or "document.txt",
                 content=content,
                 source_language=config.source_language,
-                target_language=service.get_target_language(message.from_user.id),
             )
         except (
             DocumentEstimationNotReadyError,
@@ -159,8 +192,8 @@ def create_router(
             return
 
         await message.answer(
-            build_pending_translation_message(pending),
-            reply_markup=_confirm_keyboard(),
+            build_translation_language_selection_message(pending_upload.file_name),
+            reply_markup=_language_keyboard(),
         )
 
     return router

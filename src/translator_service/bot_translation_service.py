@@ -12,6 +12,14 @@ from translator_service.translation_jobs import TextTranslator
 
 
 @dataclass(frozen=True)
+class PendingUpload:
+    user_telegram_id: int
+    file_name: str
+    content: bytes
+    source_language: str
+
+
+@dataclass(frozen=True)
 class PendingTranslation:
     user_telegram_id: int
     file_name: str
@@ -35,8 +43,57 @@ class BotTranslationService:
         self._pricing_rules = pricing_rules
         self._max_upload_mb = max_upload_mb
         self._max_fragment_chars = max_fragment_chars
+        self._pending_uploads: dict[int, PendingUpload] = {}
         self._pending: dict[int, PendingTranslation] = {}
-        self._target_languages: dict[int, str] = {}
+        self._interface_languages: dict[int, str] = {}
+
+    def store_uploaded_document(
+        self,
+        *,
+        user_telegram_id: int,
+        file_name: str,
+        content: bytes,
+        source_language: str,
+    ) -> PendingUpload:
+        upload = validate_document_upload(
+            file_name=file_name,
+            size_bytes=len(content),
+            max_upload_mb=self._max_upload_mb,
+        )
+        if upload.document_format is not DocumentFormat.TXT:
+            raise ValueError("Prototype bot currently supports TXT translation only")
+
+        pending_upload = PendingUpload(
+            user_telegram_id=user_telegram_id,
+            file_name=file_name,
+            content=content,
+            source_language=source_language,
+        )
+        self._pending_uploads[user_telegram_id] = pending_upload
+        return pending_upload
+
+    def get_pending_upload(self, user_telegram_id: int) -> PendingUpload | None:
+        return self._pending_uploads.get(user_telegram_id)
+
+    def prepare_pending_upload(
+        self,
+        *,
+        user_telegram_id: int,
+        target_language: str,
+    ) -> PendingTranslation:
+        pending_upload = self._pending_uploads.get(user_telegram_id)
+        if pending_upload is None:
+            raise ValueError("No uploaded document is waiting for translation language")
+
+        pending = self.prepare_document(
+            user_telegram_id=user_telegram_id,
+            file_name=pending_upload.file_name,
+            content=pending_upload.content,
+            source_language=pending_upload.source_language,
+            target_language=target_language,
+        )
+        self._pending_uploads.pop(user_telegram_id, None)
+        return pending
 
     def prepare_document(
         self,
@@ -76,11 +133,11 @@ class BotTranslationService:
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
         return self._pending.get(user_telegram_id)
 
-    def set_target_language(self, *, user_telegram_id: int, target_language: str) -> None:
-        self._target_languages[user_telegram_id] = target_language
+    def set_interface_language(self, *, user_telegram_id: int, language_code: str) -> None:
+        self._interface_languages[user_telegram_id] = language_code
 
-    def get_target_language(self, user_telegram_id: int) -> str:
-        return self._target_languages.get(user_telegram_id, "en")
+    def get_interface_language(self, user_telegram_id: int) -> str:
+        return self._interface_languages.get(user_telegram_id, "ru")
 
     def confirm_pending_translation(
         self,

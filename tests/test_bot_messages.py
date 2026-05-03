@@ -4,6 +4,7 @@ from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
     build_language_selected_message,
     build_language_selection_message,
+    build_translation_language_selection_message,
     build_main_menu,
     build_order_estimate_message,
     build_pending_translation_message,
@@ -129,7 +130,7 @@ class BotMessagesTest(unittest.TestCase):
     def test_language_selection_message_lists_supported_languages(self):
         message = build_language_selection_message()
 
-        self.assertIn("язык", message.lower())
+        self.assertIn("интерфейс", message.lower())
         self.assertIn("Русский", message)
         self.assertIn("Українська", message)
         self.assertIn("Français", message)
@@ -140,7 +141,14 @@ class BotMessagesTest(unittest.TestCase):
         message = build_language_selected_message("Українська")
 
         self.assertIn("Українська", message)
-        self.assertIn("загруз", message.lower())
+        self.assertIn("интерфейс", message.lower())
+
+    def test_translation_language_selection_message_is_about_uploaded_file(self):
+        message = build_translation_language_selection_message("notes.txt")
+
+        self.assertIn("notes.txt", message)
+        self.assertIn("язык перевода", message.lower())
+        self.assertIn("English", message)
 
 
 if __name__ == "__main__":
