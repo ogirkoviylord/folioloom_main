@@ -84,6 +84,31 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translator=RecordingTranslator(),
             )
 
+    def test_bot_prototype_rejects_non_txt_documents_before_confirmation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+
+        with self.assertRaises(ValueError) as error:
+            service.prepare_document(
+                user_telegram_id=42,
+                file_name="contract.docx",
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+                    </w:document>
+                    """
+                ),
+                source_language="en",
+                target_language="uk",
+            )
+
+        self.assertIn("TXT", str(error.exception))
+
 
 def _pricing_rules() -> PricingRules:
     return PricingRules(
@@ -96,3 +121,13 @@ def _pricing_rules() -> PricingRules:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _make_docx(document_xml: str) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+    return archive.getvalue()

@@ -51,6 +51,9 @@ class BotTranslationService:
             size_bytes=len(content),
             max_upload_mb=self._max_upload_mb,
         )
+        if upload.document_format is not DocumentFormat.TXT:
+            raise ValueError("Prototype bot currently supports TXT translation only")
+
         estimate = estimate_order(
             upload=upload,
             content=content,
@@ -105,4 +108,3 @@ class BotTranslationService:
         )
         self._pending.pop(user_telegram_id, None)
         return self._job_repository.get(queued_job.id)
-
