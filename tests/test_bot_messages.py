@@ -1,6 +1,6 @@
 import unittest
 
-from translator_service.bot.messages import build_start_message
+from translator_service.bot.messages import build_main_menu, build_start_message
 
 
 class BotMessagesTest(unittest.TestCase):
@@ -14,6 +14,20 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("TXT", message)
         self.assertIn("Перевести документ", message)
         self.assertIn("Баланс", message)
+
+    def test_main_menu_contains_primary_user_actions(self):
+        menu = build_main_menu()
+
+        self.assertEqual(
+            menu,
+            [
+                "Перевести документ",
+                "Мои переводы",
+                "Баланс",
+                "Настройки",
+                "Помощь",
+            ],
+        )
 
 
 if __name__ == "__main__":
