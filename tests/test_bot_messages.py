@@ -2,6 +2,8 @@ import unittest
 
 from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
+    build_language_selected_message,
+    build_language_selection_message,
     build_main_menu,
     build_order_estimate_message,
     build_pending_translation_message,
@@ -123,6 +125,22 @@ class BotMessagesTest(unittest.TestCase):
     def test_confirm_translation_text_rejects_other_messages(self):
         self.assertFalse(is_confirm_translation_text("да"))
         self.assertFalse(is_confirm_translation_text("перевести"))
+
+    def test_language_selection_message_lists_supported_languages(self):
+        message = build_language_selection_message()
+
+        self.assertIn("язык", message.lower())
+        self.assertIn("Русский", message)
+        self.assertIn("Українська", message)
+        self.assertIn("Français", message)
+        self.assertIn("Español", message)
+        self.assertIn("English", message)
+
+    def test_language_selected_message_confirms_choice(self):
+        message = build_language_selected_message("Українська")
+
+        self.assertIn("Українська", message)
+        self.assertIn("загруз", message.lower())
 
 
 if __name__ == "__main__":

@@ -44,6 +44,19 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
         self.assertEqual(service.get_pending(42), pending)
 
+    def test_stores_selected_target_language_per_user(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+
+        service.set_target_language(user_telegram_id=42, target_language="uk")
+
+        self.assertEqual(service.get_target_language(42), "uk")
+        self.assertEqual(service.get_target_language(100), "en")
+
     def test_confirms_pending_txt_translation_and_runs_job(self):
         repository = InMemoryTranslationJobRepository()
         service = BotTranslationService(

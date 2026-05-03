@@ -36,6 +36,7 @@ class BotTranslationService:
         self._max_upload_mb = max_upload_mb
         self._max_fragment_chars = max_fragment_chars
         self._pending: dict[int, PendingTranslation] = {}
+        self._target_languages: dict[int, str] = {}
 
     def prepare_document(
         self,
@@ -74,6 +75,12 @@ class BotTranslationService:
 
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
         return self._pending.get(user_telegram_id)
+
+    def set_target_language(self, *, user_telegram_id: int, target_language: str) -> None:
+        self._target_languages[user_telegram_id] = target_language
+
+    def get_target_language(self, user_telegram_id: int) -> str:
+        return self._target_languages.get(user_telegram_id, "en")
 
     def confirm_pending_translation(
         self,
