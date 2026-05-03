@@ -7,13 +7,13 @@ Telegram service prototype for paid document translation through DeepSeek API.
 Implemented:
 
 - TXT upload validation and translation flow.
-- DOCX text extraction and price estimation at domain level.
+- DOCX text extraction, price estimation, and translation flow.
 - DeepSeek chat-completions client.
-- Fragmented TXT translation runner.
+- Fragmented TXT and DOCX translation runners.
 - In-memory translation job status model.
 - aiogram runtime skeleton with `/start`, document upload, `/confirm`, and `/status`.
 
-The Telegram runtime currently translates TXT files only. DOCX translation is intentionally not enabled in the bot flow yet.
+The Telegram runtime currently translates TXT and DOCX files.
 
 ## Local Checks
 
@@ -65,11 +65,11 @@ Prototype flow:
 
 1. Send `/start`.
 2. Choose the bot interface language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
-3. Upload a `.txt` file.
+3. Upload a `.txt` or `.docx` file.
 4. Choose the translation target language button.
 5. Review the estimate.
 6. Press the localized confirm button or send `/confirm`.
-7. The bot returns the translated TXT file.
+7. The bot returns the translated file.
 
 Use `/language` to show the interface language buttons again.
 

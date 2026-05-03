@@ -2,7 +2,16 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from translator_service.translation_jobs import TextTranslator
-from translator_service.translation_runner import TranslatedDocument, translate_txt_document
+from translator_service.translation_runner import (
+    TranslatedDocument,
+    translate_docx_document,
+    translate_txt_document,
+)
+
+
+class DocumentKind(StrEnum):
+    TXT = "txt"
+    DOCX = "docx"
 
 
 class TranslationJobStatus(StrEnum):
@@ -21,6 +30,7 @@ class TranslationJob:
     source_language: str
     target_language: str
     status: TranslationJobStatus
+    document_kind: DocumentKind = DocumentKind.TXT
     result_file_name: str | None = None
     result_content: bytes | None = None
     error_message: str | None = None
@@ -40,8 +50,28 @@ class InMemoryTranslationJobRepository:
         source_language: str,
         target_language: str,
     ) -> TranslationJob:
+        return self.create_job(
+            document_kind=DocumentKind.TXT,
+            user_telegram_id=user_telegram_id,
+            file_name=file_name,
+            content=content,
+            source_language=source_language,
+            target_language=target_language,
+        )
+
+    def create_job(
+        self,
+        *,
+        document_kind: DocumentKind,
+        user_telegram_id: int,
+        file_name: str,
+        content: bytes,
+        source_language: str,
+        target_language: str,
+    ) -> TranslationJob:
         job = TranslationJob(
             id=f"job-{self._next_id}",
+            document_kind=document_kind,
             user_telegram_id=user_telegram_id,
             file_name=file_name,
             content=content,
@@ -67,15 +97,27 @@ def run_txt_translation_job(
     max_fragment_chars: int,
     translator: TextTranslator,
 ) -> TranslatedDocument:
+    return run_translation_job(
+        repository=repository,
+        job_id=job_id,
+        max_fragment_chars=max_fragment_chars,
+        translator=translator,
+    )
+
+
+def run_translation_job(
+    *,
+    repository: InMemoryTranslationJobRepository,
+    job_id: str,
+    max_fragment_chars: int,
+    translator: TextTranslator,
+) -> TranslatedDocument:
     job = repository.get(job_id)
     repository.save(replace(job, status=TranslationJobStatus.TRANSLATING))
 
     try:
-        result = translate_txt_document(
-            file_name=job.file_name,
-            content=job.content,
-            source_language=job.source_language,
-            target_language=job.target_language,
+        result = _translate_job(
+            job=job,
             max_fragment_chars=max_fragment_chars,
             translator=translator,
         )
@@ -100,3 +142,30 @@ def run_txt_translation_job(
     )
     return result
 
+
+def _translate_job(
+    *,
+    job: TranslationJob,
+    max_fragment_chars: int,
+    translator: TextTranslator,
+) -> TranslatedDocument:
+    if job.document_kind is DocumentKind.TXT:
+        return translate_txt_document(
+            file_name=job.file_name,
+            content=job.content,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            max_fragment_chars=max_fragment_chars,
+            translator=translator,
+        )
+
+    if job.document_kind is DocumentKind.DOCX:
+        return translate_docx_document(
+            file_name=job.file_name,
+            content=job.content,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            translator=translator,
+        )
+
+    raise ValueError(f"Unsupported document kind: {job.document_kind}")

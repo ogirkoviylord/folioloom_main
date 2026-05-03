@@ -5,6 +5,7 @@ from translator_service.bot_translation_service import (
     PendingUpload,
     PendingTranslation,
 )
+from translator_service.job_runner import DocumentKind
 from translator_service.job_runner import InMemoryTranslationJobRepository, TranslationJobStatus
 from translator_service.pricing import PricingRules
 
@@ -147,7 +148,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translator=RecordingTranslator(),
             )
 
-    def test_bot_prototype_rejects_non_txt_documents_before_confirmation(self):
+    def test_bot_prototype_rejects_pdf_before_confirmation(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
             pricing_rules=_pricing_rules(),
@@ -158,19 +159,43 @@ class BotTranslationServiceTest(unittest.TestCase):
         with self.assertRaises(ValueError) as error:
             service.prepare_document(
                 user_telegram_id=42,
-                file_name="contract.docx",
-                content=_make_docx(
-                    """
-                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                      <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
-                    </w:document>
-                    """
-                ),
+                file_name="scan.pdf",
+                content=b"%PDF-1.4 fake",
                 source_language="en",
                 target_language="uk",
             )
 
-        self.assertIn("TXT", str(error.exception))
+        self.assertIn("TXT and DOCX", str(error.exception))
+
+    def test_accepts_docx_upload_and_runs_docx_translation(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="contract.docx",
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+                </w:document>
+                """
+            ),
+            source_language="en",
+        )
+        service.prepare_pending_upload(user_telegram_id=42, target_language="fr")
+
+        job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+
+        self.assertEqual(job.document_kind, DocumentKind.DOCX)
+        self.assertEqual(job.result_file_name, "contract.fr.docx")
 
 
 def _pricing_rules() -> PricingRules:

@@ -2,9 +2,10 @@ from dataclasses import dataclass
 
 from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.job_runner import (
+    DocumentKind,
     InMemoryTranslationJobRepository,
     TranslationJob,
-    run_txt_translation_job,
+    run_translation_job,
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
@@ -17,6 +18,7 @@ class PendingUpload:
     file_name: str
     content: bytes
     source_language: str
+    document_kind: DocumentKind = DocumentKind.TXT
 
 
 @dataclass(frozen=True)
@@ -60,14 +62,16 @@ class BotTranslationService:
             size_bytes=len(content),
             max_upload_mb=self._max_upload_mb,
         )
-        if upload.document_format is not DocumentFormat.TXT:
-            raise ValueError("Prototype bot currently supports TXT translation only")
+        document_kind = _document_kind_from_format(upload.document_format)
+        if document_kind is None:
+            raise ValueError("Prototype bot currently supports TXT and DOCX translation only")
 
         pending_upload = PendingUpload(
             user_telegram_id=user_telegram_id,
             file_name=file_name,
             content=content,
             source_language=source_language,
+            document_kind=document_kind,
         )
         self._pending_uploads[user_telegram_id] = pending_upload
         return pending_upload
@@ -110,7 +114,11 @@ class BotTranslationService:
             max_upload_mb=self._max_upload_mb,
         )
         if upload.document_format is not DocumentFormat.TXT:
-            raise ValueError("Prototype bot currently supports TXT translation only")
+            document_kind = _document_kind_from_format(upload.document_format)
+            if document_kind is None:
+                raise ValueError(
+                    "Prototype bot currently supports TXT and DOCX translation only"
+                )
 
         estimate = estimate_order(
             upload=upload,
@@ -154,17 +162,19 @@ class BotTranslationService:
             size_bytes=len(pending.content),
             max_upload_mb=self._max_upload_mb,
         )
-        if upload.document_format is not DocumentFormat.TXT:
-            raise ValueError("Only TXT confirmation is supported in the prototype")
+        document_kind = _document_kind_from_format(upload.document_format)
+        if document_kind is None:
+            raise ValueError("Only TXT and DOCX confirmation is supported in the prototype")
 
-        queued_job = self._job_repository.create_txt_job(
+        queued_job = self._job_repository.create_job(
+            document_kind=document_kind,
             user_telegram_id=user_telegram_id,
             file_name=pending.file_name,
             content=pending.content,
             source_language=pending.source_language,
             target_language=pending.target_language,
         )
-        run_txt_translation_job(
+        run_translation_job(
             repository=self._job_repository,
             job_id=queued_job.id,
             max_fragment_chars=self._max_fragment_chars,
@@ -172,3 +182,11 @@ class BotTranslationService:
         )
         self._pending.pop(user_telegram_id, None)
         return self._job_repository.get(queued_job.id)
+
+
+def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind | None:
+    if document_format is DocumentFormat.TXT:
+        return DocumentKind.TXT
+    if document_format is DocumentFormat.DOCX:
+        return DocumentKind.DOCX
+    return None
