@@ -20,6 +20,8 @@ class BotMessagesTest(unittest.TestCase):
         message = build_start_message()
 
         self.assertIn("перевод", message.lower())
+        self.assertNotIn("DeepSeek", message)
+        self.assertNotIn("Дипсик", message)
         self.assertIn("EPUB", message)
         self.assertIn("DOCX", message)
         self.assertIn("PDF", message)
