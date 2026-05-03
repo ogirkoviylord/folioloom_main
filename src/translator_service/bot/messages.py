@@ -30,11 +30,18 @@ def build_language_selection_message() -> str:
     language_lines = "\n".join(
         f"- {language.button_text}" for language in SUPPORTED_TARGET_LANGUAGES
     )
-    return f"Выберите язык перевода:\n{language_lines}"
+    return f"Выберите язык интерфейса:\n{language_lines}"
 
 
 def build_language_selected_message(language_text: str) -> str:
-    return f"Язык перевода: {language_text}. Теперь загрузите TXT-файл."
+    return f"Язык интерфейса: {language_text}."
+
+
+def build_translation_language_selection_message(file_name: str) -> str:
+    language_lines = "\n".join(
+        f"- {language.button_text}" for language in SUPPORTED_TARGET_LANGUAGES
+    )
+    return f"Файл получен: {file_name}\n\nВыберите язык перевода:\n{language_lines}"
 
 
 def build_order_estimate_message(estimate: OrderEstimate) -> str:

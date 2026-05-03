@@ -2,6 +2,7 @@ import unittest
 
 from translator_service.bot_translation_service import (
     BotTranslationService,
+    PendingUpload,
     PendingTranslation,
 )
 from translator_service.job_runner import InMemoryTranslationJobRepository, TranslationJobStatus
@@ -44,7 +45,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
         self.assertEqual(service.get_pending(42), pending)
 
-    def test_stores_selected_target_language_per_user(self):
+    def test_stores_selected_interface_language_per_user(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
             pricing_rules=_pricing_rules(),
@@ -52,10 +53,59 @@ class BotTranslationServiceTest(unittest.TestCase):
             max_fragment_chars=20,
         )
 
-        service.set_target_language(user_telegram_id=42, target_language="uk")
+        service.set_interface_language(user_telegram_id=42, language_code="uk")
 
-        self.assertEqual(service.get_target_language(42), "uk")
-        self.assertEqual(service.get_target_language(100), "en")
+        self.assertEqual(service.get_interface_language(42), "uk")
+        self.assertEqual(service.get_interface_language(100), "ru")
+
+    def test_upload_waits_for_translation_language_before_estimate(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+
+        upload = service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Hello",
+            source_language="auto",
+        )
+
+        self.assertEqual(
+            upload,
+            PendingUpload(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"Hello",
+                source_language="auto",
+            ),
+        )
+        self.assertEqual(service.get_pending_upload(42), upload)
+
+    def test_prepares_estimate_from_pending_upload_after_translation_language_choice(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Hello",
+            source_language="auto",
+        )
+
+        pending = service.prepare_pending_upload(
+            user_telegram_id=42,
+            target_language="uk",
+        )
+
+        self.assertEqual(pending.target_language, "uk")
+        self.assertIsNone(service.get_pending_upload(42))
+        self.assertEqual(service.get_pending(42), pending)
 
     def test_confirms_pending_txt_translation_and_runs_job(self):
         repository = InMemoryTranslationJobRepository()

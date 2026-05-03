@@ -64,13 +64,14 @@ Telegram bot polling started. Open Telegram and send /start.
 Prototype flow:
 
 1. Send `/start`.
-2. Choose the target language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
+2. Choose the bot interface language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
 3. Upload a `.txt` file.
-4. Review the estimate.
-5. Press `Подтвердить` or send `/confirm`.
-6. The bot returns the translated TXT file.
+4. Choose the translation target language button.
+5. Review the estimate.
+6. Press `Подтвердить` or send `/confirm`.
+7. The bot returns the translated TXT file.
 
-Use `/language` to show the language buttons again.
+Use `/language` to show the interface language buttons again.
 
 For auto-restart during development:
 
