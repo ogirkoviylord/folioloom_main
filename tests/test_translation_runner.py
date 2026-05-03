@@ -1,6 +1,13 @@
 import unittest
+from io import BytesIO
+from zipfile import ZipFile
 
-from translator_service.translation_runner import TranslatedDocument, translate_txt_document
+from translator_service.extractors import extract_text_from_docx
+from translator_service.translation_runner import (
+    TranslatedDocument,
+    translate_docx_document,
+    translate_txt_document,
+)
 
 
 class RecordingTranslator:
@@ -59,6 +66,53 @@ class TranslationRunnerTest(unittest.TestCase):
 
         self.assertEqual(result.file_name, "notes.uk.txt")
 
+    def test_translates_docx_document_into_downloadable_docx_result(self):
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Second</w:t></w:r><w:r><w:t> paragraph</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="contract.docx",
+            content=content,
+            source_language="en",
+            target_language="fr",
+            translator=translator,
+        )
+
+        self.assertEqual(result.file_name, "contract.fr.docx")
+        self.assertEqual(
+            result.content_type,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        self.assertEqual(result.fragment_count, 2)
+        self.assertEqual(
+            extract_text_from_docx(result.content),
+            "[fr] First paragraph\n\n[fr] Second paragraph",
+        )
+        self.assertEqual(
+            translator.requests,
+            [
+                ("First paragraph", "en", "fr"),
+                ("Second paragraph", "en", "fr"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _make_docx(document_xml: str) -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("[Content_Types].xml", "<Types />")
+    return archive.getvalue()
