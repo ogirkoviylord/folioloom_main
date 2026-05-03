@@ -8,12 +8,13 @@ Implemented:
 
 - TXT upload validation and translation flow.
 - DOCX text extraction, price estimation, and translation flow.
+- EPUB text extraction, price estimation, and translation flow.
 - DeepSeek chat-completions client.
-- Fragmented TXT and DOCX translation runners.
+- Fragmented TXT, DOCX, and EPUB translation runners.
 - In-memory translation job status model.
 - aiogram runtime skeleton with `/start`, document upload, `/confirm`, and `/status`.
 
-The Telegram runtime currently translates TXT and DOCX files.
+The Telegram runtime currently translates TXT, DOCX, and EPUB files.
 
 ## Local Checks
 
@@ -65,7 +66,7 @@ Prototype flow:
 
 1. Send `/start`.
 2. Choose the bot interface language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
-3. Upload a `.txt` or `.docx` file.
+3. Upload a `.txt`, `.docx`, or `.epub` file.
 4. Choose the translation target language button.
 5. Review the estimate.
 6. Press the localized confirm button or send `/confirm`.

@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 
 from translator_service.documents import DocumentFormat, DocumentUpload
-from translator_service.extractors import extract_text_from_docx, extract_text_from_txt
+from translator_service.extractors import (
+    extract_text_from_docx,
+    extract_text_from_epub,
+    extract_text_from_txt,
+)
 from translator_service.pricing import PricingRules, estimate_price
 from translator_service.text_analysis import estimate_text_volume
 
@@ -37,6 +41,13 @@ def estimate_order(
         )
     if upload.document_format is DocumentFormat.DOCX:
         return estimate_docx_order(
+            upload=upload,
+            content=content,
+            pricing_rules=pricing_rules,
+            max_fragment_chars=max_fragment_chars,
+        )
+    if upload.document_format is DocumentFormat.EPUB:
+        return estimate_epub_order(
             upload=upload,
             content=content,
             pricing_rules=pricing_rules,
@@ -78,6 +89,25 @@ def estimate_docx_order(
         raise ValueError("DOCX estimator can only process DOCX uploads")
 
     text = extract_text_from_docx(content)
+    return _estimate_extracted_text(
+        upload=upload,
+        text=text,
+        pricing_rules=pricing_rules,
+        max_fragment_chars=max_fragment_chars,
+    )
+
+
+def estimate_epub_order(
+    *,
+    upload: DocumentUpload,
+    content: bytes,
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
+    if upload.document_format is not DocumentFormat.EPUB:
+        raise ValueError("EPUB estimator can only process EPUB uploads")
+
+    text = extract_text_from_epub(content)
     return _estimate_extracted_text(
         upload=upload,
         text=text,

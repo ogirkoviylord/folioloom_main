@@ -5,6 +5,7 @@ from zipfile import ZipFile
 from translator_service.extractors import (
     TextExtractionError,
     extract_text_from_docx,
+    extract_text_from_epub,
     extract_text_from_txt,
 )
 
@@ -75,8 +76,64 @@ class DocxExtractionTest(unittest.TestCase):
             extract_text_from_docx(b"not a zip")
 
 
+class EpubExtractionTest(unittest.TestCase):
+    def test_extracts_visible_text_from_epub_xhtml_items(self):
+        content = _make_epub(
+            {
+                "OPS/chapter1.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <head><title>Ignored title</title><style>.x { color: red; }</style></head>
+                  <body>
+                    <h1>Глава первая</h1>
+                    <p>Первый абзац <em>книги</em>.</p>
+                    <script>ignored()</script>
+                  </body>
+                </html>
+                """,
+                "OPS/chapter2.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Второй абзац.</p></body>
+                </html>
+                """,
+            }
+        )
+
+        text = extract_text_from_epub(content)
+
+        self.assertEqual(text, "Глава первая\n\nПервый абзац книги.\n\nВторой абзац.")
+
+    def test_rejects_epub_without_translatable_text(self):
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>   </p><script>ignored()</script></body>
+                </html>
+                """,
+            }
+        )
+
+        with self.assertRaises(TextExtractionError):
+            extract_text_from_epub(content)
+
+    def test_rejects_invalid_epub_archive(self):
+        with self.assertRaises(TextExtractionError):
+            extract_text_from_epub(b"not a zip")
+
+
 def _make_docx(document_xml: str) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
+    return archive.getvalue()
+
+
+def _make_epub(xhtml_items: dict[str, str]) -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr("META-INF/container.xml", "<container />")
+        for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
+        epub.writestr("OPS/style.css", "body { font-family: serif; }")
     return archive.getvalue()
