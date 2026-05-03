@@ -3,13 +3,13 @@ import asyncio
 import os
 
 from translator_service.bot.messages import (
-    CONFIRM_TRANSLATION_TEXT,
     build_language_selected_message,
     build_language_selection_message,
     build_pending_translation_message,
     build_start_message,
     build_translation_language_selection_message,
     build_translation_job_status_message,
+    get_confirm_translation_text,
     is_confirm_translation_text,
 )
 from translator_service.bot_translation_service import BotTranslationService
@@ -91,7 +91,9 @@ def create_router(
     @router.message(Command("language"))
     async def language(message: Message) -> None:
         await message.answer(
-            build_language_selection_message(),
+            build_language_selection_message(
+                interface_language=service.get_interface_language(message.from_user.id)
+            ),
             reply_markup=_language_keyboard(),
         )
 
@@ -99,9 +101,14 @@ def create_router(
     async def language_text(message: Message) -> None:
         language_option = find_language_by_button_text(message.text)
         if language_option is None:
-            await message.answer(build_language_selection_message())
+            await message.answer(
+                build_language_selection_message(
+                    interface_language=service.get_interface_language(message.from_user.id)
+                )
+            )
             return
 
+        interface_language = service.get_interface_language(message.from_user.id)
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
             try:
@@ -119,8 +126,11 @@ def create_router(
                 return
 
             await message.answer(
-                build_pending_translation_message(pending),
-                reply_markup=_confirm_keyboard(),
+                build_pending_translation_message(
+                    pending,
+                    interface_language=interface_language,
+                ),
+                reply_markup=_confirm_keyboard(interface_language),
             )
             return
 
@@ -128,8 +138,13 @@ def create_router(
             user_telegram_id=message.from_user.id,
             language_code=language_option.code,
         )
-        await message.answer(build_language_selected_message(language_option.button_text))
-        await message.answer(build_start_message())
+        await message.answer(
+            build_language_selected_message(
+                language_option.button_text,
+                interface_language=language_option.code,
+            )
+        )
+        await message.answer(build_start_message(interface_language=language_option.code))
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
@@ -149,10 +164,14 @@ def create_router(
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
             await message.answer(
-                build_translation_language_selection_message(pending_upload.file_name),
+                build_translation_language_selection_message(
+                    pending_upload.file_name,
+                    interface_language=interface_language,
+                ),
                 reply_markup=_language_keyboard(),
             )
             return
@@ -163,8 +182,11 @@ def create_router(
             return
 
         await message.answer(
-            build_pending_translation_message(pending),
-            reply_markup=_confirm_keyboard(),
+            build_pending_translation_message(
+                pending,
+                interface_language=interface_language,
+            ),
+            reply_markup=_confirm_keyboard(interface_language),
         )
 
     @router.message(F.document)
@@ -191,19 +213,25 @@ def create_router(
             await message.answer(str(error))
             return
 
+        interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
-            build_translation_language_selection_message(pending_upload.file_name),
+            build_translation_language_selection_message(
+                pending_upload.file_name,
+                interface_language=interface_language,
+            ),
             reply_markup=_language_keyboard(),
         )
 
     return router
 
 
-def _confirm_keyboard():
+def _confirm_keyboard(interface_language: str = "ru"):
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=CONFIRM_TRANSLATION_TEXT)]],
+        keyboard=[
+            [KeyboardButton(text=get_confirm_translation_text(interface_language))]
+        ],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
@@ -231,6 +259,7 @@ async def _confirm_pending_translation(
     service: BotTranslationService,
     translator: DeepSeekClient,
 ) -> None:
+    interface_language = service.get_interface_language(message.from_user.id)
     try:
         job = service.confirm_pending_translation(
             user_telegram_id=message.from_user.id,
@@ -240,7 +269,12 @@ async def _confirm_pending_translation(
         await message.answer(str(error))
         return
 
-    await message.answer(build_translation_job_status_message(job))
+    await message.answer(
+        build_translation_job_status_message(
+            job,
+            interface_language=interface_language,
+        )
+    )
     if job.result_file_name and job.result_content:
         from aiogram.types import BufferedInputFile
 
