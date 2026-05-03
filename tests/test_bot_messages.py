@@ -32,6 +32,22 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Перевести документ", message)
         self.assertIn("Баланс", message)
 
+    def test_start_message_is_localized_for_supported_interface_languages(self):
+        expectations = {
+            "ru": "Сервис перевода документов.",
+            "uk": "Сервіс перекладу документів.",
+            "fr": "Service de traduction de documents.",
+            "es": "Servicio de traducción de documentos.",
+            "en": "Document translation service.",
+        }
+
+        for language_code, expected_text in expectations.items():
+            with self.subTest(language_code=language_code):
+                self.assertIn(
+                    expected_text,
+                    build_start_message(interface_language=language_code),
+                )
+
     def test_main_menu_contains_primary_user_actions(self):
         menu = build_main_menu()
 
@@ -137,11 +153,35 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Español", message)
         self.assertIn("English", message)
 
+    def test_language_selection_message_is_localized(self):
+        self.assertIn(
+            "Choose interface language",
+            build_language_selection_message(interface_language="en"),
+        )
+        self.assertIn(
+            "Choisissez la langue de l’interface",
+            build_language_selection_message(interface_language="fr"),
+        )
+        self.assertIn(
+            "Elige el idioma de la interfaz",
+            build_language_selection_message(interface_language="es"),
+        )
+
     def test_language_selected_message_confirms_choice(self):
         message = build_language_selected_message("Українська")
 
         self.assertIn("Українська", message)
         self.assertIn("интерфейс", message.lower())
+
+    def test_language_selected_message_is_localized(self):
+        self.assertIn(
+            "Interface language",
+            build_language_selected_message("English", interface_language="en"),
+        )
+        self.assertIn(
+            "Langue de l’interface",
+            build_language_selected_message("Français", interface_language="fr"),
+        )
 
     def test_translation_language_selection_message_is_about_uploaded_file(self):
         message = build_translation_language_selection_message("notes.txt")
@@ -149,6 +189,39 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("notes.txt", message)
         self.assertIn("язык перевода", message.lower())
         self.assertIn("English", message)
+
+    def test_translation_language_selection_message_is_localized(self):
+        message = build_translation_language_selection_message(
+            "notes.txt",
+            interface_language="en",
+        )
+
+        self.assertIn("Choose translation language", message)
+        self.assertIn("notes.txt", message)
+
+    def test_pending_translation_message_uses_localized_confirm_button(self):
+        message = build_pending_translation_message(
+            PendingTranslation(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"notes",
+                source_language="auto",
+                target_language="fr",
+                price_usd=0.10,
+                fragment_count=2,
+            ),
+            interface_language="en",
+        )
+
+        self.assertIn("Document is ready for translation", message)
+        self.assertIn("Confirm", message)
+
+    def test_confirm_translation_text_accepts_localized_buttons(self):
+        self.assertTrue(is_confirm_translation_text("Подтвердить"))
+        self.assertTrue(is_confirm_translation_text("Підтвердити"))
+        self.assertTrue(is_confirm_translation_text("Confirmer"))
+        self.assertTrue(is_confirm_translation_text("Confirmar"))
+        self.assertTrue(is_confirm_translation_text("Confirm"))
 
 
 if __name__ == "__main__":

@@ -68,10 +68,12 @@ Prototype flow:
 3. Upload a `.txt` file.
 4. Choose the translation target language button.
 5. Review the estimate.
-6. Press `Подтвердить` or send `/confirm`.
+6. Press the localized confirm button or send `/confirm`.
 7. The bot returns the translated TXT file.
 
 Use `/language` to show the interface language buttons again.
+
+Interface messages are currently localized for Russian, Ukrainian, French, Spanish, and English.
 
 For auto-restart during development:
 
