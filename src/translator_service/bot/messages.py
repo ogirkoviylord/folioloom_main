@@ -1,3 +1,4 @@
+from translator_service.job_runner import TranslationJob, TranslationJobStatus
 from translator_service.order_estimates import OrderEstimate
 
 
@@ -32,3 +33,21 @@ def build_order_estimate_message(estimate: OrderEstimate) -> str:
         f"Цена: ${estimate.price_usd:.2f}\n\n"
         "Нажмите «Подтвердить», чтобы поставить перевод в очередь."
     )
+
+
+def build_translation_job_status_message(job: TranslationJob) -> str:
+    if job.status is TranslationJobStatus.QUEUED:
+        return f"Файл {job.file_name} в очереди на перевод."
+
+    if job.status is TranslationJobStatus.TRANSLATING:
+        return f"Файл {job.file_name} переводится."
+
+    if job.status is TranslationJobStatus.READY:
+        result_name = job.result_file_name or "результат"
+        return f"Перевод готов: {result_name}."
+
+    if job.status is TranslationJobStatus.FAILED:
+        error = job.error_message or "неизвестная ошибка"
+        return f"Ошибка перевода: {error}"
+
+    return f"Статус задачи: {job.status.value}"
