@@ -42,6 +42,10 @@ def build_default_pricing_rules() -> PricingRules:
     )
 
 
+def build_polling_started_message() -> str:
+    return "Telegram bot polling started. Open Telegram and send /start."
+
+
 def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService:
     return BotTranslationService(
         job_repository=InMemoryTranslationJobRepository(),
@@ -227,6 +231,7 @@ async def run_bot() -> None:
     dispatcher.include_router(
         create_router(service=service, translator=translator, config=config)
     )
+    print(build_polling_started_message(), flush=True)
     await dispatcher.start_polling(Bot(token))
 
 
