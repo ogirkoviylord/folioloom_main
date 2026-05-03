@@ -55,6 +55,12 @@ PYTHONPATH=src \
 python3 -m translator_service.bot
 ```
 
+When startup succeeds, the terminal prints:
+
+```text
+Telegram bot polling started. Open Telegram and send /start.
+```
+
 Prototype flow:
 
 1. Send `/start`.
@@ -65,6 +71,15 @@ Prototype flow:
 6. The bot returns the translated TXT file.
 
 Use `/language` to show the language buttons again.
+
+For auto-restart during development:
+
+```bash
+TELEGRAM_BOT_TOKEN='your_bot_token' \
+DEEPSEEK_API_KEY='your_deepseek_key' \
+PYTHONPATH=src \
+watchfiles "python3 -m translator_service.bot" src
+```
 
 ## Clean-Room Note
 
