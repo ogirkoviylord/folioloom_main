@@ -251,7 +251,10 @@ def build_pending_translation_message(
     )
 
 
-def is_confirm_translation_text(text: str) -> bool:
+def is_confirm_translation_text(text: str | None) -> bool:
+    if text is None:
+        return False
+
     normalized = text.strip().lower()
     localized_confirm_texts = {
         messages["confirm"].lower() for messages in MESSAGES.values()
