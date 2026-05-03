@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+import ssl
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -69,15 +70,18 @@ class DeepSeekClient:
             },
             ensure_ascii=False,
         ).encode("utf-8")
-        status, response_body = self._transport(
-            url=f"{self._base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            body=body,
-            timeout_seconds=self._timeout_seconds,
-        )
+        try:
+            status, response_body = self._transport(
+                url=f"{self._base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                body=body,
+                timeout_seconds=self._timeout_seconds,
+            )
+        except URLError as error:
+            raise _request_error_from_url_error(error) from error
         response = _parse_json_response(response_body)
 
         if status != 200:
@@ -162,4 +166,16 @@ def _urllib_transport(
     except HTTPError as error:
         return error.code, error.read()
     except URLError as error:
-        raise DeepSeekApiError(f"DeepSeek API request failed: {error.reason}") from error
+        raise _request_error_from_url_error(error) from error
+
+
+def _request_error_from_url_error(error: URLError) -> DeepSeekApiError:
+    reason = error.reason
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return DeepSeekApiError(
+            "DeepSeek API request failed because local Python SSL certificates "
+            "are not configured. On macOS with python.org Python, run "
+            "'Install Certificates.command' from the Python folder, then retry."
+        )
+
+    return DeepSeekApiError(f"DeepSeek API request failed: {reason}")

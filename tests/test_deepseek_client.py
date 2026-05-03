@@ -1,5 +1,7 @@
 import json
+import ssl
 import unittest
+from urllib.error import URLError
 
 from translator_service.deepseek_client import (
     DeepSeekApiError,
@@ -129,6 +131,36 @@ class DeepSeekClientTest(unittest.TestCase):
                 system_prompt="Translate accurately.",
                 user_text="Привет",
             )
+
+    def test_raises_actionable_error_for_local_ssl_certificate_problem(self):
+        def failing_transport(
+            *,
+            url: str,
+            headers: dict[str, str],
+            body: bytes,
+            timeout_seconds: float,
+        ) -> tuple[int, bytes]:
+            raise URLError(
+                ssl.SSLCertVerificationError(
+                    "certificate verify failed: unable to get local issuer certificate"
+                )
+            )
+
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=failing_transport,
+        )
+
+        with self.assertRaises(DeepSeekApiError) as error:
+            client.create_chat_completion(
+                system_prompt="Translate accurately.",
+                user_text="Привет",
+            )
+
+        self.assertIn("local Python SSL certificates", str(error.exception))
+        self.assertIn("Install Certificates.command", str(error.exception))
 
 
 class RecordingTransport:
