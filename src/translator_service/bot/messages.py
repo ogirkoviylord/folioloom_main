@@ -1,5 +1,6 @@
 from translator_service.job_runner import TranslationJob, TranslationJobStatus
 from translator_service.bot_translation_service import PendingTranslation
+from translator_service.languages import SUPPORTED_TARGET_LANGUAGES
 from translator_service.order_estimates import OrderEstimate
 
 
@@ -23,6 +24,17 @@ def build_start_message() -> str:
         "Поддерживаемые форматы: EPUB, DOCX, PDF, TXT.\n\n"
         f"Главное меню:\n{menu_lines}"
     )
+
+
+def build_language_selection_message() -> str:
+    language_lines = "\n".join(
+        f"- {language.button_text}" for language in SUPPORTED_TARGET_LANGUAGES
+    )
+    return f"Выберите язык перевода:\n{language_lines}"
+
+
+def build_language_selected_message(language_text: str) -> str:
+    return f"Язык перевода: {language_text}. Теперь загрузите TXT-файл."
 
 
 def build_order_estimate_message(estimate: OrderEstimate) -> str:

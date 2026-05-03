@@ -58,10 +58,13 @@ python3 -m translator_service.bot
 Prototype flow:
 
 1. Send `/start`.
-2. Upload a `.txt` file.
-3. Review the estimate.
-4. Press `Подтвердить` or send `/confirm`.
-5. The bot translates through DeepSeek and returns the translated TXT file.
+2. Choose the target language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
+3. Upload a `.txt` file.
+4. Review the estimate.
+5. Press `Подтвердить` or send `/confirm`.
+6. The bot returns the translated TXT file.
+
+Use `/language` to show the language buttons again.
 
 ## Clean-Room Note
 

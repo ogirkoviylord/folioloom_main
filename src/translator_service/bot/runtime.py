@@ -4,6 +4,8 @@ import os
 
 from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
+    build_language_selected_message,
+    build_language_selection_message,
     build_pending_translation_message,
     build_start_message,
     build_translation_job_status_message,
@@ -15,6 +17,10 @@ from translator_service.deepseek_client import DeepSeekClient
 from translator_service.documents import UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.job_runner import InMemoryTranslationJobRepository
+from translator_service.languages import (
+    SUPPORTED_TARGET_LANGUAGES,
+    find_language_by_button_text,
+)
 from translator_service.order_estimates import DocumentEstimationNotReadyError
 from translator_service.pricing import PricingRules
 
@@ -72,7 +78,28 @@ def create_router(
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
-        await message.answer(build_start_message())
+        await message.answer(build_start_message(), reply_markup=_language_keyboard())
+        await message.answer(build_language_selection_message())
+
+    @router.message(Command("language"))
+    async def language(message: Message) -> None:
+        await message.answer(
+            build_language_selection_message(),
+            reply_markup=_language_keyboard(),
+        )
+
+    @router.message(F.text.func(_is_language_button_text))
+    async def language_text(message: Message) -> None:
+        language_option = find_language_by_button_text(message.text)
+        if language_option is None:
+            await message.answer(build_language_selection_message())
+            return
+
+        service.set_target_language(
+            user_telegram_id=message.from_user.id,
+            target_language=language_option.code,
+        )
+        await message.answer(build_language_selected_message(language_option.button_text))
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
@@ -116,7 +143,7 @@ def create_router(
                 file_name=document.file_name or "document.txt",
                 content=content,
                 source_language=config.source_language,
-                target_language=config.target_language,
+                target_language=service.get_target_language(message.from_user.id),
             )
         except (
             DocumentEstimationNotReadyError,
@@ -143,6 +170,22 @@ def _confirm_keyboard():
         resize_keyboard=True,
         one_time_keyboard=True,
     )
+
+
+def _language_keyboard():
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=language.button_text)]
+            for language in SUPPORTED_TARGET_LANGUAGES
+        ],
+        resize_keyboard=True,
+    )
+
+
+def _is_language_button_text(text: str) -> bool:
+    return find_language_by_button_text(text) is not None
 
 
 async def _confirm_pending_translation(
