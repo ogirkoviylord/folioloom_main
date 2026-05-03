@@ -3,6 +3,9 @@ from translator_service.bot_translation_service import PendingTranslation
 from translator_service.order_estimates import OrderEstimate
 
 
+CONFIRM_TRANSLATION_TEXT = "Подтвердить"
+
+
 def build_main_menu() -> list[str]:
     return [
         "Перевести документ",
@@ -32,7 +35,7 @@ def build_order_estimate_message(estimate: OrderEstimate) -> str:
         f"Примерные токены: {estimate.estimated_input_tokens} input, "
         f"{estimate.estimated_output_tokens} output\n"
         f"Цена: ${estimate.price_usd:.2f}\n\n"
-        "Нажмите «Подтвердить», чтобы поставить перевод в очередь."
+        f"Нажмите «{CONFIRM_TRANSLATION_TEXT}», чтобы поставить перевод в очередь."
     )
 
 
@@ -43,8 +46,13 @@ def build_pending_translation_message(pending: PendingTranslation) -> str:
         f"Направление: {pending.source_language} → {pending.target_language}\n"
         f"Фрагментов: {pending.fragment_count}\n"
         f"Цена: ${pending.price_usd:.2f}\n\n"
-        "Нажмите «Подтвердить», чтобы начать перевод."
+        f"Нажмите «{CONFIRM_TRANSLATION_TEXT}», чтобы начать перевод."
     )
+
+
+def is_confirm_translation_text(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized in {CONFIRM_TRANSLATION_TEXT.lower(), "/confirm"}
 
 
 def build_translation_job_status_message(job: TranslationJob) -> str:

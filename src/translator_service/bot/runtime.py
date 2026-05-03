@@ -3,9 +3,11 @@ import asyncio
 import os
 
 from translator_service.bot.messages import (
+    CONFIRM_TRANSLATION_TEXT,
     build_pending_translation_message,
     build_start_message,
     build_translation_job_status_message,
+    is_confirm_translation_text,
 )
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
@@ -74,22 +76,19 @@ def create_router(
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
-        try:
-            job = service.confirm_pending_translation(
-                user_telegram_id=message.from_user.id,
-                translator=translator,
-            )
-        except ValueError as error:
-            await message.answer(str(error))
-            return
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+        )
 
-        await message.answer(build_translation_job_status_message(job))
-        if job.result_file_name and job.result_content:
-            from aiogram.types import BufferedInputFile
-
-            await message.answer_document(
-                BufferedInputFile(job.result_content, filename=job.result_file_name)
-            )
+    @router.message(F.text.func(is_confirm_translation_text))
+    async def confirm_text(message: Message) -> None:
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+        )
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
@@ -98,7 +97,10 @@ def create_router(
             await message.answer("Активного ожидающего перевода нет.")
             return
 
-        await message.answer(build_pending_translation_message(pending))
+        await message.answer(
+            build_pending_translation_message(pending),
+            reply_markup=_confirm_keyboard(),
+        )
 
     @router.message(F.document)
     async def document_upload(message: Message) -> None:
@@ -125,9 +127,46 @@ def create_router(
             await message.answer(str(error))
             return
 
-        await message.answer(build_pending_translation_message(pending))
+        await message.answer(
+            build_pending_translation_message(pending),
+            reply_markup=_confirm_keyboard(),
+        )
 
     return router
+
+
+def _confirm_keyboard():
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=CONFIRM_TRANSLATION_TEXT)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+async def _confirm_pending_translation(
+    *,
+    message,
+    service: BotTranslationService,
+    translator: DeepSeekClient,
+) -> None:
+    try:
+        job = service.confirm_pending_translation(
+            user_telegram_id=message.from_user.id,
+            translator=translator,
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    await message.answer(build_translation_job_status_message(job))
+    if job.result_file_name and job.result_content:
+        from aiogram.types import BufferedInputFile
+
+        await message.answer_document(
+            BufferedInputFile(job.result_content, filename=job.result_file_name)
+        )
 
 
 async def run_bot() -> None:

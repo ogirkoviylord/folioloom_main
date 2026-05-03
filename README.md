@@ -60,7 +60,7 @@ Prototype flow:
 1. Send `/start`.
 2. Upload a `.txt` file.
 3. Review the estimate.
-4. Send `/confirm`.
+4. Press `Подтвердить` or send `/confirm`.
 5. The bot translates through DeepSeek and returns the translated TXT file.
 
 ## Clean-Room Note
