@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Callable
 
 from translator_service.documents import DocumentFormat, validate_document_upload
@@ -20,6 +21,9 @@ from translator_service.language_detection import (
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
 from translator_service.translation_jobs import TextTranslator
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -213,6 +217,13 @@ class BotTranslationService:
                 progress_callback=progress_callback,
             )
         except Exception:
+            failed_job = self._job_repository.get(queued_job.id)
+            logger.exception(
+                "Translation job failed: job_id=%s file_name=%s user_telegram_id=%s",
+                failed_job.id,
+                failed_job.file_name,
+                failed_job.user_telegram_id,
+            )
             return self._job_repository.get(queued_job.id)
 
         self._pending.pop(user_telegram_id, None)
