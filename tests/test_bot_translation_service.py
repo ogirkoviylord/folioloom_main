@@ -47,6 +47,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 target_language="en",
                 price_usd=0.10,
                 fragment_count=2,
+                source_language_display="ru",
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
@@ -75,7 +76,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         upload = service.store_uploaded_document(
             user_telegram_id=42,
             file_name="notes.txt",
-            content=b"Hello",
+            content=b"This is an English document.",
             source_language="auto",
         )
 
@@ -84,8 +85,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             PendingUpload(
                 user_telegram_id=42,
                 file_name="notes.txt",
-                content=b"Hello",
+                content=b"This is an English document.",
                 source_language="auto",
+                source_language_display="auto (English)",
             ),
         )
         self.assertEqual(service.get_pending_upload(42), upload)
@@ -100,7 +102,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         service.store_uploaded_document(
             user_telegram_id=42,
             file_name="notes.txt",
-            content=b"Hello",
+            content=b"This is an English document.",
             source_language="auto",
         )
 
@@ -110,6 +112,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(pending.target_language, "uk")
+        self.assertEqual(pending.source_language_display, "auto (English)")
         self.assertIsNone(service.get_pending_upload(42))
         self.assertEqual(service.get_pending(42), pending)
 

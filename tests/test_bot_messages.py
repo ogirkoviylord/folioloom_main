@@ -9,6 +9,7 @@ from translator_service.bot.messages import (
     build_order_estimate_message,
     build_pending_translation_message,
     build_start_message,
+    build_translation_progress_message,
     build_translation_job_status_message,
     is_confirm_translation_text,
 )
@@ -213,12 +214,35 @@ class BotMessagesTest(unittest.TestCase):
                 target_language="fr",
                 price_usd=0.10,
                 fragment_count=2,
+                source_language_display="auto (French)",
             ),
             interface_language="en",
         )
 
         self.assertIn("Document is ready for translation", message)
+        self.assertIn("auto (French) → fr", message)
         self.assertIn("Confirm", message)
+
+    def test_translation_language_selection_message_shows_detected_source_language(self):
+        message = build_translation_language_selection_message(
+            "book.epub",
+            interface_language="en",
+            source_language_display="auto (English)",
+        )
+
+        self.assertIn("book.epub", message)
+        self.assertIn("Original language: auto (English)", message)
+
+    def test_translation_progress_message_shows_fraction_and_bar(self):
+        message = build_translation_progress_message(
+            completed_fragments=3,
+            total_fragments=10,
+            interface_language="en",
+        )
+
+        self.assertIn("Translation progress", message)
+        self.assertIn("3/10", message)
+        self.assertIn("30%", message)
 
     def test_confirm_translation_text_accepts_localized_buttons(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))

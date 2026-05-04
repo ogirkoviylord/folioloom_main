@@ -22,6 +22,8 @@ MESSAGES = {
         "interface_language_prompt": "Выберите язык интерфейса:",
         "interface_language_selected": "Язык интерфейса: {language_text}.",
         "translation_language_prompt": "Файл получен: {file_name}\n\nВыберите язык перевода:",
+        "original_language": "Язык оригинала",
+        "progress": "Прогресс перевода",
         "estimate_title": "Предварительная оценка перевода",
         "document_ready": "Документ готов к переводу",
         "file": "Файл",
@@ -54,6 +56,8 @@ MESSAGES = {
         "interface_language_prompt": "Виберіть мову інтерфейсу:",
         "interface_language_selected": "Мова інтерфейсу: {language_text}.",
         "translation_language_prompt": "Файл отримано: {file_name}\n\nВиберіть мову перекладу:",
+        "original_language": "Мова оригіналу",
+        "progress": "Прогрес перекладу",
         "estimate_title": "Попередня оцінка перекладу",
         "document_ready": "Документ готовий до перекладу",
         "file": "Файл",
@@ -86,6 +90,8 @@ MESSAGES = {
         "interface_language_prompt": "Choisissez la langue de l’interface :",
         "interface_language_selected": "Langue de l’interface : {language_text}.",
         "translation_language_prompt": "Fichier reçu : {file_name}\n\nChoisissez la langue de traduction :",
+        "original_language": "Langue d’origine",
+        "progress": "Progression de la traduction",
         "estimate_title": "Estimation de la traduction",
         "document_ready": "Le document est prêt à être traduit",
         "file": "Fichier",
@@ -118,6 +124,8 @@ MESSAGES = {
         "interface_language_prompt": "Elige el idioma de la interfaz:",
         "interface_language_selected": "Idioma de la interfaz: {language_text}.",
         "translation_language_prompt": "Archivo recibido: {file_name}\n\nElige el idioma de traducción:",
+        "original_language": "Idioma original",
+        "progress": "Progreso de traducción",
         "estimate_title": "Estimación de traducción",
         "document_ready": "El documento está listo para traducirse",
         "file": "Archivo",
@@ -150,6 +158,8 @@ MESSAGES = {
         "interface_language_prompt": "Choose interface language:",
         "interface_language_selected": "Interface language: {language_text}.",
         "translation_language_prompt": "File received: {file_name}\n\nChoose translation language:",
+        "original_language": "Original language",
+        "progress": "Translation progress",
         "estimate_title": "Translation estimate",
         "document_ready": "Document is ready for translation",
         "file": "File",
@@ -204,14 +214,22 @@ def build_language_selected_message(
 def build_translation_language_selection_message(
     file_name: str,
     interface_language: str = "ru",
+    source_language_display: str | None = None,
 ) -> str:
+    messages = _messages(interface_language)
     language_lines = "\n".join(
         f"- {language.button_text}" for language in SUPPORTED_TARGET_LANGUAGES
     )
+    source_language_line = (
+        f"\n{messages['original_language']}: {source_language_display}\n"
+        if source_language_display
+        else ""
+    )
     return (
-        _messages(interface_language)["translation_language_prompt"].format(
+        messages["translation_language_prompt"].format(
             file_name=file_name
         )
+        + source_language_line
         + f"\n{language_lines}"
     )
 
@@ -244,7 +262,9 @@ def build_pending_translation_message(
     return (
         f"{messages['document_ready']}\n\n"
         f"{messages['file']}: {pending.file_name}\n"
-        f"{messages['direction']}: {pending.source_language} → {pending.target_language}\n"
+        f"{messages['direction']}: "
+        f"{pending.source_language_display or pending.source_language} → "
+        f"{pending.target_language}\n"
         f"{messages['fragments']}: {pending.fragment_count}\n"
         f"{messages['price']}: ${pending.price_usd:.2f}\n\n"
         f"{messages['confirm_instruction'].format(confirm_text=confirm_text)}"
@@ -260,6 +280,23 @@ def is_confirm_translation_text(text: str | None) -> bool:
         messages["confirm"].lower() for messages in MESSAGES.values()
     }
     return normalized in localized_confirm_texts | {"/confirm"}
+
+
+def build_translation_progress_message(
+    *,
+    completed_fragments: int,
+    total_fragments: int,
+    interface_language: str = "ru",
+) -> str:
+    messages = _messages(interface_language)
+    safe_total = max(total_fragments, 1)
+    percent = min(100, round(completed_fragments / safe_total * 100))
+    filled_cells = min(10, percent // 10)
+    bar = "#" * filled_cells + "-" * (10 - filled_cells)
+    return (
+        f"{messages['progress']}: [{bar}] "
+        f"{completed_fragments}/{total_fragments} ({percent}%)"
+    )
 
 
 def build_translation_job_status_message(

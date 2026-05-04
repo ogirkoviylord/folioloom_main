@@ -46,6 +46,27 @@ class JobRunnerTest(unittest.TestCase):
         self.assertEqual(stored_job.error_message, None)
         self.assertEqual(result.content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
 
+    def test_reports_progress_while_running_txt_job(self):
+        repository = InMemoryTranslationJobRepository()
+        job = repository.create_txt_job(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.\n\nTwo.",
+            source_language="en",
+            target_language="uk",
+        )
+        progress_updates: list[tuple[int, int]] = []
+
+        run_txt_translation_job(
+            repository=repository,
+            job_id=job.id,
+            max_fragment_chars=5,
+            translator=RecordingTranslator(),
+            progress_callback=progress_updates.append,
+        )
+
+        self.assertEqual(progress_updates, [(1, 2), (2, 2)])
+
     def test_runs_docx_job_and_stores_ready_docx_result(self):
         repository = InMemoryTranslationJobRepository()
         job = repository.create_job(

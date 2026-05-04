@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 class TextTranslator(Protocol):
@@ -26,14 +26,12 @@ def translate_text_fragments(
     source_language: str,
     target_language: str,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslationJobResult:
     translated_fragments: list[FragmentTranslation] = []
+    source_fragments = [fragment.strip() for fragment in fragments if fragment.strip()]
 
-    for fragment in fragments:
-        source_text = fragment.strip()
-        if not source_text:
-            continue
-
+    for source_text in source_fragments:
         translated_text = translator.translate(
             text=source_text,
             source_language=source_language,
@@ -46,6 +44,8 @@ def translate_text_fragments(
                 translated_text=translated_text,
             )
         )
+        if progress_callback is not None:
+            progress_callback((len(translated_fragments), len(source_fragments)))
 
     return TranslationJobResult(
         fragments=translated_fragments,
@@ -53,4 +53,3 @@ def translate_text_fragments(
             fragment.translated_text for fragment in translated_fragments
         ),
     )
-
