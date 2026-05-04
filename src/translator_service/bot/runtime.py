@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import asyncio
+import inspect
 import os
 
 from translator_service.bot.messages import (
@@ -281,9 +282,10 @@ async def _confirm_pending_translation(
             total_fragments=total,
             interface_language=interface_language,
         )
-        asyncio.run_coroutine_threadsafe(
-            progress_message.edit_text(progress_text),
-            loop,
+        _schedule_message_edit(
+            loop=loop,
+            message=progress_message,
+            text=progress_text,
         )
 
     try:
@@ -309,6 +311,15 @@ async def _confirm_pending_translation(
         await message.answer_document(
             BufferedInputFile(job.result_content, filename=job.result_file_name)
         )
+
+
+def _schedule_message_edit(*, loop, message, text: str):
+    async def edit_message() -> None:
+        result = message.edit_text(text)
+        if inspect.isawaitable(result):
+            await result
+
+    return asyncio.run_coroutine_threadsafe(edit_message(), loop)
 
 
 async def run_bot() -> None:

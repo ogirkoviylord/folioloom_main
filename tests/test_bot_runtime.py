@@ -1,13 +1,34 @@
+import asyncio
 import unittest
 
 from translator_service.bot.runtime import (
     BotRuntimeConfig,
     _is_language_button_text,
+    _schedule_message_edit,
     build_default_pricing_rules,
 )
 
 
-class BotRuntimeTest(unittest.TestCase):
+class TelegramMethodLikeAwaitable:
+    def __init__(self, callback):
+        self._callback = callback
+
+    def __await__(self):
+        async def run():
+            self._callback()
+
+        return run().__await__()
+
+
+class EditableMessage:
+    def __init__(self) -> None:
+        self.edited_texts: list[str] = []
+
+    def edit_text(self, text: str):
+        return TelegramMethodLikeAwaitable(lambda: self.edited_texts.append(text))
+
+
+class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
     def test_default_pricing_rules_match_mvp_tariff(self):
         rules = build_default_pricing_rules()
 
@@ -26,6 +47,19 @@ class BotRuntimeTest(unittest.TestCase):
 
     def test_language_button_filter_ignores_missing_message_text(self):
         self.assertFalse(_is_language_button_text(None))
+
+    async def test_schedules_message_edit_for_aiogram_method_awaitable(self):
+        message = EditableMessage()
+        loop = asyncio.get_running_loop()
+
+        future = _schedule_message_edit(
+            loop=loop,
+            message=message,
+            text="Progress",
+        )
+
+        await asyncio.wrap_future(future)
+        self.assertEqual(message.edited_texts, ["Progress"])
 
 
 if __name__ == "__main__":
