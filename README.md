@@ -88,6 +88,50 @@ PYTHONPATH=src \
 watchfiles "python3 -m translator_service.bot" src
 ```
 
+## Stable and Beta Bots
+
+Use two different Telegram bots from BotFather:
+
+- stable bot: for the version users rely on;
+- beta bot: for testing new behavior.
+
+Each bot must have its own `TELEGRAM_BOT_TOKEN`. Never run two polling
+processes with the same token.
+
+Create local env files from the examples:
+
+```bash
+cp .env.stable.example .env.stable
+cp .env.beta.example .env.beta
+```
+
+Fill `.env.stable` with the stable bot token and `.env.beta` with the beta bot
+token. These local files are ignored by git.
+
+Run the stable bot in one terminal:
+
+```bash
+scripts/run_bot_env.sh .env.stable
+```
+
+Run the beta bot in another terminal:
+
+```bash
+scripts/run_bot_env.sh .env.beta
+```
+
+During development, you can run beta with auto-restart:
+
+```bash
+set -a
+source .env.beta
+set +a
+PYTHONPATH=src watchfiles "python3 -m translator_service.bot" src
+```
+
+For production later, stable and beta must also use separate databases, queues,
+storage buckets, payment keys, and admin settings.
+
 ## Clean-Room Note
 
 This project is implemented from scratch. Do not copy AGPL code, prompts, file structure, class/function names, tests, or implementation details from AGPL projects.

@@ -1,4 +1,7 @@
 .env
+.env.beta
+.env.stable
+.env.prod
 .venv/
 __pycache__/
 *.py[cod]
@@ -9,4 +12,3 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-
