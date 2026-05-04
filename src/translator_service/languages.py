@@ -27,3 +27,15 @@ def find_language_by_button_text(text: str | None) -> LanguageOption | None:
             return language
 
     return None
+
+
+def language_name_for_code(language_code: str) -> str:
+    normalized = language_code.strip().lower()
+    if normalized == "auto":
+        return "the detected source language"
+
+    for language in SUPPORTED_TARGET_LANGUAGES:
+        if language.code == normalized:
+            return language.name
+
+    return language_code

@@ -153,12 +153,14 @@ class BotMessagesTest(unittest.TestCase):
                 target_language="en",
                 price_usd=0.10,
                 fragment_count=2,
+                estimated_seconds=24,
             )
         )
 
         self.assertIn("notes.txt", message)
         self.assertIn("$0.10", message)
         self.assertIn("2", message)
+        self.assertIn("24 sec", message)
         self.assertIn(CONFIRM_TRANSLATION_TEXT, message)
 
     def test_confirm_translation_text_accepts_button_text_and_command(self):
@@ -240,12 +242,14 @@ class BotMessagesTest(unittest.TestCase):
                 price_usd=0.10,
                 fragment_count=2,
                 source_language_display="auto (French)",
+                estimated_seconds=24,
             ),
             interface_language="en",
         )
 
         self.assertIn("Document is ready for translation", message)
         self.assertIn("auto (French) → fr", message)
+        self.assertIn("Estimated time: 24 sec", message)
         self.assertIn("Confirm", message)
 
     def test_translation_language_selection_message_shows_detected_source_language(self):
@@ -263,11 +267,16 @@ class BotMessagesTest(unittest.TestCase):
             completed_fragments=3,
             total_fragments=10,
             interface_language="en",
+            estimated_total_seconds=100,
+            elapsed_seconds=30,
         )
 
         self.assertIn("Translation progress", message)
         self.assertIn("3/10", message)
         self.assertIn("30%", message)
+        self.assertIn("Elapsed: 30 sec", message)
+        self.assertIn("Time left: ~1 min 10 sec", message)
+        self.assertIn("/cancel", message)
 
     def test_cancel_messages_are_localized(self):
         self.assertIn("Stopping translation", build_cancel_requested_message("en"))

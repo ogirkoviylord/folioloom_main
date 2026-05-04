@@ -122,7 +122,7 @@ def estimate_epub_order(
         character_count=estimate.character_count,
         estimated_input_tokens=estimate.estimated_input_tokens,
         estimated_output_tokens=estimate.estimated_output_tokens,
-        fragment_count=len(blocks),
+        fragment_count=estimate.fragment_count,
         price_usd=estimate.price_usd,
     )
 

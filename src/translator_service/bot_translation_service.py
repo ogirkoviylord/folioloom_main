@@ -46,6 +46,7 @@ class PendingTranslation:
     price_usd: float
     fragment_count: int
     source_language_display: str | None = None
+    estimated_seconds: int | None = None
 
 
 class BotTranslationService:
@@ -166,6 +167,7 @@ class BotTranslationService:
                 content=content,
                 source_language=source_language,
             ),
+            estimated_seconds=estimate_translation_seconds(estimate.fragment_count),
         )
         self._pending[user_telegram_id] = pending
         return pending
@@ -257,6 +259,13 @@ def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind 
     if document_format is DocumentFormat.EPUB:
         return DocumentKind.EPUB
     return None
+
+
+def estimate_translation_seconds(fragment_count: int) -> int:
+    if fragment_count <= 0:
+        return 0
+
+    return max(20, fragment_count * 12)
 
 
 def _source_language_display(

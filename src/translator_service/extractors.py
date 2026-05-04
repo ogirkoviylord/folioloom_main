@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import PurePosixPath
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
@@ -64,11 +65,7 @@ def extract_text_from_epub(content: bytes) -> str:
 def extract_epub_text_blocks(content: bytes) -> list[str]:
     try:
         with ZipFile(BytesIO(content)) as epub:
-            xhtml_files = [
-                item.filename
-                for item in epub.infolist()
-                if _is_epub_text_item(item.filename)
-            ]
+            xhtml_files = _epub_text_item_names(epub)
             blocks: list[str] = []
             for file_name in xhtml_files:
                 blocks.extend(_extract_xhtml_text_blocks(epub.read(file_name)))
@@ -88,7 +85,7 @@ def _extract_xhtml_text_blocks(content: bytes) -> list[str]:
 
     blocks: list[str] = []
     for element in document.iter():
-        if _local_name(element.tag) not in _EPUB_TEXT_BLOCK_TAGS:
+        if not _is_epub_text_element(element):
             continue
 
         text = _visible_text(element)
@@ -121,17 +118,103 @@ def _is_epub_text_item(file_name: str) -> bool:
     return lowered.endswith((".xhtml", ".html", ".htm"))
 
 
+def _epub_text_item_names(epub: ZipFile) -> list[str]:
+    archive_names = [
+        item.filename
+        for item in epub.infolist()
+        if _is_epub_text_item(item.filename)
+    ]
+    spine_names = _epub_spine_text_item_names(epub)
+    if not spine_names:
+        return archive_names
+
+    archive_name_set = set(archive_names)
+    ordered = [name for name in spine_names if name in archive_name_set]
+    ordered.extend(name for name in archive_names if name not in set(ordered))
+    return ordered
+
+
+def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
+    try:
+        container = ElementTree.fromstring(epub.read("META-INF/container.xml"))
+    except (KeyError, ElementTree.ParseError):
+        return []
+
+    rootfile = next(
+        (
+            element
+            for element in container.iter()
+            if _local_name(element.tag) == "rootfile"
+        ),
+        None,
+    )
+    if rootfile is None:
+        return []
+
+    opf_path = rootfile.attrib.get("full-path")
+    if not opf_path:
+        return []
+
+    try:
+        package = ElementTree.fromstring(epub.read(opf_path))
+    except (KeyError, ElementTree.ParseError):
+        return []
+
+    manifest = {
+        item.attrib.get("id"): item.attrib.get("href")
+        for item in package.iter()
+        if _local_name(item.tag) == "item"
+    }
+    base_path = PurePosixPath(opf_path).parent
+    if str(base_path) == ".":
+        base_path = PurePosixPath("")
+
+    names: list[str] = []
+    for itemref in package.iter():
+        if _local_name(itemref.tag) != "itemref":
+            continue
+        href = manifest.get(itemref.attrib.get("idref"))
+        if not href:
+            continue
+        file_name = _resolve_epub_href(base_path=base_path, href=href, epub=epub)
+        if _is_epub_text_item(file_name):
+            names.append(file_name)
+    return names
+
+
+def _resolve_epub_href(*, base_path: PurePosixPath, href: str, epub: ZipFile) -> str:
+    candidate = str(base_path / href)
+    if candidate in epub.namelist():
+        return candidate
+    return href
+
+
 def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
 
 
+def _is_epub_text_element(element: ElementTree.Element) -> bool:
+    if _local_name(element.tag) not in _EPUB_TEXT_BLOCK_TAGS:
+        return False
+
+    return not any(
+        _local_name(descendant.tag) in _EPUB_TEXT_BLOCK_TAGS
+        for child in list(element)
+        for descendant in child.iter()
+    )
+
+
 _EPUB_TEXT_BLOCK_TAGS = {
+    "article",
+    "aside",
     "blockquote",
     "caption",
     "dd",
+    "div",
     "dt",
+    "figcaption",
     "h1",
     "h2",
     "h3",
@@ -140,6 +223,7 @@ _EPUB_TEXT_BLOCK_TAGS = {
     "h6",
     "li",
     "p",
+    "section",
     "td",
     "th",
 }

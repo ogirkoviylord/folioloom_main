@@ -3,6 +3,7 @@ import unittest
 
 from translator_service.bot.runtime import (
     BotRuntimeConfig,
+    _cancel_inline_keyboard,
     _is_language_button_text,
     _schedule_message_edit,
     build_default_pricing_rules,
@@ -26,6 +27,32 @@ class EditableMessage:
 
     def edit_text(self, text: str):
         return TelegramMethodLikeAwaitable(lambda: self.edited_texts.append(text))
+
+
+class RecordingBot:
+    def __init__(self) -> None:
+        self.edits: list[tuple[str, int, int, object]] = []
+
+    async def edit_message_text(
+        self,
+        *,
+        text: str,
+        chat_id: int,
+        message_id: int,
+        reply_markup=None,
+    ) -> None:
+        self.edits.append((text, chat_id, message_id, reply_markup))
+
+
+class Chat:
+    id = 100
+
+
+class BotBackedMessage:
+    def __init__(self) -> None:
+        self.bot = RecordingBot()
+        self.chat = Chat()
+        self.message_id = 55
 
 
 class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -60,6 +87,27 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wrap_future(future)
         self.assertEqual(message.edited_texts, ["Progress"])
+
+    async def test_schedules_message_edit_through_bot_api_when_message_has_context(self):
+        message = BotBackedMessage()
+        loop = asyncio.get_running_loop()
+
+        future = _schedule_message_edit(
+            loop=loop,
+            message=message,
+            text="Progress 2",
+            reply_markup="inline-keyboard",
+        )
+
+        await asyncio.wrap_future(future)
+        self.assertEqual(message.bot.edits, [("Progress 2", 100, 55, "inline-keyboard")])
+
+    def test_cancel_inline_keyboard_uses_callback_data(self):
+        keyboard = _cancel_inline_keyboard("en")
+
+        button = keyboard.inline_keyboard[0][0]
+        self.assertEqual(button.text, "Cancel")
+        self.assertEqual(button.callback_data, "cancel_translation")
 
 
 if __name__ == "__main__":

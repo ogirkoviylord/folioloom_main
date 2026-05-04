@@ -93,8 +93,33 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(translated, "Hello")
         system_prompt = transport.body["messages"][0]["content"]
         self.assertIn("professional document translator", system_prompt)
-        self.assertIn("ru", system_prompt)
-        self.assertIn("en", system_prompt)
+        self.assertIn("Russian", system_prompt)
+        self.assertIn("English", system_prompt)
+
+    def test_translate_expands_uk_language_code_to_ukrainian(self):
+        transport = RecordingTransport(
+            response={
+                "choices": [{"message": {"content": "Привіт"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+            }
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+        )
+
+        client.translate(
+            text="Привет",
+            source_language="ru",
+            target_language="uk",
+        )
+
+        system_prompt = transport.body["messages"][0]["content"]
+        self.assertIn("Russian", system_prompt)
+        self.assertIn("Ukrainian", system_prompt)
+        self.assertNotIn(" to uk.", system_prompt)
 
     def test_raises_api_error_for_non_200_response(self):
         transport = RecordingTransport(

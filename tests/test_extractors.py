@@ -102,6 +102,27 @@ class EpubExtractionTest(unittest.TestCase):
 
         self.assertEqual(text, "Глава первая\n\nПервый абзац книги.\n\nВторой абзац.")
 
+    def test_extracts_epub_text_in_spine_order_not_archive_order(self):
+        content = _make_epub(
+            {
+                "OPS/chapter2.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Second chapter.</p></body>
+                </html>
+                """,
+                "OPS/chapter1.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>First chapter.</p></body>
+                </html>
+                """,
+            },
+            spine=["OPS/chapter1.xhtml", "OPS/chapter2.xhtml"],
+        )
+
+        text = extract_text_from_epub(content)
+
+        self.assertEqual(text, "First chapter.\n\nSecond chapter.")
+
     def test_rejects_epub_without_translatable_text(self):
         content = _make_epub(
             {
@@ -128,11 +149,38 @@ def _make_docx(document_xml: str) -> bytes:
     return archive.getvalue()
 
 
-def _make_epub(xhtml_items: dict[str, str]) -> bytes:
+def _make_epub(xhtml_items: dict[str, str], spine: list[str] | None = None) -> bytes:
     archive = BytesIO()
+    spine = spine or list(xhtml_items)
+    manifest_items = "\n".join(
+        f'<item id="item{index}" href="{file_name}" media-type="application/xhtml+xml" />'
+        for index, file_name in enumerate(xhtml_items)
+    )
+    spine_items = "\n".join(
+        f'<itemref idref="item{list(xhtml_items).index(file_name)}" />'
+        for file_name in spine
+    )
     with ZipFile(archive, "w") as epub:
         epub.writestr("mimetype", "application/epub+zip")
-        epub.writestr("META-INF/container.xml", "<container />")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+              </rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            f"""
+            <package xmlns="http://www.idpf.org/2007/opf">
+              <manifest>{manifest_items}</manifest>
+              <spine>{spine_items}</spine>
+            </package>
+            """,
+        )
         for file_name, content in xhtml_items.items():
             epub.writestr(file_name, content)
         epub.writestr("OPS/style.css", "body { font-family: serif; }")

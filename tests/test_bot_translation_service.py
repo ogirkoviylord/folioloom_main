@@ -61,6 +61,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 price_usd=0.10,
                 fragment_count=2,
                 source_language_display="ru",
+                estimated_seconds=24,
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
