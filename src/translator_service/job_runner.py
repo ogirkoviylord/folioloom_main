@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import Callable
 
 from translator_service.translation_jobs import TextTranslator
 from translator_service.translation_runner import (
@@ -98,12 +99,14 @@ def run_txt_translation_job(
     job_id: str,
     max_fragment_chars: int,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     return run_translation_job(
         repository=repository,
         job_id=job_id,
         max_fragment_chars=max_fragment_chars,
         translator=translator,
+        progress_callback=progress_callback,
     )
 
 
@@ -113,6 +116,7 @@ def run_translation_job(
     job_id: str,
     max_fragment_chars: int,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     job = repository.get(job_id)
     repository.save(replace(job, status=TranslationJobStatus.TRANSLATING))
@@ -122,6 +126,7 @@ def run_translation_job(
             job=job,
             max_fragment_chars=max_fragment_chars,
             translator=translator,
+            progress_callback=progress_callback,
         )
     except Exception as error:
         repository.save(
@@ -150,6 +155,7 @@ def _translate_job(
     job: TranslationJob,
     max_fragment_chars: int,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     if job.document_kind is DocumentKind.TXT:
         return translate_txt_document(
@@ -159,6 +165,7 @@ def _translate_job(
             target_language=job.target_language,
             max_fragment_chars=max_fragment_chars,
             translator=translator,
+            progress_callback=progress_callback,
         )
 
     if job.document_kind is DocumentKind.DOCX:
@@ -168,6 +175,7 @@ def _translate_job(
             source_language=job.source_language,
             target_language=job.target_language,
             translator=translator,
+            progress_callback=progress_callback,
         )
 
     if job.document_kind is DocumentKind.EPUB:
@@ -177,6 +185,7 @@ def _translate_job(
             source_language=job.source_language,
             target_language=job.target_language,
             translator=translator,
+            progress_callback=progress_callback,
         )
 
     raise ValueError(f"Unsupported document kind: {job.document_kind}")

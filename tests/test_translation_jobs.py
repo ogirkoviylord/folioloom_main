@@ -66,6 +66,19 @@ class TranslationJobsTest(unittest.TestCase):
         self.assertEqual(len(result.fragments), 2)
         self.assertEqual(result.assembled_text, "[en] Первый абзац.\n\n[en] Второй абзац.")
 
+    def test_reports_progress_after_each_translated_fragment(self):
+        progress_updates: list[tuple[int, int]] = []
+
+        translate_text_fragments(
+            fragments=["One", "Two", "Three"],
+            source_language="en",
+            target_language="uk",
+            translator=RecordingTranslator(),
+            progress_callback=progress_updates.append,
+        )
+
+        self.assertEqual(progress_updates, [(1, 3), (2, 3), (3, 3)])
+
 
 if __name__ == "__main__":
     unittest.main()

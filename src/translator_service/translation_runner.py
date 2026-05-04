@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath
+from typing import Callable
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
@@ -25,6 +26,7 @@ def translate_txt_document(
     target_language: str,
     max_fragment_chars: int,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     text = extract_text_from_txt(content)
     fragments = split_text_into_fragments(text, max_fragment_chars=max_fragment_chars)
@@ -33,6 +35,7 @@ def translate_txt_document(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        progress_callback=progress_callback,
     )
 
     return TranslatedDocument(
@@ -50,6 +53,7 @@ def translate_docx_document(
     source_language: str,
     target_language: str,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     paragraphs = _extract_docx_paragraphs(content)
     translation = translate_text_fragments(
@@ -57,6 +61,7 @@ def translate_docx_document(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        progress_callback=progress_callback,
     )
     translated_content = _replace_docx_paragraphs(
         content,
@@ -78,6 +83,7 @@ def translate_epub_document(
     source_language: str,
     target_language: str,
     translator: TextTranslator,
+    progress_callback: Callable[[tuple[int, int]], None] | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_epub_blocks(content)
     translation = translate_text_fragments(
@@ -85,6 +91,7 @@ def translate_epub_document(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        progress_callback=progress_callback,
     )
     translated_content = _replace_epub_blocks(
         content,

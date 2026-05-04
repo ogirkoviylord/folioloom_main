@@ -8,6 +8,7 @@ from translator_service.bot.messages import (
     build_pending_translation_message,
     build_start_message,
     build_translation_language_selection_message,
+    build_translation_progress_message,
     build_translation_job_status_message,
     get_confirm_translation_text,
     is_confirm_translation_text,
@@ -171,6 +172,7 @@ def create_router(
                 build_translation_language_selection_message(
                     pending_upload.file_name,
                     interface_language=interface_language,
+                    source_language_display=pending_upload.source_language_display,
                 ),
                 reply_markup=_language_keyboard(),
             )
@@ -218,6 +220,7 @@ def create_router(
             build_translation_language_selection_message(
                 pending_upload.file_name,
                 interface_language=interface_language,
+                source_language_display=pending_upload.source_language_display,
             ),
             reply_markup=_language_keyboard(),
         )
@@ -260,10 +263,35 @@ async def _confirm_pending_translation(
     translator: DeepSeekClient,
 ) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
+    pending = service.get_pending(message.from_user.id)
+    total_fragments = pending.fragment_count if pending else 0
+    progress_message = await message.answer(
+        build_translation_progress_message(
+            completed_fragments=0,
+            total_fragments=total_fragments,
+            interface_language=interface_language,
+        )
+    )
+    loop = asyncio.get_running_loop()
+
+    def report_progress(progress: tuple[int, int]) -> None:
+        completed_fragments, total = progress
+        progress_text = build_translation_progress_message(
+            completed_fragments=completed_fragments,
+            total_fragments=total,
+            interface_language=interface_language,
+        )
+        asyncio.run_coroutine_threadsafe(
+            progress_message.edit_text(progress_text),
+            loop,
+        )
+
     try:
-        job = service.confirm_pending_translation(
+        job = await asyncio.to_thread(
+            service.confirm_pending_translation,
             user_telegram_id=message.from_user.id,
             translator=translator,
+            progress_callback=report_progress,
         )
     except ValueError as error:
         await message.answer(str(error))

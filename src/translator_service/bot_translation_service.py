@@ -1,11 +1,21 @@
 from dataclasses import dataclass
+from typing import Callable
 
 from translator_service.documents import DocumentFormat, validate_document_upload
+from translator_service.extractors import (
+    extract_text_from_docx,
+    extract_text_from_epub,
+    extract_text_from_txt,
+)
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
     TranslationJob,
     run_translation_job,
+)
+from translator_service.language_detection import (
+    detect_language_from_text,
+    format_detected_source_language,
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
@@ -19,6 +29,7 @@ class PendingUpload:
     content: bytes
     source_language: str
     document_kind: DocumentKind = DocumentKind.TXT
+    source_language_display: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +41,7 @@ class PendingTranslation:
     target_language: str
     price_usd: float
     fragment_count: int
+    source_language_display: str | None = None
 
 
 class BotTranslationService:
@@ -74,6 +86,11 @@ class BotTranslationService:
             content=content,
             source_language=source_language,
             document_kind=document_kind,
+            source_language_display=_source_language_display(
+                document_format=upload.document_format,
+                content=content,
+                source_language=source_language,
+            ),
         )
         self._pending_uploads[user_telegram_id] = pending_upload
         return pending_upload
@@ -97,6 +114,7 @@ class BotTranslationService:
             content=pending_upload.content,
             source_language=pending_upload.source_language,
             target_language=target_language,
+            source_language_display=pending_upload.source_language_display,
         )
         self._pending_uploads.pop(user_telegram_id, None)
         return pending
@@ -109,6 +127,7 @@ class BotTranslationService:
         content: bytes,
         source_language: str,
         target_language: str,
+        source_language_display: str | None = None,
     ) -> PendingTranslation:
         upload = validate_document_upload(
             file_name=file_name,
@@ -136,6 +155,12 @@ class BotTranslationService:
             target_language=target_language,
             price_usd=estimate.price_usd,
             fragment_count=estimate.fragment_count,
+            source_language_display=source_language_display
+            or _source_language_display(
+                document_format=upload.document_format,
+                content=content,
+                source_language=source_language,
+            ),
         )
         self._pending[user_telegram_id] = pending
         return pending
@@ -154,6 +179,7 @@ class BotTranslationService:
         *,
         user_telegram_id: int,
         translator: TextTranslator,
+        progress_callback: Callable[[tuple[int, int]], None] | None = None,
     ) -> TranslationJob:
         pending = self._pending.get(user_telegram_id)
         if pending is None:
@@ -184,6 +210,7 @@ class BotTranslationService:
                 job_id=queued_job.id,
                 max_fragment_chars=self._max_fragment_chars,
                 translator=translator,
+                progress_callback=progress_callback,
             )
         except Exception:
             return self._job_repository.get(queued_job.id)
@@ -200,3 +227,33 @@ def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind 
     if document_format is DocumentFormat.EPUB:
         return DocumentKind.EPUB
     return None
+
+
+def _source_language_display(
+    *,
+    document_format: DocumentFormat,
+    content: bytes,
+    source_language: str,
+) -> str:
+    text = _extract_text_for_language_detection(
+        document_format=document_format,
+        content=content,
+    )
+    return format_detected_source_language(
+        requested_source_language=source_language,
+        detected_language=detect_language_from_text(text),
+    )
+
+
+def _extract_text_for_language_detection(
+    *,
+    document_format: DocumentFormat,
+    content: bytes,
+) -> str:
+    if document_format is DocumentFormat.TXT:
+        return extract_text_from_txt(content)
+    if document_format is DocumentFormat.DOCX:
+        return extract_text_from_docx(content)
+    if document_format is DocumentFormat.EPUB:
+        return extract_text_from_epub(content)
+    return ""
