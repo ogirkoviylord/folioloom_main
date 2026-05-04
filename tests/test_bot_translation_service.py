@@ -158,14 +158,18 @@ class BotTranslationServiceTest(unittest.TestCase):
             target_language="uk",
         )
 
-        job = service.confirm_pending_translation(
-            user_telegram_id=42,
-            translator=FailingTranslator(),
-        )
+        with self.assertLogs("translator_service.bot_translation_service", level="ERROR") as logs:
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=FailingTranslator(),
+            )
 
         self.assertEqual(job.status, TranslationJobStatus.FAILED)
         self.assertEqual(job.error_message, "network failed")
         self.assertEqual(service.get_pending(42), pending)
+        self.assertIn("Translation job failed", logs.output[0])
+        self.assertIn("notes.txt", logs.output[0])
+        self.assertIn("job-1", logs.output[0])
 
     def test_confirm_without_pending_translation_is_rejected(self):
         service = BotTranslationService(
