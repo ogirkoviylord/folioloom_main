@@ -20,7 +20,7 @@ from translator_service.language_detection import (
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
-from translator_service.translation_jobs import TextTranslator
+from translator_service.translation_jobs import CancellationToken, TextTranslator
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class BotTranslationService:
         self._pending_uploads: dict[int, PendingUpload] = {}
         self._pending: dict[int, PendingTranslation] = {}
         self._interface_languages: dict[int, str] = {}
+        self._active_cancellations: dict[int, CancellationToken] = {}
 
     def store_uploaded_document(
         self,
@@ -178,6 +179,14 @@ class BotTranslationService:
     def get_interface_language(self, user_telegram_id: int) -> str:
         return self._interface_languages.get(user_telegram_id, "ru")
 
+    def cancel_translation(self, user_telegram_id: int) -> bool:
+        token = self._active_cancellations.get(user_telegram_id)
+        if token is None:
+            return False
+
+        token.cancel()
+        return True
+
     def confirm_pending_translation(
         self,
         *,
@@ -208,6 +217,8 @@ class BotTranslationService:
             source_language=pending.source_language,
             target_language=pending.target_language,
         )
+        cancellation_token = CancellationToken()
+        self._active_cancellations[user_telegram_id] = cancellation_token
         try:
             run_translation_job(
                 repository=self._job_repository,
@@ -215,6 +226,7 @@ class BotTranslationService:
                 max_fragment_chars=self._max_fragment_chars,
                 translator=translator,
                 progress_callback=progress_callback,
+                cancellation_token=cancellation_token,
             )
         except Exception:
             failed_job = self._job_repository.get(queued_job.id)
@@ -225,6 +237,8 @@ class BotTranslationService:
                 failed_job.user_telegram_id,
             )
             return self._job_repository.get(queued_job.id)
+        finally:
+            self._active_cancellations.pop(user_telegram_id, None)
 
         self._pending.pop(user_telegram_id, None)
         return self._job_repository.get(queued_job.id)

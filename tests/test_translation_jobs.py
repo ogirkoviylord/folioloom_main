@@ -1,7 +1,9 @@
 import unittest
 
 from translator_service.translation_jobs import (
+    CancellationToken,
     FragmentTranslation,
+    TranslationCancelled,
     TranslationJobResult,
     translate_text_fragments,
 )
@@ -78,6 +80,37 @@ class TranslationJobsTest(unittest.TestCase):
         )
 
         self.assertEqual(progress_updates, [(1, 3), (2, 3), (3, 3)])
+
+    def test_stops_before_next_fragment_when_cancellation_is_requested(self):
+        token = CancellationToken()
+
+        def cancel_after_first(progress: tuple[int, int]) -> None:
+            if progress == (1, 3):
+                token.cancel()
+
+        with self.assertRaises(TranslationCancelled) as error:
+            translate_text_fragments(
+                fragments=["One", "Two", "Three"],
+                source_language="en",
+                target_language="uk",
+                translator=RecordingTranslator(),
+                progress_callback=cancel_after_first,
+                cancellation_token=token,
+            )
+
+        self.assertEqual(
+            error.exception.partial_result,
+            TranslationJobResult(
+                fragments=[
+                    FragmentTranslation(
+                        index=0,
+                        source_text="One",
+                        translated_text="[uk] One",
+                    )
+                ],
+                assembled_text="[uk] One",
+            ),
+        )
 
 
 if __name__ == "__main__":

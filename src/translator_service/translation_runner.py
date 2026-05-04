@@ -7,7 +7,12 @@ from zipfile import BadZipFile, ZipFile
 
 from translator_service.extractors import TextExtractionError, extract_text_from_txt
 from translator_service.text_analysis import split_text_into_fragments
-from translator_service.translation_jobs import TextTranslator, translate_text_fragments
+from translator_service.translation_jobs import (
+    CancellationToken,
+    TextTranslator,
+    TranslationCancelled,
+    translate_text_fragments,
+)
 
 
 @dataclass(frozen=True)
@@ -16,6 +21,7 @@ class TranslatedDocument:
     content_type: str
     content: bytes
     fragment_count: int
+    is_partial: bool = False
 
 
 def translate_txt_document(
@@ -27,22 +33,30 @@ def translate_txt_document(
     max_fragment_chars: int,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     text = extract_text_from_txt(content)
     fragments = split_text_into_fragments(text, max_fragment_chars=max_fragment_chars)
-    translation = translate_text_fragments(
-        fragments=fragments,
-        source_language=source_language,
-        target_language=target_language,
-        translator=translator,
-        progress_callback=progress_callback,
-    )
+    try:
+        translation = translate_text_fragments(
+            fragments=fragments,
+            source_language=source_language,
+            target_language=target_language,
+            translator=translator,
+            progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
+        )
+        is_partial = False
+    except TranslationCancelled as error:
+        translation = error.partial_result
+        is_partial = True
 
     return TranslatedDocument(
-        file_name=_translated_txt_file_name(file_name, target_language),
+        file_name=_translated_txt_file_name(file_name, target_language, is_partial),
         content_type="text/plain; charset=utf-8",
         content=translation.assembled_text.encode("utf-8"),
         fragment_count=len(translation.fragments),
+        is_partial=is_partial,
     )
 
 
@@ -54,25 +68,33 @@ def translate_docx_document(
     target_language: str,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     paragraphs = _extract_docx_paragraphs(content)
-    translation = translate_text_fragments(
-        fragments=paragraphs,
-        source_language=source_language,
-        target_language=target_language,
-        translator=translator,
-        progress_callback=progress_callback,
-    )
+    try:
+        translation = translate_text_fragments(
+            fragments=paragraphs,
+            source_language=source_language,
+            target_language=target_language,
+            translator=translator,
+            progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
+        )
+        is_partial = False
+    except TranslationCancelled as error:
+        translation = error.partial_result
+        is_partial = True
     translated_content = _replace_docx_paragraphs(
         content,
         [fragment.translated_text for fragment in translation.fragments],
     )
 
     return TranslatedDocument(
-        file_name=_translated_file_name(file_name, target_language, "docx"),
+        file_name=_translated_file_name(file_name, target_language, "docx", is_partial),
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         content=translated_content,
         fragment_count=len(translation.fragments),
+        is_partial=is_partial,
     )
 
 
@@ -84,15 +106,22 @@ def translate_epub_document(
     target_language: str,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_epub_blocks(content)
-    translation = translate_text_fragments(
-        fragments=[block.text for block in blocks],
-        source_language=source_language,
-        target_language=target_language,
-        translator=translator,
-        progress_callback=progress_callback,
-    )
+    try:
+        translation = translate_text_fragments(
+            fragments=[block.text for block in blocks],
+            source_language=source_language,
+            target_language=target_language,
+            translator=translator,
+            progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
+        )
+        is_partial = False
+    except TranslationCancelled as error:
+        translation = error.partial_result
+        is_partial = True
     translated_content = _replace_epub_blocks(
         content,
         blocks,
@@ -100,21 +129,32 @@ def translate_epub_document(
     )
 
     return TranslatedDocument(
-        file_name=_translated_file_name(file_name, target_language, "epub"),
+        file_name=_translated_file_name(file_name, target_language, "epub", is_partial),
         content_type="application/epub+zip",
         content=translated_content,
         fragment_count=len(translation.fragments),
+        is_partial=is_partial,
     )
 
 
-def _translated_txt_file_name(file_name: str, target_language: str) -> str:
-    return _translated_file_name(file_name, target_language, "txt")
+def _translated_txt_file_name(
+    file_name: str,
+    target_language: str,
+    is_partial: bool = False,
+) -> str:
+    return _translated_file_name(file_name, target_language, "txt", is_partial)
 
 
-def _translated_file_name(file_name: str, target_language: str, extension: str) -> str:
+def _translated_file_name(
+    file_name: str,
+    target_language: str,
+    extension: str,
+    is_partial: bool = False,
+) -> str:
     path = PurePath(file_name)
     stem = path.stem if path.suffix else file_name
-    return f"{stem}.{target_language}.{extension}"
+    partial = ".partial" if is_partial else ""
+    return f"{stem}.{target_language}{partial}.{extension}"
 
 
 def _extract_docx_paragraphs(content: bytes) -> list[str]:
@@ -153,7 +193,9 @@ def _replace_docx_paragraphs(content: bytes, translated_paragraphs: list[str]) -
         if not original_text:
             continue
 
-        translated_text = next(translated_iter)
+        translated_text = next(translated_iter, None)
+        if translated_text is None:
+            continue
         text_nodes[0].text = translated_text
         for text_node in text_nodes[1:]:
             text_node.text = ""
@@ -235,7 +277,7 @@ def _replace_epub_blocks(
     translated_blocks: list[str],
 ) -> bytes:
     replacements_by_file: dict[str, dict[int, str]] = {}
-    for block, translated_text in zip(blocks, translated_blocks, strict=True):
+    for block, translated_text in zip(blocks, translated_blocks, strict=False):
         replacements_by_file.setdefault(block.file_name, {})[
             block.block_index
         ] = translated_text

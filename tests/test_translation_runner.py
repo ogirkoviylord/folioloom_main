@@ -4,6 +4,7 @@ from zipfile import ZipFile
 
 from translator_service.extractors import extract_text_from_docx
 from translator_service.extractors import extract_text_from_epub
+from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_runner import (
     TranslatedDocument,
     translate_docx_document,
@@ -151,6 +152,44 @@ class TranslationRunnerTest(unittest.TestCase):
                 ("First paragraph.", "en", "uk"),
                 ("Second paragraph.", "en", "uk"),
             ],
+        )
+
+    def test_cancelled_epub_translation_returns_partial_epub_result(self):
+        translator = RecordingTranslator()
+        token = CancellationToken()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <p>First paragraph.</p>
+                    <p>Second paragraph.</p>
+                  </body>
+                </html>
+                """,
+            }
+        )
+
+        def cancel_after_first(progress: tuple[int, int]) -> None:
+            if progress == (1, 2):
+                token.cancel()
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            progress_callback=cancel_after_first,
+            cancellation_token=token,
+        )
+
+        self.assertEqual(result.file_name, "book.uk.partial.epub")
+        self.assertTrue(result.is_partial)
+        self.assertEqual(result.fragment_count, 1)
+        self.assertEqual(
+            extract_text_from_epub(result.content),
+            "[uk] First paragraph.\n\nSecond paragraph.",
         )
 
 

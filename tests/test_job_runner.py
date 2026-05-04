@@ -10,6 +10,7 @@ from translator_service.job_runner import (
     run_translation_job,
     run_txt_translation_job,
 )
+from translator_service.translation_jobs import CancellationToken
 
 
 class RecordingTranslator:
@@ -66,6 +67,36 @@ class JobRunnerTest(unittest.TestCase):
         )
 
         self.assertEqual(progress_updates, [(1, 2), (2, 2)])
+
+    def test_cancelled_txt_job_stores_partial_result(self):
+        repository = InMemoryTranslationJobRepository()
+        token = CancellationToken()
+        job = repository.create_txt_job(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.\n\nTwo.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        def cancel_after_first(progress: tuple[int, int]) -> None:
+            if progress == (1, 2):
+                token.cancel()
+
+        result = run_txt_translation_job(
+            repository=repository,
+            job_id=job.id,
+            max_fragment_chars=5,
+            translator=RecordingTranslator(),
+            progress_callback=cancel_after_first,
+            cancellation_token=token,
+        )
+
+        stored_job = repository.get(job.id)
+        self.assertEqual(stored_job.status, TranslationJobStatus.CANCELLED)
+        self.assertEqual(stored_job.result_file_name, "notes.uk.partial.txt")
+        self.assertEqual(stored_job.result_content.decode("utf-8"), "[uk] One.")
+        self.assertTrue(result.is_partial)
 
     def test_runs_docx_job_and_stores_ready_docx_result(self):
         repository = InMemoryTranslationJobRepository()

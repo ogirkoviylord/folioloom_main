@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from translator_service.documents import DocumentFormat, DocumentUpload
 from translator_service.extractors import (
     extract_text_from_docx,
+    extract_epub_text_blocks,
     extract_text_from_epub,
     extract_text_from_txt,
 )
@@ -107,12 +108,22 @@ def estimate_epub_order(
     if upload.document_format is not DocumentFormat.EPUB:
         raise ValueError("EPUB estimator can only process EPUB uploads")
 
-    text = extract_text_from_epub(content)
-    return _estimate_extracted_text(
+    blocks = extract_epub_text_blocks(content)
+    text = "\n\n".join(blocks)
+    estimate = _estimate_extracted_text(
         upload=upload,
         text=text,
         pricing_rules=pricing_rules,
         max_fragment_chars=max_fragment_chars,
+    )
+    return OrderEstimate(
+        file_name=estimate.file_name,
+        document_format=estimate.document_format,
+        character_count=estimate.character_count,
+        estimated_input_tokens=estimate.estimated_input_tokens,
+        estimated_output_tokens=estimate.estimated_output_tokens,
+        fragment_count=len(blocks),
+        price_usd=estimate.price_usd,
     )
 
 

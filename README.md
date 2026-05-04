@@ -12,7 +12,7 @@ Implemented:
 - DeepSeek chat-completions client.
 - Fragmented TXT, DOCX, and EPUB translation runners.
 - In-memory translation job status model.
-- aiogram runtime skeleton with `/start`, document upload, `/confirm`, and `/status`.
+- aiogram runtime skeleton with `/start`, document upload, `/confirm`, `/cancel`, and `/status`.
 
 The Telegram runtime currently translates TXT, DOCX, and EPUB files.
 
@@ -71,6 +71,8 @@ Prototype flow:
 5. Review the estimate.
 6. Press the localized confirm button or send `/confirm`.
 7. The bot returns the translated file.
+
+During long translations, send `/cancel` to stop after the current fragment and receive a partial translated file.
 
 Use `/language` to show the interface language buttons again.
 

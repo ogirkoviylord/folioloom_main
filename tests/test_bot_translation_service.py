@@ -20,6 +20,19 @@ class FailingTranslator:
         raise RuntimeError("network failed")
 
 
+class CancellingTranslator:
+    def __init__(self, service: BotTranslationService, user_telegram_id: int) -> None:
+        self._service = service
+        self._user_telegram_id = user_telegram_id
+        self.requests: list[str] = []
+
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.requests.append(text)
+        if len(self.requests) == 1:
+            self._service.cancel_translation(self._user_telegram_id)
+        return f"[{target_language}] {text}"
+
+
 class BotTranslationServiceTest(unittest.TestCase):
     def test_prepares_txt_estimate_for_uploaded_document(self):
         service = BotTranslationService(
@@ -170,6 +183,42 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertIn("Translation job failed", logs.output[0])
         self.assertIn("notes.txt", logs.output[0])
         self.assertIn("job-1", logs.output[0])
+
+    def test_cancel_translation_requests_active_job_cancellation(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.\n\nTwo.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=CancellingTranslator(service, 42),
+        )
+
+        self.assertEqual(job.status, TranslationJobStatus.CANCELLED)
+        self.assertEqual(job.result_file_name, "notes.uk.partial.txt")
+        self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.")
+        self.assertIsNone(service.get_pending(42))
+
+    def test_cancel_translation_returns_false_without_active_job(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+        )
+
+        self.assertFalse(service.cancel_translation(42))
 
     def test_confirm_without_pending_translation_is_rejected(self):
         service = BotTranslationService(

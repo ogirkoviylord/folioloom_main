@@ -169,7 +169,7 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.file_name, "book.epub")
         self.assertEqual(estimate.document_format, DocumentFormat.EPUB)
         self.assertEqual(estimate.character_count, 23)
-        self.assertEqual(estimate.fragment_count, 1)
+        self.assertEqual(estimate.fragment_count, 2)
 
     def test_rejects_non_epub_upload_for_epub_estimator(self):
         upload = validate_document_upload(
