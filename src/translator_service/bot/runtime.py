@@ -4,6 +4,8 @@ import inspect
 import os
 
 from translator_service.bot.messages import (
+    build_back_to_menu_message,
+    build_cancel_hint_message,
     build_cancel_requested_message,
     build_language_selected_message,
     build_language_selection_message,
@@ -13,7 +15,11 @@ from translator_service.bot.messages import (
     build_translation_language_selection_message,
     build_translation_progress_message,
     build_translation_job_status_message,
+    get_back_text,
+    get_cancel_text,
     get_confirm_translation_text,
+    is_back_text,
+    is_cancel_text,
     is_confirm_translation_text,
 )
 from translator_service.bot_translation_service import BotTranslationService
@@ -134,7 +140,7 @@ def create_router(
                     pending,
                     interface_language=interface_language,
                 ),
-                reply_markup=_confirm_keyboard(interface_language),
+                reply_markup=_confirm_keyboard(interface_language, include_back=True),
             )
             return
 
@@ -160,12 +166,21 @@ def create_router(
 
     @router.message(Command("cancel"))
     async def cancel(message: Message) -> None:
-        interface_language = service.get_interface_language(message.from_user.id)
-        if service.cancel_translation(message.from_user.id):
-            await message.answer(build_cancel_requested_message(interface_language))
-            return
+        await _cancel_active_translation(message=message, service=service)
 
-        await message.answer(build_nothing_to_cancel_message(interface_language))
+    @router.message(F.text.func(is_cancel_text))
+    async def cancel_text(message: Message) -> None:
+        await _cancel_active_translation(message=message, service=service)
+
+    @router.message(F.text.func(is_back_text))
+    async def back_text(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        service.discard_pending_translation(message.from_user.id)
+        await message.answer(build_back_to_menu_message(interface_language))
+        await message.answer(
+            build_start_message(interface_language=interface_language),
+            reply_markup=_language_keyboard(),
+        )
 
     @router.message(F.text.func(is_confirm_translation_text))
     async def confirm_text(message: Message) -> None:
@@ -200,7 +215,7 @@ def create_router(
                 pending,
                 interface_language=interface_language,
             ),
-            reply_markup=_confirm_keyboard(interface_language),
+            reply_markup=_confirm_keyboard(interface_language, include_back=True),
         )
 
     @router.message(F.document)
@@ -240,15 +255,26 @@ def create_router(
     return router
 
 
-def _confirm_keyboard(interface_language: str = "ru"):
+def _confirm_keyboard(interface_language: str = "ru", *, include_back: bool = False):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    keyboard = [[KeyboardButton(text=get_confirm_translation_text(interface_language))]]
+    if include_back:
+        keyboard.append([KeyboardButton(text=get_back_text(interface_language))])
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _cancel_keyboard(interface_language: str = "ru"):
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=get_confirm_translation_text(interface_language))]
-        ],
+        keyboard=[[KeyboardButton(text=get_cancel_text(interface_language))]],
         resize_keyboard=True,
-        one_time_keyboard=True,
     )
 
 
@@ -282,8 +308,10 @@ async def _confirm_pending_translation(
             completed_fragments=0,
             total_fragments=total_fragments,
             interface_language=interface_language,
-        )
+        ),
+        reply_markup=_cancel_keyboard(interface_language),
     )
+    await message.answer(build_cancel_hint_message(interface_language))
     loop = asyncio.get_running_loop()
 
     def report_progress(progress: tuple[int, int]) -> None:
@@ -322,6 +350,15 @@ async def _confirm_pending_translation(
         await message.answer_document(
             BufferedInputFile(job.result_content, filename=job.result_file_name)
         )
+
+
+async def _cancel_active_translation(*, message, service: BotTranslationService) -> None:
+    interface_language = service.get_interface_language(message.from_user.id)
+    if service.cancel_translation(message.from_user.id):
+        await message.answer(build_cancel_requested_message(interface_language))
+        return
+
+    await message.answer(build_nothing_to_cancel_message(interface_language))
 
 
 def _schedule_message_edit(*, loop, message, text: str):

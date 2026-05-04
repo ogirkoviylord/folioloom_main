@@ -220,6 +220,25 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         self.assertFalse(service.cancel_translation(42))
 
+    def test_discard_pending_translation_clears_unconfirmed_order(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Some text",
+            source_language="en",
+            target_language="uk",
+        )
+
+        self.assertTrue(service.discard_pending_translation(42))
+        self.assertIsNone(service.get_pending(42))
+        self.assertFalse(service.discard_pending_translation(42))
+
     def test_confirm_without_pending_translation_is_rejected(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
