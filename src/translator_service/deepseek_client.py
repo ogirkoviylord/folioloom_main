@@ -5,6 +5,8 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from translator_service.languages import language_name_for_code
+
 
 class Transport(Protocol):
     def __call__(
@@ -102,12 +104,18 @@ class DeepSeekClient:
 
 
 def _build_translation_prompt(*, source_language: str, target_language: str) -> str:
+    source_language_name = language_name_for_code(source_language)
+    target_language_name = language_name_for_code(target_language)
     return (
         "You are a professional document translator. "
-        f"Translate from {source_language} to {target_language}. "
+        f"Translate from {source_language_name} to {target_language_name}. "
         "Preserve meaning, paragraph boundaries, numbers, and named entities. "
+        "If the input contains <translation_batch> and <translation_block id=\"...\"> "
+        "tags, keep those tags and ids exactly as provided, translate only the text "
+        "inside each translation_block, and return the same XML structure. "
         "Return only the translated text without commentary."
     )
+
 
 
 def _parse_chat_result(response: dict) -> DeepSeekChatResult:

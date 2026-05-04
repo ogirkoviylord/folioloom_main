@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 import asyncio
 import inspect
+import logging
 import os
+import time
 
 from translator_service.bot.messages import (
     build_back_to_menu_message,
-    build_cancel_hint_message,
     build_cancel_requested_message,
     build_language_selected_message,
     build_language_selection_message,
@@ -34,6 +35,9 @@ from translator_service.languages import (
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
 from translator_service.pricing import PricingRules
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -87,7 +91,7 @@ def create_router(
 ):
     from aiogram import F, Router
     from aiogram.filters import Command
-    from aiogram.types import Message
+    from aiogram.types import CallbackQuery, Message
 
     router = Router()
 
@@ -171,6 +175,18 @@ def create_router(
     @router.message(F.text.func(is_cancel_text))
     async def cancel_text(message: Message) -> None:
         await _cancel_active_translation(message=message, service=service)
+
+    @router.callback_query(F.data == "cancel_translation")
+    async def cancel_callback(callback: CallbackQuery) -> None:
+        interface_language = service.get_interface_language(callback.from_user.id)
+        if service.cancel_translation(callback.from_user.id):
+            await callback.answer(build_cancel_requested_message(interface_language))
+            return
+
+        await callback.answer(
+            build_nothing_to_cancel_message(interface_language),
+            show_alert=True,
+        )
 
     @router.message(F.text.func(is_back_text))
     async def back_text(message: Message) -> None:
@@ -278,6 +294,21 @@ def _cancel_keyboard(interface_language: str = "ru"):
     )
 
 
+def _cancel_inline_keyboard(interface_language: str = "ru"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=get_cancel_text(interface_language),
+                    callback_data="cancel_translation",
+                )
+            ]
+        ]
+    )
+
+
 def _language_keyboard():
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
@@ -303,28 +334,39 @@ async def _confirm_pending_translation(
     interface_language = service.get_interface_language(message.from_user.id)
     pending = service.get_pending(message.from_user.id)
     total_fragments = pending.fragment_count if pending else 0
+    started_at = time.monotonic()
     progress_message = await message.answer(
         build_translation_progress_message(
             completed_fragments=0,
             total_fragments=total_fragments,
             interface_language=interface_language,
+            estimated_total_seconds=pending.estimated_seconds if pending else None,
+            elapsed_seconds=0,
         ),
-        reply_markup=_cancel_keyboard(interface_language),
+        reply_markup=_cancel_inline_keyboard(interface_language),
     )
-    await message.answer(build_cancel_hint_message(interface_language))
     loop = asyncio.get_running_loop()
 
     def report_progress(progress: tuple[int, int]) -> None:
         completed_fragments, total = progress
+        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        estimated_total_seconds = None
+        if completed_fragments > 0:
+            estimated_total_seconds = round(
+                elapsed_seconds / completed_fragments * max(total, completed_fragments)
+            )
         progress_text = build_translation_progress_message(
             completed_fragments=completed_fragments,
             total_fragments=total,
             interface_language=interface_language,
+            estimated_total_seconds=estimated_total_seconds,
+            elapsed_seconds=elapsed_seconds,
         )
         _schedule_message_edit(
             loop=loop,
             message=progress_message,
             text=progress_text,
+            reply_markup=_cancel_inline_keyboard(interface_language),
         )
 
     try:
@@ -361,13 +403,34 @@ async def _cancel_active_translation(*, message, service: BotTranslationService)
     await message.answer(build_nothing_to_cancel_message(interface_language))
 
 
-def _schedule_message_edit(*, loop, message, text: str):
+def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
     async def edit_message() -> None:
+        bot = getattr(message, "bot", None)
+        chat = getattr(message, "chat", None)
+        message_id = getattr(message, "message_id", None)
+        if bot is not None and chat is not None and message_id is not None:
+            await bot.edit_message_text(
+                text=text,
+                chat_id=chat.id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+            )
+            return
+
         result = message.edit_text(text)
         if inspect.isawaitable(result):
             await result
 
-    return asyncio.run_coroutine_threadsafe(edit_message(), loop)
+    future = asyncio.run_coroutine_threadsafe(edit_message(), loop)
+    future.add_done_callback(_log_message_edit_error)
+    return future
+
+
+def _log_message_edit_error(future) -> None:
+    try:
+        future.result()
+    except Exception:
+        logger.exception("Failed to edit translation progress message")
 
 
 async def run_bot() -> None:

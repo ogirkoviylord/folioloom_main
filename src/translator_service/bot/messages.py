@@ -28,6 +28,10 @@ MESSAGES = {
         "back_to_menu": "Возвращаемся в Главное меню.",
         "cancel": "Отмена",
         "cancel_hint": "Чтобы остановить перевод, нажмите «{cancel_text}» или отправьте /cancel.",
+        "elapsed": "Прошло",
+        "time_left": "Осталось",
+        "estimated_time": "Примерное время",
+        "time_unknown": "уточняется",
         "cancel_requested": "Останавливаю перевод после текущего фрагмента.",
         "nothing_to_cancel": "Сейчас нет активного перевода для остановки.",
         "estimate_title": "Предварительная оценка перевода",
@@ -69,6 +73,10 @@ MESSAGES = {
         "back_to_menu": "Повертаємося до головного меню.",
         "cancel": "Скасувати",
         "cancel_hint": "Щоб зупинити переклад, натисніть «{cancel_text}» або надішліть /cancel.",
+        "elapsed": "Минуло",
+        "time_left": "Залишилось",
+        "estimated_time": "Орієнтовний час",
+        "time_unknown": "уточнюється",
         "cancel_requested": "Зупиняю переклад після поточного фрагмента.",
         "nothing_to_cancel": "Зараз немає активного перекладу для зупинки.",
         "estimate_title": "Попередня оцінка перекладу",
@@ -110,6 +118,10 @@ MESSAGES = {
         "back_to_menu": "Retour au menu principal.",
         "cancel": "Annuler",
         "cancel_hint": "Pour arrêter la traduction, appuyez sur « {cancel_text} » ou envoyez /cancel.",
+        "elapsed": "Écoulé",
+        "time_left": "Temps restant",
+        "estimated_time": "Durée estimée",
+        "time_unknown": "estimation en cours",
         "cancel_requested": "J’arrête la traduction après le fragment en cours.",
         "nothing_to_cancel": "Aucune traduction active à arrêter.",
         "estimate_title": "Estimation de la traduction",
@@ -151,6 +163,10 @@ MESSAGES = {
         "back_to_menu": "Volvemos al menú principal.",
         "cancel": "Cancelar",
         "cancel_hint": "Para detener la traducción, pulsa «{cancel_text}» o envía /cancel.",
+        "elapsed": "Transcurrido",
+        "time_left": "Restante",
+        "estimated_time": "Tiempo estimado",
+        "time_unknown": "calculando",
         "cancel_requested": "Detendré la traducción después del fragmento actual.",
         "nothing_to_cancel": "No hay una traducción activa para detener.",
         "estimate_title": "Estimación de traducción",
@@ -192,6 +208,10 @@ MESSAGES = {
         "back_to_menu": "Returning to the Main menu.",
         "cancel": "Cancel",
         "cancel_hint": "To stop translation, press “{cancel_text}” or send /cancel.",
+        "elapsed": "Elapsed",
+        "time_left": "Time left",
+        "estimated_time": "Estimated time",
+        "time_unknown": "estimating",
         "cancel_requested": "Stopping translation after the current fragment.",
         "nothing_to_cancel": "There is no active translation to stop.",
         "estimate_title": "Translation estimate",
@@ -301,6 +321,7 @@ def build_pending_translation_message(
         f"{pending.source_language_display or pending.source_language} → "
         f"{pending.target_language}\n"
         f"{messages['fragments']}: {pending.fragment_count}\n"
+        f"{messages['estimated_time']}: {_format_duration(pending.estimated_seconds or 0)}\n"
         f"{messages['price']}: ${pending.price_usd:.2f}\n\n"
         f"{messages['confirm_instruction'].format(confirm_text=confirm_text)}"
     )
@@ -330,15 +351,29 @@ def build_translation_progress_message(
     completed_fragments: int,
     total_fragments: int,
     interface_language: str = "ru",
+    estimated_total_seconds: int | None = None,
+    elapsed_seconds: int | None = None,
 ) -> str:
     messages = _messages(interface_language)
     safe_total = max(total_fragments, 1)
     percent = min(100, round(completed_fragments / safe_total * 100))
     filled_cells = min(10, percent // 10)
     bar = "#" * filled_cells + "-" * (10 - filled_cells)
+    elapsed_line = ""
+    if elapsed_seconds is not None:
+        elapsed_line = f"\n{messages['elapsed']}: {_format_duration(elapsed_seconds)}"
+
+    time_left = messages["time_unknown"]
+    if estimated_total_seconds is not None and elapsed_seconds is not None:
+        remaining_seconds = max(0, estimated_total_seconds - elapsed_seconds)
+        time_left = f"~{_format_duration(remaining_seconds)}"
+
     return (
         f"{messages['progress']}: [{bar}] "
         f"{completed_fragments}/{total_fragments} ({percent}%)"
+        f"{elapsed_line}\n"
+        f"{messages['time_left']}: {time_left}\n\n"
+        f"{build_cancel_hint_message(interface_language)}"
     )
 
 
@@ -357,6 +392,18 @@ def build_back_to_menu_message(interface_language: str = "ru") -> str:
 def build_cancel_hint_message(interface_language: str = "ru") -> str:
     messages = _messages(interface_language)
     return messages["cancel_hint"].format(cancel_text=messages["cancel"])
+
+
+def _format_duration(seconds: int) -> str:
+    safe_seconds = max(0, round(seconds))
+    minutes, remaining_seconds = divmod(safe_seconds, 60)
+    hours, remaining_minutes = divmod(minutes, 60)
+
+    if hours:
+        return f"{hours} h {remaining_minutes} min"
+    if minutes:
+        return f"{minutes} min {remaining_seconds} sec"
+    return f"{remaining_seconds} sec"
 
 
 def get_back_text(interface_language: str = "ru") -> str:

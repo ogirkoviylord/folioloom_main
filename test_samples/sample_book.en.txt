@@ -1,0 +1,12 @@
+Chapter 1
+
+This is the first paragraph of a sample book. It has enough text to look like a real paragraph.
+
+The second paragraph mentions a term: neural translation. The term should stay meaningful after translation.
+
+Chapter 2
+
+A short list follows:
+- First item
+- Second item
+- Third item

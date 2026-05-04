@@ -169,6 +169,39 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.file_name, "book.epub")
         self.assertEqual(estimate.document_format, DocumentFormat.EPUB)
         self.assertEqual(estimate.character_count, 23)
+        self.assertEqual(estimate.fragment_count, 1)
+
+    def test_epub_estimate_counts_grouped_api_fragments_not_xhtml_blocks(self):
+        upload = validate_document_upload(
+            file_name="book.epub",
+            size_bytes=500,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=_make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <p>One short paragraph.</p>
+                        <p>Two short paragraph.</p>
+                        <p>Three short paragraph.</p>
+                      </body>
+                    </html>
+                    """
+                }
+            ),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=50,
+        )
+
         self.assertEqual(estimate.fragment_count, 2)
 
     def test_rejects_non_epub_upload_for_epub_estimator(self):

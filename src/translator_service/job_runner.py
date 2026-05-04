@@ -187,6 +187,7 @@ def _translate_job(
             source_language=job.source_language,
             target_language=job.target_language,
             translator=translator,
+            max_fragment_chars=max_fragment_chars,
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
         )
@@ -198,6 +199,7 @@ def _translate_job(
             source_language=job.source_language,
             target_language=job.target_language,
             translator=translator,
+            max_fragment_chars=max_fragment_chars,
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
         )

@@ -12,6 +12,7 @@ Implemented:
 - DeepSeek chat-completions client.
 - Fragmented TXT, DOCX, and EPUB translation runners.
 - In-memory translation job status model.
+- In-memory balance, ledger, order charge, and refund backend domain.
 - aiogram runtime skeleton with `/start`, document upload, `/confirm`, `/cancel`, and `/status`.
 
 The Telegram runtime currently translates TXT, DOCX, and EPUB files.
@@ -78,6 +79,12 @@ During long translations, press the localized Cancel button or send `/cancel` to
 Use `/language` to show the interface language buttons again.
 
 Interface messages are currently localized for Russian, Ukrainian, French, Spanish, and English.
+
+Sample documents for manual beta checks are in `test_samples/`. Regenerate them with:
+
+```bash
+python3 scripts/generate_sample_documents.py
+```
 
 For auto-restart during development:
 
