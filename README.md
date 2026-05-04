@@ -70,9 +70,10 @@ Prototype flow:
 4. Choose the translation target language button.
 5. Review the estimate.
 6. Press the localized confirm button or send `/confirm`.
+   Use the localized Back button before confirmation if the wrong file was uploaded.
 7. The bot returns the translated file.
 
-During long translations, send `/cancel` to stop after the current fragment and receive a partial translated file.
+During long translations, press the localized Cancel button or send `/cancel` to stop after the current fragment and receive a partial translated file.
 
 Use `/language` to show the interface language buttons again.
 

@@ -24,6 +24,10 @@ MESSAGES = {
         "translation_language_prompt": "Файл получен: {file_name}\n\nВыберите язык перевода:",
         "original_language": "Язык оригинала",
         "progress": "Прогресс перевода",
+        "back": "Назад",
+        "back_to_menu": "Возвращаемся в Главное меню.",
+        "cancel": "Отмена",
+        "cancel_hint": "Чтобы остановить перевод, нажмите «{cancel_text}» или отправьте /cancel.",
         "cancel_requested": "Останавливаю перевод после текущего фрагмента.",
         "nothing_to_cancel": "Сейчас нет активного перевода для остановки.",
         "estimate_title": "Предварительная оценка перевода",
@@ -61,6 +65,10 @@ MESSAGES = {
         "translation_language_prompt": "Файл отримано: {file_name}\n\nВиберіть мову перекладу:",
         "original_language": "Мова оригіналу",
         "progress": "Прогрес перекладу",
+        "back": "Назад",
+        "back_to_menu": "Повертаємося до головного меню.",
+        "cancel": "Скасувати",
+        "cancel_hint": "Щоб зупинити переклад, натисніть «{cancel_text}» або надішліть /cancel.",
         "cancel_requested": "Зупиняю переклад після поточного фрагмента.",
         "nothing_to_cancel": "Зараз немає активного перекладу для зупинки.",
         "estimate_title": "Попередня оцінка перекладу",
@@ -98,6 +106,10 @@ MESSAGES = {
         "translation_language_prompt": "Fichier reçu : {file_name}\n\nChoisissez la langue de traduction :",
         "original_language": "Langue d’origine",
         "progress": "Progression de la traduction",
+        "back": "Retour",
+        "back_to_menu": "Retour au menu principal.",
+        "cancel": "Annuler",
+        "cancel_hint": "Pour arrêter la traduction, appuyez sur « {cancel_text} » ou envoyez /cancel.",
         "cancel_requested": "J’arrête la traduction après le fragment en cours.",
         "nothing_to_cancel": "Aucune traduction active à arrêter.",
         "estimate_title": "Estimation de la traduction",
@@ -135,6 +147,10 @@ MESSAGES = {
         "translation_language_prompt": "Archivo recibido: {file_name}\n\nElige el idioma de traducción:",
         "original_language": "Idioma original",
         "progress": "Progreso de traducción",
+        "back": "Atrás",
+        "back_to_menu": "Volvemos al menú principal.",
+        "cancel": "Cancelar",
+        "cancel_hint": "Para detener la traducción, pulsa «{cancel_text}» o envía /cancel.",
         "cancel_requested": "Detendré la traducción después del fragmento actual.",
         "nothing_to_cancel": "No hay una traducción activa para detener.",
         "estimate_title": "Estimación de traducción",
@@ -172,6 +188,10 @@ MESSAGES = {
         "translation_language_prompt": "File received: {file_name}\n\nChoose translation language:",
         "original_language": "Original language",
         "progress": "Translation progress",
+        "back": "Back",
+        "back_to_menu": "Returning to the Main menu.",
+        "cancel": "Cancel",
+        "cancel_hint": "To stop translation, press “{cancel_text}” or send /cancel.",
         "cancel_requested": "Stopping translation after the current fragment.",
         "nothing_to_cancel": "There is no active translation to stop.",
         "estimate_title": "Translation estimate",
@@ -297,6 +317,14 @@ def is_confirm_translation_text(text: str | None) -> bool:
     return normalized in localized_confirm_texts | {"/confirm"}
 
 
+def is_back_text(text: str | None) -> bool:
+    return _matches_localized_text(text, "back")
+
+
+def is_cancel_text(text: str | None) -> bool:
+    return _matches_localized_text(text, "cancel") or _normalize_text(text) == "/cancel"
+
+
 def build_translation_progress_message(
     *,
     completed_fragments: int,
@@ -320,6 +348,23 @@ def build_cancel_requested_message(interface_language: str = "ru") -> str:
 
 def build_nothing_to_cancel_message(interface_language: str = "ru") -> str:
     return _messages(interface_language)["nothing_to_cancel"]
+
+
+def build_back_to_menu_message(interface_language: str = "ru") -> str:
+    return _messages(interface_language)["back_to_menu"]
+
+
+def build_cancel_hint_message(interface_language: str = "ru") -> str:
+    messages = _messages(interface_language)
+    return messages["cancel_hint"].format(cancel_text=messages["cancel"])
+
+
+def get_back_text(interface_language: str = "ru") -> str:
+    return _messages(interface_language)["back"]
+
+
+def get_cancel_text(interface_language: str = "ru") -> str:
+    return _messages(interface_language)["cancel"]
 
 
 def build_translation_job_status_message(
@@ -353,3 +398,17 @@ def get_confirm_translation_text(interface_language: str = "ru") -> str:
 
 def _messages(interface_language: str) -> dict:
     return MESSAGES.get(interface_language, MESSAGES["ru"])
+
+
+def _matches_localized_text(text: str | None, key: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+
+    return normalized in {messages[key].lower() for messages in MESSAGES.values()}
+
+
+def _normalize_text(text: str | None) -> str:
+    if text is None:
+        return ""
+    return text.strip().lower()

@@ -2,9 +2,10 @@ import unittest
 
 from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
+    build_back_to_menu_message,
+    build_cancel_requested_message,
     build_language_selected_message,
     build_language_selection_message,
-    build_cancel_requested_message,
     build_translation_language_selection_message,
     build_main_menu,
     build_nothing_to_cancel_message,
@@ -13,6 +14,10 @@ from translator_service.bot.messages import (
     build_start_message,
     build_translation_progress_message,
     build_translation_job_status_message,
+    get_back_text,
+    get_cancel_text,
+    is_back_text,
+    is_cancel_text,
     is_confirm_translation_text,
 )
 from translator_service.bot_translation_service import PendingTranslation
@@ -267,6 +272,23 @@ class BotMessagesTest(unittest.TestCase):
     def test_cancel_messages_are_localized(self):
         self.assertIn("Stopping translation", build_cancel_requested_message("en"))
         self.assertIn("no active translation", build_nothing_to_cancel_message("en"))
+
+    def test_back_button_text_is_localized_and_recognized(self):
+        self.assertEqual(get_back_text("ru"), "Назад")
+        self.assertTrue(is_back_text(" назад "))
+        self.assertTrue(is_back_text("Back"))
+        self.assertFalse(is_back_text(None))
+
+    def test_cancel_button_text_is_localized_and_recognized(self):
+        self.assertEqual(get_cancel_text("ru"), "Отмена")
+        self.assertTrue(is_cancel_text(" отмена "))
+        self.assertTrue(is_cancel_text("Cancel"))
+        self.assertTrue(is_cancel_text("/cancel"))
+        self.assertFalse(is_cancel_text(None))
+
+    def test_back_to_menu_message_is_localized(self):
+        self.assertIn("Главное меню", build_back_to_menu_message("ru"))
+        self.assertIn("Main menu", build_back_to_menu_message("en"))
 
     def test_confirm_translation_text_accepts_localized_buttons(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))

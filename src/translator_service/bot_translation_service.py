@@ -173,6 +173,11 @@ class BotTranslationService:
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
         return self._pending.get(user_telegram_id)
 
+    def discard_pending_translation(self, user_telegram_id: int) -> bool:
+        removed_pending = self._pending.pop(user_telegram_id, None)
+        removed_upload = self._pending_uploads.pop(user_telegram_id, None)
+        return removed_pending is not None or removed_upload is not None
+
     def set_interface_language(self, *, user_telegram_id: int, language_code: str) -> None:
         self._interface_languages[user_telegram_id] = language_code
 
