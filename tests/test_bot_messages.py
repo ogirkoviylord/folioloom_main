@@ -4,8 +4,10 @@ from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
     build_language_selected_message,
     build_language_selection_message,
+    build_cancel_requested_message,
     build_translation_language_selection_message,
     build_main_menu,
+    build_nothing_to_cancel_message,
     build_order_estimate_message,
     build_pending_translation_message,
     build_start_message,
@@ -117,6 +119,24 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("ошибка", message.lower())
         self.assertNotIn("DeepSeek", message)
         self.assertNotIn("API", message)
+
+    def test_translation_job_status_message_for_cancelled_job(self):
+        message = build_translation_job_status_message(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=b"book",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.CANCELLED,
+                result_file_name="book.uk.partial.epub",
+            ),
+            interface_language="en",
+        )
+
+        self.assertIn("cancelled", message.lower())
+        self.assertIn("book.uk.partial.epub", message)
 
     def test_pending_translation_message_shows_confirm_instruction(self):
         message = build_pending_translation_message(
@@ -243,6 +263,10 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Translation progress", message)
         self.assertIn("3/10", message)
         self.assertIn("30%", message)
+
+    def test_cancel_messages_are_localized(self):
+        self.assertIn("Stopping translation", build_cancel_requested_message("en"))
+        self.assertIn("no active translation", build_nothing_to_cancel_message("en"))
 
     def test_confirm_translation_text_accepts_localized_buttons(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))

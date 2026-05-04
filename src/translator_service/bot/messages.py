@@ -24,6 +24,8 @@ MESSAGES = {
         "translation_language_prompt": "Файл получен: {file_name}\n\nВыберите язык перевода:",
         "original_language": "Язык оригинала",
         "progress": "Прогресс перевода",
+        "cancel_requested": "Останавливаю перевод после текущего фрагмента.",
+        "nothing_to_cancel": "Сейчас нет активного перевода для остановки.",
         "estimate_title": "Предварительная оценка перевода",
         "document_ready": "Документ готов к переводу",
         "file": "Файл",
@@ -38,6 +40,7 @@ MESSAGES = {
         "queued": "Файл {file_name} в очереди на перевод.",
         "translating": "Файл {file_name} переводится.",
         "ready": "Перевод готов: {result_name}.",
+        "cancelled": "Перевод остановлен. Частичный результат: {result_name}.",
         "failed": "Ошибка перевода. Попробуйте еще раз позже.",
         "status": "Статус задачи: {status}",
         "confirm": "Подтвердить",
@@ -58,6 +61,8 @@ MESSAGES = {
         "translation_language_prompt": "Файл отримано: {file_name}\n\nВиберіть мову перекладу:",
         "original_language": "Мова оригіналу",
         "progress": "Прогрес перекладу",
+        "cancel_requested": "Зупиняю переклад після поточного фрагмента.",
+        "nothing_to_cancel": "Зараз немає активного перекладу для зупинки.",
         "estimate_title": "Попередня оцінка перекладу",
         "document_ready": "Документ готовий до перекладу",
         "file": "Файл",
@@ -72,6 +77,7 @@ MESSAGES = {
         "queued": "Файл {file_name} у черзі на переклад.",
         "translating": "Файл {file_name} перекладається.",
         "ready": "Переклад готовий: {result_name}.",
+        "cancelled": "Переклад зупинено. Частковий результат: {result_name}.",
         "failed": "Помилка перекладу. Спробуйте ще раз пізніше.",
         "status": "Статус завдання: {status}",
         "confirm": "Підтвердити",
@@ -92,6 +98,8 @@ MESSAGES = {
         "translation_language_prompt": "Fichier reçu : {file_name}\n\nChoisissez la langue de traduction :",
         "original_language": "Langue d’origine",
         "progress": "Progression de la traduction",
+        "cancel_requested": "J’arrête la traduction après le fragment en cours.",
+        "nothing_to_cancel": "Aucune traduction active à arrêter.",
         "estimate_title": "Estimation de la traduction",
         "document_ready": "Le document est prêt à être traduit",
         "file": "Fichier",
@@ -106,6 +114,7 @@ MESSAGES = {
         "queued": "Le fichier {file_name} est en file d’attente.",
         "translating": "Le fichier {file_name} est en cours de traduction.",
         "ready": "Traduction prête : {result_name}.",
+        "cancelled": "Traduction annulée. Résultat partiel : {result_name}.",
         "failed": "Erreur de traduction. Veuillez réessayer plus tard.",
         "status": "Statut de la tâche : {status}",
         "confirm": "Confirmer",
@@ -126,6 +135,8 @@ MESSAGES = {
         "translation_language_prompt": "Archivo recibido: {file_name}\n\nElige el idioma de traducción:",
         "original_language": "Idioma original",
         "progress": "Progreso de traducción",
+        "cancel_requested": "Detendré la traducción después del fragmento actual.",
+        "nothing_to_cancel": "No hay una traducción activa para detener.",
         "estimate_title": "Estimación de traducción",
         "document_ready": "El documento está listo para traducirse",
         "file": "Archivo",
@@ -140,6 +151,7 @@ MESSAGES = {
         "queued": "El archivo {file_name} está en cola para traducirse.",
         "translating": "El archivo {file_name} se está traduciendo.",
         "ready": "Traducción lista: {result_name}.",
+        "cancelled": "Traducción cancelada. Resultado parcial: {result_name}.",
         "failed": "Error de traducción. Inténtalo de nuevo más tarde.",
         "status": "Estado de la tarea: {status}",
         "confirm": "Confirmar",
@@ -160,6 +172,8 @@ MESSAGES = {
         "translation_language_prompt": "File received: {file_name}\n\nChoose translation language:",
         "original_language": "Original language",
         "progress": "Translation progress",
+        "cancel_requested": "Stopping translation after the current fragment.",
+        "nothing_to_cancel": "There is no active translation to stop.",
         "estimate_title": "Translation estimate",
         "document_ready": "Document is ready for translation",
         "file": "File",
@@ -174,6 +188,7 @@ MESSAGES = {
         "queued": "File {file_name} is queued for translation.",
         "translating": "File {file_name} is being translated.",
         "ready": "Translation ready: {result_name}.",
+        "cancelled": "Translation cancelled. Partial result: {result_name}.",
         "failed": "Translation error. Please try again later.",
         "status": "Job status: {status}",
         "confirm": "Confirm",
@@ -299,6 +314,14 @@ def build_translation_progress_message(
     )
 
 
+def build_cancel_requested_message(interface_language: str = "ru") -> str:
+    return _messages(interface_language)["cancel_requested"]
+
+
+def build_nothing_to_cancel_message(interface_language: str = "ru") -> str:
+    return _messages(interface_language)["nothing_to_cancel"]
+
+
 def build_translation_job_status_message(
     job: TranslationJob,
     interface_language: str = "ru",
@@ -316,6 +339,10 @@ def build_translation_job_status_message(
 
     if job.status is TranslationJobStatus.FAILED:
         return messages["failed"]
+
+    if job.status is TranslationJobStatus.CANCELLED:
+        result_name = job.result_file_name or "partial result"
+        return messages["cancelled"].format(result_name=result_name)
 
     return messages["status"].format(status=job.status.value)
 

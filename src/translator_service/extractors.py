@@ -53,7 +53,7 @@ def extract_text_from_docx(content: bytes) -> str:
 
 
 def extract_text_from_epub(content: bytes) -> str:
-    blocks = _extract_epub_text_blocks(content)
+    blocks = extract_epub_text_blocks(content)
     text = "\n\n".join(blocks)
     if not text.strip():
         raise TextExtractionError("EPUB file does not contain translatable text")
@@ -61,7 +61,7 @@ def extract_text_from_epub(content: bytes) -> str:
     return text
 
 
-def _extract_epub_text_blocks(content: bytes) -> list[str]:
+def extract_epub_text_blocks(content: bytes) -> list[str]:
     try:
         with ZipFile(BytesIO(content)) as epub:
             xhtml_files = [

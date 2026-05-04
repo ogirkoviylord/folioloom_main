@@ -4,8 +4,10 @@ import inspect
 import os
 
 from translator_service.bot.messages import (
+    build_cancel_requested_message,
     build_language_selected_message,
     build_language_selection_message,
+    build_nothing_to_cancel_message,
     build_pending_translation_message,
     build_start_message,
     build_translation_language_selection_message,
@@ -155,6 +157,15 @@ def create_router(
             service=service,
             translator=translator,
         )
+
+    @router.message(Command("cancel"))
+    async def cancel(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        if service.cancel_translation(message.from_user.id):
+            await message.answer(build_cancel_requested_message(interface_language))
+            return
+
+        await message.answer(build_nothing_to_cancel_message(interface_language))
 
     @router.message(F.text.func(is_confirm_translation_text))
     async def confirm_text(message: Message) -> None:

@@ -3,6 +3,7 @@ from enum import StrEnum
 from typing import Callable
 
 from translator_service.translation_jobs import TextTranslator
+from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_runner import (
     TranslatedDocument,
     translate_docx_document,
@@ -22,6 +23,7 @@ class TranslationJobStatus(StrEnum):
     TRANSLATING = "translating"
     READY = "ready"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,7 @@ def run_txt_translation_job(
     max_fragment_chars: int,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     return run_translation_job(
         repository=repository,
@@ -107,6 +110,7 @@ def run_txt_translation_job(
         max_fragment_chars=max_fragment_chars,
         translator=translator,
         progress_callback=progress_callback,
+        cancellation_token=cancellation_token,
     )
 
 
@@ -117,6 +121,7 @@ def run_translation_job(
     max_fragment_chars: int,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     job = repository.get(job_id)
     repository.save(replace(job, status=TranslationJobStatus.TRANSLATING))
@@ -127,6 +132,7 @@ def run_translation_job(
             max_fragment_chars=max_fragment_chars,
             translator=translator,
             progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
         )
     except Exception as error:
         repository.save(
@@ -141,7 +147,11 @@ def run_translation_job(
     repository.save(
         replace(
             job,
-            status=TranslationJobStatus.READY,
+            status=(
+                TranslationJobStatus.CANCELLED
+                if result.is_partial
+                else TranslationJobStatus.READY
+            ),
             result_file_name=result.file_name,
             result_content=result.content,
             error_message=None,
@@ -156,6 +166,7 @@ def _translate_job(
     max_fragment_chars: int,
     translator: TextTranslator,
     progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     if job.document_kind is DocumentKind.TXT:
         return translate_txt_document(
@@ -166,6 +177,7 @@ def _translate_job(
             max_fragment_chars=max_fragment_chars,
             translator=translator,
             progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
         )
 
     if job.document_kind is DocumentKind.DOCX:
@@ -176,6 +188,7 @@ def _translate_job(
             target_language=job.target_language,
             translator=translator,
             progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
         )
 
     if job.document_kind is DocumentKind.EPUB:
@@ -186,6 +199,7 @@ def _translate_job(
             target_language=job.target_language,
             translator=translator,
             progress_callback=progress_callback,
+            cancellation_token=cancellation_token,
         )
 
     raise ValueError(f"Unsupported document kind: {job.document_kind}")
