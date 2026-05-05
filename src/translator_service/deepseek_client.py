@@ -52,6 +52,11 @@ class DeepSeekClient:
         self._base_url = base_url.rstrip("/")
         self._transport = transport or _urllib_transport
         self._timeout_seconds = timeout_seconds
+        self._last_usage: DeepSeekUsage | None = None
+
+    @property
+    def last_usage(self) -> DeepSeekUsage | None:
+        return self._last_usage
 
     def create_chat_completion(
         self,
@@ -100,19 +105,38 @@ class DeepSeekClient:
             ),
             user_text=text,
         )
+        self._last_usage = result.usage
         return result.content
 
 
 def _build_translation_prompt(*, source_language: str, target_language: str) -> str:
     source_language_name = language_name_for_code(source_language)
     target_language_name = language_name_for_code(target_language)
+    source_instruction = (
+        f"Translate every human language in the input to {target_language_name}. "
+        "Do not leave text untranslated just because it is in a secondary source "
+        "language. "
+        if source_language.strip().lower() == "auto"
+        else f"Translate from {source_language_name} to {target_language_name}. "
+        "If the input contains text in another human language, translate that "
+        f"text to {target_language_name} too. "
+    )
     return (
         "You are a professional document translator. "
-        f"Translate from {source_language_name} to {target_language_name}. "
+        f"{source_instruction}"
         "Preserve meaning, paragraph boundaries, numbers, and named entities. "
+        "Keep ZXQPROTECTED...QXZ protected markers exactly unchanged. "
         "If the input contains <translation_batch> and <translation_block id=\"...\"> "
-        "tags, keep those tags and ids exactly as provided, translate only the text "
-        "inside each translation_block, and return the same XML structure. "
+        "tags, keep those tags, ids, and source_language attributes exactly as "
+        "provided. Treat a source_language attribute as a per-block source-language "
+        "hint, translate only the text inside each translation_block, and return the "
+        "same XML structure. "
+        "Do not transliterate source-language words into the target script as a "
+        "substitute for translation; translate the meaning. "
+        "If the source contains a pangram or orthographic sample, translate it as "
+        "a meaningful letter/orthography test instead of producing nonsense. "
+        "Never include notes, explanations, warnings, apologies, alternatives, or "
+        "phrases such as 'Here is the translation' anywhere in the output. "
         "Return only the translated text without commentary."
     )
 

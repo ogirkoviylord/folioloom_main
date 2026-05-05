@@ -21,14 +21,35 @@ def extract_text_from_txt(content: bytes) -> str:
 
 
 def extract_text_from_docx(content: bytes) -> str:
+    paragraphs = extract_docx_text_blocks(content)
+    text = "\n\n".join(paragraphs)
+    if not text.strip():
+        raise TextExtractionError("DOCX file does not contain translatable text")
+
+    return text
+
+
+def extract_docx_text_blocks(content: bytes) -> list[str]:
     try:
         with ZipFile(BytesIO(content)) as docx:
-            document_xml = docx.read("word/document.xml")
+            part_names = _docx_text_part_names(docx)
+            if "word/document.xml" not in docx.namelist():
+                raise KeyError("word/document.xml")
+            paragraphs: list[str] = []
+            for part_name in part_names:
+                paragraphs.extend(_extract_docx_part_text_blocks(docx.read(part_name)))
     except (BadZipFile, KeyError) as error:
         raise TextExtractionError(
             "DOCX file does not contain readable document text"
         ) from error
 
+    if not paragraphs:
+        raise TextExtractionError("DOCX file does not contain translatable text")
+
+    return paragraphs
+
+
+def _extract_docx_part_text_blocks(document_xml: bytes) -> list[str]:
     try:
         document = ElementTree.fromstring(document_xml)
     except ElementTree.ParseError as error:
@@ -46,11 +67,43 @@ def extract_text_from_docx(content: bytes) -> str:
         if paragraph_text:
             paragraphs.append(paragraph_text)
 
-    text = "\n\n".join(paragraphs)
-    if not text.strip():
-        raise TextExtractionError("DOCX file does not contain translatable text")
+    return paragraphs
 
-    return text
+
+def _docx_text_part_names(docx: ZipFile) -> list[str]:
+    names = set(docx.namelist())
+    ordered: list[str] = []
+    if "word/document.xml" in names:
+        ordered.append("word/document.xml")
+    ordered.extend(_sorted_docx_numbered_parts(names, "word/header", ".xml"))
+    ordered.extend(_sorted_docx_numbered_parts(names, "word/footer", ".xml"))
+    for optional_part in (
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/comments.xml",
+    ):
+        if optional_part in names:
+            ordered.append(optional_part)
+    return ordered
+
+
+def _sorted_docx_numbered_parts(
+    names: set[str],
+    prefix: str,
+    suffix: str,
+) -> list[str]:
+    def sort_key(name: str) -> tuple[int, str]:
+        number = name.removeprefix(prefix).removesuffix(suffix)
+        return (int(number) if number.isdigit() else 0, name)
+
+    return sorted(
+        (
+            name
+            for name in names
+            if name.startswith(prefix) and name.endswith(suffix)
+        ),
+        key=sort_key,
+    )
 
 
 def extract_text_from_epub(content: bytes) -> str:

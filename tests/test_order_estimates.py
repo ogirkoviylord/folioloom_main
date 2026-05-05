@@ -136,6 +136,41 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.character_count, 33)
         self.assertEqual(estimate.fragment_count, 1)
 
+    def test_docx_estimate_counts_headers_footers_notes_and_comments(self):
+        upload = validate_document_upload(
+            file_name="stress.docx",
+            size_bytes=500,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>Main</w:t></w:r></w:p></w:body>
+                </w:document>
+                """,
+                extra_parts={
+                    "word/header1.xml": _docx_part_xml("Header"),
+                    "word/footer1.xml": _docx_part_xml("Footer"),
+                    "word/footnotes.xml": _docx_part_xml("Footnote"),
+                    "word/endnotes.xml": _docx_part_xml("Endnote"),
+                    "word/comments.xml": _docx_part_xml("Comment"),
+                },
+            ),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=100,
+        )
+
+        self.assertEqual(estimate.character_count, 48)
+        self.assertEqual(estimate.fragment_count, 1)
+
     def test_estimate_order_dispatches_epub_uploads(self):
         upload = validate_document_upload(
             file_name="book.epub",
@@ -231,14 +266,24 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def _make_docx(document_xml: str) -> bytes:
+def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:
     from io import BytesIO
     from zipfile import ZipFile
 
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
+        for file_name, content in (extra_parts or {}).items():
+            docx.writestr(file_name, content)
     return archive.getvalue()
+
+
+def _docx_part_xml(text: str) -> str:
+    return f"""
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+    </w:document>
+    """
 
 
 def _make_epub(xhtml_items: dict[str, str]) -> bytes:

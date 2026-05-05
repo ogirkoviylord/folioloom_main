@@ -35,8 +35,8 @@ class LanguagesTest(unittest.TestCase):
     def test_resolves_language_names_for_prompts(self):
         self.assertEqual(language_name_for_code("uk"), "Ukrainian")
         self.assertEqual(language_name_for_code("en"), "English")
-        self.assertEqual(language_name_for_code("auto"), "the detected source language")
-        self.assertEqual(language_name_for_code("de"), "de")
+        self.assertEqual(language_name_for_code("auto"), "all detected source languages")
+        self.assertEqual(language_name_for_code("de"), "German")
 
 
 if __name__ == "__main__":

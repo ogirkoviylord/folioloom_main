@@ -269,6 +269,7 @@ class BotMessagesTest(unittest.TestCase):
             interface_language="en",
             estimated_total_seconds=100,
             elapsed_seconds=30,
+            last_translated_text="Translated paragraph from the document.",
         )
 
         self.assertIn("Translation progress", message)
@@ -276,6 +277,8 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("30%", message)
         self.assertIn("Elapsed: 30 sec", message)
         self.assertIn("Time left: ~1 min 10 sec", message)
+        self.assertIn("Last translated fragment", message)
+        self.assertIn("Translated paragraph from the document.", message)
         self.assertIn("/cancel", message)
 
     def test_cancel_messages_are_localized(self):

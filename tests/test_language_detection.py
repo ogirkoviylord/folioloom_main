@@ -3,6 +3,7 @@ import unittest
 from translator_service.language_detection import (
     DetectedLanguage,
     detect_language_from_text,
+    detect_languages_from_text,
     format_detected_source_language,
 )
 
@@ -32,6 +33,48 @@ class LanguageDetectionTest(unittest.TestCase):
         detected = detect_language_from_text("Este es un documento español con el texto.")
 
         self.assertEqual(detected, DetectedLanguage(code="es", name="Spanish"))
+
+    def test_detects_mixed_language_stress_text_languages(self):
+        detected = detect_languages_from_text(
+            "Русский текст. "
+            "Nederlands: Ik fiets vandaag naar Zwolle. "
+            "English: The quick brown fox jumps over the lazy dog. "
+            "Deutsch: Falsches Üben quält jeden größeren Zwerg. "
+            "Español: El pingüino tomó café. "
+            "Polski: Zażółć gęślą jaźń. "
+            "עברית: שלום עולם. "
+            "العربية: مرحبا بالعالم. "
+            "中文: 这是一个中文句子。"
+            "日本語: これは日本語の文です。"
+            "한국어: 이것은 한국어 문장입니다."
+        )
+
+        self.assertEqual(
+            [(language.code, language.name) for language in detected],
+            [
+                ("ru", "Russian"),
+                ("en", "English"),
+                ("es", "Spanish"),
+                ("pl", "Polish"),
+                ("nl", "Dutch"),
+                ("de", "German"),
+                ("he", "Hebrew"),
+                ("ar", "Arabic"),
+                ("zh", "Chinese"),
+                ("ja", "Japanese"),
+                ("ko", "Korean"),
+            ],
+        )
+
+    def test_spanish_diacritics_do_not_look_polish(self):
+        detected = detect_languages_from_text("Español: El pingüino tomó café.")
+
+        self.assertEqual(detected, [DetectedLanguage(code="es", name="Spanish")])
+
+    def test_detects_ukrainian_without_false_russian_in_mixed_detector(self):
+        detected = detect_languages_from_text("Це український текст про книгу і переклад.")
+
+        self.assertEqual(detected, [DetectedLanguage(code="uk", name="Ukrainian")])
 
     def test_returns_none_when_text_is_too_ambiguous(self):
         self.assertIsNone(detect_language_from_text("12345 !!!"))

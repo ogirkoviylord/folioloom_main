@@ -72,6 +72,19 @@ def _write_docx() -> None:
         docx.writestr("[Content_Types].xml", content_types)
         docx.writestr("_rels/.rels", relationships)
         docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/header1.xml", _docx_part_xml("Sample header text"))
+        docx.writestr("word/footer1.xml", _docx_part_xml("Sample footer text"))
+        docx.writestr("word/footnotes.xml", _docx_part_xml("Sample footnote text"))
+        docx.writestr("word/endnotes.xml", _docx_part_xml("Sample endnote text"))
+        docx.writestr("word/comments.xml", _docx_part_xml("Sample comment text"))
+
+
+def _docx_part_xml(text: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+</w:document>
+"""
 
 
 def _write_epub() -> None:
