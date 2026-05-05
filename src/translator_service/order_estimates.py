@@ -2,12 +2,16 @@ from dataclasses import dataclass
 
 from translator_service.documents import DocumentFormat, DocumentUpload
 from translator_service.extractors import (
-    extract_docx_text_blocks,
-    extract_epub_text_blocks,
     extract_text_from_txt,
 )
 from translator_service.pricing import PricingRules, estimate_price
-from translator_service.text_analysis import estimate_text_volume
+from translator_service.structure_optimizer import (
+    StructuredTextBlock,
+    build_translation_units,
+    estimate_unit_input_tokens,
+)
+from translator_service.text_analysis import TextAnalysis, estimate_text_volume
+from translator_service.translation_runner import _extract_docx_blocks, _extract_epub_blocks
 
 
 @dataclass(frozen=True)
@@ -88,26 +92,24 @@ def estimate_docx_order(
     if upload.document_format is not DocumentFormat.DOCX:
         raise ValueError("DOCX estimator can only process DOCX uploads")
 
-    blocks = extract_docx_text_blocks(content)
-    text = "\n\n".join(blocks)
-    estimate = _estimate_extracted_text(
+    blocks = _extract_docx_blocks(content)
+    text = "\n\n".join(block.text for block in blocks)
+    estimate = _estimate_structured_blocks(
         upload=upload,
         text=text,
+        blocks=[
+            StructuredTextBlock(
+                index=index,
+                text=block.text,
+                kind=block.kind,
+                group_id=block.group_id,
+            )
+            for index, block in enumerate(blocks)
+        ],
         pricing_rules=pricing_rules,
         max_fragment_chars=max_fragment_chars,
     )
-    return OrderEstimate(
-        file_name=estimate.file_name,
-        document_format=estimate.document_format,
-        character_count=estimate.character_count,
-        estimated_input_tokens=estimate.estimated_input_tokens,
-        estimated_output_tokens=estimate.estimated_output_tokens,
-        fragment_count=_count_grouped_text_blocks(
-            blocks,
-            max_fragment_chars=max_fragment_chars,
-        ),
-        price_usd=estimate.price_usd,
-    )
+    return estimate
 
 
 def estimate_epub_order(
@@ -120,23 +122,24 @@ def estimate_epub_order(
     if upload.document_format is not DocumentFormat.EPUB:
         raise ValueError("EPUB estimator can only process EPUB uploads")
 
-    blocks = extract_epub_text_blocks(content)
-    text = "\n\n".join(blocks)
-    estimate = _estimate_extracted_text(
+    blocks = _extract_epub_blocks(content)
+    text = "\n\n".join(block.text for block in blocks)
+    estimate = _estimate_structured_blocks(
         upload=upload,
         text=text,
+        blocks=[
+            StructuredTextBlock(
+                index=index,
+                text=block.text,
+                kind=block.kind,
+                group_id=block.group_id,
+            )
+            for index, block in enumerate(blocks)
+        ],
         pricing_rules=pricing_rules,
         max_fragment_chars=max_fragment_chars,
     )
-    return OrderEstimate(
-        file_name=estimate.file_name,
-        document_format=estimate.document_format,
-        character_count=estimate.character_count,
-        estimated_input_tokens=estimate.estimated_input_tokens,
-        estimated_output_tokens=estimate.estimated_output_tokens,
-        fragment_count=estimate.fragment_count,
-        price_usd=estimate.price_usd,
-    )
+    return estimate
 
 
 def _estimate_extracted_text(
@@ -160,19 +163,29 @@ def _estimate_extracted_text(
     )
 
 
-def _count_grouped_text_blocks(blocks: list[str], *, max_fragment_chars: int) -> int:
-    grouped_count = 0
-    current_length = 0
-    for text in blocks:
-        text_length = len(text)
-        separator_length = 2 if current_length else 0
-        candidate_length = current_length + separator_length + text_length
-        if current_length and candidate_length > max_fragment_chars:
-            grouped_count += 1
-            current_length = text_length
-            continue
-        current_length = candidate_length
+def _estimate_structured_blocks(
+    *,
+    upload: DocumentUpload,
+    text: str,
+    blocks: list[StructuredTextBlock],
+    pricing_rules: PricingRules,
+    max_fragment_chars: int,
+) -> OrderEstimate:
+    units = build_translation_units(blocks, max_fragment_chars=max_fragment_chars)
+    normalized_text = text.strip()
+    text_analysis = TextAnalysis(
+        character_count=len(normalized_text),
+        estimated_input_tokens=estimate_unit_input_tokens(units),
+        fragment_count=len(units),
+    )
+    price_estimate = estimate_price(text_analysis, pricing_rules)
 
-    if current_length:
-        grouped_count += 1
-    return grouped_count
+    return OrderEstimate(
+        file_name=upload.file_name,
+        document_format=upload.document_format,
+        character_count=text_analysis.character_count,
+        estimated_input_tokens=price_estimate.estimated_input_tokens,
+        estimated_output_tokens=price_estimate.estimated_output_tokens,
+        fragment_count=text_analysis.fragment_count,
+        price_usd=price_estimate.price_usd,
+    )
