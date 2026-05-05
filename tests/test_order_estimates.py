@@ -171,6 +171,42 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.character_count, 48)
         self.assertEqual(estimate.fragment_count, 1)
 
+    def test_docx_estimate_counts_structural_table_unit_separately(self):
+        upload = validate_document_upload(
+            file_name="table.docx",
+            size_bytes=500,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r><w:t>Intro paragraph.</w:t></w:r></w:p>
+                    <w:tbl>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Source</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Target</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                    </w:tbl>
+                    <w:p><w:r><w:t>Outro paragraph.</w:t></w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=1_000,
+        )
+
+        self.assertEqual(estimate.fragment_count, 3)
+
     def test_estimate_order_dispatches_epub_uploads(self):
         upload = validate_document_upload(
             file_name="book.epub",
@@ -238,6 +274,41 @@ class TxtOrderEstimateTest(unittest.TestCase):
         )
 
         self.assertEqual(estimate.fragment_count, 2)
+
+    def test_epub_estimate_counts_structural_table_unit_separately(self):
+        upload = validate_document_upload(
+            file_name="book.epub",
+            size_bytes=500,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=_make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <p>Intro paragraph.</p>
+                        <table>
+                          <tr><td>Source</td><td>Target</td></tr>
+                        </table>
+                        <p>Outro paragraph.</p>
+                      </body>
+                    </html>
+                    """
+                }
+            ),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=1_000,
+        )
+
+        self.assertEqual(estimate.fragment_count, 3)
 
     def test_rejects_non_epub_upload_for_epub_estimator(self):
         upload = validate_document_upload(
