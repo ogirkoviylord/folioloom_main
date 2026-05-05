@@ -675,6 +675,51 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertIn("Німецька:", text)
         self.assertNotIn("German:", text)
 
+    def test_docx_translation_keeps_table_as_separate_structural_unit(self):
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Intro paragraph.</w:t></w:r></w:p>
+                <w:tbl>
+                  <w:tr>
+                    <w:tc><w:p><w:r><w:t>Source</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:p><w:r><w:t>Target</w:t></w:r></w:p></w:tc>
+                  </w:tr>
+                </w:tbl>
+                <w:p><w:r><w:t>Outro paragraph.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="table.docx",
+            content=content,
+            source_language="en",
+            target_language="fr",
+            max_fragment_chars=1_000,
+            translator=translator,
+        )
+
+        self.assertEqual(result.fragment_count, 3)
+        self.assertEqual(
+            [request[0] for request in translator.requests],
+            [
+                "<translation_batch>\n"
+                '<translation_block id="0">Intro paragraph.</translation_block>\n'
+                "</translation_batch>",
+                "<translation_batch>\n"
+                '<translation_block id="0">Source</translation_block>\n'
+                '<translation_block id="1">Target</translation_block>\n'
+                "</translation_batch>",
+                "<translation_batch>\n"
+                '<translation_block id="0">Outro paragraph.</translation_block>\n'
+                "</translation_batch>",
+            ],
+        )
+
     def test_docx_translation_expands_vml_textbox_height_to_avoid_clipping(self):
         class TextboxTranslator:
             def translate(self, *, text: str, source_language: str, target_language: str) -> str:
@@ -981,6 +1026,50 @@ class TranslationRunnerTest(unittest.TestCase):
 
         self.assertEqual(result.fragment_count, 2)
         self.assertEqual(len(translator.requests), 2)
+
+    def test_epub_translation_keeps_table_as_separate_structural_unit(self):
+        translator = RecordingTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <p>Intro paragraph.</p>
+                    <table>
+                      <tr><td>Source</td><td>Target</td></tr>
+                    </table>
+                    <p>Outro paragraph.</p>
+                  </body>
+                </html>
+                """,
+            }
+        )
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            max_fragment_chars=1_000,
+            translator=translator,
+        )
+
+        self.assertEqual(result.fragment_count, 3)
+        self.assertEqual(
+            [request[0] for request in translator.requests],
+            [
+                "<translation_batch>\n"
+                '<translation_block id="0">Intro paragraph.</translation_block>\n'
+                "</translation_batch>",
+                "<translation_batch>\n"
+                '<translation_block id="0">Source</translation_block>\n'
+                '<translation_block id="1">Target</translation_block>\n'
+                "</translation_batch>",
+                "<translation_batch>\n"
+                '<translation_block id="0">Outro paragraph.</translation_block>\n'
+                "</translation_batch>",
+            ],
+        )
 
 
 if __name__ == "__main__":

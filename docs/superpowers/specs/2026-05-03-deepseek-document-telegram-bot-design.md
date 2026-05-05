@@ -242,6 +242,27 @@ Fragment counts shown to users must match actual API work units.
 - Internal text blocks, such as DOCX paragraphs and EPUB XHTML elements, are separate from user-facing fragments. They are used for precise replacement but are not shown as progress fragments.
 - Grouping policy changes must update estimation and runtime progress together.
 
+## Document Structure Optimizer
+
+DOCX and EPUB translation must route text through a deterministic structure optimizer before any LLM request is made. The optimizer is deliberately parser-driven rather than LLM-driven, so ordinary documents do not spend tokens just to decide that they are ordinary.
+
+The optimizer classifies extracted text blocks as plain text, headings, lists, tables, footnotes, or dense markup. It then builds API work units with safe boundaries:
+
+- Plain adjacent paragraphs can be batched up to the configured fragment size.
+- DOCX tables and EPUB tables are kept separate from surrounding prose when they fit.
+- Oversized tables are split only between extracted blocks, never by cutting the middle of a cell paragraph or XHTML text node.
+- Lists are kept separate from ordinary paragraphs and split only between list items when they exceed the fragment size.
+- Dense EPUB markup and footnote-like blocks use stricter structural treatment than plain book prose.
+- EPUB processing remains spine-aware, so optimization never changes reading order, progress order, or partial-result order.
+
+The optimizer also assigns an internal prompt tier to each work unit:
+
+- Plain: ordinary prose and headings.
+- Structured: lists, footnotes, and similar ordered text.
+- Strict: tables and dense markup.
+
+The current prototype uses these tiers for cost estimation and future prompt routing while keeping the existing translator interface stable. Estimation includes per-unit prompt overhead, so a simple EPUB novel stays close to plain-text pricing, while a table-heavy DOCX or reference-like EPUB is priced more honestly before confirmation.
+
 ## Language Handling Policy
 
 The bot stores language choices as short internal codes but provider prompts must use human-readable language names.
