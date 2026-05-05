@@ -17,6 +17,12 @@ from translator_service.protected_text import (
     protect_text,
     restore_protected_text,
 )
+from translator_service.structure_optimizer import (
+    PromptTier,
+    StructuredTextBlock,
+    TextBlockKind,
+    build_translation_units,
+)
 from translator_service.text_analysis import split_text_into_fragments
 from translator_service.translation_jobs import (
     CancellationToken,
@@ -202,7 +208,7 @@ def _extract_docx_blocks(content: bytes) -> list[_DocxTextBlock]:
             for part_name in part_names:
                 document = _read_docx_xml(docx.read(part_name))
                 for block_index, paragraph_block in enumerate(
-                    _extract_docx_part_blocks(document)
+                    _extract_docx_part_blocks(document, part_name=part_name)
                 ):
                     blocks.append(
                         _DocxTextBlock(
@@ -214,6 +220,8 @@ def _extract_docx_blocks(content: bytes) -> list[_DocxTextBlock]:
                             is_fixed_width_pseudo_table=(
                                 paragraph_block.is_fixed_width_pseudo_table
                             ),
+                            kind=paragraph_block.kind,
+                            group_id=paragraph_block.group_id,
                         )
                     )
     except (BadZipFile, KeyError) as error:
@@ -229,8 +237,15 @@ def _extract_docx_blocks(content: bytes) -> list[_DocxTextBlock]:
 
 def _extract_docx_part_blocks(
     document: ElementTree.Element,
+    *,
+    part_name: str,
 ) -> list[_DocxParagraphBlock]:
     namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    parent_by_child_id = _parent_map(document)
+    table_index_by_id = {
+        id(table): index
+        for index, table in enumerate(document.findall(".//w:tbl", namespace))
+    }
     paragraphs: list[_DocxParagraphBlock] = []
     for paragraph in document.findall(".//w:p", namespace):
         paragraph_text = _docx_paragraph_text(paragraph, namespace=namespace).strip()
@@ -240,6 +255,13 @@ def _extract_docx_part_blocks(
                 paragraph_text=paragraph_text,
                 namespace=namespace,
             )
+            kind, group_id = _docx_paragraph_structure(
+                paragraph,
+                part_name=part_name,
+                namespace=namespace,
+                parent_by_child_id=parent_by_child_id,
+                table_index_by_id=table_index_by_id,
+            )
             paragraphs.append(
                 _DocxParagraphBlock(
                     text=paragraph_text,
@@ -248,9 +270,49 @@ def _extract_docx_part_blocks(
                         namespace=namespace,
                     ),
                     is_fixed_width_pseudo_table=is_fixed_width_pseudo_table,
+                    kind=kind,
+                    group_id=group_id,
                 )
             )
     return paragraphs
+
+
+def _docx_paragraph_structure(
+    paragraph: ElementTree.Element,
+    *,
+    part_name: str,
+    namespace: dict[str, str],
+    parent_by_child_id: dict[int, ElementTree.Element],
+    table_index_by_id: dict[int, int],
+) -> tuple[TextBlockKind, str | None]:
+    table = _nearest_ancestor(
+        paragraph,
+        local_name="tbl",
+        parent_by_child_id=parent_by_child_id,
+    )
+    if table is not None:
+        table_index = table_index_by_id.get(id(table), 0)
+        return TextBlockKind.TABLE, f"{part_name}:table:{table_index}"
+
+    if paragraph.find("w:pPr/w:numPr", namespace) is not None:
+        num_id = paragraph.find("w:pPr/w:numPr/w:numId", namespace)
+        num_value = (
+            num_id.get(f"{{{namespace['w']}}}val")
+            if num_id is not None
+            else "unknown"
+        )
+        return TextBlockKind.LIST, f"{part_name}:list:{num_value}"
+
+    paragraph_style = paragraph.find("w:pPr/w:pStyle", namespace)
+    style_value = (
+        paragraph_style.get(f"{{{namespace['w']}}}val")
+        if paragraph_style is not None
+        else ""
+    )
+    if style_value.lower().startswith("heading"):
+        return TextBlockKind.HEADING, None
+
+    return TextBlockKind.PLAIN, None
 
 
 def _docx_paragraph_text(
@@ -687,6 +749,8 @@ class _DocxTextBlock:
     text: str
     protected_phrases: tuple[str, ...] = ()
     is_fixed_width_pseudo_table: bool = False
+    kind: TextBlockKind = TextBlockKind.PLAIN
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -694,11 +758,14 @@ class _DocxParagraphBlock:
     text: str
     protected_phrases: tuple[str, ...] = ()
     is_fixed_width_pseudo_table: bool = False
+    kind: TextBlockKind = TextBlockKind.PLAIN
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
 class _DocxTranslationUnit:
     blocks: list[_DocxTextBlock]
+    prompt_tier: PromptTier = PromptTier.PLAIN
 
     @property
     def text(self) -> str:
@@ -710,11 +777,14 @@ class _EpubTextBlock:
     file_name: str
     block_index: int
     text: str
+    kind: TextBlockKind = TextBlockKind.PLAIN
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
 class _EpubTranslationUnit:
     blocks: list[_EpubTextBlock]
+    prompt_tier: PromptTier = PromptTier.PLAIN
 
     @property
     def text(self) -> str:
@@ -736,14 +806,24 @@ def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
             blocks: list[_EpubTextBlock] = []
             for file_name in _epub_text_item_names(epub):
                 document = _read_epub_xhtml(epub.read(file_name))
+                parent_by_child_id = _parent_map(document)
+                group_index_by_element_id = _epub_group_indexes(document)
                 for block_index, element in enumerate(_iter_epub_text_elements(document)):
                     text = _visible_text(element)
                     if text:
+                        kind, group_id = _epub_block_structure(
+                            element,
+                            file_name=file_name,
+                            parent_by_child_id=parent_by_child_id,
+                            group_index_by_element_id=group_index_by_element_id,
+                        )
                         blocks.append(
                             _EpubTextBlock(
                                 file_name=file_name,
                                 block_index=block_index,
                                 text=text,
+                                kind=kind,
+                                group_id=group_id,
                             )
                         )
     except (BadZipFile, KeyError) as error:
@@ -755,6 +835,95 @@ def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
         raise TextExtractionError("EPUB file does not contain translatable text")
 
     return blocks
+
+
+def _epub_block_structure(
+    element: ElementTree.Element,
+    *,
+    file_name: str,
+    parent_by_child_id: dict[int, ElementTree.Element],
+    group_index_by_element_id: dict[int, tuple[str, int]],
+) -> tuple[TextBlockKind, str | None]:
+    table = _nearest_ancestor(
+        element,
+        local_name="table",
+        parent_by_child_id=parent_by_child_id,
+    )
+    if table is not None:
+        group_name, group_index = group_index_by_element_id.get(id(table), ("table", 0))
+        return TextBlockKind.TABLE, f"{file_name}:{group_name}:{group_index}"
+
+    list_element = _nearest_ancestor_in(
+        element,
+        local_names={"ol", "ul", "dl"},
+        parent_by_child_id=parent_by_child_id,
+    )
+    if list_element is not None:
+        group_name, group_index = group_index_by_element_id.get(
+            id(list_element),
+            ("list", 0),
+        )
+        return TextBlockKind.LIST, f"{file_name}:{group_name}:{group_index}"
+
+    local_name = _local_name(element.tag)
+    epub_type = element.attrib.get("epub:type", "") or element.attrib.get(
+        "{http://www.idpf.org/2007/ops}type",
+        "",
+    )
+    footnote = _nearest_epub_footnote_element(
+        element,
+        parent_by_child_id=parent_by_child_id,
+    )
+    if local_name == "aside" or "footnote" in epub_type or footnote is not None:
+        footnote_id = id(footnote) if footnote is not None else id(element)
+        return TextBlockKind.FOOTNOTE, f"{file_name}:footnote:{footnote_id}"
+    if local_name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        return TextBlockKind.HEADING, None
+    if _is_dense_epub_markup(element):
+        return TextBlockKind.DENSE_MARKUP, f"{file_name}:dense:{id(element)}"
+    return TextBlockKind.PLAIN, None
+
+
+def _nearest_epub_footnote_element(
+    element: ElementTree.Element,
+    *,
+    parent_by_child_id: dict[int, ElementTree.Element],
+) -> ElementTree.Element | None:
+    current: ElementTree.Element | None = element
+    while current is not None:
+        epub_type = current.attrib.get("epub:type", "") or current.attrib.get(
+            "{http://www.idpf.org/2007/ops}type",
+            "",
+        )
+        if _local_name(current.tag) == "aside" or "footnote" in epub_type:
+            return current
+        current = parent_by_child_id.get(id(current))
+    return None
+
+
+def _epub_group_indexes(
+    document: ElementTree.Element,
+) -> dict[int, tuple[str, int]]:
+    indexes: dict[int, tuple[str, int]] = {}
+    counters = {"table": 0, "list": 0}
+    for element in document.iter():
+        local_name = _local_name(element.tag)
+        if local_name == "table":
+            indexes[id(element)] = ("table", counters["table"])
+            counters["table"] += 1
+        elif local_name in {"ol", "ul", "dl"}:
+            indexes[id(element)] = ("list", counters["list"])
+            counters["list"] += 1
+    return indexes
+
+
+def _is_dense_epub_markup(element: ElementTree.Element) -> bool:
+    inline_count = sum(
+        1
+        for child in element.iter()
+        if child is not element and _local_name(child.tag) in _EPUB_DENSE_INLINE_TAGS
+    )
+    return inline_count >= 4
 
 
 def _replace_epub_blocks(
@@ -789,30 +958,25 @@ def _group_docx_blocks(
     *,
     max_fragment_chars: int,
 ) -> list[_DocxTranslationUnit]:
-    if not blocks:
-        return []
-
-    units: list[_DocxTranslationUnit] = []
-    current: list[_DocxTextBlock] = []
-    current_length = 0
-
-    for block in blocks:
-        block_length = len(block.text)
-        separator_length = 2 if current else 0
-        candidate_length = current_length + separator_length + block_length
-        if current and candidate_length > max_fragment_chars:
-            units.append(_DocxTranslationUnit(blocks=current))
-            current = [block]
-            current_length = block_length
-            continue
-
-        current.append(block)
-        current_length = candidate_length
-
-    if current:
-        units.append(_DocxTranslationUnit(blocks=current))
-
-    return units
+    optimized_units = build_translation_units(
+        [
+            StructuredTextBlock(
+                index=index,
+                text=block.text,
+                kind=block.kind,
+                group_id=block.group_id,
+            )
+            for index, block in enumerate(blocks)
+        ],
+        max_fragment_chars=max_fragment_chars,
+    )
+    return [
+        _DocxTranslationUnit(
+            blocks=[blocks[unit_block.index] for unit_block in optimized_unit.blocks],
+            prompt_tier=optimized_unit.prompt_tier,
+        )
+        for optimized_unit in optimized_units
+    ]
 
 
 def _group_epub_blocks(
@@ -820,30 +984,25 @@ def _group_epub_blocks(
     *,
     max_fragment_chars: int,
 ) -> list[_EpubTranslationUnit]:
-    if not blocks:
-        return []
-
-    units: list[_EpubTranslationUnit] = []
-    current: list[_EpubTextBlock] = []
-    current_length = 0
-
-    for block in blocks:
-        block_length = len(block.text)
-        separator_length = 2 if current else 0
-        candidate_length = current_length + separator_length + block_length
-        if current and candidate_length > max_fragment_chars:
-            units.append(_EpubTranslationUnit(blocks=current))
-            current = [block]
-            current_length = block_length
-            continue
-
-        current.append(block)
-        current_length = candidate_length
-
-    if current:
-        units.append(_EpubTranslationUnit(blocks=current))
-
-    return units
+    optimized_units = build_translation_units(
+        [
+            StructuredTextBlock(
+                index=index,
+                text=block.text,
+                kind=block.kind,
+                group_id=block.group_id,
+            )
+            for index, block in enumerate(blocks)
+        ],
+        max_fragment_chars=max_fragment_chars,
+    )
+    return [
+        _EpubTranslationUnit(
+            blocks=[blocks[unit_block.index] for unit_block in optimized_unit.blocks],
+            prompt_tier=optimized_unit.prompt_tier,
+        )
+        for optimized_unit in optimized_units
+    ]
 
 
 def _translate_docx_units(
@@ -1955,6 +2114,37 @@ def _resolve_epub_href(*, base_path: PurePosixPath, href: str, epub: ZipFile) ->
     return href
 
 
+def _parent_map(document: ElementTree.Element) -> dict[int, ElementTree.Element]:
+    return {id(child): parent for parent in document.iter() for child in list(parent)}
+
+
+def _nearest_ancestor(
+    element: ElementTree.Element,
+    *,
+    local_name: str,
+    parent_by_child_id: dict[int, ElementTree.Element],
+) -> ElementTree.Element | None:
+    return _nearest_ancestor_in(
+        element,
+        local_names={local_name},
+        parent_by_child_id=parent_by_child_id,
+    )
+
+
+def _nearest_ancestor_in(
+    element: ElementTree.Element,
+    *,
+    local_names: set[str],
+    parent_by_child_id: dict[int, ElementTree.Element],
+) -> ElementTree.Element | None:
+    current = parent_by_child_id.get(id(element))
+    while current is not None:
+        if _local_name(current.tag) in local_names:
+            return current
+        current = parent_by_child_id.get(id(current))
+    return None
+
+
 def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
@@ -1994,3 +2184,16 @@ _EPUB_TEXT_BLOCK_TAGS = {
     "th",
 }
 _EPUB_IGNORED_TAGS = {"head", "script", "style", "svg"}
+_EPUB_DENSE_INLINE_TAGS = {
+    "a",
+    "abbr",
+    "b",
+    "code",
+    "em",
+    "i",
+    "mark",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+}
