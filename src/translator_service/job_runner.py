@@ -4,6 +4,7 @@ from typing import Callable
 
 from translator_service.translation_jobs import TextTranslator
 from translator_service.translation_jobs import CancellationToken
+from translator_service.translation_jobs import TranslationProgress
 from translator_service.translation_runner import (
     TranslatedDocument,
     translate_docx_document,
@@ -101,7 +102,7 @@ def run_txt_translation_job(
     job_id: str,
     max_fragment_chars: int,
     translator: TextTranslator,
-    progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     return run_translation_job(
@@ -120,7 +121,7 @@ def run_translation_job(
     job_id: str,
     max_fragment_chars: int,
     translator: TextTranslator,
-    progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     job = repository.get(job_id)
@@ -165,7 +166,7 @@ def _translate_job(
     job: TranslationJob,
     max_fragment_chars: int,
     translator: TextTranslator,
-    progress_callback: Callable[[tuple[int, int]], None] | None = None,
+    progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
     if job.document_kind is DocumentKind.TXT:

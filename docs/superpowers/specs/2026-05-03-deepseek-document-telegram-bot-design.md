@@ -50,11 +50,11 @@ Prototype storage and processing limits:
 - The prototype does not yet include real payment provider integration, PostgreSQL persistence, Redis queue workers, object storage, admin tooling, file TTL cleanup, antivirus scanning, parser sandboxing, or production retries.
 - Originals, pending files, jobs, cancellation state, and result bytes are currently stored only in process memory and are lost after bot restart.
 - TXT translation groups paragraphs up to the configured fragment size.
-- DOCX translation handles main document paragraphs and table cell paragraphs, groups short text blocks into marked API batches, parses the marked response, and inserts only clean translated text back into the DOCX package.
-- DOCX assembly preserves existing paragraph and run structure where possible, including basic run-level formatting such as bold text. Exact semantic mapping of translated words to original style spans is best-effort because translation can change word order and text length.
+- DOCX translation handles main document paragraphs, table cell paragraphs, headers, footers, footnotes, endnotes, and comments. It groups short text blocks into marked API batches, parses the marked response, and inserts only clean translated text back into the DOCX package.
+- DOCX assembly preserves existing paragraph and run structure where possible, including basic run-level formatting such as bold text, hyperlink text, and subscript/superscript runs. Exact semantic mapping of translated words to original style spans is best-effort because translation can change word order and text length.
 - EPUB translation follows the EPUB spine reading order, extracts text blocks from common XHTML containers, groups them into marked API batches, parses the marked response, and inserts translations back into their original XHTML positions.
 - EPUB assembly preserves existing inline XHTML elements where possible, including tags such as `strong`, `em`, `a`, and `span`. Exact semantic mapping of translated words to original inline spans is best-effort because translation can change word order and text length.
-- Full DOCX styling fidelity and advanced OOXML features such as headers, footers, comments, footnotes, text boxes, tracked changes, and complex run-level reconstruction are not yet production-complete.
+- Full DOCX styling fidelity and advanced OOXML features such as text boxes, tracked changes internals, floating shapes, complex field codes, embedded objects, exact pagination preservation, and complex run-level reconstruction are not yet production-complete.
 
 ## MVP Data Flow
 
@@ -62,8 +62,8 @@ Prototype storage and processing limits:
 2. User sends a document to the Telegram bot.
 3. The bot validates format and size.
 4. The service stores a pending upload and extracts text for estimation.
-5. The service detects the probable original document language when source language is `auto`.
-6. The bot shows the detected original language and asks for the target translation language.
+5. The service detects probable original document languages when source language is `auto`.
+6. The bot shows the detected original language or mixed-language list and asks for the target translation language.
 7. The bot shows price, fragment count, direction, and confirmation controls.
 8. User either goes back to the main menu or confirms the translation.
 9. In the production service, user confirmation charges balance and queues the order. In the current prototype, confirmation starts translation immediately in process.
@@ -81,7 +81,7 @@ The service must treat file formats as separate adapters. Every adapter has its 
 ### MVP Formats
 
 - TXT: plain text input and plain text output.
-- DOCX: extract and replace paragraph/table-cell paragraph text while preserving the original DOCX package as much as possible. MVP output must not leak internal batch markers into the document.
+- DOCX: extract and replace paragraph/table-cell paragraph text plus headers, footers, footnotes, endnotes, and comments while preserving the original DOCX package as much as possible. MVP output must not leak internal batch markers into the document.
 - EPUB: translate XHTML content files in spine reading order and preserve ebook metadata, manifest, spine, images, styles, and navigation. Partial results must translate the beginning of the readable book, not arbitrary ZIP archive entries.
 - PDF: support text-layer PDFs first; scanned PDFs require OCR and must be clearly marked as a slower, higher-risk mode.
 - RTF: convert rich text to an intermediate representation, translate text runs, and return RTF or DOCX depending on conversion quality.
@@ -112,7 +112,7 @@ The project is written from scratch, but may depend on independent third-party t
 - Python ZIP and XML tooling, or a permissive DOCX library such as `python-docx`: read and write OOXML packages.
 - `lxml` or Python XML libraries: preserve XML namespaces and modify text nodes safely.
 - No Microsoft Office dependency is required for MVP DOCX support.
-- The translator receives marked batches for DOCX paragraphs and table-cell text. The assembler must parse batch markers and insert only translated text into OOXML.
+- The translator receives marked batches for DOCX paragraphs, table-cell text, headers, footers, footnotes, endnotes, and comments. The assembler must parse batch markers and insert only translated text into OOXML.
 - If the provider returns invalid or partial batch markup, the service must fall back to safer smaller translations instead of inserting provider commentary or internal XML into the user document.
 
 ### EPUB, HTML, and FB2
@@ -213,11 +213,24 @@ Long-running translations must keep the user informed and in control.
 Structured document adapters must preserve original layout and inline formatting whenever the format exposes enough structure to do so.
 
 - TXT has no styling and therefore returns plain translated text.
-- DOCX must preserve the original OOXML package, paragraphs, tables, and existing text runs where possible. Basic run formatting such as bold, italic, underline, and links must survive translation if the source text used those runs.
+- DOCX must preserve the original OOXML package, paragraphs, tables, headers, footers, notes, comments, media files, and existing text runs where possible. Basic run formatting such as bold, italic, underline, and links must survive translation if the source text used those runs.
+- DOCX must preserve run-level semantic formatting such as superscript, subscript, manual line breaks, tabs, non-breaking spaces, soft hyphens, repeated spacing, and hyperlink relationships. Chemical formulas, mathematical powers, indices, and similar notation must not be flattened into ordinary text.
 - EPUB must preserve the EPUB package and XHTML element tree where possible. Inline tags such as `strong`, `em`, `a`, `span`, `sup`, and `sub` must survive translation.
 - Future rich formats such as RTF, FB2, HTML, ODT, and converted PDF outputs must use the same rule: translate text nodes/runs, not flatten the document into dry plain text.
 - If exact layout or style preservation is impossible for a format, the service must show a risk warning before payment or offer a safer output format such as DOCX or TXT.
 - Formatting preservation is best-effort at the span level. A translator may reorder words, so the assembler should preserve style containers and distribute translated text across existing text nodes without exposing internal markers.
+
+## Current Stabilization Focus
+
+The current beta work is focused on making complex DOCX translation reliable before expanding paid production infrastructure.
+
+- Complex DOCX documents must translate all human-language prose, including mixed-language paragraphs and language-labeled lines, while preserving document-control labels, code-like snippets, structured data, formulas, and technical notation.
+- The stress-test document flow is used as a regression target, but fixes must be general adapter behavior rather than one-off patches for a single file.
+- The service must prevent provider boilerplate from leaking into documents, including explanations, apologies, warnings, markdown fences, and phrases such as `Here is the translation`.
+- Progress editing must be resilient to Telegram limitations. If a message cannot be edited, the bot should recover without failing the translation job.
+- Fragment estimation and runtime progress must remain identical for TXT, DOCX, and EPUB. A user must not see hundreds of fragments before confirmation and thousands after starting.
+- Partial DOCX and EPUB results must represent user-visible reading order. Cancelling after early progress should produce the beginning of the document/book translated, not arbitrary metadata or archive-order text.
+- The current prototype has no persistent file storage or upload quarantine. Production must add object storage, TTL cleanup, file validation, antivirus scanning, size limits, and parser sandboxing before accepting arbitrary public traffic.
 
 ## Fragment Counting Policy
 
@@ -241,6 +254,41 @@ The bot stores language choices as short internal codes but provider prompts mus
 - `auto` maps to the detected source language in prompts.
 - Future languages must be added through the shared language registry so interface buttons, prompt language names, and matching logic stay consistent.
 - Provider prompts must never use ambiguous codes such as `uk` when the intended language is Ukrainian.
+- If a document contains multiple detected languages, the bot shows a mixed-language source display before confirmation, for example `auto (mixed: Russian, English, Polish, Dutch)`.
+- Mixed-language documents must be translated fully into the selected target language. The provider prompt must explicitly instruct the model to translate every human language in the input, not only the dominant source language.
+- For DOCX, language-labeled blocks such as `Nederlands: ...`, `Polski: ...`, `中文: ... 日本語: ... 한국어: ...` must be translated by source-language segment instead of relying on one broad `auto` request. The localized language label may be regenerated by the assembler while the segment body is translated from the correct source language.
+- Placeholders, URLs, JSON/XML snippets, commands, regexes, tags, special spacing characters, and protected tokens must be preserved while surrounding human-readable text is translated.
+
+## Name and Term Preservation Policy
+
+The service must support configurable preservation of names and terms. This is a translation setting, not a provider choice.
+
+- Users must be able to choose whether to preserve or translate proper names and named entities where preserving them makes sense.
+- Configurable categories include company and product names, personal names, city and country names, link anchor text, brand names, book or article titles, technical terms, domain-specific glossary terms, and custom user-provided terms.
+- Default behavior should be conservative for technical and business documents: preserve company names, brands, URLs, code-like labels, placeholders, and protected terms unless the user explicitly chooses to localize them.
+- Link URLs must always be preserved. Link visible text may be translated or preserved depending on the selected mode.
+- Terminology handling must support at least four policies: translate terms into the target language, transliterate/transcribe terms into the target script, preserve original terms unchanged, or use glossary-pinned forms.
+- Technical-literature mode should default to preserving or transliterating established terms instead of over-localizing them. For example, a term like `placeholder` may become `плейсхолдер` or remain `placeholder`, depending on the selected terminology policy; it must not be inconsistently translated across the same document.
+- The service should recognize that some borrowed terms are already natural target-language words in technical contexts. For Russian technical documents, words such as `плейсхолдер`, `промпт`, `токен`, `callback`, `endpoint`, `framework`, and similar terms may need preservation or transcription rather than literal translation.
+- Users must eventually be able to switch technical-term handling before confirmation. Required options: `preserve technical terms`, `translate technical terms`, `transliterate technical terms`, and `use glossary`. This switch applies to terms such as `endnote`, `tracked changes`, `query-параметры`, `regex`, `placeholder`, `callback`, `endpoint`, file-format names, API terms, and other domain terms.
+- The selected technical-term policy must be visible in the order summary before payment/confirmation and must be stored with the job so retries, partial results, and downloaded outputs use the same terminology behavior.
+- The translation policy should support domain presets such as `general`, `technical`, `business`, and `literary`. The `technical` preset must prefer stable terminology, code/identifier preservation, and controlled transliteration over creative localization.
+- The service should support a user glossary where the user can pin terms such as `placeholder`, `prompt`, `token`, company names, city names, product names, and domain-specific phrases to exact target-language forms.
+- The confirmation screen should eventually show the active terminology mode, for example `Terms: technical, preserve brands, transliterate common IT terms`.
+- The confirmation screen should eventually show the active preservation mode, for example `Preserve names: companies, brands, links, technical terms`.
+- The backend must represent these choices as a structured translation policy so the same settings apply consistently to TXT, DOCX, EPUB, and future rich formats.
+
+## Structured Content Protection Policy
+
+The service must detect technical and structured content before sending text to the LLM. This is necessary for complex documents, not only for the stress-test document.
+
+- JSON, YAML, XML, HTML, Markdown, command-line snippets, regexes, placeholders, environment variables, code-like identifiers, URLs, and inline structured literals must be protected from accidental translation.
+- Structured data keys and machine-readable values must be preserved by default. Examples: JSON keys, boolean/null values, numeric literals, URLs, env vars, IDs, and command flags.
+- Human-readable values inside structured data may be translated only when a future policy explicitly allows it, for example `translate structured values only`.
+- Special layout-affecting text characters such as non-breaking spaces, repeated spaces, soft hyphens, manual line breaks, tabs, and formula/index runs must be preserved because changing them can alter pagination and table layout.
+- Short uppercase labels and identifiers such as `ID`, `ROW-001`, `COMMENT_TEST`, `TRACKED_CHANGE_TEST`, and similar document-control tokens must be protected.
+- Known orthographic samples and pangrams should be handled as orthographic tests instead of literal prose when literal translation produces nonsense. The implementation should prefer a documented translation note such as `Проверка польских диакритических знаков...` over transliterated nonsense.
+- Future production behavior should expose structured-content policy as part of the same translation policy object as terminology settings.
 
 ## Translation Modes
 
@@ -248,7 +296,7 @@ The MVP supports user-facing modes, not provider selection:
 
 - Fast: lower-cost default instructions.
 - Quality: stricter translation instructions and additional validation where useful.
-- Terms: uses user-provided terminology instructions.
+- Terms: uses user-provided terminology instructions and preservation rules.
 
 All prompts must be written specifically for this project.
 
@@ -288,11 +336,17 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - The confirmation message shows approximate translation time before the user starts the job.
 - EPUB extraction covers common text containers such as `div`, `section`, `figcaption`, `article`, and `aside` without duplicating parent and child blocks.
 - Manual beta-check sample documents are generated in TXT, DOCX, and EPUB formats with headings, paragraphs, lists, tables, inline text, and ebook structure.
-- DOCX translation groups paragraphs/table-cell text into marked batches and strips internal markers before writing the result.
+- DOCX translation groups paragraphs/table-cell text, headers, footers, footnotes, endnotes, and comments into marked batches and strips internal markers before writing the result.
 - DOCX translation preserves basic run-level formatting nodes, including bold runs, instead of collapsing the result into one plain text run.
+- DOCX estimation and language detection include the same translatable DOCX parts as runtime translation.
+- DOCX mixed-language blocks can be translated by detected source-language segment, including multiple language labels inside one paragraph.
+- DOCX translation protects hyperlink visible text, subscript/superscript runs, technical tokens, structured data, URLs, placeholders, code-like identifiers, JSON/YAML/XML/HTML snippets, repeated spaces, non-breaking spaces, and soft hyphens from model damage.
+- Technical term preservation has a baseline glossary for terms such as `endnote`, `tracked changes`, `query-параметры`, `regex`, and `placeholder`, with a future user-facing switch planned for preservation/translation/transliteration/glossary modes.
+- Known orthographic samples such as Polish `Zażółć gęślą jaźń` are normalized as orthographic tests instead of accepting transliterated nonsense from the model.
 - EPUB translation uses OPF spine reading order, groups XHTML blocks into marked API batches, and preserves partial results in reading order.
 - EPUB translation preserves inline XHTML formatting nodes, including `strong`, `em`, and links, instead of flattening the block into plain text.
 - Provider prompts use human-readable language names from the shared language registry.
+- Auto-source provider prompts instruct the model to translate every human language in mixed-language fragments into the target language.
 
 ## Acceptance Criteria
 
@@ -311,6 +365,7 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Balance and order payment tests cover top-up, insufficient balance, order charge, and refund behavior without external services.
 - EPUB translation tests cover div-based book text, spine reading order, grouped API fragments, and preservation of the `mimetype` item.
 - EPUB translation tests cover preservation of inline formatting nodes such as `strong`.
-- DOCX translation tests cover batch-marker parsing, basic run-level formatting preservation, and ensure internal XML markers do not leak into the result document.
+- DOCX translation tests cover batch-marker parsing, basic run-level formatting preservation, headers, footers, footnotes, endnotes, comments, source-language segmented translation, hyperlink anchor preservation, subscript/superscript preservation, structured-data protection, technical-term preservation, orthographic sample handling, and ensure internal XML markers do not leak into the result document.
+- Language detection tests cover mixed-language source display.
 - Language tests cover shared language-name resolution for provider prompts.
 - The repository contains no copied AGPL implementation artifacts.

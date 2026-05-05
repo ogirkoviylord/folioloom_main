@@ -1,5 +1,6 @@
 import unittest
 from io import BytesIO
+from xml.etree import ElementTree
 from zipfile import ZipFile
 
 from translator_service.extractors import extract_text_from_docx
@@ -151,6 +152,40 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertEqual(text, "Глава 1\n\nИсточник\n\nЦель")
         self.assertNotIn("translation_batch", text)
 
+    def test_docx_translation_strips_model_service_prefaces_from_batch_blocks(self):
+        class ChattyTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">Вот перевод:\nГлава 1</translation_block>'
+                    '<translation_block id="1">```text\nИсточник\n```</translation_block>'
+                    "</translation_batch>"
+                )
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Chapter 1</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Source</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="sample.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=ChattyTranslator(),
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertEqual(text, "Глава 1\n\nИсточник")
+        self.assertNotIn("Вот перевод", text)
+        self.assertNotIn("```", text)
+
     def test_docx_translation_preserves_run_formatting_nodes(self):
         class XmlTranslator:
             def translate(self, *, text: str, source_language: str, target_language: str) -> str:
@@ -195,6 +230,498 @@ class TranslationRunnerTest(unittest.TestCase):
             for text_node in bold_runs[0].findall(".//w:t", namespace)
         )
         self.assertIn("жирный", bold_text)
+
+    def test_docx_translation_updates_headers_footers_notes_and_comments(self):
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p><w:r><w:t>Main body text</w:t></w:r></w:p></w:body>
+            </w:document>
+            """,
+            extra_parts={
+                "word/header1.xml": _docx_part_xml("Header text"),
+                "word/footer1.xml": _docx_part_xml("Footer text"),
+                "word/footnotes.xml": _docx_part_xml("Footnote text"),
+                "word/endnotes.xml": _docx_part_xml("Endnote text"),
+                "word/comments.xml": _docx_part_xml("Comment text"),
+            },
+        )
+
+        result = translate_docx_document(
+            file_name="stress.docx",
+            content=content,
+            source_language="auto",
+            target_language="uk",
+            translator=translator,
+        )
+
+        with ZipFile(BytesIO(result.content)) as docx:
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/document.xml"),
+                "[uk] Main body text",
+            )
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/header1.xml"),
+                "[uk] Header text",
+            )
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/footer1.xml"),
+                "[uk] Footer text",
+            )
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/footnotes.xml"),
+                "[uk] Footnote text",
+            )
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/endnotes.xml"),
+                "[uk] Endnote text",
+            )
+            self.assertEqual(
+                _extract_docx_part_text(docx, "word/comments.xml"),
+                "[uk] Comment text",
+            )
+        self.assertEqual(result.fragment_count, 1)
+        self.assertEqual(len(translator.requests), 1)
+
+    def test_docx_translation_preserves_protected_tokens(self):
+        class TokenBreakingTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                document = _parse_xml(text.encode("utf-8"))
+                for block in document:
+                    block.text = (
+                        (block.text or "")
+                        .replace("ROW-001", "СТРОКА-001")
+                        .replace("inline_code", "встроенный_код")
+                        .replace("COMMENT_TEST", "КОММЕНТАРИЙ_ТЕСТ")
+                        .replace("{{PLACEHOLDER}}", "{{ЗАПОЛНИТЕЛЬ}}")
+                        .replace("https://example.com/a", "https://example.ru/a")
+                    )
+                return ElementTree.tostring(document, encoding="unicode")
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>ROW-001 uses inline_code and COMMENT_TEST with {{PLACEHOLDER}} at https://example.com/a.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="tokens.docx",
+            content=content,
+            source_language="auto",
+            target_language="ru",
+            translator=TokenBreakingTranslator(),
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertIn("ROW-001", text)
+        self.assertIn("inline_code", text)
+        self.assertIn("COMMENT_TEST", text)
+        self.assertIn("{{PLACEHOLDER}}", text)
+        self.assertIn("https://example.com/a", text)
+        self.assertNotIn("СТРОКА-001", text)
+        self.assertNotIn("встроенный_код", text)
+        self.assertNotIn("КОММЕНТАРИЙ_ТЕСТ", text)
+
+    def test_docx_auto_batches_include_source_language_hints(self):
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Русский текст.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Nederlands: Ik fiets vandaag naar Zwolle.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Polski: Zażółć gęślą jaźń.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        translate_docx_document(
+            file_name="mixed.docx",
+            content=content,
+            source_language="auto",
+            target_language="ru",
+            translator=translator,
+        )
+
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["ru", "nl", "pl"],
+        )
+
+    def test_docx_auto_translates_labeled_language_blocks_with_explicit_source(self):
+        class SourceAwareTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                self.requests.append((text, source_language, target_language))
+                document = _parse_xml(text.encode("utf-8"))
+                translations = {
+                    "uk": "Крыльцо, еж, енот и перья — проверка букв.",
+                    "nl": "Сегодня я еду на велосипеде в Зволле.",
+                    "fr": "Где находится отель? Это стоит 1 234,56 € — не так ли?",
+                    "pl": "Пожелти гуслью душу.",
+                    "he": "Привет, мир — текст справа налево внутри русского документа.",
+                }
+                for block in document:
+                    block.text = translations.get(source_language, block.text or "")
+                return ElementTree.tostring(document, encoding="unicode")
+
+        translator = SourceAwareTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Українська: Ґанок, їжак, єнот і пір’я — перевірка літер.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Nederlands: Ik fiets vandaag naar Zwolle.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Français: Où est l’hôtel?</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Polski: Zażółć gęślą jaźń.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>עברית: שלום עולם — текст справа налево внутри русского документа.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="mixed.docx",
+            content=content,
+            source_language="auto",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertIn("Украинский: Крыльцо", text)
+        self.assertIn("Нидерландский: Сегодня я еду на велосипеде", text)
+        self.assertIn("Французский: Где находится отель?", text)
+        self.assertIn("Польский: Проверка польских диакритических знаков", text)
+        self.assertNotIn("Пожелти гуслью душу", text)
+        self.assertIn("Иврит: Привет, мир", text)
+        self.assertIn("Сегодня я еду на велосипеде", text)
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["uk", "nl", "fr", "pl", "he"],
+        )
+
+    def test_docx_auto_translates_multiple_labeled_languages_inside_one_block(self):
+        class SourceAwareTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                self.requests.append((text, source_language, target_language))
+                document = _parse_xml(text.encode("utf-8"))
+                translations = {
+                    "zh": "Это китайское предложение.",
+                    "ja": "Это японское предложение.",
+                    "ko": "Это корейское предложение.",
+                }
+                for block in document:
+                    block.text = translations[source_language]
+                return ElementTree.tostring(document, encoding="unicode")
+
+        translator = SourceAwareTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>中文: 这是一个中文句子。日本語: これは日本語の文です。한국어: 이것은 한국어 문장입니다.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="mixed-inline.docx",
+            content=content,
+            source_language="auto",
+            target_language="ru",
+            translator=translator,
+        )
+
+        self.assertEqual(
+            extract_text_from_docx(result.content),
+            "Китайский: Это китайское предложение. "
+            "Японский: Это японское предложение. "
+            "Корейский: Это корейское предложение.",
+        )
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["zh", "ja", "ko"],
+        )
+
+    def test_docx_translation_preserves_hyperlink_anchor_text(self):
+        class LinkBreakingTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                document = _parse_xml(text.encode("utf-8"))
+                for block in document:
+                    block.text = (
+                        (block.text or "")
+                        .replace("External link:", "Внешняя ссылка:")
+                        .replace("OpenAI Example Link", "пример ссылки OpenAI")
+                        .replace("check the address.", "проверьте адрес.")
+                    )
+                return ElementTree.tostring(document, encoding="unicode")
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r><w:t>External link: </w:t></w:r>
+                  <w:hyperlink>
+                    <w:r><w:t>OpenAI Example Link</w:t></w:r>
+                  </w:hyperlink>
+                  <w:r><w:t> — check the address.</w:t></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="links.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=LinkBreakingTranslator(),
+        )
+
+        with ZipFile(BytesIO(result.content)) as docx:
+            document = _parse_xml(docx.read("word/document.xml"))
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        hyperlink = document.find(".//w:hyperlink", namespace)
+        self.assertIsNotNone(hyperlink)
+        hyperlink_text = "".join(
+            text_node.text or "" for text_node in hyperlink.findall(".//w:t", namespace)
+        )
+        self.assertEqual(hyperlink_text, "OpenAI Example Link")
+        self.assertIn("Внешняя ссылка:", extract_text_from_docx(result.content))
+        self.assertNotIn("пример ссылки OpenAI", extract_text_from_docx(result.content))
+
+    def test_docx_translation_preserves_subscript_and_superscript_runs(self):
+        class FormulaTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                document = _parse_xml(text.encode("utf-8"))
+                for block in document:
+                    block.text = (
+                        (block.text or "")
+                        .replace("Formulas and indexes:", "Формулы и индексы:")
+                        .replace(" units.", " единиц.")
+                    )
+                return ElementTree.tostring(document, encoding="unicode")
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r><w:t>Formulas and indexes: H</w:t></w:r>
+                  <w:r><w:rPr><w:vertAlign w:val="subscript" /></w:rPr><w:t>2</w:t></w:r>
+                  <w:r><w:t>O, CO</w:t></w:r>
+                  <w:r><w:rPr><w:vertAlign w:val="subscript" /></w:rPr><w:t>2</w:t></w:r>
+                  <w:r><w:t>, E = mc</w:t></w:r>
+                  <w:r><w:rPr><w:vertAlign w:val="superscript" /></w:rPr><w:t>2</w:t></w:r>
+                  <w:r><w:t>, 10</w:t></w:r>
+                  <w:r><w:rPr><w:vertAlign w:val="superscript" /></w:rPr><w:t>−6</w:t></w:r>
+                  <w:r><w:t> units.</w:t></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="formulas.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=FormulaTranslator(),
+        )
+
+        with ZipFile(BytesIO(result.content)) as docx:
+            document = _parse_xml(docx.read("word/document.xml"))
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        aligned_runs = [
+            run
+            for run in document.findall(".//w:r", namespace)
+            if run.find("w:rPr/w:vertAlign", namespace) is not None
+        ]
+        aligned_texts = [
+            "".join(text_node.text or "" for text_node in run.findall(".//w:t", namespace))
+            for run in aligned_runs
+        ]
+        self.assertEqual(aligned_texts, ["2", "2", "2", "−6"])
+        self.assertIn(
+            "Формулы и индексы: H2O, CO2, E = mc2, 10−6 единиц.",
+            extract_text_from_docx(result.content),
+        )
+
+    def test_docx_translation_preserves_tabs_around_translated_text(self):
+        class TabTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                return (
+                    "<translation_batch>"
+                    "<translation_block id=\"0\">Працівник:\tЯ бачив файл.</translation_block>"
+                    "</translation_batch>"
+                )
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r><w:t>Работник:</w:t><w:tab/><w:t>Я видел файл.</w:t></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="dialog.docx",
+            content=content,
+            source_language="ru",
+            target_language="uk",
+            translator=TabTranslator(),
+        )
+
+        with ZipFile(BytesIO(result.content)) as docx:
+            document = _parse_xml(docx.read("word/document.xml"))
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        paragraph = document.find(".//w:p", namespace)
+        self.assertIsNotNone(paragraph.find(".//w:tab", namespace))
+        self.assertEqual(
+            [
+                text_node.text
+                for text_node in paragraph.findall(".//w:t", namespace)
+            ],
+            ["Працівник:", "Я бачив файл."],
+        )
+
+    def test_docx_translation_translates_fixed_width_pseudo_table_rows_without_shifting_columns(self):
+        class PseudoTableTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                return (
+                    "<translation_batch>"
+                    "<translation_block id=\"0\">Кава        2      €3,50      зберегти крапку</translation_block>"
+                    "</translation_batch>"
+                )
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r>
+                    <w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" /></w:rPr>
+                    <w:t>Coffee        2      €3.50      keep decimal point</w:t>
+                  </w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="pseudo-table.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=PseudoTableTranslator(),
+        )
+
+        line = extract_text_from_docx(result.content)
+        self.assertIn("Кава", line)
+        self.assertIn("зберегти крапку", line)
+        self.assertEqual(line.index("2"), 14)
+        self.assertEqual(line.index("€3,50"), 21)
+        self.assertEqual(line.index("зберегти крапку"), 32)
+
+    def test_docx_translation_uses_target_language_labels_for_ukrainian(self):
+        class LabelTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                return (
+                    "<translation_batch>"
+                    "<translation_block id=\"0\">тіло перекладу</translation_block>"
+                    "</translation_batch>"
+                )
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Немецкий: Fußgängerübergang.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="labels.docx",
+            content=content,
+            source_language="auto",
+            target_language="uk",
+            translator=LabelTranslator(),
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertIn("Німецька:", text)
+        self.assertNotIn("German:", text)
+
+    def test_docx_translation_expands_vml_textbox_height_to_avoid_clipping(self):
+        class TextboxTranslator:
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                return (
+                    "<translation_batch>"
+                    "<translation_block id=\"0\">Перший довгий рядок перекладу.</translation_block>"
+                    "<translation_block id=\"1\">Другий довгий рядок перекладу, який займає більше місця.</translation_block>"
+                    "<translation_block id=\"2\">Третій довгий рядок перекладу не повинен обрізатися.</translation_block>"
+                    "</translation_batch>"
+                )
+
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:v="urn:schemas-microsoft-com:vml">
+              <w:body>
+                <w:p><w:r><w:pict>
+                  <v:shape id="TextBox" type="#_x0000_t202" style="width:430pt;height:40pt">
+                    <v:textbox><w:txbxContent>
+                      <w:p><w:r><w:t>Первая строка.</w:t></w:r></w:p>
+                      <w:p><w:r><w:t>Вторая строка.</w:t></w:r></w:p>
+                      <w:p><w:r><w:t>Третья строка.</w:t></w:r></w:p>
+                    </w:txbxContent></v:textbox>
+                  </v:shape>
+                </w:pict></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="textbox.docx",
+            content=content,
+            source_language="ru",
+            target_language="uk",
+            translator=TextboxTranslator(),
+        )
+
+        with ZipFile(BytesIO(result.content)) as docx:
+            document = _parse_xml(docx.read("word/document.xml"))
+        shape = document.find(
+            ".//v:shape",
+            {"v": "urn:schemas-microsoft-com:vml"},
+        )
+        self.assertIn("Третій довгий рядок", extract_text_from_docx(result.content))
+        self.assertIn("height:", shape.attrib["style"])
+        self.assertNotIn("height:40pt", shape.attrib["style"])
 
     def test_translates_epub_document_into_downloadable_epub_result(self):
         translator = RecordingTranslator()
@@ -460,11 +987,13 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def _make_docx(document_xml: str) -> bytes:
+def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
         docx.writestr("[Content_Types].xml", "<Types />")
+        for file_name, content in (extra_parts or {}).items():
+            docx.writestr(file_name, content)
     return archive.getvalue()
 
 
@@ -520,3 +1049,20 @@ def _parse_xml(content: bytes):
     from xml.etree import ElementTree
 
     return ElementTree.fromstring(content)
+
+
+def _docx_part_xml(text: str) -> str:
+    return f"""
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+    </w:document>
+    """
+
+
+def _extract_docx_part_text(docx: ZipFile, file_name: str) -> str:
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    document = _parse_xml(docx.read(file_name))
+    return "\n\n".join(
+        "".join(text_node.text or "" for text_node in paragraph.findall(".//w:t", namespace))
+        for paragraph in document.findall(".//w:p", namespace)
+    )

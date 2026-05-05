@@ -35,6 +35,7 @@ from translator_service.languages import (
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
 from translator_service.pricing import PricingRules
+from translator_service.translation_jobs import TranslationProgress
 
 
 logger = logging.getLogger(__name__)
@@ -335,6 +336,12 @@ async def _confirm_pending_translation(
     pending = service.get_pending(message.from_user.id)
     total_fragments = pending.fragment_count if pending else 0
     started_at = time.monotonic()
+    progress_stats = {
+        "completed": 0,
+        "tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
     progress_message = await message.answer(
         build_translation_progress_message(
             completed_fragments=0,
@@ -347,21 +354,32 @@ async def _confirm_pending_translation(
     )
     loop = asyncio.get_running_loop()
 
-    def report_progress(progress: tuple[int, int]) -> None:
-        completed_fragments, total = progress
+    def report_progress(progress: TranslationProgress | tuple[int, int]) -> None:
+        completed_fragments, total = _progress_counts(progress)
         elapsed_seconds = max(1, round(time.monotonic() - started_at))
         estimated_total_seconds = None
         if completed_fragments > 0:
             estimated_total_seconds = round(
                 elapsed_seconds / completed_fragments * max(total, completed_fragments)
             )
+        last_translated_text = _progress_translated_text(progress)
         progress_text = build_translation_progress_message(
             completed_fragments=completed_fragments,
             total_fragments=total,
             interface_language=interface_language,
             estimated_total_seconds=estimated_total_seconds,
             elapsed_seconds=elapsed_seconds,
+            last_translated_text=last_translated_text,
         )
+        if isinstance(progress, TranslationProgress):
+            progress_stats["completed"] = completed_fragments
+            progress_stats["tokens"] += progress.total_tokens
+            progress_stats["prompt_tokens"] += progress.prompt_tokens
+            progress_stats["completion_tokens"] += progress.completion_tokens
+            _print_translation_progress(
+                progress=progress,
+                elapsed_total_seconds=elapsed_seconds,
+            )
         _schedule_message_edit(
             loop=loop,
             message=progress_message,
@@ -380,6 +398,15 @@ async def _confirm_pending_translation(
         await message.answer(str(error))
         return
 
+    _print_translation_summary(
+        completed_fragments=progress_stats["completed"],
+        total_fragments=total_fragments,
+        elapsed_seconds=time.monotonic() - started_at,
+        prompt_tokens=progress_stats["prompt_tokens"],
+        completion_tokens=progress_stats["completion_tokens"],
+        total_tokens=progress_stats["tokens"],
+        status=job.status.value,
+    )
     await message.answer(
         build_translation_job_status_message(
             job,
@@ -429,8 +456,73 @@ def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
 def _log_message_edit_error(future) -> None:
     try:
         future.result()
-    except Exception:
+    except Exception as error:
+        message = str(error)
+        if "message can't be edited" in message:
+            logger.warning("Telegram refused to edit translation progress message: %s", message)
+            return
         logger.exception("Failed to edit translation progress message")
+
+
+def _progress_counts(progress: TranslationProgress | tuple[int, int]) -> tuple[int, int]:
+    if isinstance(progress, TranslationProgress):
+        return progress.completed_fragments, progress.total_fragments
+    return progress
+
+
+def _progress_translated_text(progress: TranslationProgress | tuple[int, int]) -> str | None:
+    if isinstance(progress, TranslationProgress) and progress.translated_text:
+        return progress.translated_text
+    return None
+
+
+def _print_translation_progress(
+    *,
+    progress: TranslationProgress,
+    elapsed_total_seconds: int,
+) -> None:
+    status = "ok" if progress.success else "failed"
+    print(
+        "[translation] "
+        f"fragment={progress.completed_fragments}/{progress.total_fragments} "
+        f"status={status} "
+        f"fragment_time={progress.elapsed_seconds:.2f}s "
+        f"elapsed={elapsed_total_seconds}s "
+        f"tokens={progress.total_tokens} "
+        f"prompt_tokens={progress.prompt_tokens} "
+        f"completion_tokens={progress.completion_tokens} "
+        f'last="{_terminal_preview(progress.translated_text)}"',
+        flush=True,
+    )
+
+
+def _print_translation_summary(
+    *,
+    completed_fragments: int,
+    total_fragments: int,
+    elapsed_seconds: float,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    status: str,
+) -> None:
+    print(
+        "[translation-summary] "
+        f"status={status} "
+        f"fragments={completed_fragments}/{total_fragments} "
+        f"elapsed={elapsed_seconds:.2f}s "
+        f"tokens={total_tokens} "
+        f"prompt_tokens={prompt_tokens} "
+        f"completion_tokens={completion_tokens}",
+        flush=True,
+    )
+
+
+def _terminal_preview(text: str, max_length: int = 240) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized.replace('"', "'")
+    return (normalized[: max_length - 1].rstrip() + "…").replace('"', "'")
 
 
 async def run_bot() -> None:

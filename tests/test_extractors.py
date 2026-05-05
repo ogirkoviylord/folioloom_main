@@ -51,6 +51,34 @@ class DocxExtractionTest(unittest.TestCase):
 
         self.assertEqual(text, "Первый абзац\n\nВторой абзац")
 
+    def test_extracts_docx_text_from_headers_footers_notes_and_comments(self):
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p><w:r><w:t>Основной текст</w:t></w:r></w:p></w:body>
+            </w:document>
+            """,
+            extra_parts={
+                "word/header1.xml": _docx_part_xml("Колонтитул сверху"),
+                "word/footer1.xml": _docx_part_xml("Колонтитул снизу"),
+                "word/footnotes.xml": _docx_part_xml("Текст сноски"),
+                "word/endnotes.xml": _docx_part_xml("Текст endnote"),
+                "word/comments.xml": _docx_part_xml("Текст комментария"),
+            },
+        )
+
+        text = extract_text_from_docx(content)
+
+        self.assertEqual(
+            text,
+            "Основной текст\n\n"
+            "Колонтитул сверху\n\n"
+            "Колонтитул снизу\n\n"
+            "Текст сноски\n\n"
+            "Текст endnote\n\n"
+            "Текст комментария",
+        )
+
     def test_rejects_docx_without_document_xml(self):
         archive = BytesIO()
         with ZipFile(archive, "w") as docx:
@@ -142,11 +170,21 @@ class EpubExtractionTest(unittest.TestCase):
             extract_text_from_epub(b"not a zip")
 
 
-def _make_docx(document_xml: str) -> bytes:
+def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
+        for file_name, content in (extra_parts or {}).items():
+            docx.writestr(file_name, content)
     return archive.getvalue()
+
+
+def _docx_part_xml(text: str) -> str:
+    return f"""
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+    </w:document>
+    """
 
 
 def _make_epub(xhtml_items: dict[str, str], spine: list[str] | None = None) -> bytes:

@@ -2,9 +2,8 @@ from dataclasses import dataclass
 
 from translator_service.documents import DocumentFormat, DocumentUpload
 from translator_service.extractors import (
-    extract_text_from_docx,
+    extract_docx_text_blocks,
     extract_epub_text_blocks,
-    extract_text_from_epub,
     extract_text_from_txt,
 )
 from translator_service.pricing import PricingRules, estimate_price
@@ -89,12 +88,25 @@ def estimate_docx_order(
     if upload.document_format is not DocumentFormat.DOCX:
         raise ValueError("DOCX estimator can only process DOCX uploads")
 
-    text = extract_text_from_docx(content)
-    return _estimate_extracted_text(
+    blocks = extract_docx_text_blocks(content)
+    text = "\n\n".join(blocks)
+    estimate = _estimate_extracted_text(
         upload=upload,
         text=text,
         pricing_rules=pricing_rules,
         max_fragment_chars=max_fragment_chars,
+    )
+    return OrderEstimate(
+        file_name=estimate.file_name,
+        document_format=estimate.document_format,
+        character_count=estimate.character_count,
+        estimated_input_tokens=estimate.estimated_input_tokens,
+        estimated_output_tokens=estimate.estimated_output_tokens,
+        fragment_count=_count_grouped_text_blocks(
+            blocks,
+            max_fragment_chars=max_fragment_chars,
+        ),
+        price_usd=estimate.price_usd,
     )
 
 
@@ -146,3 +158,21 @@ def _estimate_extracted_text(
         fragment_count=text_analysis.fragment_count,
         price_usd=price_estimate.price_usd,
     )
+
+
+def _count_grouped_text_blocks(blocks: list[str], *, max_fragment_chars: int) -> int:
+    grouped_count = 0
+    current_length = 0
+    for text in blocks:
+        text_length = len(text)
+        separator_length = 2 if current_length else 0
+        candidate_length = current_length + separator_length + text_length
+        if current_length and candidate_length > max_fragment_chars:
+            grouped_count += 1
+            current_length = text_length
+            continue
+        current_length = candidate_length
+
+    if current_length:
+        grouped_count += 1
+    return grouped_count

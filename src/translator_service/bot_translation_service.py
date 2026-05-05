@@ -15,12 +15,16 @@ from translator_service.job_runner import (
     run_translation_job,
 )
 from translator_service.language_detection import (
-    detect_language_from_text,
-    format_detected_source_language,
+    detect_languages_from_text,
+    format_detected_source_languages,
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
-from translator_service.translation_jobs import CancellationToken, TextTranslator
+from translator_service.translation_jobs import (
+    CancellationToken,
+    TextTranslator,
+    TranslationProgress,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -199,7 +203,7 @@ class BotTranslationService:
         *,
         user_telegram_id: int,
         translator: TextTranslator,
-        progress_callback: Callable[[tuple[int, int]], None] | None = None,
+        progress_callback: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJob:
         pending = self._pending.get(user_telegram_id)
         if pending is None:
@@ -278,9 +282,9 @@ def _source_language_display(
         document_format=document_format,
         content=content,
     )
-    return format_detected_source_language(
+    return format_detected_source_languages(
         requested_source_language=source_language,
-        detected_language=detect_language_from_text(text),
+        detected_languages=detect_languages_from_text(text),
     )
 
 

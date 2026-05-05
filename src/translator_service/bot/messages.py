@@ -32,6 +32,7 @@ MESSAGES = {
         "time_left": "Осталось",
         "estimated_time": "Примерное время",
         "time_unknown": "уточняется",
+        "last_fragment": "Последний переведенный фрагмент",
         "cancel_requested": "Останавливаю перевод после текущего фрагмента.",
         "nothing_to_cancel": "Сейчас нет активного перевода для остановки.",
         "estimate_title": "Предварительная оценка перевода",
@@ -77,6 +78,7 @@ MESSAGES = {
         "time_left": "Залишилось",
         "estimated_time": "Орієнтовний час",
         "time_unknown": "уточнюється",
+        "last_fragment": "Останній перекладений фрагмент",
         "cancel_requested": "Зупиняю переклад після поточного фрагмента.",
         "nothing_to_cancel": "Зараз немає активного перекладу для зупинки.",
         "estimate_title": "Попередня оцінка перекладу",
@@ -122,6 +124,7 @@ MESSAGES = {
         "time_left": "Temps restant",
         "estimated_time": "Durée estimée",
         "time_unknown": "estimation en cours",
+        "last_fragment": "Dernier fragment traduit",
         "cancel_requested": "J’arrête la traduction après le fragment en cours.",
         "nothing_to_cancel": "Aucune traduction active à arrêter.",
         "estimate_title": "Estimation de la traduction",
@@ -167,6 +170,7 @@ MESSAGES = {
         "time_left": "Restante",
         "estimated_time": "Tiempo estimado",
         "time_unknown": "calculando",
+        "last_fragment": "Último fragmento traducido",
         "cancel_requested": "Detendré la traducción después del fragmento actual.",
         "nothing_to_cancel": "No hay una traducción activa para detener.",
         "estimate_title": "Estimación de traducción",
@@ -212,6 +216,7 @@ MESSAGES = {
         "time_left": "Time left",
         "estimated_time": "Estimated time",
         "time_unknown": "estimating",
+        "last_fragment": "Last translated fragment",
         "cancel_requested": "Stopping translation after the current fragment.",
         "nothing_to_cancel": "There is no active translation to stop.",
         "estimate_title": "Translation estimate",
@@ -353,6 +358,7 @@ def build_translation_progress_message(
     interface_language: str = "ru",
     estimated_total_seconds: int | None = None,
     elapsed_seconds: int | None = None,
+    last_translated_text: str | None = None,
 ) -> str:
     messages = _messages(interface_language)
     safe_total = max(total_fragments, 1)
@@ -368,11 +374,20 @@ def build_translation_progress_message(
         remaining_seconds = max(0, estimated_total_seconds - elapsed_seconds)
         time_left = f"~{_format_duration(remaining_seconds)}"
 
+    last_fragment_line = ""
+    if last_translated_text:
+        last_fragment_line = (
+            f"{messages['last_fragment']}:\n"
+            f"{_shorten_progress_fragment(last_translated_text)}"
+        )
+    last_fragment_section = f"\n\n{last_fragment_line}" if last_fragment_line else ""
+
     return (
         f"{messages['progress']}: [{bar}] "
         f"{completed_fragments}/{total_fragments} ({percent}%)"
         f"{elapsed_line}\n"
-        f"{messages['time_left']}: {time_left}\n\n"
+        f"{messages['time_left']}: {time_left}"
+        f"{last_fragment_section}\n\n"
         f"{build_cancel_hint_message(interface_language)}"
     )
 
@@ -404,6 +419,13 @@ def _format_duration(seconds: int) -> str:
     if minutes:
         return f"{minutes} min {remaining_seconds} sec"
     return f"{remaining_seconds} sec"
+
+
+def _shorten_progress_fragment(text: str, max_length: int = 700) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 1].rstrip() + "…"
 
 
 def get_back_text(interface_language: str = "ru") -> str:

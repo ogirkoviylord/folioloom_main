@@ -106,6 +106,31 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
         self.assertEqual(service.get_pending_upload(42), upload)
 
+    def test_auto_language_display_lists_mixed_document_languages(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+        )
+
+        upload = service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="mixed.txt",
+            content=(
+                "Русский текст документа.\n"
+                "English: The quick brown fox jumps over the lazy dog.\n"
+                "Polski: Zażółć gęślą jaźń.\n"
+                "Nederlands: Ik fiets vandaag naar Zwolle."
+            ).encode("utf-8"),
+            source_language="auto",
+        )
+
+        self.assertEqual(
+            upload.source_language_display,
+            "auto (mixed: Russian, English, Polish, Dutch)",
+        )
+
     def test_prepares_estimate_from_pending_upload_after_translation_language_choice(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
