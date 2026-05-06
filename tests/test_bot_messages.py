@@ -277,6 +277,7 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("30%", message)
         self.assertIn("Elapsed: 30 sec", message)
         self.assertIn("Time left: ~1 min 10 sec", message)
+        self.assertIn("Status: translating ⠋", message)
         self.assertIn("Last translated fragment", message)
         self.assertIn("Translated paragraph from the document.", message)
         self.assertIn("/cancel", message)

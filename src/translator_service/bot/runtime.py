@@ -26,7 +26,7 @@ from translator_service.bot.messages import (
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
-from translator_service.documents import UnsupportedDocumentError
+from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.job_runner import InMemoryTranslationJobRepository
 from translator_service.languages import (
@@ -39,6 +39,9 @@ from translator_service.translation_jobs import TranslationProgress
 
 
 logger = logging.getLogger(__name__)
+
+TRANSLATION_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+TRANSLATION_SPINNER_INTERVAL_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -238,6 +241,13 @@ def create_router(
     @router.message(F.document)
     async def document_upload(message: Message) -> None:
         document = message.document
+        if _document_exceeds_upload_limit(document, max_upload_mb=config.max_upload_mb):
+            error = FileTooLargeError(
+                f"File exceeds the upload limit of {config.max_upload_mb} MB"
+            )
+            await message.answer(str(error))
+            return
+
         bot = message.bot
         file = await bot.get_file(document.file_id)
         downloaded = await bot.download_file(file.file_path)
@@ -326,6 +336,13 @@ def _is_language_button_text(text: str | None) -> bool:
     return find_language_by_button_text(text) is not None
 
 
+def _document_exceeds_upload_limit(document, *, max_upload_mb: int) -> bool:
+    file_size = getattr(document, "file_size", None)
+    if file_size is None:
+        return False
+    return int(file_size) > max_upload_mb * 1024 * 1024
+
+
 async def _confirm_pending_translation(
     *,
     message,
@@ -338,9 +355,15 @@ async def _confirm_pending_translation(
     started_at = time.monotonic()
     progress_stats = {
         "completed": 0,
+        "total": total_fragments,
+        "estimated_total_seconds": pending.estimated_seconds if pending else None,
+        "last_translated_text": None,
+        "spinner_index": 0,
         "tokens": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
     }
     progress_message = await message.answer(
         build_translation_progress_message(
@@ -349,10 +372,12 @@ async def _confirm_pending_translation(
             interface_language=interface_language,
             estimated_total_seconds=pending.estimated_seconds if pending else None,
             elapsed_seconds=0,
+            activity_indicator=_next_spinner_frame(-1),
         ),
         reply_markup=_cancel_inline_keyboard(interface_language),
     )
     loop = asyncio.get_running_loop()
+    stop_heartbeat = asyncio.Event()
 
     def report_progress(progress: TranslationProgress | tuple[int, int]) -> None:
         completed_fragments, total = _progress_counts(progress)
@@ -363,6 +388,11 @@ async def _confirm_pending_translation(
                 elapsed_seconds / completed_fragments * max(total, completed_fragments)
             )
         last_translated_text = _progress_translated_text(progress)
+        progress_stats["completed"] = completed_fragments
+        progress_stats["total"] = total
+        progress_stats["estimated_total_seconds"] = estimated_total_seconds
+        progress_stats["last_translated_text"] = last_translated_text
+        progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
         progress_text = build_translation_progress_message(
             completed_fragments=completed_fragments,
             total_fragments=total,
@@ -370,12 +400,16 @@ async def _confirm_pending_translation(
             estimated_total_seconds=estimated_total_seconds,
             elapsed_seconds=elapsed_seconds,
             last_translated_text=last_translated_text,
+            activity_indicator=_next_spinner_frame(
+                int(progress_stats["spinner_index"]) - 1
+            ),
         )
         if isinstance(progress, TranslationProgress):
-            progress_stats["completed"] = completed_fragments
             progress_stats["tokens"] += progress.total_tokens
             progress_stats["prompt_tokens"] += progress.prompt_tokens
             progress_stats["completion_tokens"] += progress.completion_tokens
+            progress_stats["cache_hit_tokens"] += progress.prompt_cache_hit_tokens
+            progress_stats["cache_miss_tokens"] += progress.prompt_cache_miss_tokens
             _print_translation_progress(
                 progress=progress,
                 elapsed_total_seconds=elapsed_seconds,
@@ -387,6 +421,16 @@ async def _confirm_pending_translation(
             reply_markup=_cancel_inline_keyboard(interface_language),
         )
 
+    heartbeat_task = asyncio.create_task(
+        _run_translation_progress_heartbeat(
+            stop_event=stop_heartbeat,
+            loop=loop,
+            message=progress_message,
+            interface_language=interface_language,
+            started_at=started_at,
+            progress_stats=progress_stats,
+        )
+    )
     try:
         job = await asyncio.to_thread(
             service.confirm_pending_translation,
@@ -395,16 +439,28 @@ async def _confirm_pending_translation(
             progress_callback=report_progress,
         )
     except ValueError as error:
+        stop_heartbeat.set()
+        await heartbeat_task
         await message.answer(str(error))
         return
+    finally:
+        stop_heartbeat.set()
+
+    await heartbeat_task
 
     _print_translation_summary(
+        job_id=job.id,
+        file_name=job.file_name,
+        result_file_name=job.result_file_name,
+        document_kind=job.document_kind.value,
         completed_fragments=progress_stats["completed"],
-        total_fragments=total_fragments,
+        total_fragments=int(progress_stats["total"]),
         elapsed_seconds=time.monotonic() - started_at,
         prompt_tokens=progress_stats["prompt_tokens"],
         completion_tokens=progress_stats["completion_tokens"],
         total_tokens=progress_stats["tokens"],
+        prompt_cache_hit_tokens=progress_stats["cache_hit_tokens"],
+        prompt_cache_miss_tokens=progress_stats["cache_miss_tokens"],
         status=job.status.value,
     )
     await message.answer(
@@ -428,6 +484,63 @@ async def _cancel_active_translation(*, message, service: BotTranslationService)
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+async def _run_translation_progress_heartbeat(
+    *,
+    stop_event: asyncio.Event,
+    loop,
+    message,
+    interface_language: str,
+    started_at: float,
+    progress_stats: dict[str, object],
+) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=TRANSLATION_SPINNER_INTERVAL_SECONDS,
+            )
+            return
+        except asyncio.TimeoutError:
+            pass
+
+        progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
+        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        completed_fragments = int(progress_stats["completed"])
+        total_fragments = int(progress_stats["total"])
+        estimated_total_seconds = progress_stats["estimated_total_seconds"]
+        if estimated_total_seconds is None and completed_fragments > 0:
+            estimated_total_seconds = round(
+                elapsed_seconds
+                / completed_fragments
+                * max(total_fragments, completed_fragments)
+            )
+        progress_text = build_translation_progress_message(
+            completed_fragments=completed_fragments,
+            total_fragments=total_fragments,
+            interface_language=interface_language,
+            estimated_total_seconds=(
+                int(estimated_total_seconds)
+                if estimated_total_seconds is not None
+                else None
+            ),
+            elapsed_seconds=elapsed_seconds,
+            last_translated_text=(
+                str(progress_stats["last_translated_text"])
+                if progress_stats["last_translated_text"]
+                else None
+            ),
+            activity_indicator=_next_spinner_frame(
+                int(progress_stats["spinner_index"]) - 1
+            ),
+        )
+        _schedule_message_edit(
+            loop=loop,
+            message=message,
+            text=progress_text,
+            reply_markup=_cancel_inline_keyboard(interface_language),
+        )
 
 
 def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
@@ -476,6 +589,12 @@ def _progress_translated_text(progress: TranslationProgress | tuple[int, int]) -
     return None
 
 
+def _next_spinner_frame(current_index: int) -> str:
+    return TRANSLATION_SPINNER_FRAMES[
+        (current_index + 1) % len(TRANSLATION_SPINNER_FRAMES)
+    ]
+
+
 def _print_translation_progress(
     *,
     progress: TranslationProgress,
@@ -491,38 +610,49 @@ def _print_translation_progress(
         f"tokens={progress.total_tokens} "
         f"prompt_tokens={progress.prompt_tokens} "
         f"completion_tokens={progress.completion_tokens} "
-        f'last="{_terminal_preview(progress.translated_text)}"',
+        f"translated_chars={len(progress.translated_text)}",
         flush=True,
     )
 
 
 def _print_translation_summary(
     *,
+    job_id: str,
+    file_name: str,
+    result_file_name: str | None,
+    document_kind: str,
     completed_fragments: int,
     total_fragments: int,
     elapsed_seconds: float,
     prompt_tokens: int,
     completion_tokens: int,
     total_tokens: int,
+    prompt_cache_hit_tokens: int,
+    prompt_cache_miss_tokens: int,
     status: str,
 ) -> None:
-    print(
-        "[translation-summary] "
+    average_fragment_time = (
+        elapsed_seconds / completed_fragments if completed_fragments > 0 else 0.0
+    )
+    summary = (
+        "TRANSLATION FINISHED "
         f"status={status} "
+        f"job_id={job_id} "
+        f"file={file_name} "
+        f"result={result_file_name or '-'} "
+        f"kind={document_kind} "
         f"fragments={completed_fragments}/{total_fragments} "
         f"elapsed={elapsed_seconds:.2f}s "
+        f"avg_fragment_time={average_fragment_time:.2f}s "
         f"tokens={total_tokens} "
         f"prompt_tokens={prompt_tokens} "
-        f"completion_tokens={completion_tokens}",
-        flush=True,
+        f"completion_tokens={completion_tokens} "
+        f"cache_hit_tokens={prompt_cache_hit_tokens} "
+        f"cache_miss_tokens={prompt_cache_miss_tokens}"
     )
-
-
-def _terminal_preview(text: str, max_length: int = 240) -> str:
-    normalized = " ".join(text.split())
-    if len(normalized) <= max_length:
-        return normalized.replace('"', "'")
-    return (normalized[: max_length - 1].rstrip() + "…").replace('"', "'")
+    if status in {"ready", "cancelled"}:
+        summary = f"\033[92m{summary}\033[0m"
+    print(summary, flush=True)
 
 
 async def run_bot() -> None:

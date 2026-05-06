@@ -1,13 +1,20 @@
 import asyncio
+import io
 import unittest
+from contextlib import redirect_stdout
 
 from translator_service.bot.runtime import (
     BotRuntimeConfig,
     _cancel_inline_keyboard,
+    _document_exceeds_upload_limit,
     _is_language_button_text,
+    _next_spinner_frame,
+    _print_translation_progress,
+    _print_translation_summary,
     _schedule_message_edit,
     build_default_pricing_rules,
 )
+from translator_service.translation_jobs import TranslationProgress
 
 
 class TelegramMethodLikeAwaitable:
@@ -108,6 +115,100 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         button = keyboard.inline_keyboard[0][0]
         self.assertEqual(button.text, "Cancel")
         self.assertEqual(button.callback_data, "cancel_translation")
+
+    def test_document_size_guard_uses_telegram_metadata_before_download(self):
+        class Document:
+            file_size = 6 * 1024 * 1024
+
+        self.assertTrue(_document_exceeds_upload_limit(Document(), max_upload_mb=5))
+        self.assertFalse(_document_exceeds_upload_limit(Document(), max_upload_mb=6))
+
+    def test_translation_progress_log_does_not_include_user_text(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            _print_translation_progress(
+                progress=TranslationProgress(
+                    completed_fragments=1,
+                    total_fragments=2,
+                    source_text="private source text",
+                    translated_text="private translated text",
+                    elapsed_seconds=1.25,
+                    total_tokens=9,
+                ),
+                elapsed_total_seconds=2,
+            )
+
+        self.assertNotIn("private source text", output.getvalue())
+        self.assertNotIn("private translated text", output.getvalue())
+        self.assertIn("tokens=9", output.getvalue())
+
+    def test_spinner_frame_cycles(self):
+        self.assertEqual(_next_spinner_frame(-1), "⠋")
+        self.assertEqual(_next_spinner_frame(0), "⠙")
+        self.assertEqual(_next_spinner_frame(9), "⠋")
+
+    def test_success_translation_summary_is_green_and_contains_totals(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            _print_translation_summary(
+                job_id="job-42",
+                file_name="book.epub",
+                result_file_name="book.uk.epub",
+                document_kind="epub",
+                completed_fragments=10,
+                total_fragments=10,
+                elapsed_seconds=125.4,
+                prompt_tokens=1000,
+                completion_tokens=700,
+                total_tokens=1700,
+                prompt_cache_hit_tokens=300,
+                prompt_cache_miss_tokens=700,
+                status="ready",
+            )
+
+        text = output.getvalue()
+        self.assertIn("\033[92m", text)
+        self.assertIn("\033[0m", text)
+        self.assertIn("TRANSLATION FINISHED", text)
+        self.assertIn("job_id=job-42", text)
+        self.assertIn("file=book.epub", text)
+        self.assertIn("result=book.uk.epub", text)
+        self.assertIn("kind=epub", text)
+        self.assertIn("fragments=10/10", text)
+        self.assertIn("elapsed=125.40s", text)
+        self.assertIn("avg_fragment_time=12.54s", text)
+        self.assertIn("tokens=1700", text)
+        self.assertIn("prompt_tokens=1000", text)
+        self.assertIn("completion_tokens=700", text)
+        self.assertIn("cache_hit_tokens=300", text)
+        self.assertIn("cache_miss_tokens=700", text)
+
+    def test_failed_translation_summary_is_not_green(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            _print_translation_summary(
+                job_id="job-43",
+                file_name="book.epub",
+                result_file_name=None,
+                document_kind="epub",
+                completed_fragments=3,
+                total_fragments=10,
+                elapsed_seconds=30,
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                prompt_cache_hit_tokens=0,
+                prompt_cache_miss_tokens=100,
+                status="failed",
+            )
+
+        text = output.getvalue()
+        self.assertNotIn("\033[92m", text)
+        self.assertIn("TRANSLATION FINISHED", text)
+        self.assertIn("status=failed", text)
 
 
 if __name__ == "__main__":

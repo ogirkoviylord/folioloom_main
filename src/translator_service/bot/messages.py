@@ -24,6 +24,7 @@ MESSAGES = {
         "translation_language_prompt": "Файл получен: {file_name}\n\nВыберите язык перевода:",
         "original_language": "Язык оригинала",
         "progress": "Прогресс перевода",
+        "activity": "Статус: перевод идет {indicator}",
         "back": "Назад",
         "back_to_menu": "Возвращаемся в Главное меню.",
         "cancel": "Отмена",
@@ -70,6 +71,7 @@ MESSAGES = {
         "translation_language_prompt": "Файл отримано: {file_name}\n\nВиберіть мову перекладу:",
         "original_language": "Мова оригіналу",
         "progress": "Прогрес перекладу",
+        "activity": "Статус: переклад триває {indicator}",
         "back": "Назад",
         "back_to_menu": "Повертаємося до головного меню.",
         "cancel": "Скасувати",
@@ -116,6 +118,7 @@ MESSAGES = {
         "translation_language_prompt": "Fichier reçu : {file_name}\n\nChoisissez la langue de traduction :",
         "original_language": "Langue d’origine",
         "progress": "Progression de la traduction",
+        "activity": "Statut : traduction en cours {indicator}",
         "back": "Retour",
         "back_to_menu": "Retour au menu principal.",
         "cancel": "Annuler",
@@ -162,6 +165,7 @@ MESSAGES = {
         "translation_language_prompt": "Archivo recibido: {file_name}\n\nElige el idioma de traducción:",
         "original_language": "Idioma original",
         "progress": "Progreso de traducción",
+        "activity": "Estado: traduciendo {indicator}",
         "back": "Atrás",
         "back_to_menu": "Volvemos al menú principal.",
         "cancel": "Cancelar",
@@ -208,6 +212,7 @@ MESSAGES = {
         "translation_language_prompt": "File received: {file_name}\n\nChoose translation language:",
         "original_language": "Original language",
         "progress": "Translation progress",
+        "activity": "Status: translating {indicator}",
         "back": "Back",
         "back_to_menu": "Returning to the Main menu.",
         "cancel": "Cancel",
@@ -359,6 +364,7 @@ def build_translation_progress_message(
     estimated_total_seconds: int | None = None,
     elapsed_seconds: int | None = None,
     last_translated_text: str | None = None,
+    activity_indicator: str = "⠋",
 ) -> str:
     messages = _messages(interface_language)
     safe_total = max(total_fragments, 1)
@@ -387,6 +393,7 @@ def build_translation_progress_message(
         f"{completed_fragments}/{total_fragments} ({percent}%)"
         f"{elapsed_line}\n"
         f"{messages['time_left']}: {time_left}"
+        f"\n{messages['activity'].format(indicator=activity_indicator)}"
         f"{last_fragment_section}\n\n"
         f"{build_cancel_hint_message(interface_language)}"
     )
