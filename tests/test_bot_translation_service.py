@@ -78,6 +78,10 @@ class BotTranslationServiceTest(unittest.TestCase):
                 fragment_count=2,
                 source_language_display="ru",
                 estimated_seconds=24,
+                character_count=28,
+                estimated_input_tokens=7,
+                estimated_output_tokens=8,
+                document_format="txt",
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
@@ -93,7 +97,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         service.set_interface_language(user_telegram_id=42, language_code="uk")
 
         self.assertEqual(service.get_interface_language(42), "uk")
-        self.assertEqual(service.get_interface_language(100), "ru")
+        self.assertEqual(service.get_interface_language(100), "en")
 
     def test_upload_waits_for_translation_language_before_estimate(self):
         service = BotTranslationService(

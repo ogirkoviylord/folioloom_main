@@ -53,6 +53,10 @@ class PendingTranslation:
     fragment_count: int
     source_language_display: str | None = None
     estimated_seconds: int | None = None
+    character_count: int = 0
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
+    document_format: str = ""
 
 
 class BotTranslationService:
@@ -183,6 +187,10 @@ class BotTranslationService:
                 source_language=source_language,
             ),
             estimated_seconds=estimate_translation_seconds(estimate.fragment_count),
+            character_count=estimate.character_count,
+            estimated_input_tokens=estimate.estimated_input_tokens,
+            estimated_output_tokens=estimate.estimated_output_tokens,
+            document_format=estimate.document_format.value,
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -204,7 +212,7 @@ class BotTranslationService:
 
     def get_interface_language(self, user_telegram_id: int) -> str:
         with self._state_lock:
-            return self._interface_languages.get(user_telegram_id, "ru")
+            return self._interface_languages.get(user_telegram_id, "en")
 
     def cancel_translation(self, user_telegram_id: int) -> bool:
         with self._state_lock:

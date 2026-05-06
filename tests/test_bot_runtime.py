@@ -1,13 +1,17 @@
 import asyncio
+from datetime import datetime
 import io
 import unittest
 from contextlib import redirect_stdout
 
+from translator_service.bot_translation_service import PendingTranslation
+import translator_service.bot.runtime as runtime
 from translator_service.bot.runtime import (
     BotRuntimeConfig,
     _cancel_inline_keyboard,
     _document_exceeds_upload_limit,
     _is_language_button_text,
+    _main_menu_keyboard,
     _next_spinner_frame,
     _print_translation_progress,
     _print_translation_summary,
@@ -116,6 +120,18 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(button.text, "Cancel")
         self.assertEqual(button.callback_data, "cancel_translation")
 
+    def test_main_menu_keyboard_uses_folioloom_buttons(self):
+        keyboard = _main_menu_keyboard("en")
+
+        self.assertEqual(
+            [[button.text for button in row] for row in keyboard.keyboard],
+            [
+                ["📖 Translate a Book"],
+                ["🧵 How It Works", "🌍 Language"],
+                ["Help"],
+            ],
+        )
+
     def test_document_size_guard_uses_telegram_metadata_before_download(self):
         class Document:
             file_size = 6 * 1024 * 1024
@@ -142,6 +158,48 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private source text", output.getvalue())
         self.assertNotIn("private translated text", output.getvalue())
         self.assertIn("tokens=9", output.getvalue())
+
+    def test_translation_start_log_is_blue_and_contains_pending_metadata(self):
+        output = io.StringIO()
+        if not hasattr(runtime, "_print_translation_start"):
+            self.fail("_print_translation_start is not implemented")
+
+        with redirect_stdout(output):
+            runtime._print_translation_start(
+                PendingTranslation(
+                    user_telegram_id=42,
+                    file_name="book.epub",
+                    content=b"book content",
+                    source_language="auto",
+                    target_language="ru",
+                    price_usd=0.25,
+                    fragment_count=4,
+                    source_language_display="auto (English)",
+                    estimated_seconds=48,
+                    character_count=1200,
+                    estimated_input_tokens=450,
+                    estimated_output_tokens=540,
+                    document_format="epub",
+                ),
+                started_at=datetime(2026, 5, 6, 12, 30, 5),
+            )
+
+        text = output.getvalue()
+        self.assertIn("\033[94m", text)
+        self.assertIn("\033[0m", text)
+        self.assertIn("TRANSLATION STARTED", text)
+        self.assertIn("started_at=2026-05-06T12:30:05", text)
+        self.assertIn("file=book.epub", text)
+        self.assertIn("type=epub", text)
+        self.assertIn("size_bytes=12", text)
+        self.assertIn("characters=1200", text)
+        self.assertIn("source=auto (English)", text)
+        self.assertIn("target=ru", text)
+        self.assertIn("fragments=4", text)
+        self.assertIn("estimated_time=48s", text)
+        self.assertIn("price=$0.25", text)
+        self.assertIn("input_tokens=450", text)
+        self.assertIn("output_tokens=540", text)
 
     def test_spinner_frame_cycles(self):
         self.assertEqual(_next_spinner_frame(-1), "⠋")

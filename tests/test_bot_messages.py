@@ -2,6 +2,8 @@ import unittest
 
 from translator_service.bot.messages import (
     CONFIRM_TRANSLATION_TEXT,
+    build_help_message,
+    build_how_it_works_message,
     build_back_to_menu_message,
     build_cancel_requested_message,
     build_language_selected_message,
@@ -12,13 +14,20 @@ from translator_service.bot.messages import (
     build_order_estimate_message,
     build_pending_translation_message,
     build_start_message,
+    build_upload_prompt_message,
     build_translation_progress_message,
     build_translation_job_status_message,
     get_back_text,
     get_cancel_text,
+    get_main_menu_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
+    is_help_text,
+    is_how_it_works_text,
+    is_language_menu_text,
+    is_main_menu_text,
+    is_translate_book_text,
 )
 from translator_service.bot_translation_service import PendingTranslation
 from translator_service.documents import DocumentFormat
@@ -30,23 +39,25 @@ class BotMessagesTest(unittest.TestCase):
     def test_start_message_explains_translation_service_and_menu(self):
         message = build_start_message()
 
-        self.assertIn("перевод", message.lower())
+        self.assertIn("Welcome to FolioLoom", message)
+        self.assertIn("Books, beautifully translated.", message)
         self.assertNotIn("DeepSeek", message)
         self.assertNotIn("Дипсик", message)
         self.assertIn("EPUB", message)
         self.assertIn("DOCX", message)
-        self.assertIn("PDF", message)
         self.assertIn("TXT", message)
-        self.assertIn("Перевести документ", message)
-        self.assertIn("Баланс", message)
+        self.assertNotIn("PDF", message)
+        self.assertIn("📖 Translate a Book", message)
+        self.assertNotIn("Balance", message)
 
     def test_start_message_is_localized_for_supported_interface_languages(self):
         expectations = {
-            "ru": "Сервис перевода документов.",
-            "uk": "Сервіс перекладу документів.",
-            "fr": "Service de traduction de documents.",
-            "es": "Servicio de traducción de documentos.",
-            "en": "Document translation service.",
+            "ru": "Добро пожаловать в FolioLoom.",
+            "uk": "Ласкаво просимо до FolioLoom.",
+            "fr": "Bienvenue dans FolioLoom.",
+            "es": "Bienvenido a FolioLoom.",
+            "en": "Welcome to FolioLoom.",
+            "nl": "Welkom bij FolioLoom.",
         }
 
         for language_code, expected_text in expectations.items():
@@ -57,15 +68,21 @@ class BotMessagesTest(unittest.TestCase):
                 )
 
     def test_main_menu_contains_primary_user_actions(self):
-        menu = build_main_menu()
-
         self.assertEqual(
-            menu,
+            build_main_menu(),
             [
-                "Перевести документ",
-                "Мои переводы",
-                "Баланс",
-                "Настройки",
+                "📖 Translate a Book",
+                "🧵 How It Works",
+                "🌍 Language",
+                "Help",
+            ],
+        )
+        self.assertEqual(
+            build_main_menu("ru"),
+            [
+                "📖 Перевести книгу",
+                "🧵 Как это работает",
+                "🌍 Язык",
                 "Помощь",
             ],
         )
@@ -88,7 +105,7 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("36", message)
         self.assertIn("2", message)
         self.assertIn("$0.10", message)
-        self.assertIn("Подтвердить", message)
+        self.assertIn("Start Translation", message)
 
     def test_translation_job_status_message_for_ready_job(self):
         message = build_translation_job_status_message(
@@ -104,7 +121,7 @@ class BotMessagesTest(unittest.TestCase):
             )
         )
 
-        self.assertIn("готов", message.lower())
+        self.assertIn("translation is ready", message.lower())
         self.assertIn("notes.en.txt", message)
 
     def test_translation_job_status_message_for_failed_job(self):
@@ -121,7 +138,7 @@ class BotMessagesTest(unittest.TestCase):
             )
         )
 
-        self.assertIn("ошибка", message.lower())
+        self.assertIn("something went wrong", message.lower())
         self.assertNotIn("DeepSeek", message)
         self.assertNotIn("API", message)
 
@@ -161,11 +178,12 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("$0.10", message)
         self.assertIn("2", message)
         self.assertIn("24 sec", message)
-        self.assertIn(CONFIRM_TRANSLATION_TEXT, message)
+        self.assertIn("Start Translation", message)
 
     def test_confirm_translation_text_accepts_button_text_and_command(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))
         self.assertTrue(is_confirm_translation_text(" подтвердить "))
+        self.assertTrue(is_confirm_translation_text("Start Translation"))
         self.assertTrue(is_confirm_translation_text("/confirm"))
 
     def test_confirm_translation_text_rejects_other_messages(self):
@@ -178,12 +196,13 @@ class BotMessagesTest(unittest.TestCase):
     def test_language_selection_message_lists_supported_languages(self):
         message = build_language_selection_message()
 
-        self.assertIn("интерфейс", message.lower())
+        self.assertIn("interface", message.lower())
         self.assertIn("Русский", message)
         self.assertIn("Українська", message)
         self.assertIn("Français", message)
         self.assertIn("Español", message)
         self.assertIn("English", message)
+        self.assertIn("Nederlands", message)
 
     def test_language_selection_message_is_localized(self):
         self.assertIn(
@@ -198,12 +217,16 @@ class BotMessagesTest(unittest.TestCase):
             "Elige el idioma de la interfaz",
             build_language_selection_message(interface_language="es"),
         )
+        self.assertIn(
+            "Kies de interfacetaal",
+            build_language_selection_message(interface_language="nl"),
+        )
 
     def test_language_selected_message_confirms_choice(self):
         message = build_language_selected_message("Українська")
 
         self.assertIn("Українська", message)
-        self.assertIn("интерфейс", message.lower())
+        self.assertIn("Interface language", message)
 
     def test_language_selected_message_is_localized(self):
         self.assertIn(
@@ -214,12 +237,16 @@ class BotMessagesTest(unittest.TestCase):
             "Langue de l’interface",
             build_language_selected_message("Français", interface_language="fr"),
         )
+        self.assertIn(
+            "Interfacetaal",
+            build_language_selected_message("Nederlands", interface_language="nl"),
+        )
 
     def test_translation_language_selection_message_is_about_uploaded_file(self):
         message = build_translation_language_selection_message("notes.txt")
 
         self.assertIn("notes.txt", message)
-        self.assertIn("язык перевода", message.lower())
+        self.assertIn("Choose the target language", message)
         self.assertIn("English", message)
 
     def test_translation_language_selection_message_is_localized(self):
@@ -228,7 +255,7 @@ class BotMessagesTest(unittest.TestCase):
             interface_language="en",
         )
 
-        self.assertIn("Choose translation language", message)
+        self.assertIn("Choose the target language", message)
         self.assertIn("notes.txt", message)
 
     def test_pending_translation_message_uses_localized_confirm_button(self):
@@ -247,10 +274,11 @@ class BotMessagesTest(unittest.TestCase):
             interface_language="en",
         )
 
-        self.assertIn("Document is ready for translation", message)
-        self.assertIn("auto (French) → fr", message)
+        self.assertIn("Ready to begin", message)
+        self.assertIn("From: auto (French)", message)
+        self.assertIn("To: French", message)
         self.assertIn("Estimated time: 24 sec", message)
-        self.assertIn("Confirm", message)
+        self.assertIn("Start Translation", message)
 
     def test_translation_language_selection_message_shows_detected_source_language(self):
         message = build_translation_language_selection_message(
@@ -260,7 +288,7 @@ class BotMessagesTest(unittest.TestCase):
         )
 
         self.assertIn("book.epub", message)
-        self.assertIn("Original language: auto (English)", message)
+        self.assertIn("Source language: auto (English)", message)
 
     def test_translation_progress_message_shows_fraction_and_bar(self):
         message = build_translation_progress_message(
@@ -277,7 +305,7 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("30%", message)
         self.assertIn("Elapsed: 30 sec", message)
         self.assertIn("Time left: ~1 min 10 sec", message)
-        self.assertIn("Status: translating ⠋", message)
+        self.assertIn("Working through the text ⠋", message)
         self.assertIn("Last translated fragment", message)
         self.assertIn("Translated paragraph from the document.", message)
         self.assertIn("/cancel", message)
@@ -300,15 +328,55 @@ class BotMessagesTest(unittest.TestCase):
         self.assertFalse(is_cancel_text(None))
 
     def test_back_to_menu_message_is_localized(self):
-        self.assertIn("Главное меню", build_back_to_menu_message("ru"))
+        self.assertIn("главное меню", build_back_to_menu_message("ru").lower())
         self.assertIn("Main menu", build_back_to_menu_message("en"))
+        self.assertIn("Hoofdmenu", build_back_to_menu_message("nl"))
 
     def test_confirm_translation_text_accepts_localized_buttons(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))
         self.assertTrue(is_confirm_translation_text("Підтвердити"))
         self.assertTrue(is_confirm_translation_text("Confirmer"))
         self.assertTrue(is_confirm_translation_text("Confirmar"))
-        self.assertTrue(is_confirm_translation_text("Confirm"))
+        self.assertTrue(is_confirm_translation_text("Start Translation"))
+        self.assertTrue(is_confirm_translation_text("Bevestigen"))
+
+    def test_main_menu_buttons_are_recognized_across_locales(self):
+        self.assertTrue(is_translate_book_text("📖 Translate a Book"))
+        self.assertTrue(is_translate_book_text("📖 Перевести книгу"))
+        self.assertTrue(is_how_it_works_text("🧵 How It Works"))
+        self.assertTrue(is_how_it_works_text("🧵 Zo werkt het"))
+        self.assertTrue(is_language_menu_text("🌍 Language"))
+        self.assertTrue(is_language_menu_text("🌍 Язык"))
+        self.assertTrue(is_help_text("Help"))
+        self.assertTrue(is_help_text("Помощь"))
+        self.assertTrue(is_main_menu_text("Main Menu"))
+        self.assertTrue(is_main_menu_text("Главное меню"))
+
+    def test_folioloom_support_messages_do_not_advertise_pdf_or_dead_features(self):
+        for language_code in ("en", "ru", "uk", "fr", "es", "nl"):
+            with self.subTest(language_code=language_code):
+                combined = "\n".join(
+                    [
+                        build_start_message(language_code),
+                        build_upload_prompt_message(language_code),
+                        build_help_message(language_code),
+                        build_how_it_works_message(language_code),
+                    ]
+                )
+                self.assertIn("FolioLoom", combined)
+                self.assertIn("EPUB", combined)
+                self.assertIn("DOCX", combined)
+                self.assertIn("TXT", combined)
+                self.assertNotIn("PDF", combined)
+                self.assertNotIn("DeepSeek", combined)
+                self.assertNotIn("Balance", combined)
+                self.assertNotIn("Pricing", combined)
+                self.assertNotIn("My Books", combined)
+
+    def test_main_menu_text_is_localized(self):
+        self.assertIn("FolioLoom", get_main_menu_text("en"))
+        self.assertIn("Choose what", get_main_menu_text("en"))
+        self.assertIn("Выберите", get_main_menu_text("ru"))
 
 
 if __name__ == "__main__":

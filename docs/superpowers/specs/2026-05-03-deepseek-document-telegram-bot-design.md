@@ -8,6 +8,26 @@ Build an independent Telegram service for paid document translation through Deep
 
 This project is written from scratch. The implementation must not copy AGPL code, file layout, function or class names, prompts, tests, configuration, or internal architecture from AGPL projects. The project may use general product ideas, public API documentation, open file format documentation, and independently selected permissive libraries.
 
+## Reference-Informed Principles
+
+The public `hydropix/TranslateBooksWithLLMs` repository is a useful product and reliability reference for long-document translation, but it is AGPL-licensed and desktop/multi-provider oriented. This project must treat it as background context only. Any implementation, prompt text, file layout, test data, naming, or internal architecture must be independently designed.
+
+Useful concepts to preserve in this project's own architecture:
+
+- Treat every file format as a separate adapter with explicit extraction, estimation, translation-unit building, validation, partial-result assembly, and final-result assembly responsibilities.
+- Use strict, machine-parseable work-unit envelopes for structured documents so multiple text blocks can be translated in one request and mapped back by stable IDs.
+- Protect tags, URLs, structured literals, technical tokens, special spacing, and document-control fragments before the LLM sees them, then restore them deterministically.
+- Validate every structured LLM response before inserting it into a user document. If validation fails, retry with a smaller unit or fall back to one-block translation rather than leaking markers, XML, markdown fences, or provider commentary.
+- Preserve user trust during long jobs through accurate estimates, progress based on real API work units, cooperative cancellation, resumability, and partial outputs in user-visible reading order.
+- Use benchmark and regression suites to compare prompt versions, language profiles, document adapters, and model settings. The benchmark goal is not provider choice for end users; it is controlled quality and cost governance for the DeepSeek-only service.
+- Keep style presets, terminology modes, language profiles, and document text-type profiles as structured policy inputs rather than loose user prompt text.
+
+Concepts intentionally not adopted:
+
+- End-user provider/model selection. DeepSeek remains the only provider exposed by the service core.
+- Desktop-first Flask/Socket.IO architecture. Telegram and future channels remain thin adapters over a shared backend.
+- AGPL prompt wording, examples, file organization, class names, or test fixtures.
+
 ## MVP Architecture
 
 The MVP is split into small services that can run locally with Docker Compose:
@@ -55,7 +75,7 @@ The current local prototype is a runnable Telegram bot with in-memory state. It 
 Implemented prototype capabilities:
 
 - Bot interface language selection is the first user step after `/start`.
-- Interface messages are localized for Russian, Ukrainian, French, Spanish, and English.
+- Interface messages are localized for Russian, Ukrainian, French, Spanish, English, and Dutch.
 - The user can upload TXT, DOCX, or EPUB files.
 - The bot validates file extension and size before creating a pending translation.
 - The bot detects and displays the probable original document language when source language is configured as `auto`, for example `auto (English)` or `auto (unknown)`.
@@ -165,7 +185,7 @@ The project is written from scratch, but may depend on independent third-party t
 ### OCR for Scans, PDF Images, and DjVu
 
 - OCR engine: Tesseract OCR as the default open-source baseline, or PaddleOCR/EasyOCR as optional higher-quality alternatives.
-- Language packs: Russian, Ukrainian, English, French, and Spanish OCR data must be installed for the interface and target markets.
+- Language packs: Russian, Ukrainian, English, French, Spanish, and Dutch OCR data must be installed for the current interface and target markets. Future OCR language packs must follow the same staged rollout as target translation languages.
 - Image preprocessing: OpenCV or Pillow for deskewing, binarization, contrast adjustment, rotation detection, cropping, and page splitting.
 - PDF page rendering: Poppler or MuPDF for producing high-resolution page images before OCR.
 - DjVu support: DjVuLibre tools (`ddjvu`, `djvutxt`) to extract embedded text or render pages for OCR.
@@ -293,6 +313,39 @@ The optimizer also assigns an internal prompt tier to each work unit:
 
 The current prototype uses these tiers for cost estimation and future prompt routing while keeping the existing translator interface stable. Estimation includes per-unit prompt overhead, so a simple EPUB novel stays close to plain-text pricing, while a table-heavy DOCX or reference-like EPUB is priced more honestly before confirmation.
 
+## Prompt and Output Contract Policy
+
+Prompts are an internal product surface and must be built from project-owned prompt policy objects, not scattered string literals. A prompt policy combines:
+
+- source-language handling, including `auto` and per-block source-language hints;
+- target-language profile, such as Russian, Ukrainian, French, Spanish, English, or Dutch;
+- document text-type profile, such as general, literary, technical, scientific, business/legal-like, or mixed;
+- user-facing mode, such as Fast, Quality, or Terms;
+- terminology and named-entity policy;
+- prompt tier, such as plain, structured, or strict;
+- protection version and prompt policy version.
+
+All provider prompts must remain DeepSeek-specific and concise enough for long-document economics. Repeated invariant instructions should be stable across requests to benefit provider-side context caching where possible. Project-owned prompt text may be inspired by general prompt-engineering principles, but must not copy AGPL prompts or examples.
+
+Structured DOCX and EPUB requests must use a parseable project-owned envelope with stable block identifiers. The model must return the same envelope shape, block count, block IDs, and source-language attributes when present, with only block text translated. TXT may use plain text output in the prototype, but production translation should consider a lightweight response envelope or equivalent validation when provider commentary becomes a recurring risk.
+
+Prompt tiers control strictness:
+
+- Plain units prioritize natural translation, paragraph boundaries, and low overhead.
+- Structured units add stronger list, footnote, ordering, and numbering preservation requirements.
+- Strict units add table, dense markup, marker, and spacing preservation requirements, and should be validated more aggressively before insertion.
+
+The translation runner must validate every structured response before assembly:
+
+- block count, IDs, and required attributes match the request;
+- protected markers survive exactly;
+- XML/batch markers are removed from final user-visible text;
+- provider commentary, markdown fences, apologies, and warnings are stripped only when unambiguous;
+- if parsing or validation fails, the service retries the same unit with stricter instructions, then splits into smaller units, then falls back to individual block translation;
+- failed validation must never result in internal markers or malformed XML being inserted into a user document.
+
+Translation-memory cache keys must include normalized source text, source language, target language, prompt tier, prompt policy version, protection version, target-language profile version, text-type profile, and terminology policy version. This prevents stale translations from surviving meaningful prompt or policy changes.
+
 ## Translation Cache Optimization
 
 The service must distinguish provider-side context-cache savings from application-level translation memory.
@@ -323,6 +376,7 @@ The bot stores language choices as short internal codes but provider prompts mus
 - `fr` maps to `French`.
 - `es` maps to `Spanish`.
 - `en` maps to `English`.
+- `nl` maps to `Dutch`.
 - `auto` maps to the detected source language in prompts.
 - Future languages must be added through the shared language registry so interface buttons, prompt language names, and matching logic stay consistent.
 - Provider prompts must never use ambiguous codes such as `uk` when the intended language is Ukrainian.
@@ -331,15 +385,52 @@ The bot stores language choices as short internal codes but provider prompts mus
 - For DOCX, language-labeled blocks such as `Nederlands: ...`, `Polski: ...`, `中文: ... 日本語: ... 한국어: ...` must be translated by source-language segment instead of relying on one broad `auto` request. The localized language label may be regenerated by the assembler while the segment body is translated from the correct source language.
 - Placeholders, URLs, JSON/XML snippets, commands, regexes, tags, special spacing characters, and protected tokens must be preserved while surrounding human-readable text is translated.
 
+## Translation Language Quality Roadmap
+
+Language expansion must happen only after the current product loop is reliable: upload, extraction, estimation, target-language selection, confirmation, translation, progress, cancellation, partial result, and final delivery must work end to end for real beta users.
+
+Each target language must be designed and reviewed through the standalone language-quality methodology in `docs/superpowers/specs/translation-language-quality-methodology.md`.
+
+The first target-language profile is Russian: `docs/superpowers/specs/russian-translation-profile.md`.
+
+Current target translation languages are Russian, Ukrainian, French, Spanish, English, and Dutch. These languages are the immediate quality focus. Each current language must have language-specific QA examples for ordinary prose, book/manuscript style, headings and lists, technical text, mixed-language fragments, names and terminology preservation, and structured-document formatting. Quality review must check both directions commonly used by users, not only English as the source.
+
+The next expansion phase should add Polish, Turkish, and German. They should be added as production target languages only after the shared language registry, interface copy where needed, prompt language names, language detection display, terminology rules, OCR language packs where relevant, and regression samples are ready.
+
+The later expansion phase should add Chinese, Japanese, Korean, and Arabic. These languages require extra readiness checks before release: script-specific punctuation and spacing, CJK line breaking, right-to-left Arabic handling, font and shaping behavior in DOCX/PDF-derived outputs, language-specific terminology policy, and mixed-script document tests.
+
+No future language should be exposed in user-facing target-language buttons until it has a completed QA checklist, passing regression samples, and a clear quality label for beta use versus production use.
+
+## Quality Benchmark and Regression Policy
+
+The service needs an internal quality harness before expanding languages, document formats, or translation modes. The harness is for engineering governance, not for exposing model choice to users.
+
+The benchmark suite should include:
+
+- fixed literary, journalistic, technical, business/legal-like, educational, and mixed-language source samples;
+- TXT, DOCX, and EPUB versions of the same source cases where structure matters;
+- target-language-specific expected behaviors from each language profile;
+- regression checks for marker preservation, provider-boilerplate removal, batch parsing, reading order, partial-output order, and terminology consistency;
+- cost and token diagnostics for prompt tiers, provider cache-hit/miss tokens, and application-level translation-memory hits;
+- human-review notes for qualitative decisions that automated checks cannot judge reliably.
+
+Automated scoring may use deterministic checks first and LLM-as-judge only as a secondary signal. Any LLM judge must use a project-owned rubric and must not be the only gate for production release. A language, prompt version, or adapter change should not be promoted from beta to stable unless the relevant regression pack passes and the known residual risks are documented.
+
 ## Name and Term Preservation Policy
 
 The service must support configurable preservation of names and terms. This is a translation setting, not a provider choice.
 
 - Users must be able to choose whether to preserve or translate proper names and named entities where preserving them makes sense.
-- Configurable categories include company and product names, personal names, city and country names, link anchor text, brand names, book or article titles, technical terms, domain-specific glossary terms, and custom user-provided terms.
+- Configurable categories include company and product names, personal names, city and country names, street names, addresses, institutions, organizations, link anchor text, brand names, product names, book or article titles, technical terms, domain-specific glossary terms, and custom user-provided terms.
 - Default behavior should be conservative for technical and business documents: preserve company names, brands, URLs, code-like labels, placeholders, and protected terms unless the user explicitly chooses to localize them.
 - Link URLs must always be preserved. Link visible text may be translated or preserved depending on the selected mode.
 - Terminology handling must support at least four policies: translate terms into the target language, transliterate/transcribe terms into the target script, preserve original terms unchanged, or use glossary-pinned forms.
+- Named-entity handling must support at least four policies per category where the target language allows it: preserve original form, translate the semantic meaning, transliterate/transcribe into the target script, or use glossary-pinned forms.
+- The service must distinguish entities that should almost never be translated, such as registered brands, product names, legal company names, URLs, email addresses, usernames, code identifiers, package names, and API names, from entities that may be translated or transliterated depending on user preference, such as street names, city names, institution names, book titles, article titles, event names, and organization display names.
+- User-facing controls for named entities are not required in the current prototype, but the backend translation policy must be shaped so they can be added later without rewriting TXT, DOCX, and EPUB translation flows.
+- A future confirmation screen should expose simple presets before advanced controls. Example presets: `preserve original names`, `transliterate names for Russian`, `translate descriptive names`, and `use glossary`.
+- Advanced controls may override entity categories separately, for example: brands preserve, company legal names preserve, personal names transliterate, streets transliterate, book titles translate, institutions translate with original in parentheses.
+- For Russian target translations, the default should preserve brands, product names, code/API/library names, URLs, and legal company names; transliterate ordinary personal names when a Russian form is expected; and translate descriptive book/article titles only when the title is not a protected brand or official title.
 - Technical-literature mode should default to preserving or transliterating established terms instead of over-localizing them. For example, a term like `placeholder` may become `плейсхолдер` or remain `placeholder`, depending on the selected terminology policy; it must not be inconsistently translated across the same document.
 - The service should recognize that some borrowed terms are already natural target-language words in technical contexts. For Russian technical documents, words such as `плейсхолдер`, `промпт`, `токен`, `callback`, `endpoint`, `framework`, and similar terms may need preservation or transcription rather than literal translation.
 - Users must eventually be able to switch technical-term handling before confirmation. Required options: `preserve technical terms`, `translate technical terms`, `transliterate technical terms`, and `use glossary`. This switch applies to terms such as `endnote`, `tracked changes`, `query-параметры`, `regex`, `placeholder`, `callback`, `endpoint`, file-format names, API terms, and other domain terms.
@@ -349,6 +440,44 @@ The service must support configurable preservation of names and terms. This is a
 - The confirmation screen should eventually show the active terminology mode, for example `Terms: technical, preserve brands, transliterate common IT terms`.
 - The confirmation screen should eventually show the active preservation mode, for example `Preserve names: companies, brands, links, technical terms`.
 - The backend must represent these choices as a structured translation policy so the same settings apply consistently to TXT, DOCX, EPUB, and future rich formats.
+
+## Text Type Detection and Translation Profiles
+
+The service should eventually classify the uploaded text before translation so it can choose a better translation profile without asking the user too many questions.
+
+Detected text type is an internal translation hint by default, not a user-facing promise. The bot should not show a detected type in the current prototype unless it is useful for user control, for example when confidence is low or when the user can switch the mode before confirmation.
+
+The classifier should support at least these document/text types:
+
+- general prose;
+- literary fiction;
+- literary non-fiction;
+- journalistic or publicistic text;
+- scientific or academic text;
+- technical documentation;
+- business or legal-like document;
+- educational material;
+- marketing or sales copy;
+- mixed or unknown.
+
+Detection can be implemented incrementally:
+
+- First pass: deterministic signals from file structure, headings, tables, citations, formulas, code-like text, bibliography markers, and vocabulary.
+- Second pass: optional LLM or model-assisted classification on a short sample, returning a type, confidence, and brief internal reason.
+- Production pass: combine file-level type with section-level hints, because a book may contain literary prose, tables, footnotes, quotes, and technical appendices in one document.
+
+The detected type should select a translation profile, not a different provider. Examples:
+
+- `literary`: preserve voice, rhythm, dialogue, imagery, and author style; avoid dry explanatory paraphrase.
+- `journalistic`: preserve factual clarity, tone, names, dates, attributions, and readable publicistic style.
+- `scientific`: preserve terminology, citations, units, formulas, hedging, and exact claims.
+- `technical`: preserve identifiers, commands, API names, placeholders, code-like fragments, and established technical terms.
+- `business/legal-like`: preserve entity names, dates, numbers, obligations, definitions, and formal tone; avoid creative paraphrase.
+- `marketing`: preserve persuasive intent and idiomatic target-language copy, but avoid inventing claims.
+
+The user should eventually be able to override the detected profile before confirmation. The order summary should store both `detected_text_type` and `selected_translation_profile`, so retries, partial results, cache keys, and downloaded outputs remain consistent.
+
+Misclassification must be safe. If confidence is low, the service should use a conservative `general` or `mixed` profile and, in a future UI, offer the user a simple choice rather than silently applying a strong literary, legal, or scientific mode.
 
 ## Structured Content Protection Policy
 
@@ -369,6 +498,8 @@ The MVP supports user-facing modes, not provider selection:
 - Fast: lower-cost default instructions.
 - Quality: stricter translation instructions and additional validation where useful.
 - Terms: uses user-provided terminology instructions and preservation rules.
+
+These user-facing modes are separate from detected text type and target-language profile. A translation request can therefore be `Quality + Russian + technical`, `Fast + English + general`, or `Terms + Russian + literary`, with the structured translation policy determining the final prompt instructions.
 
 All prompts must be written specifically for this project.
 
@@ -395,7 +526,7 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - TXT validation, estimation, translation, and result file generation.
 - DOCX extraction, estimation, translation, and basic DOCX result assembly.
 - EPUB extraction, estimation, translation, and EPUB result assembly.
-- Localized bot interface for Russian, Ukrainian, French, Spanish, and English.
+- Localized bot interface for Russian, Ukrainian, French, Spanish, English, and Dutch.
 - Separate interface language and target translation language flows.
 - Localized confirmation buttons.
 - Back button for discarding unconfirmed pending translations.
