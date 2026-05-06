@@ -8,7 +8,7 @@ from translator_service.languages import (
 
 
 class LanguagesTest(unittest.TestCase):
-    def test_supported_target_languages_are_the_requested_five(self):
+    def test_supported_target_languages_include_dutch(self):
         self.assertEqual(
             [(language.code, language.button_text) for language in SUPPORTED_TARGET_LANGUAGES],
             [
@@ -17,14 +17,15 @@ class LanguagesTest(unittest.TestCase):
                 ("fr", "Français"),
                 ("es", "Español"),
                 ("en", "English"),
+                ("nl", "Nederlands"),
             ],
         )
 
     def test_finds_language_by_button_text_case_insensitively(self):
-        language = find_language_by_button_text(" english ")
+        language = find_language_by_button_text(" nederlands ")
 
-        self.assertEqual(language.code, "en")
-        self.assertEqual(language.name, "English")
+        self.assertEqual(language.code, "nl")
+        self.assertEqual(language.name, "Dutch")
 
     def test_returns_none_for_unknown_language_button(self):
         self.assertIsNone(find_language_by_button_text("Deutsch"))
@@ -35,6 +36,7 @@ class LanguagesTest(unittest.TestCase):
     def test_resolves_language_names_for_prompts(self):
         self.assertEqual(language_name_for_code("uk"), "Ukrainian")
         self.assertEqual(language_name_for_code("en"), "English")
+        self.assertEqual(language_name_for_code("nl"), "Dutch")
         self.assertEqual(language_name_for_code("auto"), "all detected source languages")
         self.assertEqual(language_name_for_code("de"), "German")
 

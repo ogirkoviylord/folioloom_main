@@ -14,6 +14,7 @@ SUPPORTED_TARGET_LANGUAGES = [
     LanguageOption(code="fr", name="French", button_text="Français"),
     LanguageOption(code="es", name="Spanish", button_text="Español"),
     LanguageOption(code="en", name="English", button_text="English"),
+    LanguageOption(code="nl", name="Dutch", button_text="Nederlands"),
 ]
 
 

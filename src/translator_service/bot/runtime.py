@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import asyncio
+from datetime import datetime
 import inspect
 import logging
 import os
@@ -8,22 +9,34 @@ import time
 from translator_service.bot.messages import (
     build_back_to_menu_message,
     build_cancel_requested_message,
+    build_help_message,
+    build_how_it_works_message,
     build_language_selected_message,
     build_language_selection_message,
     build_nothing_to_cancel_message,
+    build_no_pending_translation_message,
     build_pending_translation_message,
     build_start_message,
     build_translation_language_selection_message,
     build_translation_progress_message,
+    build_upload_error_message,
+    build_upload_prompt_message,
     build_translation_job_status_message,
+    get_main_menu_button_text,
     get_back_text,
     get_cancel_text,
     get_confirm_translation_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
+    is_help_text,
+    is_how_it_works_text,
+    is_language_menu_text,
+    is_main_menu_text,
+    is_translate_book_text,
+    build_main_menu,
 )
-from translator_service.bot_translation_service import BotTranslationService
+from translator_service.bot_translation_service import BotTranslationService, PendingTranslation
 from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
 from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
@@ -102,8 +115,12 @@ def create_router(
     @router.message(Command("start"))
     async def start(message: Message) -> None:
         await message.answer(
-            build_language_selection_message(),
-            reply_markup=_language_keyboard(),
+            build_start_message(
+                interface_language=service.get_interface_language(message.from_user.id)
+            ),
+            reply_markup=_main_menu_keyboard(
+                service.get_interface_language(message.from_user.id)
+            ),
         )
 
     @router.message(Command("language"))
@@ -112,6 +129,47 @@ def create_router(
             build_language_selection_message(
                 interface_language=service.get_interface_language(message.from_user.id)
             ),
+            reply_markup=_language_keyboard(),
+        )
+
+    @router.message(F.text.func(is_main_menu_text))
+    async def main_menu(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        service.discard_pending_translation(message.from_user.id)
+        await message.answer(
+            build_start_message(interface_language=interface_language),
+            reply_markup=_main_menu_keyboard(interface_language),
+        )
+
+    @router.message(F.text.func(is_translate_book_text))
+    async def translate_book(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        await message.answer(
+            build_upload_prompt_message(interface_language),
+            reply_markup=_back_keyboard(interface_language),
+        )
+
+    @router.message(F.text.func(is_how_it_works_text))
+    async def how_it_works(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        await message.answer(
+            build_how_it_works_message(interface_language),
+            reply_markup=_menu_detail_keyboard(interface_language),
+        )
+
+    @router.message(F.text.func(is_help_text))
+    async def help_text(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        await message.answer(
+            build_help_message(interface_language),
+            reply_markup=_menu_detail_keyboard(interface_language),
+        )
+
+    @router.message(F.text.func(is_language_menu_text))
+    async def language_menu(message: Message) -> None:
+        interface_language = service.get_interface_language(message.from_user.id)
+        await message.answer(
+            build_language_selection_message(interface_language=interface_language),
             reply_markup=_language_keyboard(),
         )
 
@@ -140,7 +198,7 @@ def create_router(
                 UnsupportedDocumentError,
                 ValueError,
             ) as error:
-                await message.answer(str(error))
+                await message.answer(build_upload_error_message(error, interface_language))
                 return
 
             await message.answer(
@@ -162,7 +220,10 @@ def create_router(
                 interface_language=language_option.code,
             )
         )
-        await message.answer(build_start_message(interface_language=language_option.code))
+        await message.answer(
+            build_start_message(interface_language=language_option.code),
+            reply_markup=_main_menu_keyboard(language_option.code),
+        )
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
@@ -199,7 +260,7 @@ def create_router(
         await message.answer(build_back_to_menu_message(interface_language))
         await message.answer(
             build_start_message(interface_language=interface_language),
-            reply_markup=_language_keyboard(),
+            reply_markup=_main_menu_keyboard(interface_language),
         )
 
     @router.message(F.text.func(is_confirm_translation_text))
@@ -227,7 +288,7 @@ def create_router(
 
         pending = service.get_pending(message.from_user.id)
         if pending is None:
-            await message.answer("Активного ожидающего перевода нет.")
+            await message.answer(build_no_pending_translation_message(interface_language))
             return
 
         await message.answer(
@@ -245,7 +306,8 @@ def create_router(
             error = FileTooLargeError(
                 f"File exceeds the upload limit of {config.max_upload_mb} MB"
             )
-            await message.answer(str(error))
+            interface_language = service.get_interface_language(message.from_user.id)
+            await message.answer(build_upload_error_message(error, interface_language))
             return
 
         bot = message.bot
@@ -266,7 +328,8 @@ def create_router(
             UnsupportedDocumentError,
             ValueError,
         ) as error:
-            await message.answer(str(error))
+            interface_language = service.get_interface_language(message.from_user.id)
+            await message.answer(build_upload_error_message(error, interface_language))
             return
 
         interface_language = service.get_interface_language(message.from_user.id)
@@ -282,7 +345,7 @@ def create_router(
     return router
 
 
-def _confirm_keyboard(interface_language: str = "ru", *, include_back: bool = False):
+def _confirm_keyboard(interface_language: str = "en", *, include_back: bool = False):
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
     keyboard = [[KeyboardButton(text=get_confirm_translation_text(interface_language))]]
@@ -296,7 +359,43 @@ def _confirm_keyboard(interface_language: str = "ru", *, include_back: bool = Fa
     )
 
 
-def _cancel_keyboard(interface_language: str = "ru"):
+def _main_menu_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    menu = build_main_menu(interface_language)
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=menu[0])],
+            [KeyboardButton(text=menu[1]), KeyboardButton(text=menu[2])],
+            [KeyboardButton(text=menu[3])],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def _menu_detail_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    menu = build_main_menu(interface_language)
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=menu[0])],
+            [KeyboardButton(text=get_main_menu_button_text(interface_language))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def _back_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=get_back_text(interface_language))]],
+        resize_keyboard=True,
+    )
+
+
+def _cancel_keyboard(interface_language: str = "en"):
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
     return ReplyKeyboardMarkup(
@@ -305,7 +404,7 @@ def _cancel_keyboard(interface_language: str = "ru"):
     )
 
 
-def _cancel_inline_keyboard(interface_language: str = "ru"):
+def _cancel_inline_keyboard(interface_language: str = "en"):
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     return InlineKeyboardMarkup(
@@ -353,6 +452,8 @@ async def _confirm_pending_translation(
     pending = service.get_pending(message.from_user.id)
     total_fragments = pending.fragment_count if pending else 0
     started_at = time.monotonic()
+    if pending is not None:
+        _print_translation_start(pending)
     progress_stats = {
         "completed": 0,
         "total": total_fragments,
@@ -615,6 +716,30 @@ def _print_translation_progress(
     )
 
 
+def _print_translation_start(
+    pending: PendingTranslation,
+    *,
+    started_at: datetime | None = None,
+) -> None:
+    started_at = started_at or datetime.now()
+    summary = (
+        "TRANSLATION STARTED "
+        f"started_at={started_at.isoformat(timespec='seconds')} "
+        f"file={pending.file_name} "
+        f"type={pending.document_format or _file_extension_type(pending.file_name)} "
+        f"size_bytes={len(pending.content)} "
+        f"characters={pending.character_count} "
+        f"source={pending.source_language_display or pending.source_language} "
+        f"target={pending.target_language} "
+        f"fragments={pending.fragment_count} "
+        f"estimated_time={(pending.estimated_seconds or 0)}s "
+        f"price=${pending.price_usd:.2f} "
+        f"input_tokens={pending.estimated_input_tokens} "
+        f"output_tokens={pending.estimated_output_tokens}"
+    )
+    print(f"\033[94m{summary}\033[0m", flush=True)
+
+
 def _print_translation_summary(
     *,
     job_id: str,
@@ -653,6 +778,11 @@ def _print_translation_summary(
     if status in {"ready", "cancelled"}:
         summary = f"\033[92m{summary}\033[0m"
     print(summary, flush=True)
+
+
+def _file_extension_type(file_name: str) -> str:
+    extension = file_name.rsplit(".", 1)[-1].strip().lower()
+    return extension if extension and extension != file_name.lower() else "unknown"
 
 
 async def run_bot() -> None:
