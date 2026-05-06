@@ -3,6 +3,7 @@ import unittest
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     find_language_by_button_text,
+    localized_language_name_for_code,
     language_name_for_code,
 )
 
@@ -39,6 +40,12 @@ class LanguagesTest(unittest.TestCase):
         self.assertEqual(language_name_for_code("nl"), "Dutch")
         self.assertEqual(language_name_for_code("auto"), "all detected source languages")
         self.assertEqual(language_name_for_code("de"), "German")
+
+    def test_resolves_localized_language_names_for_user_interface(self):
+        self.assertEqual(localized_language_name_for_code("nl", "ru"), "Нидерландский")
+        self.assertEqual(localized_language_name_for_code("fr", "nl"), "Frans")
+        self.assertEqual(localized_language_name_for_code("auto", "ru"), "автоопределение")
+        self.assertEqual(localized_language_name_for_code("de", "es"), "Alemán")
 
 
 if __name__ == "__main__":

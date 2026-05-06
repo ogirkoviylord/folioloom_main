@@ -1,5 +1,6 @@
 import unittest
 from io import BytesIO
+from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from translator_service.extractors import (
@@ -10,6 +11,9 @@ from translator_service.extractors import (
     extract_text_from_epub,
     extract_text_from_txt,
 )
+
+
+TEST_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_samples"
 
 
 class TxtExtractionTest(unittest.TestCase):
@@ -123,6 +127,20 @@ class DocxExtractionTest(unittest.TestCase):
         with self.assertRaises(TextExtractionError):
             extract_text_from_docx(archive.getvalue())
 
+    def test_extracts_russian_profile_regression_docx_sample(self):
+        content = (TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.docx").read_bytes()
+
+        text = extract_text_from_docx(content)
+
+        self.assertIn("Russian Profile Regression", text)
+        self.assertIn("He made a decision after a high-level overview", text)
+        self.assertIn("Set the API endpoint", text)
+        self.assertIn("English: The endpoint failed", text)
+        self.assertIn("Maria Johnson visited Baker Street", text)
+        self.assertIn("${API_TOKEN}", text)
+        self.assertIn("Russian profile regression header", text)
+        self.assertIn("Footnote: preserve API endpoint terminology.", text)
+
 
 class EpubExtractionTest(unittest.TestCase):
     def test_extracts_visible_text_from_epub_xhtml_items(self):
@@ -196,6 +214,22 @@ class EpubExtractionTest(unittest.TestCase):
 
         with self.assertRaises(TextExtractionError):
             extract_text_from_epub(archive.getvalue())
+
+    def test_extracts_russian_profile_regression_epub_sample_in_spine_order(self):
+        content = (TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.epub").read_bytes()
+
+        text = extract_text_from_epub(content)
+
+        self.assertIn("Russian Profile Regression", text)
+        self.assertIn("The room held its breath", text)
+        self.assertIn("Set the API endpoint", text)
+        self.assertIn("English: The endpoint failed", text)
+        self.assertIn("Zażółć gęślą jaźń", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertLess(
+            text.index("Russian Profile Regression"),
+            text.index("Mixed, Named Entities, And Protected Text"),
+        )
 
 
 def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:

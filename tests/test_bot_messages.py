@@ -14,12 +14,16 @@ from translator_service.bot.messages import (
     build_order_estimate_message,
     build_pending_translation_message,
     build_start_message,
+    build_settings_message,
     build_upload_prompt_message,
     build_translation_progress_message,
     build_translation_job_status_message,
+    build_unknown_text_message,
+    get_progress_activity_phrase,
     get_back_text,
     get_cancel_text,
     get_main_menu_text,
+    get_toggle_progress_preview_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
@@ -27,6 +31,8 @@ from translator_service.bot.messages import (
     is_how_it_works_text,
     is_language_menu_text,
     is_main_menu_text,
+    is_settings_text,
+    is_toggle_progress_preview_text,
     is_translate_book_text,
 )
 from translator_service.bot_translation_service import PendingTranslation
@@ -74,7 +80,18 @@ class BotMessagesTest(unittest.TestCase):
                 "📖 Translate a Book",
                 "🧵 How It Works",
                 "🌍 Language",
+                "⚙️ Settings",
                 "Help",
+            ],
+        )
+        self.assertEqual(
+            build_main_menu("nl"),
+            [
+                "📖 Boek vertalen",
+                "🧵 Zo werkt het",
+                "🌍 Taal",
+                "⚙️ Instellingen",
+                "Hulp",
             ],
         )
         self.assertEqual(
@@ -83,9 +100,33 @@ class BotMessagesTest(unittest.TestCase):
                 "📖 Перевести книгу",
                 "🧵 Как это работает",
                 "🌍 Язык",
+                "⚙️ Настройки",
                 "Помощь",
             ],
         )
+
+    def test_settings_message_shows_preview_preference_and_language(self):
+        message = build_settings_message(
+            interface_language="en",
+            progress_preview_enabled=True,
+        )
+
+        self.assertIn("Settings", message)
+        self.assertIn("Latest passage preview: On", message)
+        self.assertIn("Interface language: English", message)
+        self.assertEqual(get_toggle_progress_preview_text("en", True), "Hide Preview")
+        self.assertEqual(get_toggle_progress_preview_text("en", False), "Show Preview")
+
+    def test_settings_message_is_localized(self):
+        message = build_settings_message(
+            interface_language="ru",
+            progress_preview_enabled=False,
+        )
+
+        self.assertIn("Настройки", message)
+        self.assertIn("Последний фрагмент: выключен", message)
+        self.assertIn("Язык интерфейса: Русский", message)
+        self.assertEqual(get_toggle_progress_preview_text("ru", False), "Показывать фрагмент")
 
     def test_order_estimate_message_shows_price_and_volume(self):
         message = build_order_estimate_message(
@@ -179,6 +220,26 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("2", message)
         self.assertIn("24 sec", message)
         self.assertIn("Start Translation", message)
+
+    def test_pending_translation_message_localizes_duration_and_language_names(self):
+        message = build_pending_translation_message(
+            PendingTranslation(
+                user_telegram_id=42,
+                file_name="boek.docx",
+                content=b"notes",
+                source_language="auto",
+                target_language="nl",
+                price_usd=0.10,
+                fragment_count=2,
+                source_language_display="auto (Dutch)",
+                estimated_seconds=3661,
+            ),
+            interface_language="ru",
+        )
+
+        self.assertIn("С языка: автоопределение (Нидерландский)", message)
+        self.assertIn("На язык: Нидерландский", message)
+        self.assertIn("Примерное время: 1 ч 1 мин", message)
 
     def test_confirm_translation_text_accepts_button_text_and_command(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))
@@ -275,7 +336,7 @@ class BotMessagesTest(unittest.TestCase):
         )
 
         self.assertIn("Ready to begin", message)
-        self.assertIn("From: auto (French)", message)
+        self.assertIn("From: auto-detect (French)", message)
         self.assertIn("To: French", message)
         self.assertIn("Estimated time: 24 sec", message)
         self.assertIn("Start Translation", message)
@@ -288,7 +349,16 @@ class BotMessagesTest(unittest.TestCase):
         )
 
         self.assertIn("book.epub", message)
-        self.assertIn("Source language: auto (English)", message)
+        self.assertIn("Source language: auto-detect (English)", message)
+
+    def test_translation_language_selection_message_localizes_detected_source_language(self):
+        message = build_translation_language_selection_message(
+            "boek.docx",
+            interface_language="ru",
+            source_language_display="auto (Dutch)",
+        )
+
+        self.assertIn("Язык оригинала: автоопределение (Нидерландский)", message)
 
     def test_translation_progress_message_shows_fraction_and_bar(self):
         message = build_translation_progress_message(
@@ -307,8 +377,76 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Time left: ~1 min 10 sec", message)
         self.assertIn("Working through the text ⠋", message)
         self.assertIn("Last translated fragment", message)
+        self.assertIn("<blockquote expandable>", message)
+        self.assertIn("</blockquote>", message)
         self.assertIn("Translated paragraph from the document.", message)
         self.assertIn("/cancel", message)
+
+    def test_translation_progress_message_escapes_expandable_quote_excerpt(self):
+        message = build_translation_progress_message(
+            completed_fragments=1,
+            total_fragments=2,
+            interface_language="en",
+            elapsed_seconds=5,
+            last_translated_text="A <chapter> & a note",
+        )
+
+        self.assertIn("<blockquote expandable>A &lt;chapter&gt; &amp; a note</blockquote>", message)
+        self.assertNotIn("A <chapter> & a note", message)
+
+    def test_translation_progress_message_localizes_time_units(self):
+        message = build_translation_progress_message(
+            completed_fragments=1,
+            total_fragments=2,
+            interface_language="nl",
+            estimated_total_seconds=3661,
+            elapsed_seconds=61,
+        )
+
+        self.assertIn("Verstreken: 1 min 1 sec", message)
+        self.assertIn("Resterende tijd: ~1 u", message)
+
+    def test_progress_activity_phrases_are_localized_and_lively(self):
+        self.assertEqual(get_progress_activity_phrase("en", 0), "Turning the next page")
+        self.assertEqual(get_progress_activity_phrase("ru", 1), "Главы остаются на своих местах")
+        self.assertEqual(get_progress_activity_phrase("nl", 2), "De komma’s gedragen zich")
+
+    def test_translation_progress_message_can_use_lively_activity_phrase(self):
+        message = build_translation_progress_message(
+            completed_fragments=2,
+            total_fragments=5,
+            interface_language="ru",
+            elapsed_seconds=12,
+            activity_indicator="❦",
+            activity_phrase_index=2,
+        )
+
+        self.assertIn("Запятые ведут себя прилично ❦", message)
+
+    def test_translation_progress_message_uses_phrase_pack_for_all_locales(self):
+        expectations = {
+            "uk": "Коми поводяться чемно ✦",
+            "fr": "Les virgules se tiennent bien ✦",
+            "es": "Las comas se portan bien ✦",
+            "nl": "De komma’s gedragen zich ✦",
+        }
+
+        for language_code, expected in expectations.items():
+            with self.subTest(language_code=language_code):
+                message = build_translation_progress_message(
+                    completed_fragments=1,
+                    total_fragments=3,
+                    interface_language=language_code,
+                    activity_indicator="✦",
+                    activity_phrase_index=2,
+                )
+
+                self.assertIn(expected, message)
+
+    def test_unknown_text_message_points_back_to_menu(self):
+        self.assertIn("Send a book", build_unknown_text_message("en"))
+        self.assertIn("книгу", build_unknown_text_message("ru"))
+        self.assertIn("Hoofdmenu", build_unknown_text_message("nl"))
 
     def test_cancel_messages_are_localized(self):
         self.assertIn("Stopping translation", build_cancel_requested_message("en"))
@@ -347,8 +485,14 @@ class BotMessagesTest(unittest.TestCase):
         self.assertTrue(is_how_it_works_text("🧵 Zo werkt het"))
         self.assertTrue(is_language_menu_text("🌍 Language"))
         self.assertTrue(is_language_menu_text("🌍 Язык"))
+        self.assertTrue(is_settings_text("⚙️ Settings"))
+        self.assertTrue(is_settings_text("⚙️ Настройки"))
+        self.assertTrue(is_settings_text("⚙️ Instellingen"))
+        self.assertTrue(is_toggle_progress_preview_text("Hide Preview"))
+        self.assertTrue(is_toggle_progress_preview_text("Показывать фрагмент"))
         self.assertTrue(is_help_text("Help"))
         self.assertTrue(is_help_text("Помощь"))
+        self.assertTrue(is_help_text("Hulp"))
         self.assertTrue(is_main_menu_text("Main Menu"))
         self.assertTrue(is_main_menu_text("Главное меню"))
 

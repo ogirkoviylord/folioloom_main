@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.order_estimates import (
@@ -8,6 +9,9 @@ from translator_service.order_estimates import (
     estimate_txt_order,
 )
 from translator_service.pricing import PricingRules
+
+
+TEST_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_samples"
 
 
 class TxtOrderEstimateTest(unittest.TestCase):
@@ -207,6 +211,31 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         self.assertEqual(estimate.fragment_count, 3)
 
+    def test_docx_estimate_accepts_russian_profile_regression_sample(self):
+        path = TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.docx"
+        upload = validate_document_upload(
+            file_name=path.name,
+            size_bytes=path.stat().st_size,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=path.read_bytes(),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=300,
+        )
+
+        self.assertEqual(estimate.document_format, DocumentFormat.DOCX)
+        self.assertGreater(estimate.character_count, 1_000)
+        self.assertEqual(estimate.fragment_count, 7)
+        self.assertGreater(estimate.estimated_input_tokens, 700)
+
     def test_estimate_order_dispatches_epub_uploads(self):
         upload = validate_document_upload(
             file_name="book.epub",
@@ -275,6 +304,49 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         self.assertEqual(estimate.fragment_count, 2)
 
+    def test_epub_estimate_ignores_navigation_and_noise_blocks(self):
+        upload = validate_document_upload(
+            file_name="book.epub",
+            size_bytes=500,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=_make_epub(
+                {
+                    "OPS/front.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Contents</h1>
+                        <p>Chapter 1</p>
+                        <p>Chapter 2</p>
+                      </body>
+                    </html>
+                    """,
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Chapter 1</h1>
+                        <p>* * *</p>
+                        <p>First real paragraph of the book.</p>
+                      </body>
+                    </html>
+                    """,
+                }
+            ),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=60,
+        )
+
+        self.assertEqual(estimate.character_count, 44)
+        self.assertEqual(estimate.fragment_count, 1)
+
     def test_epub_estimate_counts_structural_table_unit_separately(self):
         upload = validate_document_upload(
             file_name="book.epub",
@@ -309,6 +381,31 @@ class TxtOrderEstimateTest(unittest.TestCase):
         )
 
         self.assertEqual(estimate.fragment_count, 3)
+
+    def test_epub_estimate_accepts_russian_profile_regression_sample(self):
+        path = TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.epub"
+        upload = validate_document_upload(
+            file_name=path.name,
+            size_bytes=path.stat().st_size,
+            max_upload_mb=50,
+        )
+
+        estimate = estimate_order(
+            upload=upload,
+            content=path.read_bytes(),
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=300,
+        )
+
+        self.assertEqual(estimate.document_format, DocumentFormat.EPUB)
+        self.assertGreater(estimate.character_count, 1_000)
+        self.assertEqual(estimate.fragment_count, 5)
+        self.assertGreater(estimate.estimated_input_tokens, 400)
 
     def test_rejects_non_epub_upload_for_epub_estimator(self):
         upload = validate_document_upload(

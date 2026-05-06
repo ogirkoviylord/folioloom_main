@@ -1,5 +1,7 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import time
 
 from translator_service.bot_translation_service import (
@@ -7,8 +9,14 @@ from translator_service.bot_translation_service import (
     PendingUpload,
     PendingTranslation,
 )
+from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.job_runner import DocumentKind
 from translator_service.job_runner import InMemoryTranslationJobRepository, TranslationJobStatus
+from translator_service.persistent_jobs import (
+    PersistentTranslationJobStatus,
+    PersistentWorkUnitStatus,
+    SQLiteTranslationJobStore,
+)
 from translator_service.pricing import PricingRules
 
 
@@ -78,10 +86,6 @@ class BotTranslationServiceTest(unittest.TestCase):
                 fragment_count=2,
                 source_language_display="ru",
                 estimated_seconds=24,
-                character_count=28,
-                estimated_input_tokens=7,
-                estimated_output_tokens=8,
-                document_format="txt",
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
@@ -98,6 +102,24 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         self.assertEqual(service.get_interface_language(42), "uk")
         self.assertEqual(service.get_interface_language(100), "en")
+
+    def test_stores_progress_preview_preference_per_user(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+
+        self.assertTrue(service.get_progress_preview_enabled(42))
+
+        service.set_progress_preview_enabled(
+            user_telegram_id=42,
+            enabled=False,
+        )
+
+        self.assertFalse(service.get_progress_preview_enabled(42))
+        self.assertTrue(service.get_progress_preview_enabled(100))
 
     def test_upload_waits_for_translation_language_before_estimate(self):
         service = BotTranslationService(
@@ -125,6 +147,36 @@ class BotTranslationServiceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(service.get_pending_upload(42), upload)
+
+    def test_upload_can_be_persisted_to_object_storage_before_estimate(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+            )
+
+            upload = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"This is an English document.",
+                source_language="auto",
+            )
+            pending = service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            self.assertIsNotNone(upload.source_object_key)
+            self.assertEqual(upload.source_object_key, pending.source_object_key)
+            self.assertEqual(storage.get_bytes(upload.source_object_key), upload.content)
+            self.assertEqual(
+                storage.get_metadata(upload.source_object_key).kind,
+                StoredFileKind.ORIGINAL,
+            )
 
     def test_auto_language_display_lists_mixed_document_languages(self):
         service = BotTranslationService(
@@ -200,6 +252,107 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.result_file_name, "notes.uk.txt")
         self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
         self.assertIsNone(service.get_pending(42))
+
+    def test_persistent_txt_confirmation_uses_stored_work_units(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            persisted_job = persistent_store.get_job(job.id)
+            work_units = persistent_store.list_work_units(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(job.result_file_name, "notes.uk.txt")
+            self.assertEqual(
+                job.result_content.decode("utf-8"),
+                "[uk] One.\n\n[uk] Two.",
+            )
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.READY,
+            )
+            self.assertIsNotNone(persisted_job.final_object_key)
+            self.assertEqual(
+                storage.get_bytes(persisted_job.final_object_key),
+                job.result_content,
+            )
+            self.assertEqual(
+                [unit.status for unit in work_units],
+                [
+                    PersistentWorkUnitStatus.TRANSLATED,
+                    PersistentWorkUnitStatus.TRANSLATED,
+                ],
+            )
+
+    def test_persistent_txt_cancellation_returns_partial_result(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=CancellingTranslator(service, 42),
+            )
+
+            persisted_job = persistent_store.get_job(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.CANCELLED)
+            self.assertEqual(job.result_file_name, "notes.uk.partial.txt")
+            self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.")
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertIsNotNone(persisted_job.partial_object_key)
+            self.assertEqual(
+                storage.get_bytes(persisted_job.partial_object_key),
+                job.result_content,
+            )
 
     def test_concurrent_confirm_claims_pending_translation_once(self):
         repository = InMemoryTranslationJobRepository()

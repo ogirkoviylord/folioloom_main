@@ -1,6 +1,9 @@
-# DeepSeek Document Translator
+# FolioLoom
 
-Telegram service prototype for paid document translation through DeepSeek API.
+Telegram bot prototype for translating books, chapters, and manuscripts.
+
+FolioLoom is the Telegram product for the Folio & Loom translation workflow.
+DeepSeek is an internal translation provider, not the user-facing brand.
 
 ## Current Prototype
 
@@ -13,9 +16,31 @@ Implemented:
 - Fragmented TXT, DOCX, and EPUB translation runners.
 - In-memory translation job status model.
 - In-memory balance, ledger, order charge, and refund backend domain.
-- aiogram runtime skeleton with `/start`, document upload, `/confirm`, `/cancel`, and `/status`.
+- aiogram runtime skeleton with `/start`, `/menu`, `/help`, `/language`, document upload, `/confirm`, `/cancel`, and `/status`.
 
 The Telegram runtime currently translates TXT, DOCX, and EPUB files.
+
+## Workspace Policy
+
+Active development work must happen in the dev workspace:
+
+```text
+/path/to/local-workspace/Documents/New project 2 dev
+```
+
+The release workspace is reserved for the stable bot and must receive only reviewed, working changes ready for release:
+
+```text
+/path/to/local-workspace/Documents/New project 2
+```
+
+The legacy beta workspace must not be used for new development or updates:
+
+```text
+/path/to/local-workspace/Documents/New project 2 beta
+```
+
+Before changing files, confirm that the current working directory is the dev workspace unless the task explicitly says to prepare a release.
 
 ## Local Checks
 
@@ -66,21 +91,21 @@ Telegram bot polling started. Open Telegram and send /start.
 Prototype flow:
 
 1. Send `/start`.
-2. Choose the bot interface language button: `Русский`, `Українська`, `Français`, `Español`, or `English`.
+2. Choose `📖 Translate a Book`, or use `🌍 Language` to change the interface language.
 3. Upload a `.txt`, `.docx`, or `.epub` file.
 4. Choose the translation target language button.
-5. Review the estimate.
-6. Press the localized confirm button or send `/confirm`.
+5. Review the estimate and translation summary.
+6. Press the localized start button or send `/confirm`.
    Use the localized Back button before confirmation if the wrong file was uploaded.
 7. The bot returns the translated file.
 
 During long translations, press the localized Cancel button or send `/cancel` to stop after the current fragment and receive a partial translated file.
 
-Use `/language` to show the interface language buttons again.
+Use `/menu` to return to the main menu, `/help` for the help screen, and `/language` to show the interface language buttons again.
 
-Interface messages are currently localized for Russian, Ukrainian, French, Spanish, and English.
+Interface messages are currently localized for English, Russian, Ukrainian, French, Spanish, and Dutch.
 
-Sample documents for manual beta checks are in `test_samples/`. Regenerate them with:
+Sample documents for manual dev checks are in `test_samples/`. Regenerate them with:
 
 ```bash
 python3 scripts/generate_sample_documents.py
@@ -95,12 +120,12 @@ PYTHONPATH=src \
 watchfiles "python3 -m translator_service.bot" src
 ```
 
-## Stable and Beta Bots
+## Stable and Dev Bots
 
 Use two different Telegram bots from BotFather:
 
 - stable bot: for the version users rely on;
-- beta bot: for testing new behavior.
+- dev bot: for testing new behavior from the dev workspace.
 
 Each bot must have its own `TELEGRAM_BOT_TOKEN`. Never run two polling
 processes with the same token.
@@ -109,10 +134,10 @@ Create local env files from the examples:
 
 ```bash
 cp .env.stable.example .env.stable
-cp .env.beta.example .env.beta
+cp .env.dev.example .env.dev
 ```
 
-Fill `.env.stable` with the stable bot token and `.env.beta` with the beta bot
+Fill `.env.stable` with the stable bot token and `.env.dev` with the dev bot
 token. These local files are ignored by git.
 
 Run the stable bot in one terminal:
@@ -121,22 +146,22 @@ Run the stable bot in one terminal:
 scripts/run_bot_env.sh .env.stable
 ```
 
-Run the beta bot in another terminal:
+Run the dev bot in another terminal:
 
 ```bash
-scripts/run_bot_env.sh .env.beta
+scripts/run_bot_env.sh .env.dev
 ```
 
-During development, you can run beta with auto-restart:
+During development, you can run the dev bot with auto-restart:
 
 ```bash
 set -a
-source .env.beta
+source .env.dev
 set +a
 PYTHONPATH=src watchfiles "python3 -m translator_service.bot" src
 ```
 
-For production later, stable and beta must also use separate databases, queues,
+For production later, stable and dev must also use separate databases, queues,
 storage buckets, payment keys, and admin settings.
 
 ## Clean-Room Note

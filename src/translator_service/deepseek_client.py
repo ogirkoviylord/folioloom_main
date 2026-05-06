@@ -8,6 +8,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from translator_service.languages import language_name_for_code
+from translator_service.text_analysis import detect_text_type
+from translator_service.translation_profiles import build_target_language_profile_prompt
 
 
 class Transport(Protocol):
@@ -142,6 +144,7 @@ class DeepSeekClient:
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
         result = self.create_chat_completion(
             system_prompt=_build_translation_prompt(
+                text=text,
                 source_language=source_language,
                 target_language=target_language,
             ),
@@ -151,9 +154,19 @@ class DeepSeekClient:
         return result.content
 
 
-def _build_translation_prompt(*, source_language: str, target_language: str) -> str:
+def _build_translation_prompt(
+    *,
+    text: str,
+    source_language: str,
+    target_language: str,
+) -> str:
     source_language_name = language_name_for_code(source_language)
     target_language_name = language_name_for_code(target_language)
+    text_type = detect_text_type(text)
+    target_language_profile_prompt = build_target_language_profile_prompt(
+        target_language=target_language,
+        text_type=text_type,
+    )
     source_instruction = (
         f"Translate every human language in the input to {target_language_name}. "
         "Do not leave text untranslated just because it is in a secondary source "
@@ -167,6 +180,9 @@ def _build_translation_prompt(*, source_language: str, target_language: str) -> 
         "You are a professional document translator. "
         f"{source_instruction}"
         "Preserve meaning, paragraph boundaries, numbers, and named entities. "
+        "For narrative prose, preserve the narrator and speaker person, gender, "
+        "and number from the source; do not switch first-person masculine, "
+        "feminine, singular, plural, or point of view between fragments. "
         "Keep ZXQPROTECTED...QXZ protected markers exactly unchanged. "
         "If the input contains <translation_batch> and <translation_block id=\"...\"> "
         "tags, keep those tags, ids, and source_language attributes exactly as "
@@ -179,6 +195,7 @@ def _build_translation_prompt(*, source_language: str, target_language: str) -> 
         "a meaningful letter/orthography test instead of producing nonsense. "
         "Never include notes, explanations, warnings, apologies, alternatives, or "
         "phrases such as 'Here is the translation' anywhere in the output. "
+        f"{target_language_profile_prompt} "
         "Return only the translated text without commentary."
     )
 

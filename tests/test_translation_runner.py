@@ -1,5 +1,6 @@
 import unittest
 from io import BytesIO
+from pathlib import Path
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
@@ -13,6 +14,9 @@ from translator_service.translation_runner import (
     translate_epub_document,
     translate_txt_document,
 )
+
+
+TEST_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_samples"
 
 
 class RecordingTranslator:
@@ -676,6 +680,29 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertIn("Німецька:", text)
         self.assertNotIn("German:", text)
 
+    def test_translates_russian_profile_regression_docx_sample(self):
+        translator = RecordingTranslator()
+        path = TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.docx"
+
+        result = translate_docx_document(
+            file_name=path.name,
+            content=path.read_bytes(),
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            max_fragment_chars=300,
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertEqual(result.file_name, "russian_profile_regression.en-ru.ru.docx")
+        self.assertEqual(result.fragment_count, 7)
+        self.assertIn("[ru] Russian Profile Regression", text)
+        self.assertIn("[ru] Set ${API_TOKEN}", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertIn("ROW-001", text)
+        self.assertIn("[ru] Footnote: preserve API endpoint terminology.", text)
+        self.assertNotIn("ZXQPROTECTED", text)
+
     def test_docx_translation_keeps_table_as_separate_structural_unit(self):
         translator = RecordingTranslator()
         content = _make_docx(
@@ -956,6 +983,69 @@ class TranslationRunnerTest(unittest.TestCase):
             self.assertEqual(epub.infolist()[0].filename, "mimetype")
             self.assertEqual(epub.read("mimetype"), b"application/epub+zip")
 
+    def test_translated_epub_updates_metadata_toc_and_html_title(self):
+        translator = RecordingTranslator()
+        content = _make_epub_with_metadata_and_toc()
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+        )
+
+        with ZipFile(BytesIO(result.content)) as epub:
+            opf = _parse_xml(epub.read("OPS/content.opf"))
+            toc = _parse_xml(epub.read("OPS/toc.ncx"))
+            chapter = _parse_xml(epub.read("OPS/chapter.xhtml"))
+
+        self.assertEqual(
+            _first_text(opf, "title"),
+            "[uk] Original Book Title",
+        )
+        self.assertEqual(
+            _first_text(opf, "description"),
+            "[uk] Original book description.",
+        )
+        self.assertEqual(_first_text(opf, "language"), "uk")
+        self.assertEqual(
+            [_element_text(element) for element in toc.iter() if _local_name(element.tag) == "text"],
+            [
+                "[uk] Original Book Title",
+                "[uk] Chapter One",
+            ],
+        )
+        self.assertEqual(_first_text(chapter, "title"), "[uk] Original Book Title")
+        self.assertEqual(
+            extract_text_from_epub(result.content),
+            "[uk] Chapter One\n\n[uk] First paragraph.",
+        )
+
+    def test_translates_russian_profile_regression_epub_sample(self):
+        translator = RecordingTranslator()
+        path = TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.epub"
+
+        result = translate_epub_document(
+            file_name=path.name,
+            content=path.read_bytes(),
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            max_fragment_chars=300,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertEqual(result.file_name, "russian_profile_regression.en-ru.ru.epub")
+        self.assertEqual(result.fragment_count, 5)
+        self.assertIn("[ru] Russian Profile Regression", text)
+        self.assertIn("[ru] English: The endpoint failed", text)
+        self.assertIn("Zażółć gęślą jaźń", text)
+        self.assertIn("${API_TOKEN}", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertIn("ROW-001", text)
+        self.assertNotIn("ZXQPROTECTED", text)
+
     def test_cancelled_epub_translation_returns_partial_epub_result(self):
         translator = RecordingTranslator()
         token = CancellationToken()
@@ -1033,6 +1123,59 @@ class TranslationRunnerTest(unittest.TestCase):
             extract_text_from_epub(result.content),
             "[uk] First chapter.\n\nSecond chapter.",
         )
+
+    def test_cancelled_epub_translation_skips_navigation_and_noise_for_partial_body(self):
+        translator = RecordingTranslator()
+        token = CancellationToken()
+        content = _make_epub(
+            {
+                "OPS/front.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>Contents</h1>
+                    <p>Chapter 1</p>
+                    <p>Chapter 2</p>
+                  </body>
+                </html>
+                """,
+                "OPS/chapter1.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>Chapter 1</h1>
+                    <p>* * *</p>
+                    <p>First real paragraph of the book.</p>
+                    <p>Second real paragraph of the book.</p>
+                  </body>
+                </html>
+                """,
+            },
+            spine=["OPS/front.xhtml", "OPS/chapter1.xhtml"],
+        )
+
+        def cancel_after_first(progress) -> None:
+            if progress.completed_fragments == 1:
+                token.cancel()
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            max_fragment_chars=60,
+            progress_callback=cancel_after_first,
+            cancellation_token=token,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertTrue(result.is_partial)
+        self.assertEqual(result.fragment_count, 1)
+        self.assertIn("[uk] First real paragraph of the book.", text)
+        self.assertIn("Second real paragraph of the book.", text)
+        self.assertIn("Contents", text)
+        self.assertIn("* * *", text)
+        self.assertNotIn("[uk] Contents", text)
+        self.assertNotIn("[uk] * * *", text)
 
     def test_epub_translation_groups_blocks_by_max_fragment_chars(self):
         translator = RecordingTranslator()
@@ -1160,6 +1303,67 @@ def _make_epub(xhtml_items: dict[str, str], spine: list[str] | None = None) -> b
     return archive.getvalue()
 
 
+def _make_epub_with_metadata_and_toc() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+              </rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/"
+                     unique-identifier="bookid">
+              <metadata>
+                <dc:identifier id="bookid">urn:uuid:test-book</dc:identifier>
+                <dc:title>Original Book Title</dc:title>
+                <dc:creator>Author Name</dc:creator>
+                <dc:language>en</dc:language>
+                <dc:description>Original book description.</dc:description>
+              </metadata>
+              <manifest>
+                <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+              </manifest>
+              <spine toc="ncx"><itemref idref="chapter" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/toc.ncx",
+            """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>Original Book Title</text></docTitle>
+              <navMap>
+                <navPoint id="chapter" playOrder="1">
+                  <navLabel><text>Chapter One</text></navLabel>
+                  <content src="chapter.xhtml" />
+                </navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+        epub.writestr(
+            "OPS/chapter.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><title>Original Book Title</title></head>
+              <body><h1>Chapter One</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+    return archive.getvalue()
+
+
 def _translate_marked_blocks(text: str, target_language: str) -> str:
     from xml.etree import ElementTree
 
@@ -1173,6 +1377,23 @@ def _parse_xml(content: bytes):
     from xml.etree import ElementTree
 
     return ElementTree.fromstring(content)
+
+
+def _first_text(document, local_name: str) -> str:
+    for element in document.iter():
+        if _local_name(element.tag) == local_name:
+            return _element_text(element)
+    raise AssertionError(f"Missing element: {local_name}")
+
+
+def _element_text(element) -> str:
+    return "".join(element.itertext()).strip()
+
+
+def _local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.rsplit("}", 1)[1]
+    return tag
 
 
 def _docx_part_xml(text: str) -> str:

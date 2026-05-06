@@ -170,8 +170,15 @@ def translate_epub_document(
     translated_content = _replace_epub_blocks(
         content,
         blocks,
-        [fragment.translated_text for fragment in translation.fragments],
+        translation.fragments,
     )
+    if not is_partial:
+        translated_content = _translate_epub_auxiliary_content(
+            translated_content,
+            source_language=source_language,
+            target_language=target_language,
+            translator=translator,
+        )
 
     return TranslatedDocument(
         file_name=_translated_file_name(file_name, target_language, "epub", is_partial),
@@ -785,11 +792,13 @@ class _DocxTranslationUnit:
 
 @dataclass(frozen=True)
 class _EpubTextBlock:
+    index: int
     file_name: str
     block_index: int
     text: str
     kind: TextBlockKind = TextBlockKind.PLAIN
     group_id: str | None = None
+    role: str = "body"
 
 
 @dataclass(frozen=True)
@@ -820,24 +829,48 @@ def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
                 document = _read_epub_xhtml(epub.read(file_name))
                 parent_by_child_id = _parent_map(document)
                 group_index_by_element_id = _epub_group_indexes(document)
-                for block_index, element in enumerate(_iter_epub_text_elements(document)):
-                    text = _visible_text(element)
-                    if text:
-                        kind, group_id = _epub_block_structure(
-                            element,
+                extracted_elements = [
+                    (block_index, element, _visible_text(element))
+                    for block_index, element in enumerate(_iter_epub_text_elements(document))
+                ]
+                text_elements = [
+                    (block_index, element, text)
+                    for block_index, element, text in extracted_elements
+                    if text
+                ]
+                is_navigation_file = _is_epub_navigation_document(
+                    file_name=file_name,
+                    document=document,
+                    texts=[text for _, _, text in text_elements],
+                )
+                has_body_prose = any(
+                    _is_epub_body_prose(element, text)
+                    for _, element, text in text_elements
+                )
+                for block_index, element, text in text_elements:
+                    kind, group_id = _epub_block_structure(
+                        element,
+                        file_name=file_name,
+                        parent_by_child_id=parent_by_child_id,
+                        group_index_by_element_id=group_index_by_element_id,
+                    )
+                    blocks.append(
+                        _EpubTextBlock(
+                            index=len(blocks),
                             file_name=file_name,
-                            parent_by_child_id=parent_by_child_id,
-                            group_index_by_element_id=group_index_by_element_id,
-                        )
-                        blocks.append(
-                            _EpubTextBlock(
-                                file_name=file_name,
-                                block_index=block_index,
+                            block_index=block_index,
+                            text=text,
+                            kind=kind,
+                            group_id=group_id,
+                            role=_epub_block_role(
+                                element=element,
                                 text=text,
-                                kind=kind,
-                                group_id=group_id,
-                            )
+                                parent_by_child_id=parent_by_child_id,
+                                is_navigation_file=is_navigation_file,
+                                has_body_prose=has_body_prose,
+                            ),
                         )
+                    )
     except (BadZipFile, KeyError) as error:
         raise TextExtractionError(
             "EPUB file does not contain readable book text"
@@ -938,13 +971,142 @@ def _is_dense_epub_markup(element: ElementTree.Element) -> bool:
     return inline_count >= 4
 
 
+def _is_epub_navigation_document(
+    *,
+    file_name: str,
+    document: ElementTree.Element,
+    texts: list[str],
+) -> bool:
+    lowered_file_name = file_name.lower()
+    if any(part in lowered_file_name for part in ("nav", "toc", "contents")):
+        return True
+    if any(_local_name(element.tag) == "nav" for element in document.iter()):
+        return True
+    if _looks_like_epub_contents_heading(texts[0] if texts else ""):
+        following_texts = texts[1:]
+        if following_texts and (
+            sum(
+                1
+                for text in following_texts
+                if _is_epub_noise_text(text) or _looks_like_epub_navigation_entry(text)
+            )
+            / len(following_texts)
+            >= 0.5
+        ):
+            return True
+    if len(texts) < 20:
+        return False
+
+    navigation_like_count = sum(
+        1
+        for text in texts
+        if _is_epub_noise_text(text) or _looks_like_epub_navigation_entry(text)
+    )
+    return navigation_like_count / len(texts) >= 0.65
+
+
+def _epub_block_role(
+    *,
+    element: ElementTree.Element,
+    text: str,
+    parent_by_child_id: dict[int, ElementTree.Element],
+    is_navigation_file: bool,
+    has_body_prose: bool,
+) -> str:
+    if is_navigation_file or _is_inside_epub_navigation(element, parent_by_child_id):
+        return _EPUB_BLOCK_ROLE_NAVIGATION
+    if _is_epub_noise_text(text):
+        return _EPUB_BLOCK_ROLE_NOISE
+    if _is_epub_heading_element(element) and not has_body_prose:
+        return _EPUB_BLOCK_ROLE_NAVIGATION
+    return _EPUB_BLOCK_ROLE_BODY
+
+
+def _is_inside_epub_navigation(
+    element: ElementTree.Element,
+    parent_by_child_id: dict[int, ElementTree.Element],
+) -> bool:
+    current: ElementTree.Element | None = element
+    while current is not None:
+        local_name = _local_name(current.tag)
+        epub_type = _epub_type(current)
+        if local_name == "nav" or any(
+            token in epub_type for token in ("toc", "landmarks", "page-list")
+        ):
+            return True
+        current = parent_by_child_id.get(id(current))
+    return False
+
+
+def _epub_type(element: ElementTree.Element) -> str:
+    return (
+        element.attrib.get("epub:type", "")
+        or element.attrib.get("{http://www.idpf.org/2007/ops}type", "")
+    ).lower()
+
+
+def _is_epub_heading_element(element: ElementTree.Element) -> bool:
+    return _local_name(element.tag) in {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+
+def _is_epub_body_prose(element: ElementTree.Element, text: str) -> bool:
+    if _is_epub_noise_text(text) or _is_epub_heading_element(element):
+        return False
+    letter_count = len(re.findall(r"[^\W\d_]", text, flags=re.UNICODE))
+    return letter_count >= 12
+
+
+def _is_epub_noise_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if re.fullmatch(r"[\*\s•·—–-]+", stripped):
+        return True
+    if re.fullmatch(r"\d+", stripped):
+        return True
+    if stripped.lower() in {"notes", "note", "примечания", "примітки"}:
+        return True
+    return False
+
+
+def _looks_like_epub_navigation_entry(text: str) -> bool:
+    stripped = text.strip()
+    if len(stripped) > 80:
+        return False
+    return bool(
+        re.match(
+            r"^(annotation|contents|notes|chapter|part|глава|часть|розділ|частина|"
+            r"благодарности|подяки|об авторе|про автора|примечания|примітки)"
+            r"(\b|\s|\d)",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_epub_contents_heading(text: str) -> bool:
+    return text.strip().lower() in {
+        "contents",
+        "table of contents",
+        "оглавление",
+        "содержание",
+        "зміст",
+    }
+
+
 def _replace_epub_blocks(
     content: bytes,
     blocks: list[_EpubTextBlock],
-    translated_blocks: list[str],
+    translated_fragments: list[FragmentTranslation],
 ) -> bytes:
+    translated_by_block_index = {
+        fragment.index: fragment.translated_text for fragment in translated_fragments
+    }
     replacements_by_file: dict[str, dict[int, str]] = {}
-    for block, translated_text in zip(blocks, translated_blocks, strict=False):
+    for block in blocks:
+        translated_text = translated_by_block_index.get(block.index)
+        if translated_text is None:
+            continue
         replacements_by_file.setdefault(block.file_name, {})[
             block.block_index
         ] = translated_text
@@ -964,6 +1126,181 @@ def _replace_epub_blocks(
             target_epub.writestr(item, data)
 
     return target.getvalue()
+
+
+def _translate_epub_auxiliary_content(
+    content: bytes,
+    *,
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+) -> bytes:
+    source = BytesIO(content)
+    target = BytesIO()
+
+    with ZipFile(source) as source_epub, ZipFile(target, "w") as target_epub:
+        validate_archive_members(source_epub)
+        opf_path = _epub_package_path(source_epub)
+        for item in source_epub.infolist():
+            data = source_epub.read(item)
+            if item.filename == opf_path:
+                data = _translate_epub_opf_metadata(
+                    data,
+                    source_language=source_language,
+                    target_language=target_language,
+                    translator=translator,
+                )
+            elif item.filename.lower().endswith(".ncx"):
+                data = _translate_epub_ncx_text(
+                    data,
+                    source_language=source_language,
+                    target_language=target_language,
+                    translator=translator,
+                )
+            elif _is_epub_text_item(item.filename):
+                data = _translate_epub_xhtml_auxiliary_text(
+                    data,
+                    source_language=source_language,
+                    target_language=target_language,
+                    translator=translator,
+                )
+            target_epub.writestr(item, data)
+
+    return target.getvalue()
+
+
+def _translate_epub_opf_metadata(
+    content: bytes,
+    *,
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+) -> bytes:
+    document = ElementTree.fromstring(content)
+    translatable_elements = [
+        element
+        for element in document.iter()
+        if _local_name(element.tag) in {"title", "description"}
+        and (element.text or "").strip()
+    ]
+    translated_texts = _translate_epub_auxiliary_strings(
+        [_element_direct_text(element) for element in translatable_elements],
+        source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+    )
+    for element, translated_text in zip(
+        translatable_elements,
+        translated_texts,
+        strict=True,
+    ):
+        element.text = translated_text
+
+    for element in document.iter():
+        if _local_name(element.tag) == "language":
+            element.text = target_language
+
+    return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
+
+
+def _translate_epub_ncx_text(
+    content: bytes,
+    *,
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+) -> bytes:
+    document = ElementTree.fromstring(content)
+    translatable_elements = [
+        element
+        for element in document.iter()
+        if _local_name(element.tag) == "text" and (element.text or "").strip()
+    ]
+    translated_texts = _translate_epub_auxiliary_strings(
+        [_element_direct_text(element) for element in translatable_elements],
+        source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+    )
+    for element, translated_text in zip(
+        translatable_elements,
+        translated_texts,
+        strict=True,
+    ):
+        element.text = translated_text
+    return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
+
+
+def _translate_epub_xhtml_auxiliary_text(
+    content: bytes,
+    *,
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+) -> bytes:
+    document = _read_epub_xhtml(content)
+    parent_by_child_id = _parent_map(document)
+    elements: list[ElementTree.Element] = []
+    seen_element_ids: set[int] = set()
+    for element in document.iter():
+        if _local_name(element.tag) == "title" or (
+            _is_epub_text_element(element)
+            and _is_inside_epub_navigation(element, parent_by_child_id)
+        ):
+            text = _visible_text(element)
+            if text and id(element) not in seen_element_ids:
+                elements.append(element)
+                seen_element_ids.add(id(element))
+
+    translated_texts = _translate_epub_auxiliary_strings(
+        [_visible_text(element) for element in elements],
+        source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+    )
+    for element, translated_text in zip(elements, translated_texts, strict=True):
+        if _local_name(element.tag) == "title":
+            element.text = translated_text
+            continue
+        _replace_text_node_sequence(_epub_text_slots(element), translated_text)
+    return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
+
+
+def _translate_epub_auxiliary_strings(
+    texts: list[str],
+    *,
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+) -> list[str]:
+    if not texts:
+        return []
+
+    protected_texts = [protect_text(text) for text in texts]
+    translated_text = translator.translate(
+        text=_format_translation_batch(
+            [protected_text.text for protected_text in protected_texts],
+            source_language_hints=_source_language_hints(
+                texts,
+                source_language=source_language,
+            ),
+        ),
+        source_language=source_language,
+        target_language=target_language,
+    )
+    parsed = _parse_translation_batch(translated_text, expected_count=len(texts))
+    if parsed is None:
+        return _translate_texts_individually(
+            texts=texts,
+            translator=translator,
+            source_language=source_language,
+            target_language=target_language,
+        )
+    return _restore_protected_texts(parsed, protected_texts)
+
+
+def _element_direct_text(element: ElementTree.Element) -> str:
+    return (element.text or "").strip()
 
 
 def _group_docx_blocks(
@@ -997,6 +1334,11 @@ def _group_epub_blocks(
     *,
     max_fragment_chars: int,
 ) -> list[_EpubTranslationUnit]:
+    translatable_blocks = [
+        block
+        for block in blocks
+        if block.role == _EPUB_BLOCK_ROLE_BODY
+    ]
     optimized_units = build_translation_units(
         [
             StructuredTextBlock(
@@ -1005,13 +1347,16 @@ def _group_epub_blocks(
                 kind=block.kind,
                 group_id=block.group_id,
             )
-            for index, block in enumerate(blocks)
+            for index, block in enumerate(translatable_blocks)
         ],
         max_fragment_chars=max_fragment_chars,
     )
     return [
         _EpubTranslationUnit(
-            blocks=[blocks[unit_block.index] for unit_block in optimized_unit.blocks],
+            blocks=[
+                translatable_blocks[unit_block.index]
+                for unit_block in optimized_unit.blocks
+            ],
             prompt_tier=optimized_unit.prompt_tier,
         )
         for optimized_unit in optimized_units
@@ -1597,7 +1942,7 @@ def _translate_epub_units(
         if cached is not None:
             translated_unit_blocks = [
                 FragmentTranslation(
-                    index=source_block.block_index,
+                    index=source_block.index,
                     source_text=source_block.text,
                     translated_text=translated,
                 )
@@ -1884,7 +2229,7 @@ def _parse_epub_translation_unit(
     parsed = _restore_protected_texts(parsed, protected_blocks)
     return [
         FragmentTranslation(
-            index=source_block.block_index,
+            index=source_block.index,
             source_text=source_block.text,
             translated_text=translated,
         )
@@ -1932,7 +2277,7 @@ def _translate_epub_blocks_individually(
         protected_source = protect_text(source_block.text)
         translated_blocks.append(
             FragmentTranslation(
-                index=source_block.block_index,
+                index=source_block.index,
                 source_text=source_block.text,
                 translated_text=restore_protected_text(
                     translator.translate(
@@ -2027,7 +2372,7 @@ def _count_translated_epub_units(
     return sum(
         1
         for unit in translation_units
-        if all(block.block_index in translated_indexes for block in unit.blocks)
+        if all(block.index in translated_indexes for block in unit.blocks)
     )
 
 
@@ -2203,11 +2548,11 @@ def _epub_text_item_names(epub: ZipFile) -> list[str]:
     return ordered
 
 
-def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
+def _epub_package_path(epub: ZipFile) -> str | None:
     try:
         container = ElementTree.fromstring(epub.read("META-INF/container.xml"))
     except (KeyError, ElementTree.ParseError):
-        return []
+        return None
 
     rootfile = next(
         (
@@ -2218,9 +2563,12 @@ def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
         None,
     )
     if rootfile is None:
-        return []
+        return None
+    return rootfile.attrib.get("full-path")
 
-    opf_path = rootfile.attrib.get("full-path")
+
+def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
+    opf_path = _epub_package_path(epub)
     if not opf_path:
         return []
 
@@ -2328,6 +2676,9 @@ _EPUB_TEXT_BLOCK_TAGS = {
     "th",
 }
 _EPUB_IGNORED_TAGS = {"head", "script", "style", "svg"}
+_EPUB_BLOCK_ROLE_BODY = "body"
+_EPUB_BLOCK_ROLE_NAVIGATION = "navigation"
+_EPUB_BLOCK_ROLE_NOISE = "noise"
 _EPUB_DENSE_INLINE_TAGS = {
     "a",
     "abbr",
