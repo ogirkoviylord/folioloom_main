@@ -7,6 +7,8 @@ import json
 from typing import Protocol
 
 from translator_service.structure_optimizer import PromptTier
+from translator_service.text_analysis import detect_text_type
+from translator_service.translation_profiles import target_language_policy_signature
 
 
 class TranslationCache(Protocol):
@@ -92,11 +94,17 @@ def _cache_key(
         "version": 1,
         "source_language": source_language.strip().lower(),
         "target_language": target_language.strip().lower(),
+        "target_language_policy": target_language_policy_signature(target_language),
+        "source_text_policy": _source_text_policy_signature(source_texts),
         "prompt_tier": prompt_tier.value,
         "source_texts": [_normalize_text(text) for text in source_texts],
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _source_text_policy_signature(source_texts: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(detect_text_type(text).value for text in source_texts)
 
 
 def _normalize_text(text: str) -> str:

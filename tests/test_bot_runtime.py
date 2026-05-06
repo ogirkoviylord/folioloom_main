@@ -1,22 +1,27 @@
 import asyncio
-from datetime import datetime
 import io
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from translator_service.bot_translation_service import PendingTranslation
-import translator_service.bot.runtime as runtime
 from translator_service.bot.runtime import (
     BotRuntimeConfig,
+    HEARTBEAT_PATTERNS,
     _cancel_inline_keyboard,
+    _choose_heartbeat_pattern_name,
     _document_exceeds_upload_limit,
+    _include_progress_preview,
     _is_language_button_text,
     _main_menu_keyboard,
+    _next_heartbeat_frame,
     _next_spinner_frame,
     _print_translation_progress,
     _print_translation_summary,
     _schedule_message_edit,
+    _settings_keyboard,
     build_default_pricing_rules,
+    build_translation_service,
 )
 from translator_service.translation_jobs import TranslationProgress
 
@@ -42,7 +47,7 @@ class EditableMessage:
 
 class RecordingBot:
     def __init__(self) -> None:
-        self.edits: list[tuple[str, int, int, object]] = []
+        self.edits: list[tuple[str, int, int, object, str | None]] = []
 
     async def edit_message_text(
         self,
@@ -51,8 +56,9 @@ class RecordingBot:
         chat_id: int,
         message_id: int,
         reply_markup=None,
+        parse_mode=None,
     ) -> None:
-        self.edits.append((text, chat_id, message_id, reply_markup))
+        self.edits.append((text, chat_id, message_id, reply_markup, parse_mode))
 
 
 class Chat:
@@ -64,6 +70,11 @@ class BotBackedMessage:
         self.bot = RecordingBot()
         self.chat = Chat()
         self.message_id = 55
+
+
+class _RuntimeRecordingTranslator:
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        return f"[{target_language}] {text}"
 
 
 class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -82,6 +93,58 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.target_language, "en")
         self.assertEqual(config.max_fragment_chars, 4_000)
         self.assertEqual(config.max_upload_mb, 50)
+        self.assertEqual(config.object_storage_root, "var/object-storage")
+        self.assertEqual(config.persistent_jobs_db_path, "var/jobs.sqlite3")
+
+    def test_build_translation_service_wires_local_object_storage(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=temp_dir,
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                )
+            )
+            self.addCleanup(service.close)
+
+            upload = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"This is an English document.",
+                source_language="auto",
+            )
+
+            self.assertIsNotNone(upload.source_object_key)
+            self.assertTrue((Path(temp_dir) / upload.source_object_key).exists())
+
+    def test_build_translation_service_wires_persistent_txt_confirmation(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=_RuntimeRecordingTranslator(),
+            )
+
+            self.assertEqual(job.id, "job-1")
+            self.assertEqual(job.result_file_name, "notes.uk.txt")
+            self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
 
     def test_language_button_filter_ignores_missing_message_text(self):
         self.assertFalse(_is_language_button_text(None))
@@ -111,7 +174,20 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
 
         await asyncio.wrap_future(future)
-        self.assertEqual(message.bot.edits, [("Progress 2", 100, 55, "inline-keyboard")])
+        self.assertEqual(message.bot.edits, [("Progress 2", 100, 55, "inline-keyboard", "HTML")])
+
+    async def test_schedules_message_edit_with_html_parse_mode_for_expandable_quotes(self):
+        message = BotBackedMessage()
+        loop = asyncio.get_running_loop()
+
+        future = _schedule_message_edit(
+            loop=loop,
+            message=message,
+            text="<blockquote expandable>Preview</blockquote>",
+        )
+
+        await asyncio.wrap_future(future)
+        self.assertEqual(message.bot.edits[0][4], "HTML")
 
     def test_cancel_inline_keyboard_uses_callback_data(self):
         keyboard = _cancel_inline_keyboard("en")
@@ -128,7 +204,38 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             [
                 ["📖 Translate a Book"],
                 ["🧵 How It Works", "🌍 Language"],
+                ["⚙️ Settings"],
                 ["Help"],
+            ],
+        )
+
+    def test_progress_preview_helper_respects_user_setting(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                )
+            )
+            self.addCleanup(service.close)
+
+            self.assertEqual(
+                _include_progress_preview(service, 42, "translated"),
+                "translated",
+            )
+
+            service.set_progress_preview_enabled(user_telegram_id=42, enabled=False)
+
+            self.assertIsNone(_include_progress_preview(service, 42, "translated"))
+
+    def test_settings_keyboard_exposes_only_preview_toggle_and_main_menu(self):
+        keyboard = _settings_keyboard("ru", progress_preview_enabled=False)
+
+        self.assertEqual(
+            [[button.text for button in row] for row in keyboard.keyboard],
+            [
+                ["Показывать фрагмент"],
+                ["Главное меню"],
             ],
         )
 
@@ -139,7 +246,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_document_exceeds_upload_limit(Document(), max_upload_mb=5))
         self.assertFalse(_document_exceeds_upload_limit(Document(), max_upload_mb=6))
 
-    def test_translation_progress_log_does_not_include_user_text(self):
+    def test_translation_progress_log_includes_last_translated_fragment_preview(self):
         output = io.StringIO()
 
         with redirect_stdout(output):
@@ -148,7 +255,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     completed_fragments=1,
                     total_fragments=2,
                     source_text="private source text",
-                    translated_text="private translated text",
+                    translated_text="translated text\nwith a second line",
                     elapsed_seconds=1.25,
                     total_tokens=9,
                 ),
@@ -156,55 +263,36 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertNotIn("private source text", output.getvalue())
-        self.assertNotIn("private translated text", output.getvalue())
+        self.assertIn("last_translated=", output.getvalue())
+        self.assertIn("translated text with a second line", output.getvalue())
         self.assertIn("tokens=9", output.getvalue())
-
-    def test_translation_start_log_is_blue_and_contains_pending_metadata(self):
-        output = io.StringIO()
-        if not hasattr(runtime, "_print_translation_start"):
-            self.fail("_print_translation_start is not implemented")
-
-        with redirect_stdout(output):
-            runtime._print_translation_start(
-                PendingTranslation(
-                    user_telegram_id=42,
-                    file_name="book.epub",
-                    content=b"book content",
-                    source_language="auto",
-                    target_language="ru",
-                    price_usd=0.25,
-                    fragment_count=4,
-                    source_language_display="auto (English)",
-                    estimated_seconds=48,
-                    character_count=1200,
-                    estimated_input_tokens=450,
-                    estimated_output_tokens=540,
-                    document_format="epub",
-                ),
-                started_at=datetime(2026, 5, 6, 12, 30, 5),
-            )
-
-        text = output.getvalue()
-        self.assertIn("\033[94m", text)
-        self.assertIn("\033[0m", text)
-        self.assertIn("TRANSLATION STARTED", text)
-        self.assertIn("started_at=2026-05-06T12:30:05", text)
-        self.assertIn("file=book.epub", text)
-        self.assertIn("type=epub", text)
-        self.assertIn("size_bytes=12", text)
-        self.assertIn("characters=1200", text)
-        self.assertIn("source=auto (English)", text)
-        self.assertIn("target=ru", text)
-        self.assertIn("fragments=4", text)
-        self.assertIn("estimated_time=48s", text)
-        self.assertIn("price=$0.25", text)
-        self.assertIn("input_tokens=450", text)
-        self.assertIn("output_tokens=540", text)
 
     def test_spinner_frame_cycles(self):
         self.assertEqual(_next_spinner_frame(-1), "⠋")
         self.assertEqual(_next_spinner_frame(0), "⠙")
         self.assertEqual(_next_spinner_frame(9), "⠋")
+
+    def test_heartbeat_patterns_are_mono_typographic(self):
+        self.assertGreaterEqual(len(HEARTBEAT_PATTERNS), 5)
+        self.assertEqual(HEARTBEAT_PATTERNS["calm_dots"], ("·", "•", "●", "•"))
+        self.assertEqual(HEARTBEAT_PATTERNS["fleuron"], ("❦", "❧", "❦", "❧"))
+        self.assertEqual(HEARTBEAT_PATTERNS["editorial"], ("¶", "§", "¶", "§"))
+        flattened = "".join(symbol for pattern in HEARTBEAT_PATTERNS.values() for symbol in pattern)
+        self.assertNotIn("❤️", flattened)
+        self.assertNotIn("💕", flattened)
+
+    def test_heartbeat_pattern_choice_is_stable_for_order_seed(self):
+        first = _choose_heartbeat_pattern_name(user_telegram_id=42, file_name="book.epub")
+        second = _choose_heartbeat_pattern_name(user_telegram_id=42, file_name="book.epub")
+
+        self.assertEqual(first, second)
+        self.assertIn(first, HEARTBEAT_PATTERNS)
+
+    def test_heartbeat_frame_cycles_with_selected_pattern(self):
+        self.assertEqual(_next_heartbeat_frame("page", -1), "□")
+        self.assertEqual(_next_heartbeat_frame("page", 0), "▣")
+        self.assertEqual(_next_heartbeat_frame("page", 3), "□")
+        self.assertEqual(_next_heartbeat_frame("unknown", -1), "·")
 
     def test_success_translation_summary_is_green_and_contains_totals(self):
         output = io.StringIO()

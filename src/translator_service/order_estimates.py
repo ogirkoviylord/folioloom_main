@@ -11,7 +11,11 @@ from translator_service.structure_optimizer import (
     estimate_unit_input_tokens,
 )
 from translator_service.text_analysis import TextAnalysis, estimate_text_volume
-from translator_service.translation_runner import _extract_docx_blocks, _extract_epub_blocks
+from translator_service.translation_runner import (
+    _extract_docx_blocks,
+    _extract_epub_blocks,
+    _group_epub_blocks,
+)
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,16 @@ def estimate_epub_order(
         raise ValueError("EPUB estimator can only process EPUB uploads")
 
     blocks = _extract_epub_blocks(content)
-    text = "\n\n".join(block.text for block in blocks)
+    translation_units = _group_epub_blocks(
+        blocks,
+        max_fragment_chars=max_fragment_chars,
+    )
+    translatable_blocks = [
+        block
+        for unit in translation_units
+        for block in unit.blocks
+    ]
+    text = "\n\n".join(block.text for block in translatable_blocks)
     estimate = _estimate_structured_blocks(
         upload=upload,
         text=text,
@@ -134,7 +147,7 @@ def estimate_epub_order(
                 kind=block.kind,
                 group_id=block.group_id,
             )
-            for index, block in enumerate(blocks)
+            for index, block in enumerate(translatable_blocks)
         ],
         pricing_rules=pricing_rules,
         max_fragment_chars=max_fragment_chars,

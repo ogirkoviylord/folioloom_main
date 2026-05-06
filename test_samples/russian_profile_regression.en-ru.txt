@@ -1,0 +1,160 @@
+Russian Translation Regression Sample Pack
+
+Target language: ru
+Purpose: manual and automated QA for English/mixed-source translation into Russian.
+
+## ru-ordinary-calque-decision-overview
+Category: ordinary_prose
+Expected text type: general
+
+Source:
+He made a decision after a high-level overview of the system.
+
+Expected behavior:
+- Avoid сделал решение.
+- Avoid mechanical высокоуровневый обзор in general prose.
+
+Required prompt terms:
+- made a decision
+- решил
+- high-level overview
+- общее описание
+
+## ru-literary-rain-window
+Category: literary
+Expected text type: literary fiction
+
+Source:
+The room held its breath while the rain traced silver lines across the window.
+
+Expected behavior:
+- Preserve imagery and rhythm.
+- Do not flatten the sentence into neutral explanation.
+
+Required prompt terms:
+- voice, rhythm
+- imagery
+
+## ru-technical-api-placeholder-callback
+Category: technical
+Expected text type: technical
+
+Source:
+Set the API endpoint and pass the placeholder token to the callback handler.
+
+Expected behavior:
+- Preserve API and technical identifiers.
+- Use stable Russian technical terminology or controlled transcription.
+
+Required prompt terms:
+- technical documentation
+- preserve code identifiers
+- placeholder
+- плейсхолдер
+- callback
+
+## ru-business-acme-obligation
+Category: business_legal
+Expected text type: business/legal-like
+
+Source:
+Acme B.V. shall deliver the materials by 15 March 2026 under this agreement.
+
+Expected behavior:
+- Preserve legal company name and date.
+- Preserve obligation without creative paraphrase.
+
+Required prompt terms:
+- formal Russian
+- obligations
+- legal entity names
+
+## ru-scientific-correlation-hedging
+Category: scientific
+Expected text type: scientific/academic
+
+Source:
+The results suggest a moderate correlation, but the sample size limits the conclusion.
+
+Expected behavior:
+- Preserve hedging.
+- Do not overstate the conclusion.
+
+Required prompt terms:
+- Preserve claims
+- hedging
+- exact terminology
+
+## ru-journalistic-officials-policy
+Category: journalistic
+Expected text type: journalistic/publicistic
+
+Source:
+Officials said the policy would be reviewed after public consultations.
+
+Expected behavior:
+- Preserve attribution.
+- Use readable Russian publicistic rhythm.
+
+Required prompt terms:
+- publicistic
+- facts
+- attribution
+
+## ru-mixed-language-labels
+Category: mixed_language
+Expected text type: mixed/unknown
+
+Source:
+English: The endpoint failed. Polski: Zażółć gęślą jaźń. Nederlands: De klant bevestigde de bestelling.
+
+Expected behavior:
+- Translate all human-language segments into Russian.
+- Treat the Polish pangram as an orthographic sample.
+
+Required prompt terms:
+- conservative general Russian
+- technical and named-entity protections
+
+## ru-named-entities-maria-openai
+Category: named_entities
+Expected text type: general
+
+Source:
+Maria Johnson visited Baker Street and met the OpenAI Research team.
+
+Expected behavior:
+- Transliterate ordinary personal names.
+- Preserve brand spelling.
+
+Required prompt terms:
+- Transliterate ordinary personal names
+- Preserve brands
+
+## ru-protected-content-token-url-row
+Category: protected_content
+Expected text type: technical
+
+Source:
+Set ${API_TOKEN}, call https://example.com/v1/items, and keep ROW-001 unchanged.
+
+Expected behavior:
+- Preserve placeholder, URL, and row identifier byte-for-byte.
+- Translate surrounding prose only.
+
+Required prompt terms:
+- Do not add Russian case endings
+- protected markers
+
+## ru-heading-title-case
+Category: heading_title_case
+Expected text type: general
+
+Source:
+Translation Quality Roadmap
+
+Expected behavior:
+- Use Russian sentence-style capitalization.
+
+Required prompt terms:
+- natural modern Russian

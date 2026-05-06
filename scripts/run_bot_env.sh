@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-  echo "Usage: scripts/run_bot_env.sh .env.beta|.env.stable" >&2
+  echo "Usage: scripts/run_bot_env.sh .env.dev|.env.stable" >&2
   exit 2
 fi
 

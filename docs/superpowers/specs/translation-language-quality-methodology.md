@@ -32,45 +32,17 @@ These rules should not be redesigned per language unless a real exception exists
 
 ### 1. Role and Priority
 
-Define why this language is being worked on now.
-
-- Is it a first QA language, strategic market language, interface language, or expansion language?
-- Which source languages are most likely?
-- Which document types matter most?
-- What must be true before beta or production exposure?
+Define why this language is being worked on now, likely source languages, most important document types, and beta/production readiness.
 
 ### 2. Target-Language Naturalness
 
-Define what “good natural output” means.
-
-- Preferred sentence rhythm and word order.
-- How much source structure may be rewritten for naturalness.
-- Whether borrowed English terms are acceptable.
-- How to avoid literal calques.
-- How to avoid over-editing the author’s style.
-
-Every profile must include:
-
-- a literal but bad translation;
-- an acceptable neutral translation;
-- a higher-quality translation for the expected domain.
+Define sentence rhythm, word order, allowed rewriting for naturalness, borrowed-term tolerance, calque avoidance, and author-style preservation. Include a bad literal translation, an acceptable neutral translation, and a preferred domain translation.
 
 ### 3. Text Type Profiles
 
-Define behavior for:
+Define behavior for general prose, literary fiction, literary non-fiction, journalistic/publicistic text, scientific/academic text, technical documentation, business/legal-like documents, educational material, marketing/sales copy, and mixed/unknown text.
 
-- general prose;
-- literary fiction;
-- literary non-fiction;
-- journalistic or publicistic text;
-- scientific or academic text;
-- technical documentation;
-- business or legal-like document;
-- educational material;
-- marketing or sales copy;
-- mixed or unknown.
-
-For every type, decide tone, terminology strictness, allowed paraphrase level, named-entity behavior, title behavior, and whether the detected type should be user-visible. Low-confidence detection must fall back to conservative `general` or `mixed`.
+For every type, decide tone, terminology strictness, allowed paraphrase level, named-entity behavior, title behavior, and whether detected type should be user-visible. Low-confidence detection must fall back to conservative `general` or `mixed`.
 
 ### 4. Terminology Policy
 
@@ -85,18 +57,7 @@ Each profile must list common technical terms, publishing/book terms, legal/busi
 
 ### 5. Named-Entity Policy
 
-Define defaults and future user-switchable behavior for:
-
-- personal names;
-- brands;
-- product names;
-- legal company names;
-- institutions and organizations;
-- city and country names;
-- street names and addresses;
-- book, article, chapter, and event titles;
-- link anchor text;
-- usernames, package names, API names, and code identifiers.
+Define defaults and future user-switchable behavior for personal names, brands, products, legal company names, institutions, organizations, cities, countries, street names, addresses, book/article/chapter/event titles, link anchor text, usernames, package names, API names, and code identifiers.
 
 For each category, choose one of: preserve, translate, transliterate/transcribe, glossary-pinned form, preserve with translated explanation in parentheses, or translated form with original in parentheses.
 
@@ -127,16 +88,7 @@ Production-bound profiles must include at least one DOCX and one EPUB sample.
 
 ### 10. User Controls
 
-Define what the user can change now, later, and never.
-
-Required future controls:
-
-- translation mode: Fast, Quality, Terms;
-- detected text type override;
-- terminology mode;
-- named-entity preset;
-- glossary upload or glossary entries;
-- preserve/translate/transliterate switches for advanced users.
+Define what the user can change now, later, and never. Required future controls include translation mode, detected text type override, terminology mode, named-entity preset, glossary upload or entries, and preserve/translate/transliterate switches for advanced users.
 
 Simple UI should use presets. Advanced UI may expose category-level entity controls.
 
@@ -148,118 +100,6 @@ Every sample must include expected behavior, not necessarily a single exact tran
 
 ### 12. Acceptance Criteria
 
-A profile is beta-ready when:
+A profile is beta-ready when the profile has no unresolved decisions, every required sample category exists, regression tests cover deterministic protections and known exceptions, manual QA has checked at least one medium-length document, terminology and named-entity defaults are documented, text type behavior is documented, and user-facing target-language button, prompt language name, and language detection display are consistent.
 
-- the profile has no unresolved decisions;
-- every required sample category exists;
-- regression tests cover deterministic protections and known exceptions;
-- manual QA has checked at least one medium-length document;
-- terminology and named-entity defaults are documented;
-- text type behavior is documented;
-- user-facing target-language button, prompt language name, and language detection display are consistent.
-
-A profile is production-ready when:
-
-- beta feedback has no recurring unresolved quality class;
-- common source-target pairs have examples;
-- DOCX and EPUB samples preserve structure;
-- glossary and named-entity settings are stored with the job or explicitly scoped out;
-- cache keys include every policy field that changes translation output;
-- failure modes and fallbacks are documented.
-
-## Language Profile Template
-
-```markdown
-# <Language> Translation Profile
-
-## Status
-
-- Priority:
-- Rollout stage:
-- Target audience:
-- Common source languages:
-- Most important document types:
-
-## Default Behavior
-
-- General:
-- Technical:
-- Literary:
-- Business/legal-like:
-- Scientific/academic:
-- Journalistic:
-- Marketing:
-
-## Terminology
-
-- Preserve:
-- Translate:
-- Transliterate/transcribe:
-- Glossary required:
-- False friends:
-
-## Named Entities
-
-- Personal names:
-- Brands:
-- Products:
-- Companies:
-- Institutions:
-- Cities/countries:
-- Streets/addresses:
-- Titles:
-- Links:
-- Code/API/package names:
-
-## Typography
-
-- Quotes:
-- Dashes:
-- Title capitalization:
-- Numbers/dates/units:
-- Lists:
-
-## Protected Text Grammar
-
-- Case/gender/number behavior:
-- Preserved foreign terms:
-- Inline code punctuation:
-
-## Source Pair Exceptions
-
-- English -> <Language>:
-- Other common source -> <Language>:
-- Mixed source -> <Language>:
-
-## Document Format Risks
-
-- TXT:
-- DOCX:
-- EPUB:
-- Future OCR/PDF:
-
-## User Controls
-
-- Current:
-- Future simple presets:
-- Future advanced controls:
-
-## Regression Samples
-
-- Ordinary prose:
-- Literary:
-- Technical:
-- Business/legal:
-- Scientific:
-- Journalistic:
-- Mixed-language:
-- Named entities:
-- Protected content:
-- DOCX:
-- EPUB:
-
-## Acceptance Notes
-
-- Beta-ready gaps:
-- Production-ready gaps:
-```
+A profile is production-ready when beta feedback has no recurring unresolved quality class, common source-target pairs have examples, DOCX and EPUB samples preserve structure, glossary and named-entity settings are stored with the job or explicitly scoped out, cache keys include every policy field that changes translation output, and failure modes/fallbacks are documented.
