@@ -39,6 +39,8 @@ class TranslationProgress:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
     success: bool = True
 
     def __eq__(self, other: object) -> bool:
@@ -107,6 +109,8 @@ def translate_text_fragments(
                     prompt_tokens=usage[0],
                     completion_tokens=usage[1],
                     total_tokens=usage[2],
+                    prompt_cache_hit_tokens=usage[3],
+                    prompt_cache_miss_tokens=usage[4],
                 )
             )
 
@@ -124,13 +128,15 @@ def _build_translation_result(
     )
 
 
-def _translation_usage(translator: TextTranslator) -> tuple[int, int, int]:
+def _translation_usage(translator: TextTranslator) -> tuple[int, int, int, int, int]:
     usage = getattr(translator, "last_usage", None)
     if usage is None:
-        return (0, 0, 0)
+        return (0, 0, 0, 0, 0)
 
     return (
         int(getattr(usage, "prompt_tokens", 0) or 0),
         int(getattr(usage, "completion_tokens", 0) or 0),
         int(getattr(usage, "total_tokens", 0) or 0),
+        int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0),
+        int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0),
     )

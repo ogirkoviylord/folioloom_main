@@ -22,6 +22,32 @@ The MVP is split into small services that can run locally with Docker Compose:
 
 The user never chooses an LLM provider. DeepSeek model and pricing settings are controlled by service configuration and admin tools.
 
+## Multi-Channel Architecture
+
+Telegram is the first product channel, but the backend must be designed as a channel-independent document translation service. Translation, estimation, payments, order state, file storage, cancellation, retries, terminology policy, and result assembly must live in the shared service core, not inside Telegram handlers.
+
+Each user-facing platform must be implemented as a thin channel adapter:
+
+- Telegram adapter: Telegram files, commands, reply keyboards, inline buttons, localized bot messages, and Telegram-specific delivery.
+- WhatsApp adapter: WhatsApp Business Platform messages, media upload/download, approved template messages, interactive buttons or lists where available, and WhatsApp-specific delivery windows.
+- Future adapters: website/web app, Viber, Messenger, Instagram, Discord, Slack, email, or partner API.
+
+Channel adapters may differ in UI controls, message length limits, file limits, payment flow, and delivery rules, but they must call the same backend use cases:
+
+- create or resume user session;
+- upload and validate document;
+- detect source languages;
+- estimate price, fragment count, and time;
+- choose target language and translation policy;
+- confirm and pay for an order;
+- start, cancel, or resume translation;
+- fetch final or partial result files;
+- show order history and support status.
+
+The shared backend must use internal user, order, file, and job identifiers rather than Telegram-specific IDs as primary domain identifiers. Channel-specific identifiers such as Telegram user ID, WhatsApp phone number, or web account ID are external identities linked to the internal user account.
+
+WhatsApp support is a planned growth channel, not part of the current prototype. It requires WhatsApp Business Platform access through Meta or a provider such as Twilio, MessageBird, or 360dialog, business verification, message template management, media handling, and compliance with WhatsApp conversation-window rules. The architecture must make this an adapter addition rather than a rewrite.
+
 ## Current Prototype Scope
 
 The current local prototype is a runnable Telegram bot with in-memory state. It is not yet the full paid production service, but it already exercises the core document translation loop end to end.
@@ -42,6 +68,9 @@ Implemented prototype capabilities:
 - Cancellation stops after the current fragment, marks the job as cancelled, and returns a partial translated file with `.partial` in the name.
 - Translation errors are logged internally with traceback but shown to the user as generic localized failure messages.
 - End-user messages must not mention the internal LLM provider.
+- The DeepSeek client retries temporary network/read failures and temporary HTTP errors so one transient provider or connection issue does not fail a long document immediately.
+- Runtime progress and developer logs include per-fragment timing and token usage, including provider cache hit/miss token counters when available.
+- DOCX and EPUB translation can reuse application-level translation memory for repeated API units through the bot service path, avoiding duplicate provider calls for identical source text, source language, target language, and prompt tier.
 
 Prototype storage and processing limits:
 
@@ -52,6 +81,7 @@ Prototype storage and processing limits:
 - TXT translation groups paragraphs up to the configured fragment size.
 - DOCX translation handles main document paragraphs, table cell paragraphs, headers, footers, footnotes, endnotes, and comments. It groups short text blocks into marked API batches, parses the marked response, and inserts only clean translated text back into the DOCX package.
 - DOCX assembly preserves existing paragraph and run structure where possible, including basic run-level formatting such as bold text, hyperlink text, and subscript/superscript runs. Exact semantic mapping of translated words to original style spans is best-effort because translation can change word order and text length.
+- DOCX mono-spaced pseudo-table rows are translated, then re-padded so column starts remain aligned when translated cells still fit the available width.
 - EPUB translation follows the EPUB spine reading order, extracts text blocks from common XHTML containers, groups them into marked API batches, parses the marked response, and inserts translations back into their original XHTML positions.
 - EPUB assembly preserves existing inline XHTML elements where possible, including tags such as `strong`, `em`, `a`, and `span`. Exact semantic mapping of translated words to original inline spans is best-effort because translation can change word order and text length.
 - Full DOCX styling fidelity and advanced OOXML features such as text boxes, tracked changes internals, floating shapes, complex field codes, embedded objects, exact pagination preservation, and complex run-level reconstruction are not yet production-complete.
@@ -263,6 +293,27 @@ The optimizer also assigns an internal prompt tier to each work unit:
 
 The current prototype uses these tiers for cost estimation and future prompt routing while keeping the existing translator interface stable. Estimation includes per-unit prompt overhead, so a simple EPUB novel stays close to plain-text pricing, while a table-heavy DOCX or reference-like EPUB is priced more honestly before confirmation.
 
+## Translation Cache Optimization
+
+The service must distinguish provider-side context-cache savings from application-level translation memory.
+
+Provider context caching can reduce input-token price when a request shares a stable prefix with recent requests, but unique document text is still cache miss. The DeepSeek client parses and exposes `prompt_cache_hit_tokens` and `prompt_cache_miss_tokens` in usage records so progress, billing diagnostics, and future admin reports can show whether input-token spend came from cache hits or misses.
+
+Application-level translation memory is the stronger optimization. DOCX and EPUB units are looked up before any LLM request using a key built from normalized source text, source language, target language, and prompt tier. On hit, the service reuses the translated blocks without sending the unit to the provider, so it avoids input miss tokens, input hit tokens, and completion tokens entirely. On miss, the unit is translated normally and the clean parsed result is stored for later documents or repeated boilerplate inside the same batch.
+
+The cache key includes a version field so future changes to protection, parsing, or prompt-tier behavior can invalidate old entries safely. Production storage may be Redis or PostgreSQL; the prototype uses an in-memory implementation behind the same cache interface. The current prototype wires this cache through the Telegram bot service, job runner, and DOCX/EPUB runners.
+
+## Provider Reliability Policy
+
+Long documents must survive ordinary provider and network instability.
+
+- DeepSeek remains the only LLM provider in the product.
+- Temporary network errors, read timeouts, socket errors, SSL read interruptions, and temporary provider HTTP statuses such as `429` and `5xx` should be retried automatically.
+- Non-temporary local configuration errors, such as missing macOS Python SSL certificates, must fail fast with an actionable internal error.
+- Retries must repeat the same API unit without changing source text, target language, prompt tier, or protection markers.
+- Retry attempts and provider failures must be logged for developers, while users receive a localized generic failure only after retries are exhausted.
+- Future production workers should persist retry state with the job so process restarts do not lose progress.
+
 ## Language Handling Policy
 
 The bot stores language choices as short internal codes but provider prompts must use human-readable language names.
@@ -339,6 +390,8 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Settings and healthcheck API.
 - Clean-room Telegram bot text builders.
 - DeepSeek-compatible chat completion client and smoke probes.
+- DeepSeek client retries temporary network/read failures and temporary provider HTTP errors.
+- DeepSeek usage parsing includes prompt tokens, completion tokens, total tokens, provider cache-hit tokens, and provider cache-miss tokens.
 - TXT validation, estimation, translation, and result file generation.
 - DOCX extraction, estimation, translation, and basic DOCX result assembly.
 - EPUB extraction, estimation, translation, and EPUB result assembly.
@@ -359,6 +412,7 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Manual beta-check sample documents are generated in TXT, DOCX, and EPUB formats with headings, paragraphs, lists, tables, inline text, and ebook structure.
 - DOCX translation groups paragraphs/table-cell text, headers, footers, footnotes, endnotes, and comments into marked batches and strips internal markers before writing the result.
 - DOCX translation preserves basic run-level formatting nodes, including bold runs, instead of collapsing the result into one plain text run.
+- DOCX mono-spaced pseudo-table rows are translated and re-padded to preserve column starts where possible.
 - DOCX estimation and language detection include the same translatable DOCX parts as runtime translation.
 - DOCX mixed-language blocks can be translated by detected source-language segment, including multiple language labels inside one paragraph.
 - DOCX translation protects hyperlink visible text, subscript/superscript runs, technical tokens, structured data, URLs, placeholders, code-like identifiers, JSON/YAML/XML/HTML snippets, repeated spaces, non-breaking spaces, and soft hyphens from model damage.
@@ -366,6 +420,7 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Known orthographic samples such as Polish `Zażółć gęślą jaźń` are normalized as orthographic tests instead of accepting transliterated nonsense from the model.
 - EPUB translation uses OPF spine reading order, groups XHTML blocks into marked API batches, and preserves partial results in reading order.
 - EPUB translation preserves inline XHTML formatting nodes, including `strong`, `em`, and links, instead of flattening the block into plain text.
+- Application-level translation memory is implemented for DOCX and EPUB units and is wired through the bot service and job runner.
 - Provider prompts use human-readable language names from the shared language registry.
 - Auto-source provider prompts instruct the model to translate every human language in mixed-language fragments into the target language.
 
@@ -386,7 +441,9 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Balance and order payment tests cover top-up, insufficient balance, order charge, and refund behavior without external services.
 - EPUB translation tests cover div-based book text, spine reading order, grouped API fragments, and preservation of the `mimetype` item.
 - EPUB translation tests cover preservation of inline formatting nodes such as `strong`.
-- DOCX translation tests cover batch-marker parsing, basic run-level formatting preservation, headers, footers, footnotes, endnotes, comments, source-language segmented translation, hyperlink anchor preservation, subscript/superscript preservation, structured-data protection, technical-term preservation, orthographic sample handling, and ensure internal XML markers do not leak into the result document.
+- DOCX translation tests cover batch-marker parsing, basic run-level formatting preservation, headers, footers, footnotes, endnotes, comments, source-language segmented translation, hyperlink anchor preservation, subscript/superscript preservation, pseudo-table re-padding, structured-data protection, technical-term preservation, orthographic sample handling, and ensure internal XML markers do not leak into the result document.
+- DeepSeek client tests cover transient network retries, temporary HTTP retries, cache token parsing, and fast failure for local SSL certificate configuration problems.
+- Bot translation service tests cover DOCX and EPUB translation memory through the real confirmation path.
 - Language detection tests cover mixed-language source display.
 - Language tests cover shared language-name resolution for provider prompts.
 - The repository contains no copied AGPL implementation artifacts.

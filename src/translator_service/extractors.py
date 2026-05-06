@@ -4,6 +4,11 @@ from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
 
+MAX_ARCHIVE_ENTRY_COUNT = 512
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 20 * 1024 * 1024
+
+
 class TextExtractionError(ValueError):
     pass
 
@@ -32,6 +37,7 @@ def extract_text_from_docx(content: bytes) -> str:
 def extract_docx_text_blocks(content: bytes) -> list[str]:
     try:
         with ZipFile(BytesIO(content)) as docx:
+            validate_archive_members(docx)
             part_names = _docx_text_part_names(docx)
             if "word/document.xml" not in docx.namelist():
                 raise KeyError("word/document.xml")
@@ -118,6 +124,7 @@ def extract_text_from_epub(content: bytes) -> str:
 def extract_epub_text_blocks(content: bytes) -> list[str]:
     try:
         with ZipFile(BytesIO(content)) as epub:
+            validate_archive_members(epub)
             xhtml_files = _epub_text_item_names(epub)
             blocks: list[str] = []
             for file_name in xhtml_files:
@@ -128,6 +135,20 @@ def extract_epub_text_blocks(content: bytes) -> list[str]:
         ) from error
 
     return blocks
+
+
+def validate_archive_members(archive: ZipFile) -> None:
+    members = archive.infolist()
+    if len(members) > MAX_ARCHIVE_ENTRY_COUNT:
+        raise TextExtractionError("Document archive contains too many files")
+
+    total_uncompressed = 0
+    for member in members:
+        if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise TextExtractionError("Document archive member is too large")
+        total_uncompressed += member.file_size
+        if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise TextExtractionError("Document archive is too large after extraction")
 
 
 def _extract_xhtml_text_blocks(content: bytes) -> list[str]:

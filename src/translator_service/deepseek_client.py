@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import json
+import socket
 import ssl
+import time
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,6 +27,8 @@ class DeepSeekUsage:
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -46,12 +50,16 @@ class DeepSeekClient:
         base_url: str,
         transport: Transport | None = None,
         timeout_seconds: float = 60.0,
+        retry_attempts: int = 3,
+        retry_delay_seconds: float = 1.0,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._transport = transport or _urllib_transport
         self._timeout_seconds = timeout_seconds
+        self._retry_attempts = max(1, retry_attempts)
+        self._retry_delay_seconds = max(0.0, retry_delay_seconds)
         self._last_usage: DeepSeekUsage | None = None
 
     @property
@@ -77,18 +85,7 @@ class DeepSeekClient:
             },
             ensure_ascii=False,
         ).encode("utf-8")
-        try:
-            status, response_body = self._transport(
-                url=f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                body=body,
-                timeout_seconds=self._timeout_seconds,
-            )
-        except URLError as error:
-            raise _request_error_from_url_error(error) from error
+        status, response_body = self._send_with_retries(body)
         response = _parse_json_response(response_body)
 
         if status != 200:
@@ -96,6 +93,51 @@ class DeepSeekClient:
             raise DeepSeekApiError(f"DeepSeek API returned HTTP {status}: {message}")
 
         return _parse_chat_result(response)
+
+    def _send_with_retries(self, body: bytes) -> tuple[int, bytes]:
+        last_error: DeepSeekApiError | None = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                status, response_body = self._transport(
+                    url=f"{self._base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    body=body,
+                    timeout_seconds=self._timeout_seconds,
+                )
+            except URLError as error:
+                if isinstance(error.reason, ssl.SSLCertVerificationError):
+                    raise _request_error_from_url_error(error) from error
+                last_error = _request_error_from_url_error(error)
+            except _TRANSIENT_NETWORK_ERRORS as error:
+                last_error = DeepSeekApiError(
+                    f"DeepSeek API request failed while reading response: {error}"
+                )
+            else:
+                if _is_retryable_http_status(status) and attempt < self._retry_attempts:
+                    last_error = DeepSeekApiError(
+                        f"DeepSeek API returned temporary HTTP {status}"
+                    )
+                    self._sleep_before_retry(attempt)
+                    continue
+                return status, response_body
+
+            if attempt < self._retry_attempts:
+                self._sleep_before_retry(attempt)
+                continue
+
+        if last_error is None:
+            raise DeepSeekApiError("DeepSeek API request failed")
+        raise DeepSeekApiError(
+            f"{last_error} after {self._retry_attempts} attempts"
+        ) from last_error
+
+    def _sleep_before_retry(self, attempt: int) -> None:
+        if self._retry_delay_seconds <= 0:
+            return
+        time.sleep(self._retry_delay_seconds * attempt)
 
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
         result = self.create_chat_completion(
@@ -158,6 +200,8 @@ def _parse_chat_result(response: dict) -> DeepSeekChatResult:
             prompt_tokens=int(usage.get("prompt_tokens", 0)),
             completion_tokens=int(usage.get("completion_tokens", 0)),
             total_tokens=int(usage.get("total_tokens", 0)),
+            prompt_cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens", 0)),
+            prompt_cache_miss_tokens=int(usage.get("prompt_cache_miss_tokens", 0)),
         ),
     )
 
@@ -198,7 +242,19 @@ def _urllib_transport(
     except HTTPError as error:
         return error.code, error.read()
     except URLError as error:
-        raise _request_error_from_url_error(error) from error
+        raise error
+
+
+_TRANSIENT_NETWORK_ERRORS = (
+    TimeoutError,
+    socket.timeout,
+    ssl.SSLError,
+    OSError,
+)
+
+
+def _is_retryable_http_status(status: int) -> bool:
+    return status == 429 or 500 <= status <= 599
 
 
 def _request_error_from_url_error(error: URLError) -> DeepSeekApiError:
