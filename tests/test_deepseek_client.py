@@ -27,6 +27,8 @@ class DeepSeekClientTest(unittest.TestCase):
                     "prompt_tokens": 10,
                     "completion_tokens": 4,
                     "total_tokens": 14,
+                    "prompt_cache_hit_tokens": 6,
+                    "prompt_cache_miss_tokens": 4,
                 },
             }
         )
@@ -35,6 +37,7 @@ class DeepSeekClientTest(unittest.TestCase):
             model="deepseek-v4-flash",
             base_url="https://api.deepseek.com",
             transport=transport,
+            retry_attempts=1,
         )
 
         result = client.create_chat_completion(
@@ -50,6 +53,8 @@ class DeepSeekClientTest(unittest.TestCase):
                     prompt_tokens=10,
                     completion_tokens=4,
                     total_tokens=14,
+                    prompt_cache_hit_tokens=6,
+                    prompt_cache_miss_tokens=4,
                 ),
             ),
         )
@@ -82,6 +87,7 @@ class DeepSeekClientTest(unittest.TestCase):
             model="deepseek-v4-flash",
             base_url="https://api.deepseek.com",
             transport=transport,
+            retry_attempts=1,
         )
 
         translated = client.translate(
@@ -215,6 +221,135 @@ class DeepSeekClientTest(unittest.TestCase):
 
         self.assertIn("local Python SSL certificates", str(error.exception))
         self.assertIn("Install Certificates.command", str(error.exception))
+
+    def test_retries_transient_network_error_before_succeeding(self):
+        class FlakyTransport:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                self.calls += 1
+                if self.calls == 1:
+                    raise TimeoutError("timed out while reading response")
+                return (
+                    200,
+                    json.dumps(
+                        {
+                            "choices": [{"message": {"content": "Привіт"}}],
+                            "usage": {
+                                "prompt_tokens": 3,
+                                "completion_tokens": 2,
+                                "total_tokens": 5,
+                            },
+                        }
+                    ).encode("utf-8"),
+                )
+
+        transport = FlakyTransport()
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_delay_seconds=0,
+        )
+
+        result = client.create_chat_completion(
+            system_prompt="Translate accurately.",
+            user_text="Привет",
+        )
+
+        self.assertEqual(result.content, "Привіт")
+        self.assertEqual(transport.calls, 2)
+
+    def test_retries_temporary_http_error_before_succeeding(self):
+        class FlakyHttpTransport:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                self.calls += 1
+                if self.calls == 1:
+                    return 503, json.dumps({"error": {"message": "busy"}}).encode("utf-8")
+                return (
+                    200,
+                    json.dumps(
+                        {
+                            "choices": [{"message": {"content": "Hola"}}],
+                            "usage": {
+                                "prompt_tokens": 3,
+                                "completion_tokens": 2,
+                                "total_tokens": 5,
+                            },
+                        }
+                    ).encode("utf-8"),
+                )
+
+        transport = FlakyHttpTransport()
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_delay_seconds=0,
+        )
+
+        result = client.create_chat_completion(
+            system_prompt="Translate accurately.",
+            user_text="Привет",
+        )
+
+        self.assertEqual(result.content, "Hola")
+        self.assertEqual(transport.calls, 2)
+
+    def test_raises_api_error_after_retries_are_exhausted(self):
+        class FailingTransport:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                self.calls += 1
+                raise TimeoutError("timed out while reading response")
+
+        transport = FailingTransport()
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=2,
+            retry_delay_seconds=0,
+        )
+
+        with self.assertRaises(DeepSeekApiError) as error:
+            client.create_chat_completion(
+                system_prompt="Translate accurately.",
+                user_text="Привет",
+            )
+
+        self.assertEqual(transport.calls, 2)
+        self.assertIn("after 2 attempts", str(error.exception))
 
 
 class RecordingTransport:

@@ -1,9 +1,11 @@
 import unittest
 from io import BytesIO
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from translator_service.extractors import (
     TextExtractionError,
+    MAX_ARCHIVE_ENTRY_COUNT,
+    MAX_ARCHIVE_UNCOMPRESSED_BYTES,
     extract_text_from_docx,
     extract_text_from_epub,
     extract_text_from_txt,
@@ -103,6 +105,24 @@ class DocxExtractionTest(unittest.TestCase):
         with self.assertRaises(TextExtractionError):
             extract_text_from_docx(b"not a zip")
 
+    def test_rejects_docx_with_excessive_uncompressed_size(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as docx:
+            docx.writestr("word/document.xml", b"x" * (MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1))
+
+        with self.assertRaises(TextExtractionError):
+            extract_text_from_docx(archive.getvalue())
+
+    def test_rejects_docx_with_too_many_archive_entries(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w") as docx:
+            docx.writestr("word/document.xml", _docx_part_xml("Text"))
+            for index in range(MAX_ARCHIVE_ENTRY_COUNT):
+                docx.writestr(f"word/header{index}.xml", _docx_part_xml("Header"))
+
+        with self.assertRaises(TextExtractionError):
+            extract_text_from_docx(archive.getvalue())
+
 
 class EpubExtractionTest(unittest.TestCase):
     def test_extracts_visible_text_from_epub_xhtml_items(self):
@@ -168,6 +188,14 @@ class EpubExtractionTest(unittest.TestCase):
     def test_rejects_invalid_epub_archive(self):
         with self.assertRaises(TextExtractionError):
             extract_text_from_epub(b"not a zip")
+
+    def test_rejects_epub_with_excessive_uncompressed_size(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as epub:
+            epub.writestr("META-INF/container.xml", b"x" * (MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1))
+
+        with self.assertRaises(TextExtractionError):
+            extract_text_from_epub(archive.getvalue())
 
 
 def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:

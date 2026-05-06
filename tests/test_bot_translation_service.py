@@ -1,4 +1,6 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 from translator_service.bot_translation_service import (
     BotTranslationService,
@@ -11,7 +13,11 @@ from translator_service.pricing import PricingRules
 
 
 class RecordingTranslator:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str, str]] = []
+
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.requests.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
 
 
@@ -30,6 +36,16 @@ class CancellingTranslator:
         self.requests.append(text)
         if len(self.requests) == 1:
             self._service.cancel_translation(self._user_telegram_id)
+        return f"[{target_language}] {text}"
+
+
+class BlockingTranslator:
+    def __init__(self) -> None:
+        self.requests: list[str] = []
+
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.requests.append(text)
+        time.sleep(0.05)
         return f"[{target_language}] {text}"
 
 
@@ -181,6 +197,43 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
         self.assertIsNone(service.get_pending(42))
 
+    def test_concurrent_confirm_claims_pending_translation_once(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+        translator = BlockingTranslator()
+
+        def confirm():
+            return service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(confirm), pool.submit(confirm)]
+            results = []
+            errors = []
+            for future in futures:
+                try:
+                    results.append(future.result(timeout=5))
+                except ValueError as error:
+                    errors.append(str(error))
+
+        self.assertEqual([job.id for job in results], ["job-1"])
+        self.assertEqual(errors, ["No pending translation for this user"])
+        self.assertEqual(len(translator.requests), 1)
+
     def test_failed_translation_returns_failed_job_and_keeps_pending_retry(self):
         repository = InMemoryTranslationJobRepository()
         service = BotTranslationService(
@@ -328,6 +381,50 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.document_kind, DocumentKind.DOCX)
         self.assertEqual(job.result_file_name, "contract.fr.docx")
 
+    def test_docx_translation_memory_is_used_through_bot_service(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p><w:r><w:t>Repeated sentence.</w:t></w:r></w:p></w:body>
+            </w:document>
+            """
+        )
+
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+        )
+        first_job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=translator,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+        )
+        second_job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=translator,
+        )
+
+        self.assertEqual(first_job.status, TranslationJobStatus.READY)
+        self.assertEqual(second_job.status, TranslationJobStatus.READY)
+        self.assertEqual(len(translator.requests), 1)
+
     def test_accepts_epub_upload_and_runs_epub_translation(self):
         repository = InMemoryTranslationJobRepository()
         service = BotTranslationService(
@@ -359,6 +456,52 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         self.assertEqual(job.document_kind, DocumentKind.EPUB)
         self.assertEqual(job.result_file_name, "book.es.epub")
+
+    def test_epub_translation_memory_is_used_through_bot_service(self):
+        repository = InMemoryTranslationJobRepository()
+        service = BotTranslationService(
+            job_repository=repository,
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+        )
+        translator = RecordingTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Repeated book sentence.</p></body>
+                </html>
+                """
+            }
+        )
+
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="first.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+        )
+        first_job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=translator,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="second.epub",
+            content=content,
+            source_language="en",
+            target_language="uk",
+        )
+        second_job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=translator,
+        )
+
+        self.assertEqual(first_job.status, TranslationJobStatus.READY)
+        self.assertEqual(second_job.status, TranslationJobStatus.READY)
+        self.assertEqual(len(translator.requests), 1)
 
 
 def _pricing_rules() -> PricingRules:

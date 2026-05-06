@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import logging
+from threading import RLock
 from typing import Callable
 
 from translator_service.documents import DocumentFormat, validate_document_upload
@@ -20,6 +21,7 @@ from translator_service.language_detection import (
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.pricing import PricingRules
+from translator_service.translation_cache import MemoryTranslationCache, TranslationCache
 from translator_service.translation_jobs import (
     CancellationToken,
     TextTranslator,
@@ -61,6 +63,7 @@ class BotTranslationService:
         pricing_rules: PricingRules,
         max_upload_mb: int,
         max_fragment_chars: int,
+        translation_cache: TranslationCache | None = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -70,6 +73,8 @@ class BotTranslationService:
         self._pending: dict[int, PendingTranslation] = {}
         self._interface_languages: dict[int, str] = {}
         self._active_cancellations: dict[int, CancellationToken] = {}
+        self._translation_cache = translation_cache or MemoryTranslationCache()
+        self._state_lock = RLock()
 
     def store_uploaded_document(
         self,
@@ -102,11 +107,13 @@ class BotTranslationService:
                 source_language=source_language,
             ),
         )
-        self._pending_uploads[user_telegram_id] = pending_upload
+        with self._state_lock:
+            self._pending_uploads[user_telegram_id] = pending_upload
         return pending_upload
 
     def get_pending_upload(self, user_telegram_id: int) -> PendingUpload | None:
-        return self._pending_uploads.get(user_telegram_id)
+        with self._state_lock:
+            return self._pending_uploads.get(user_telegram_id)
 
     def prepare_pending_upload(
         self,
@@ -114,9 +121,12 @@ class BotTranslationService:
         user_telegram_id: int,
         target_language: str,
     ) -> PendingTranslation:
-        pending_upload = self._pending_uploads.get(user_telegram_id)
-        if pending_upload is None:
-            raise ValueError("No uploaded document is waiting for translation language")
+        with self._state_lock:
+            pending_upload = self._pending_uploads.get(user_telegram_id)
+            if pending_upload is None:
+                raise ValueError(
+                    "No uploaded document is waiting for translation language"
+                )
 
         pending = self.prepare_document(
             user_telegram_id=user_telegram_id,
@@ -126,7 +136,8 @@ class BotTranslationService:
             target_language=target_language,
             source_language_display=pending_upload.source_language_display,
         )
-        self._pending_uploads.pop(user_telegram_id, None)
+        with self._state_lock:
+            self._pending_uploads.pop(user_telegram_id, None)
         return pending
 
     def prepare_document(
@@ -173,25 +184,31 @@ class BotTranslationService:
             ),
             estimated_seconds=estimate_translation_seconds(estimate.fragment_count),
         )
-        self._pending[user_telegram_id] = pending
+        with self._state_lock:
+            self._pending[user_telegram_id] = pending
         return pending
 
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
-        return self._pending.get(user_telegram_id)
+        with self._state_lock:
+            return self._pending.get(user_telegram_id)
 
     def discard_pending_translation(self, user_telegram_id: int) -> bool:
-        removed_pending = self._pending.pop(user_telegram_id, None)
-        removed_upload = self._pending_uploads.pop(user_telegram_id, None)
+        with self._state_lock:
+            removed_pending = self._pending.pop(user_telegram_id, None)
+            removed_upload = self._pending_uploads.pop(user_telegram_id, None)
         return removed_pending is not None or removed_upload is not None
 
     def set_interface_language(self, *, user_telegram_id: int, language_code: str) -> None:
-        self._interface_languages[user_telegram_id] = language_code
+        with self._state_lock:
+            self._interface_languages[user_telegram_id] = language_code
 
     def get_interface_language(self, user_telegram_id: int) -> str:
-        return self._interface_languages.get(user_telegram_id, "ru")
+        with self._state_lock:
+            return self._interface_languages.get(user_telegram_id, "ru")
 
     def cancel_translation(self, user_telegram_id: int) -> bool:
-        token = self._active_cancellations.get(user_telegram_id)
+        with self._state_lock:
+            token = self._active_cancellations.get(user_telegram_id)
         if token is None:
             return False
 
@@ -205,9 +222,10 @@ class BotTranslationService:
         translator: TextTranslator,
         progress_callback: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJob:
-        pending = self._pending.get(user_telegram_id)
-        if pending is None:
-            raise ValueError("No pending translation for this user")
+        with self._state_lock:
+            pending = self._pending.pop(user_telegram_id, None)
+            if pending is None:
+                raise ValueError("No pending translation for this user")
 
         upload = validate_document_upload(
             file_name=pending.file_name,
@@ -229,7 +247,8 @@ class BotTranslationService:
             target_language=pending.target_language,
         )
         cancellation_token = CancellationToken()
-        self._active_cancellations[user_telegram_id] = cancellation_token
+        with self._state_lock:
+            self._active_cancellations[user_telegram_id] = cancellation_token
         try:
             run_translation_job(
                 repository=self._job_repository,
@@ -238,6 +257,7 @@ class BotTranslationService:
                 translator=translator,
                 progress_callback=progress_callback,
                 cancellation_token=cancellation_token,
+                translation_cache=self._translation_cache,
             )
         except Exception:
             failed_job = self._job_repository.get(queued_job.id)
@@ -247,11 +267,13 @@ class BotTranslationService:
                 failed_job.file_name,
                 failed_job.user_telegram_id,
             )
+            with self._state_lock:
+                self._pending.setdefault(user_telegram_id, pending)
             return self._job_repository.get(queued_job.id)
         finally:
-            self._active_cancellations.pop(user_telegram_id, None)
+            with self._state_lock:
+                self._active_cancellations.pop(user_telegram_id, None)
 
-        self._pending.pop(user_telegram_id, None)
         return self._job_repository.get(queued_job.id)
 
 
