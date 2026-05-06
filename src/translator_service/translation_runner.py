@@ -10,7 +10,11 @@ from typing import Callable
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from translator_service.extractors import TextExtractionError, extract_text_from_txt
+from translator_service.extractors import (
+    TextExtractionError,
+    extract_text_from_txt,
+    validate_archive_members,
+)
 from translator_service.language_detection import detect_languages_from_text
 from translator_service.protected_text import (
     ProtectedText,
@@ -24,6 +28,7 @@ from translator_service.structure_optimizer import (
     build_translation_units,
 )
 from translator_service.text_analysis import split_text_into_fragments
+from translator_service.translation_cache import TranslationCache
 from translator_service.translation_jobs import (
     CancellationToken,
     FragmentTranslation,
@@ -90,6 +95,7 @@ def translate_docx_document(
     max_fragment_chars: int = 4_000,
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
+    translation_cache: TranslationCache | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_docx_blocks(content)
     translation_units = _group_docx_blocks(
@@ -104,6 +110,7 @@ def translate_docx_document(
             translator=translator,
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
+            translation_cache=translation_cache,
         )
         is_partial = False
     except TranslationCancelled as error:
@@ -139,6 +146,7 @@ def translate_epub_document(
     max_fragment_chars: int = 4_000,
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
+    translation_cache: TranslationCache | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_epub_blocks(content)
     translation_units = _group_epub_blocks(
@@ -153,6 +161,7 @@ def translate_epub_document(
             translator=translator,
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
+            translation_cache=translation_cache,
         )
         is_partial = False
     except TranslationCancelled as error:
@@ -201,6 +210,7 @@ def _translated_file_name(
 def _extract_docx_blocks(content: bytes) -> list[_DocxTextBlock]:
     try:
         with ZipFile(BytesIO(content)) as docx:
+            validate_archive_members(docx)
             part_names = _docx_text_part_names(docx)
             if "word/document.xml" not in docx.namelist():
                 raise KeyError("word/document.xml")
@@ -389,6 +399,7 @@ def _replace_docx_blocks(
     target = BytesIO()
 
     with ZipFile(source) as source_docx, ZipFile(target, "w") as target_docx:
+        validate_archive_members(source_docx)
         for item in source_docx.infolist():
             data = source_docx.read(item)
             if item.filename in replacements_by_file:
@@ -803,6 +814,7 @@ class _TextTranslationUnit:
 def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
     try:
         with ZipFile(BytesIO(content)) as epub:
+            validate_archive_members(epub)
             blocks: list[_EpubTextBlock] = []
             for file_name in _epub_text_item_names(epub):
                 document = _read_epub_xhtml(epub.read(file_name))
@@ -941,6 +953,7 @@ def _replace_epub_blocks(
     target = BytesIO()
 
     with ZipFile(source) as source_epub, ZipFile(target, "w") as target_epub:
+        validate_archive_members(source_epub)
         for item in source_epub.infolist():
             data = source_epub.read(item)
             if item.filename in replacements_by_file:
@@ -1013,6 +1026,7 @@ def _translate_docx_units(
     translator: TextTranslator,
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
+    translation_cache: TranslationCache | None = None,
 ) -> TranslationJobResult:
     translated_blocks: list[FragmentTranslation] = []
     total_units = len(units)
@@ -1025,6 +1039,8 @@ def _translate_docx_units(
         unit_prompt_tokens = 0
         unit_completion_tokens = 0
         unit_total_tokens = 0
+        unit_cache_hit_tokens = 0
+        unit_cache_miss_tokens = 0
         last_source_text = ""
         last_translated_text = ""
         for subgroup_source_language, subgroup_blocks in _docx_translation_subgroups(
@@ -1046,6 +1062,8 @@ def _translate_docx_units(
                 unit_prompt_tokens += usage[0]
                 unit_completion_tokens += usage[1]
                 unit_total_tokens += usage[2]
+                unit_cache_hit_tokens += usage[3]
+                unit_cache_miss_tokens += usage[4]
                 last_source_text = subgroup_blocks[0].text
                 last_translated_text = translated_text
                 translated_blocks.append(
@@ -1055,6 +1073,31 @@ def _translate_docx_units(
                         translated_text=translated_text,
                     )
                 )
+                continue
+
+            cached = _translation_cache_get(
+                translation_cache,
+                blocks=[block.text for block in subgroup_blocks],
+                source_language=subgroup_source_language,
+                target_language=target_language,
+                prompt_tier=unit.prompt_tier,
+            )
+            if cached is not None:
+                translated_blocks.extend(
+                    FragmentTranslation(
+                        index=source_block.index,
+                        source_text=source_block.text,
+                        translated_text=translated,
+                    )
+                    for source_block, translated in zip(
+                        subgroup_blocks,
+                        cached,
+                        strict=True,
+                    )
+                )
+                if subgroup_blocks and cached:
+                    last_source_text = subgroup_blocks[-1].text
+                    last_translated_text = cached[-1]
                 continue
 
             prepared_blocks = [
@@ -1090,6 +1133,8 @@ def _translate_docx_units(
             unit_prompt_tokens += usage[0]
             unit_completion_tokens += usage[1]
             unit_total_tokens += usage[2]
+            unit_cache_hit_tokens += usage[3]
+            unit_cache_miss_tokens += usage[4]
             parsed = _parse_translation_batch(
                 translated_text,
                 expected_count=len(subgroup_blocks),
@@ -1136,6 +1181,14 @@ def _translate_docx_units(
                     strict=True,
                 )
             )
+            _translation_cache_put(
+                translation_cache,
+                source_texts=tuple(block.text for block in subgroup_blocks),
+                translated_texts=tuple(parsed),
+                source_language=subgroup_source_language,
+                target_language=target_language,
+                prompt_tier=unit.prompt_tier,
+            )
             if subgroup_blocks and parsed:
                 last_source_text = subgroup_blocks[-1].text
                 last_translated_text = parsed[-1]
@@ -1150,6 +1203,8 @@ def _translate_docx_units(
                     prompt_tokens=unit_prompt_tokens,
                     completion_tokens=unit_completion_tokens,
                     total_tokens=unit_total_tokens,
+                    prompt_cache_hit_tokens=unit_cache_hit_tokens,
+                    prompt_cache_miss_tokens=unit_cache_miss_tokens,
                 )
             )
 
@@ -1522,6 +1577,7 @@ def _translate_epub_units(
     translator: TextTranslator,
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
+    translation_cache: TranslationCache | None = None,
 ):
     translated_blocks = []
     total_units = len(units)
@@ -1531,6 +1587,40 @@ def _translate_epub_units(
             raise TranslationCancelled(_build_epub_translation_result(translated_blocks))
 
         unit_started_at = time.monotonic()
+        cached = _translation_cache_get(
+            translation_cache,
+            blocks=[block.text for block in unit.blocks],
+            source_language=source_language,
+            target_language=target_language,
+            prompt_tier=unit.prompt_tier,
+        )
+        if cached is not None:
+            translated_unit_blocks = [
+                FragmentTranslation(
+                    index=source_block.block_index,
+                    source_text=source_block.text,
+                    translated_text=translated,
+                )
+                for source_block, translated in zip(
+                    unit.blocks,
+                    cached,
+                    strict=True,
+                )
+            ]
+            translated_blocks.extend(translated_unit_blocks)
+            if progress_callback is not None:
+                last_block = translated_unit_blocks[-1] if translated_unit_blocks else None
+                progress_callback(
+                    TranslationProgress(
+                        completed_fragments=unit_index + 1,
+                        total_fragments=total_units,
+                        source_text=last_block.source_text if last_block else "",
+                        translated_text=last_block.translated_text if last_block else "",
+                        elapsed_seconds=time.monotonic() - unit_started_at,
+                    )
+                )
+            continue
+
         protected_blocks = [protect_text(block.text) for block in unit.blocks]
         source_language_hints = _source_language_hints(
             [block.text for block in unit.blocks],
@@ -1554,6 +1644,16 @@ def _translate_epub_units(
             target_language=target_language,
         )
         translated_blocks.extend(translated_unit_blocks)
+        _translation_cache_put(
+            translation_cache,
+            source_texts=tuple(block.text for block in unit.blocks),
+            translated_texts=tuple(
+                block.translated_text for block in translated_unit_blocks
+            ),
+            source_language=source_language,
+            target_language=target_language,
+            prompt_tier=unit.prompt_tier,
+        )
         if progress_callback is not None:
             last_block = translated_unit_blocks[-1] if translated_unit_blocks else None
             progress_callback(
@@ -1566,6 +1666,8 @@ def _translate_epub_units(
                     prompt_tokens=usage[0],
                     completion_tokens=usage[1],
                     total_tokens=usage[2],
+                    prompt_cache_hit_tokens=usage[3],
+                    prompt_cache_miss_tokens=usage[4],
                 )
             )
 
@@ -1645,6 +1747,8 @@ def _translate_marked_text_units(
                     prompt_tokens=usage[0],
                     completion_tokens=usage[1],
                     total_tokens=usage[2],
+                    prompt_cache_hit_tokens=usage[3],
+                    prompt_cache_miss_tokens=usage[4],
                 )
             )
 
@@ -1660,15 +1764,55 @@ def _build_epub_translation_result(translated_blocks: list[FragmentTranslation])
     )
 
 
-def _translator_usage(translator: TextTranslator) -> tuple[int, int, int]:
+def _translator_usage(translator: TextTranslator) -> tuple[int, int, int, int, int]:
     usage = getattr(translator, "last_usage", None)
     if usage is None:
-        return (0, 0, 0)
+        return (0, 0, 0, 0, 0)
 
     return (
         int(getattr(usage, "prompt_tokens", 0) or 0),
         int(getattr(usage, "completion_tokens", 0) or 0),
         int(getattr(usage, "total_tokens", 0) or 0),
+        int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0),
+        int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0),
+    )
+
+
+def _translation_cache_get(
+    translation_cache: TranslationCache | None,
+    *,
+    blocks: list[str],
+    source_language: str,
+    target_language: str,
+    prompt_tier: PromptTier,
+) -> tuple[str, ...] | None:
+    if translation_cache is None:
+        return None
+    return translation_cache.get(
+        source_texts=tuple(blocks),
+        source_language=source_language,
+        target_language=target_language,
+        prompt_tier=prompt_tier,
+    )
+
+
+def _translation_cache_put(
+    translation_cache: TranslationCache | None,
+    *,
+    source_texts: tuple[str, ...],
+    translated_texts: tuple[str, ...],
+    source_language: str,
+    target_language: str,
+    prompt_tier: PromptTier,
+) -> None:
+    if translation_cache is None:
+        return
+    translation_cache.put(
+        source_texts=source_texts,
+        translated_texts=translated_texts,
+        source_language=source_language,
+        target_language=target_language,
+        prompt_tier=prompt_tier,
     )
 
 

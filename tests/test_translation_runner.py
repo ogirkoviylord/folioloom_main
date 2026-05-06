@@ -5,6 +5,7 @@ from zipfile import ZipFile
 
 from translator_service.extractors import extract_text_from_docx
 from translator_service.extractors import extract_text_from_epub
+from translator_service.translation_cache import MemoryTranslationCache
 from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_runner import (
     TranslatedDocument,
@@ -719,6 +720,40 @@ class TranslationRunnerTest(unittest.TestCase):
                 "</translation_batch>",
             ],
         )
+
+    def test_docx_translation_reuses_translation_memory_for_repeated_units(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Repeated sentence.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(extract_text_from_docx(first.content), "[uk] Repeated sentence.")
+        self.assertEqual(extract_text_from_docx(second.content), "[uk] Repeated sentence.")
 
     def test_docx_translation_expands_vml_textbox_height_to_avoid_clipping(self):
         class TextboxTranslator:
