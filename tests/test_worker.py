@@ -214,6 +214,35 @@ class WorkerTest(unittest.TestCase):
                 PersistentWorkUnitStatus.TRANSLATED,
             )
 
+    def test_worker_tick_reclaims_expired_active_unit_before_processing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="stale.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Stale paragraph",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            stale = store.claim_next_work_unit(job.id, worker_id="worker-crashed")
+            translator = RecordingTranslator()
+
+            processed = run_worker_tick(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                lease_seconds=0,
+            )
+
+            completed = store.list_work_units(job.id)[0]
+            self.assertEqual(processed, 1)
+            self.assertEqual(completed.id, stale.id)
+            self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+            self.assertEqual(completed.worker_id, "worker-a")
+            self.assertEqual(translator.calls, [("Stale paragraph", "en", "uk")])
+
     def test_assembles_translated_text_result_into_object_storage(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))

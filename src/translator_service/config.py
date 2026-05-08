@@ -61,6 +61,8 @@ class Settings:
 
 
 def validate_server_settings(settings: Settings) -> None:
+    if settings.work_unit_lease_seconds <= 0:
+        raise ValueError("WORK_UNIT_LEASE_SECONDS must be greater than 0")
     if settings.translation_execution_mode == "worker":
         if settings.job_store_backend != "postgres":
             raise ValueError(

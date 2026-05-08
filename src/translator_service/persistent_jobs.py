@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -320,6 +320,49 @@ class SQLiteTranslationJobStore:
             )
         return self._get_work_unit(unit_id)
 
+    def reclaim_stale_work_units(self, *, lease_seconds: int, worker_id: str) -> int:
+        _ = worker_id
+        now = _now()
+        cutoff = now - timedelta(seconds=lease_seconds)
+        with self._connection:
+            stale_rows = self._connection.execute(
+                """
+                UPDATE work_units
+                SET status = ?, worker_id = NULL, updated_at = ?
+                WHERE status = ? AND COALESCE(updated_at, started_at) <= ?
+                    AND job_id IN (
+                        SELECT id FROM translation_jobs
+                        WHERE status IN (?, ?, ?)
+                    )
+                RETURNING job_id
+                """,
+                (
+                    PersistentWorkUnitStatus.PENDING.value,
+                    _to_db_time(now),
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    _to_db_time(cutoff),
+                    PersistentTranslationJobStatus.QUEUED.value,
+                    PersistentTranslationJobStatus.TRANSLATING.value,
+                    PersistentTranslationJobStatus.INTERRUPTED.value,
+                ),
+            ).fetchall()
+            stale_job_ids = sorted({row["job_id"] for row in stale_rows})
+            if stale_job_ids:
+                placeholders = ", ".join("?" for _ in stale_job_ids)
+                self._connection.execute(
+                    f"""
+                    UPDATE translation_jobs
+                    SET status = ?, updated_at = ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    (
+                        PersistentTranslationJobStatus.QUEUED.value,
+                        _to_db_time(now),
+                        *stale_job_ids,
+                    ),
+                )
+        return len(stale_rows)
+
     def complete_work_unit(
         self,
         work_unit_id: str,
@@ -329,17 +372,28 @@ class SQLiteTranslationJobStore:
         completion_tokens: int,
         cache_hit_tokens: int,
         cache_miss_tokens: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         work_unit = self._require_work_unit(work_unit_id)
         now = _now()
+        where_clause = "id = ?"
+        where_values: list[str] = [work_unit_id]
+        if worker_id is not None:
+            where_clause += " AND status = ? AND worker_id = ?"
+            where_values.extend(
+                [
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    worker_id,
+                ]
+            )
         with self._connection:
-            self._connection.execute(
-                """
+            cursor = self._connection.execute(
+                f"""
                 UPDATE work_units
                 SET status = ?, translated_text = ?, prompt_tokens = ?,
                     completion_tokens = ?, cache_hit_tokens = ?,
                     cache_miss_tokens = ?, completed_at = ?, updated_at = ?
-                WHERE id = ?
+                WHERE {where_clause}
                 """,
                 (
                     PersistentWorkUnitStatus.TRANSLATED.value,
@@ -350,10 +404,10 @@ class SQLiteTranslationJobStore:
                     cache_miss_tokens,
                     _to_db_time(now),
                     _to_db_time(now),
-                    work_unit_id,
+                    *where_values,
                 ),
             )
-            if self._job_has_no_unfinished_work(work_unit.job_id):
+            if cursor.rowcount and self._job_has_no_unfinished_work(work_unit.job_id):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -367,30 +421,42 @@ class SQLiteTranslationJobStore:
         *,
         error_message: str,
         retry_count: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         work_unit = self._require_work_unit(work_unit_id)
         now = _now()
+        where_clause = "id = ?"
+        where_values: list[str] = [work_unit_id]
+        if worker_id is not None:
+            where_clause += " AND status = ? AND worker_id = ?"
+            where_values.extend(
+                [
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    worker_id,
+                ]
+            )
         with self._connection:
-            self._connection.execute(
-                """
+            cursor = self._connection.execute(
+                f"""
                 UPDATE work_units
                 SET status = ?, last_error = ?, retry_count = ?,
                     worker_id = NULL, updated_at = ?
-                WHERE id = ?
+                WHERE {where_clause}
                 """,
                 (
                     PersistentWorkUnitStatus.FAILED.value,
                     error_message,
                     retry_count,
                     _to_db_time(now),
-                    work_unit_id,
+                    *where_values,
                 ),
             )
-            self._update_job_status(
-                work_unit.job_id,
-                PersistentTranslationJobStatus.INTERRUPTED,
-                now=now,
-            )
+            if cursor.rowcount:
+                self._update_job_status(
+                    work_unit.job_id,
+                    PersistentTranslationJobStatus.INTERRUPTED,
+                    now=now,
+                )
         return self._get_work_unit(work_unit_id)
 
     def cancel_job(self, job_id: str) -> PersistentTranslationJob:

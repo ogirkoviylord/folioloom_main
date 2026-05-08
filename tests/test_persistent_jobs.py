@@ -274,6 +274,117 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(retried.id, first.id)
         self.assertEqual(retried.status, PersistentWorkUnitStatus.TRANSLATING)
 
+    def test_reclaims_expired_translating_unit_after_worker_crash(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+
+        reclaimed = store.reclaim_stale_work_units(
+            lease_seconds=0,
+            worker_id="worker-b",
+        )
+        reclaimed_unit = store.list_work_units(job.id)[0]
+        reclaimed_job = store.get_job(job.id)
+        second = store.claim_next_work_unit(job.id, worker_id="worker-b")
+
+        self.assertEqual(reclaimed, 1)
+        self.assertEqual(reclaimed_unit.status, PersistentWorkUnitStatus.PENDING)
+        self.assertIsNone(reclaimed_unit.worker_id)
+        self.assertEqual(reclaimed_job.status, PersistentTranslationJobStatus.QUEUED)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(second.worker_id, "worker-b")
+        self.assertEqual(
+            store.get_job(job.id).status,
+            PersistentTranslationJobStatus.TRANSLATING,
+        )
+
+    def test_stale_worker_cannot_complete_reclaimed_unit(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+        store.reclaim_stale_work_units(lease_seconds=0, worker_id="worker-b")
+        claimed_by_new_worker = store.claim_next_work_unit(
+            job.id,
+            worker_id="worker-b",
+        )
+
+        stale_result = store.complete_work_unit(
+            first.id,
+            translated_text="stale result",
+            prompt_tokens=1,
+            completion_tokens=1,
+            cache_hit_tokens=0,
+            cache_miss_tokens=1,
+            worker_id="worker-a",
+        )
+        final_result = store.complete_work_unit(
+            claimed_by_new_worker.id,
+            translated_text="fresh result",
+            prompt_tokens=2,
+            completion_tokens=2,
+            cache_hit_tokens=0,
+            cache_miss_tokens=2,
+            worker_id="worker-b",
+        )
+
+        self.assertEqual(stale_result.status, PersistentWorkUnitStatus.TRANSLATING)
+        self.assertEqual(stale_result.worker_id, "worker-b")
+        self.assertIsNone(stale_result.translated_text)
+        self.assertEqual(final_result.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(final_result.translated_text, "fresh result")
+
+    def test_stale_worker_cannot_fail_reclaimed_unit(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+        store.reclaim_stale_work_units(lease_seconds=0, worker_id="worker-b")
+        store.claim_next_work_unit(job.id, worker_id="worker-b")
+
+        stale_result = store.fail_work_unit(
+            first.id,
+            error_message="old timeout",
+            retry_count=1,
+            worker_id="worker-a",
+        )
+
+        self.assertEqual(stale_result.status, PersistentWorkUnitStatus.TRANSLATING)
+        self.assertEqual(stale_result.worker_id, "worker-b")
+        self.assertIsNone(stale_result.last_error)
+        self.assertEqual(
+            store.get_job(job.id).status,
+            PersistentTranslationJobStatus.TRANSLATING,
+        )
+
+    def test_reclaim_does_not_reopen_terminal_job(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        active = store.claim_next_work_unit(job.id, worker_id="worker-a")
+        store.cancel_job(job.id)
+        with store._connection:
+            store._connection.execute(
+                """
+                UPDATE work_units
+                SET status = ?, worker_id = ?
+                WHERE id = ?
+                """,
+                (
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    "worker-a",
+                    active.id,
+                ),
+            )
+
+        reclaimed = store.reclaim_stale_work_units(
+            lease_seconds=0,
+            worker_id="worker-b",
+        )
+
+        self.assertEqual(reclaimed, 0)
+        self.assertEqual(
+            store.get_job(job.id).status,
+            PersistentTranslationJobStatus.CANCELLED,
+        )
+
     def test_usage_summary_sums_completed_work_units(self):
         store = self._memory_store()
         job = _job_with_units(store)

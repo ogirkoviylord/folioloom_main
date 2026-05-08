@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from psycopg.rows import dict_row
@@ -258,6 +258,48 @@ class PostgreSQLTranslationJobStore:
             )
         return self._require_work_unit(unit_id)
 
+    def reclaim_stale_work_units(self, *, lease_seconds: int, worker_id: str) -> int:
+        _ = worker_id
+        now = _now()
+        cutoff = now - timedelta(seconds=lease_seconds)
+        with self._connection.transaction():
+            stale_rows = self._connection.execute(
+                """
+                UPDATE work_units
+                SET status = %s, worker_id = NULL, updated_at = %s
+                WHERE status = %s AND COALESCE(updated_at, started_at) <= %s
+                    AND job_id IN (
+                        SELECT id FROM translation_jobs
+                        WHERE status IN (%s, %s, %s)
+                    )
+                RETURNING job_id
+                """,
+                (
+                    PersistentWorkUnitStatus.PENDING.value,
+                    now,
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    cutoff,
+                    PersistentTranslationJobStatus.QUEUED.value,
+                    PersistentTranslationJobStatus.TRANSLATING.value,
+                    PersistentTranslationJobStatus.INTERRUPTED.value,
+                ),
+            ).fetchall()
+            stale_job_ids = sorted({row["job_id"] for row in stale_rows})
+            if stale_job_ids:
+                self._connection.execute(
+                    """
+                    UPDATE translation_jobs
+                    SET status = %s, updated_at = %s
+                    WHERE id = ANY(%s)
+                    """,
+                    (
+                        PersistentTranslationJobStatus.QUEUED.value,
+                        now,
+                        stale_job_ids,
+                    ),
+                )
+        return len(stale_rows)
+
     def complete_work_unit(
         self,
         work_unit_id: str,
@@ -267,17 +309,28 @@ class PostgreSQLTranslationJobStore:
         completion_tokens: int,
         cache_hit_tokens: int,
         cache_miss_tokens: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         work_unit = self._require_work_unit(work_unit_id)
         now = _now()
+        where_clause = "id = %s"
+        where_values: list[object] = [work_unit_id]
+        if worker_id is not None:
+            where_clause += " AND status = %s AND worker_id = %s"
+            where_values.extend(
+                [
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    worker_id,
+                ]
+            )
         with self._connection.transaction():
-            self._connection.execute(
-                """
+            cursor = self._connection.execute(
+                f"""
                 UPDATE work_units
                 SET status = %s, translated_text = %s, prompt_tokens = %s,
                     completion_tokens = %s, cache_hit_tokens = %s,
                     cache_miss_tokens = %s, completed_at = %s, updated_at = %s
-                WHERE id = %s
+                WHERE {where_clause}
                 """,
                 (
                     PersistentWorkUnitStatus.TRANSLATED.value,
@@ -288,10 +341,10 @@ class PostgreSQLTranslationJobStore:
                     cache_miss_tokens,
                     now,
                     now,
-                    work_unit_id,
+                    *where_values,
                 ),
             )
-            if self._job_has_no_unfinished_work(work_unit.job_id):
+            if cursor.rowcount and self._job_has_no_unfinished_work(work_unit.job_id):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -305,30 +358,42 @@ class PostgreSQLTranslationJobStore:
         *,
         error_message: str,
         retry_count: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         work_unit = self._require_work_unit(work_unit_id)
         now = _now()
+        where_clause = "id = %s"
+        where_values: list[object] = [work_unit_id]
+        if worker_id is not None:
+            where_clause += " AND status = %s AND worker_id = %s"
+            where_values.extend(
+                [
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    worker_id,
+                ]
+            )
         with self._connection.transaction():
-            self._connection.execute(
-                """
+            cursor = self._connection.execute(
+                f"""
                 UPDATE work_units
                 SET status = %s, last_error = %s, retry_count = %s,
                     worker_id = NULL, updated_at = %s
-                WHERE id = %s
+                WHERE {where_clause}
                 """,
                 (
                     PersistentWorkUnitStatus.FAILED.value,
                     error_message,
                     retry_count,
                     now,
-                    work_unit_id,
+                    *where_values,
                 ),
             )
-            self._update_job_status(
-                work_unit.job_id,
-                PersistentTranslationJobStatus.INTERRUPTED,
-                now=now,
-            )
+            if cursor.rowcount:
+                self._update_job_status(
+                    work_unit.job_id,
+                    PersistentTranslationJobStatus.INTERRUPTED,
+                    now=now,
+                )
         return self._require_work_unit(work_unit_id)
 
     def cancel_job(self, job_id: str) -> PersistentTranslationJob:

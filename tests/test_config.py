@@ -75,6 +75,12 @@ class BackendSettingsTests(unittest.TestCase):
 
         validate_server_settings(settings)
 
+    def test_server_validation_rejects_non_positive_work_unit_lease(self):
+        settings = Settings(work_unit_lease_seconds=0)
+
+        with self.assertRaisesRegex(ValueError, "WORK_UNIT_LEASE_SECONDS"):
+            validate_server_settings(settings)
+
 
 if __name__ == "__main__":
     unittest.main()
