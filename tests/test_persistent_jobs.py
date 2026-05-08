@@ -1,9 +1,8 @@
-import unittest
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from concurrent.futures import ThreadPoolExecutor
+import unittest
 
-from translator_service.job_store import TranslationJobStore
 from translator_service.persistent_jobs import (
     JobUsageSummary,
     PersistentTranslationJobStatus,
@@ -11,28 +10,6 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
-
-
-class JobStoreProtocolTests(unittest.TestCase):
-    def test_sqlite_store_satisfies_translation_job_store_protocol(self):
-        store: TranslationJobStore = SQLiteTranslationJobStore(":memory:")
-        self.addCleanup(store.close)
-
-        job = store.create_job(
-            order_id="order-1",
-            user_id="user-1",
-            file_id="file-1",
-            file_name="book.txt",
-            document_kind="txt",
-            source_language="en",
-            target_language="uk",
-            adapter_version="txt-v1",
-            prompt_version="prompt-v1",
-            pricing_snapshot_id="price-v1",
-            source_object_key="original/file-1.txt",
-        )
-
-        self.assertEqual(store.get_job(job.id).id, job.id)
 
 
 class SQLiteTranslationJobStoreTest(unittest.TestCase):
@@ -52,6 +29,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
                 prompt_version="plain-v1",
                 pricing_snapshot_id="pricing-1",
                 source_object_key="original/abc-book.epub",
+                translation_policy='{"target_language_policy":"target-profile:ru:russian-v1"}',
             )
             store.add_work_units(
                 job.id,
@@ -89,6 +67,10 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             )
             self.assertEqual(persisted_job.file_name, "book.epub")
             self.assertEqual(persisted_job.source_object_key, "original/abc-book.epub")
+            self.assertEqual(
+                persisted_job.translation_policy,
+                '{"target_language_policy":"target-profile:ru:russian-v1"}',
+            )
             self.assertEqual(len(work_units), 2)
             self.assertEqual(work_units[0].status, PersistentWorkUnitStatus.PENDING)
             self.assertEqual(work_units[0].source_block_ids, ("chapter-1:p1",))
@@ -122,47 +104,314 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             PersistentTranslationJobStatus.TRANSLATING,
         )
 
-    def test_list_claimable_jobs_returns_queued_translating_and_interrupted_jobs(self):
+    def test_claim_next_work_unit_allows_configured_active_units_per_job(self):
         store = self._memory_store()
-        queued = _job_with_units(store)
-        translating = _job_with_units(store)
-        interrupted = _job_with_units(store)
-        ready = _job_with_units(store)
-        cancelled = _job_with_units(store)
+        job = _job_with_units(store)
 
-        store.claim_next_work_unit(translating.id, worker_id="worker-a")
-        failed_unit = store.claim_next_work_unit(interrupted.id, worker_id="worker-a")
-        store.fail_work_unit(
-            failed_unit.id,
-            error_message="provider read timeout",
-            retry_count=1,
+        first = store.claim_next_work_unit(
+            job.id,
+            worker_id="worker-a",
+            max_active_units_per_job=2,
         )
-        for unit in store.list_work_units(ready.id):
-            claimed = store.claim_next_work_unit(ready.id, worker_id="worker-a")
-            store.complete_work_unit(
-                claimed.id,
-                translated_text=f"Done {unit.sequence}",
+        second = store.claim_next_work_unit(
+            job.id,
+            worker_id="worker-b",
+            max_active_units_per_job=2,
+        )
+        third = store.claim_next_work_unit(
+            job.id,
+            worker_id="worker-c",
+            max_active_units_per_job=2,
+        )
+
+        self.assertEqual(first.sequence, 1)
+        self.assertEqual(second.sequence, 2)
+        self.assertIsNone(third)
+        self.assertEqual(first.status, PersistentWorkUnitStatus.TRANSLATING)
+        self.assertEqual(second.status, PersistentWorkUnitStatus.TRANSLATING)
+
+    def test_scheduler_claim_sets_token_lease_and_attempt_count(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(max_active_units_global=4),
+        )
+        claimed_unit = store.list_work_units(job.id)[0]
+
+        self.assertEqual(claim.job_id, job.id)
+        self.assertEqual(claim.work_unit_id, claimed_unit.id)
+        self.assertEqual(claim.worker_id, "worker-a")
+        self.assertTrue(claim.claim_token)
+        self.assertEqual(claim.attempt_number, 1)
+        self.assertEqual(claimed_unit.worker_id, "worker-a")
+        self.assertEqual(claimed_unit.claim_token, claim.claim_token)
+        self.assertIsNotNone(claimed_unit.lease_until)
+        self.assertEqual(claimed_unit.attempt_count, 1)
+
+    def test_scheduler_claim_does_not_overwrite_lost_candidate(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        store._connection = _ClaimRaceConnection(store._connection)
+
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(max_active_units_global=4),
+        )
+        claimed_unit = store.list_work_units(job.id)[0]
+
+        self.assertIsNone(claim)
+        self.assertEqual(claimed_unit.worker_id, "worker-race")
+        self.assertEqual(claimed_unit.claim_token, "race-token")
+        self.assertEqual(claimed_unit.attempt_count, 1)
+
+    def test_completion_requires_matching_claim_token(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        with self.assertRaises(ValueError):
+            store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token="stale-token",
+                translated_text="stale completion",
                 prompt_tokens=1,
                 completion_tokens=1,
                 cache_hit_tokens=0,
                 cache_miss_tokens=1,
             )
-        store.cancel_job(cancelled.id)
 
-        claimable = store.list_claimable_jobs()
+        store.complete_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            translated_text="valid completion",
+            prompt_tokens=1,
+            completion_tokens=1,
+            cache_hit_tokens=0,
+            cache_miss_tokens=1,
+        )
+
+        first_unit = store.list_work_units(job.id)[0]
+        self.assertEqual(first_unit.translated_text, "valid completion")
+
+    def test_stale_completion_cannot_overwrite_newer_claim(self):
+        from datetime import timedelta
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        old_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=1,
+            limits=SchedulerLimits(),
+        )
+        store.recover_expired_leases(
+            now=old_claim.lease_until + timedelta(seconds=1),
+            retry_base_delay_seconds=0,
+            retry_max_delay_seconds=0,
+        )
+        new_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        with self.assertRaises(ValueError):
+            store.complete_claimed_work_unit(
+                work_unit_id=old_claim.work_unit_id,
+                claim_token=old_claim.claim_token,
+                translated_text="stale completion",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cache_hit_tokens=0,
+                cache_miss_tokens=1,
+            )
+
+        first_unit = store.list_work_units(job.id)[0]
+        self.assertEqual(first_unit.status, PersistentWorkUnitStatus.TRANSLATING)
+        self.assertEqual(first_unit.claim_token, new_claim.claim_token)
+        self.assertIsNone(first_unit.translated_text)
+
+    def test_scheduled_claim_allows_later_unit_when_job_active_limit_permits(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_per_job=2,
+                max_active_units_global=10,
+            ),
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_per_job=2,
+                max_active_units_global=10,
+            ),
+        )
+        third = store.claim_next_scheduled_work_unit(
+            worker_id="worker-c",
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_per_job=2,
+                max_active_units_global=10,
+            ),
+        )
+
+        self.assertEqual(first.work_unit_id, f"{job.id}:unit-1")
+        self.assertEqual(second.work_unit_id, f"{job.id}:unit-2")
+        self.assertIsNone(third)
+
+    def test_scheduled_claim_preserves_single_active_ordering_by_default(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(max_active_units_per_job=1),
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(max_active_units_per_job=1),
+        )
+
+        self.assertEqual(first.work_unit_id, f"{job.id}:unit-1")
+        self.assertIsNone(second)
+
+    def test_retryable_failure_records_attempt_and_delays_reclaim(self):
+        from translator_service.scheduler import (
+            SchedulerLimits,
+            WorkUnitFailureKind,
+        )
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        failed = store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="provider timeout",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=600,
+        )
+        immediate = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        attempts = store.list_work_unit_attempts(claim.work_unit_id)
+
+        self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_RETRYABLE)
+        self.assertIsNone(immediate)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0].error_message, "provider timeout")
+
+    def test_expired_lease_is_recovered_for_retry(self):
+        from datetime import timedelta
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=1,
+            limits=SchedulerLimits(),
+        )
+
+        recovered = store.recover_expired_leases(
+            now=claim.lease_until + timedelta(seconds=1),
+            retry_base_delay_seconds=0,
+            retry_max_delay_seconds=0,
+        )
+        reclaimed = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(reclaimed.work_unit_id, claim.work_unit_id)
+        self.assertNotEqual(reclaimed.claim_token, claim.claim_token)
+
+    def test_scheduler_events_capture_claim_complete_and_retry(self):
+        from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="provider timeout",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=600,
+        )
+
+        events = store.list_scheduler_events(job.id)
 
         self.assertEqual(
-            [job.id for job in claimable],
-            [queued.id, translating.id, interrupted.id],
+            [event.event_type for event in events],
+            ["work_unit_claimed", "work_unit_retry_scheduled"],
         )
-        self.assertEqual(
-            [job.status for job in claimable],
-            [
-                PersistentTranslationJobStatus.QUEUED,
-                PersistentTranslationJobStatus.TRANSLATING,
-                PersistentTranslationJobStatus.INTERRUPTED,
-            ],
+        self.assertEqual(events[0].job_id, job.id)
+        self.assertEqual(events[0].work_unit_id, claim.work_unit_id)
+
+    def test_worker_heartbeat_is_upserted(self):
+        store = self._memory_store()
+
+        store.record_worker_heartbeat(
+            worker_id="worker-a",
+            worker_kind="translation",
+            status="idle",
+            active_job_id=None,
+            active_work_unit_id=None,
         )
+        store.record_worker_heartbeat(
+            worker_id="worker-a",
+            worker_kind="translation",
+            status="busy",
+            active_job_id="job-1",
+            active_work_unit_id="job-1:unit-1",
+        )
+
+        heartbeat = store.get_worker_heartbeat("worker-a")
+
+        self.assertEqual(heartbeat.worker_id, "worker-a")
+        self.assertEqual(heartbeat.status, "busy")
+        self.assertEqual(heartbeat.active_job_id, "job-1")
 
     def test_complete_work_units_stores_usage_and_marks_job_ready(self):
         store = self._memory_store()
@@ -274,117 +523,6 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(retried.id, first.id)
         self.assertEqual(retried.status, PersistentWorkUnitStatus.TRANSLATING)
 
-    def test_reclaims_expired_translating_unit_after_worker_crash(self):
-        store = self._memory_store()
-        job = _job_with_units(store)
-        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
-
-        reclaimed = store.reclaim_stale_work_units(
-            lease_seconds=0,
-            worker_id="worker-b",
-        )
-        reclaimed_unit = store.list_work_units(job.id)[0]
-        reclaimed_job = store.get_job(job.id)
-        second = store.claim_next_work_unit(job.id, worker_id="worker-b")
-
-        self.assertEqual(reclaimed, 1)
-        self.assertEqual(reclaimed_unit.status, PersistentWorkUnitStatus.PENDING)
-        self.assertIsNone(reclaimed_unit.worker_id)
-        self.assertEqual(reclaimed_job.status, PersistentTranslationJobStatus.QUEUED)
-        self.assertEqual(first.id, second.id)
-        self.assertEqual(second.worker_id, "worker-b")
-        self.assertEqual(
-            store.get_job(job.id).status,
-            PersistentTranslationJobStatus.TRANSLATING,
-        )
-
-    def test_stale_worker_cannot_complete_reclaimed_unit(self):
-        store = self._memory_store()
-        job = _job_with_units(store)
-        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
-        store.reclaim_stale_work_units(lease_seconds=0, worker_id="worker-b")
-        claimed_by_new_worker = store.claim_next_work_unit(
-            job.id,
-            worker_id="worker-b",
-        )
-
-        stale_result = store.complete_work_unit(
-            first.id,
-            translated_text="stale result",
-            prompt_tokens=1,
-            completion_tokens=1,
-            cache_hit_tokens=0,
-            cache_miss_tokens=1,
-            worker_id="worker-a",
-        )
-        final_result = store.complete_work_unit(
-            claimed_by_new_worker.id,
-            translated_text="fresh result",
-            prompt_tokens=2,
-            completion_tokens=2,
-            cache_hit_tokens=0,
-            cache_miss_tokens=2,
-            worker_id="worker-b",
-        )
-
-        self.assertEqual(stale_result.status, PersistentWorkUnitStatus.TRANSLATING)
-        self.assertEqual(stale_result.worker_id, "worker-b")
-        self.assertIsNone(stale_result.translated_text)
-        self.assertEqual(final_result.status, PersistentWorkUnitStatus.TRANSLATED)
-        self.assertEqual(final_result.translated_text, "fresh result")
-
-    def test_stale_worker_cannot_fail_reclaimed_unit(self):
-        store = self._memory_store()
-        job = _job_with_units(store)
-        first = store.claim_next_work_unit(job.id, worker_id="worker-a")
-        store.reclaim_stale_work_units(lease_seconds=0, worker_id="worker-b")
-        store.claim_next_work_unit(job.id, worker_id="worker-b")
-
-        stale_result = store.fail_work_unit(
-            first.id,
-            error_message="old timeout",
-            retry_count=1,
-            worker_id="worker-a",
-        )
-
-        self.assertEqual(stale_result.status, PersistentWorkUnitStatus.TRANSLATING)
-        self.assertEqual(stale_result.worker_id, "worker-b")
-        self.assertIsNone(stale_result.last_error)
-        self.assertEqual(
-            store.get_job(job.id).status,
-            PersistentTranslationJobStatus.TRANSLATING,
-        )
-
-    def test_reclaim_does_not_reopen_terminal_job(self):
-        store = self._memory_store()
-        job = _job_with_units(store)
-        active = store.claim_next_work_unit(job.id, worker_id="worker-a")
-        store.cancel_job(job.id)
-        with store._connection:
-            store._connection.execute(
-                """
-                UPDATE work_units
-                SET status = ?, worker_id = ?
-                WHERE id = ?
-                """,
-                (
-                    PersistentWorkUnitStatus.TRANSLATING.value,
-                    "worker-a",
-                    active.id,
-                ),
-            )
-
-        reclaimed = store.reclaim_stale_work_units(
-            lease_seconds=0,
-            worker_id="worker-b",
-        )
-
-        self.assertEqual(reclaimed, 0)
-        self.assertEqual(
-            store.get_job(job.id).status,
-            PersistentTranslationJobStatus.CANCELLED,
-        )
-
     def test_usage_summary_sums_completed_work_units(self):
         store = self._memory_store()
         job = _job_with_units(store)
@@ -440,6 +578,53 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertIsNone(partial.final_object_key)
         self.assertEqual(final.partial_object_key, "partial/job-1-book.partial.txt")
         self.assertEqual(final.final_object_key, "final/job-1-book.txt")
+
+    def test_lists_jobs_for_user_with_most_recent_first(self):
+        store = self._memory_store()
+        first = store.create_job(
+            order_id="order-1",
+            user_id="telegram:42",
+            file_id="file-1",
+            file_name="first.epub",
+            document_kind="epub",
+            source_language="en",
+            target_language="uk",
+            adapter_version="epub-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+            source_object_key="original/first.epub",
+        )
+        second = store.create_job(
+            order_id="order-2",
+            user_id="telegram:42",
+            file_id="file-2",
+            file_name="second.docx",
+            document_kind="docx",
+            source_language="en",
+            target_language="ru",
+            adapter_version="docx-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+            source_object_key="original/second.docx",
+        )
+        store.create_job(
+            order_id="order-3",
+            user_id="telegram:100",
+            file_id="file-3",
+            file_name="other.txt",
+            document_kind="txt",
+            source_language="en",
+            target_language="fr",
+            adapter_version="txt-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+            source_object_key="original/other.txt",
+        )
+
+        jobs = store.list_jobs_for_user("telegram:42", limit=5)
+
+        self.assertEqual([job.id for job in jobs], [second.id, first.id])
+        self.assertEqual([job.file_name for job in jobs], ["second.docx", "first.epub"])
 
     def test_store_can_be_used_from_worker_thread(self):
         with TemporaryDirectory() as temp_dir:
@@ -508,6 +693,57 @@ def _job_with_units(store: SQLiteTranslationJobStore):
         ],
     )
     return job
+
+
+class _ClaimRaceConnection:
+    def __init__(self, connection):
+        self._connection = connection
+        self._armed = True
+
+    def execute(self, sql, parameters=()):
+        cursor = self._connection.execute(sql, parameters)
+        if self._armed and "SELECT wu.*" in sql:
+            self._armed = False
+            return _ClaimRaceCursor(self._connection, cursor)
+        return cursor
+
+    def executemany(self, *args, **kwargs):
+        return self._connection.executemany(*args, **kwargs)
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._connection.__exit__(*args)
+
+    def close(self):
+        return self._connection.close()
+
+
+class _ClaimRaceCursor:
+    def __init__(self, connection, cursor):
+        self._connection = connection
+        self._cursor = cursor
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is not None:
+            self._connection.execute(
+                """
+                UPDATE work_units
+                SET status = ?, worker_id = ?, claim_token = ?,
+                    attempt_count = attempt_count + 1
+                WHERE id = ?
+                """,
+                (
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    "worker-race",
+                    "race-token",
+                    row["id"],
+                ),
+            )
+        return row
 
 
 if __name__ == "__main__":

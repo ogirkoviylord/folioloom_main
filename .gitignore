@@ -9,9 +9,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-.superpowers/
 .DS_Store
 build/
 dist/
 *.egg-info/
 var/
+.superpowers/

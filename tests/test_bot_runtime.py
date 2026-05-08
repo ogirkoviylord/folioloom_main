@@ -4,37 +4,44 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.bot.runtime import (
-    HEARTBEAT_PATTERNS,
     BotRuntimeConfig,
+    HEARTBEAT_PATTERNS,
+    _CallbackSpamGuard,
+    _UserActionInFlightGuard,
+    _answer_callback_if_spam,
     _cancel_inline_keyboard,
     _choose_heartbeat_pattern_name,
-    _confirm_pending_translation,
+    _deepseek_parallel_capacity_from_env,
     _document_exceeds_upload_limit,
-    _download_persistent_translation_callback,
-    _handle_resume_persistent_translation_callback,
+    _edit_callback_message,
     _include_progress_preview,
     _is_language_button_text,
     _main_menu_keyboard,
+    _my_books_keyboard,
     _next_heartbeat_frame,
     _next_spinner_frame,
     _print_translation_progress,
+    _print_translation_progress_update,
     _print_translation_summary,
+    _progress_message_for_current_user_language,
+    _confirm_pending_translation,
+    _log_message_edit_error,
     _schedule_message_edit,
+    _should_schedule_progress_edit,
     _settings_keyboard,
     build_deepseek_translator,
     build_default_pricing_rules,
     build_translation_service,
 )
 from translator_service.config import Settings
-from translator_service.persistent_jobs import (
-    PersistentTranslationJobStatus,
-    SQLiteTranslationJobStore,
-    WorkUnitPlan,
-)
-from translator_service.job_runner import TranslationJobStatus
+from translator_service.deepseek_client import DeepSeekClient
+from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
+from translator_service.document_sandbox import DocumentSandbox
 from translator_service.translation_jobs import TranslationProgress
+from translator_service.user_activity import SQLiteUserActivityStore
 
 
 class TelegramMethodLikeAwaitable:
@@ -51,9 +58,14 @@ class TelegramMethodLikeAwaitable:
 class EditableMessage:
     def __init__(self) -> None:
         self.edited_texts: list[str] = []
+        self.edited_reply_markups: list[object] = []
 
-    def edit_text(self, text: str):
-        return TelegramMethodLikeAwaitable(lambda: self.edited_texts.append(text))
+    def edit_text(self, text: str, reply_markup=None):
+        def record() -> None:
+            self.edited_texts.append(text)
+            self.edited_reply_markups.append(reply_markup)
+
+        return TelegramMethodLikeAwaitable(record)
 
 
 class RecordingBot:
@@ -83,53 +95,32 @@ class BotBackedMessage:
         self.message_id = 55
 
 
-class FromUser:
+class User:
     id = 42
 
 
-class AnswerRecordingMessage:
-    def __init__(self) -> None:
-        self.from_user = FromUser()
-        self.answers: list[str] = []
-        self.documents: list[object] = []
-
-    async def answer(self, text: str, **kwargs):
-        self.answers.append(text)
-        return EditableMessage()
-
-    async def answer_document(self, document) -> None:
-        self.documents.append(document)
-
-
-class CallbackRecordingMessage:
-    def __init__(self) -> None:
-        self.answers: list[str] = []
-        self.documents: list[object] = []
-
-    async def answer(self, text: str, **kwargs):
-        self.answers.append(text)
-
-    async def answer_document(self, document) -> None:
-        self.documents.append(document)
-
-
 class RecordingCallback:
-    def __init__(self, *, data: str, user_id: int = 42) -> None:
+    def __init__(self, *, data: str = "my_books") -> None:
+        self.from_user = User()
         self.data = data
-        self.from_user = type("FromUser", (), {"id": user_id})()
-        self.message = CallbackRecordingMessage()
-        self.answers: list[tuple[str | None, bool]] = []
+        self.answers: list[tuple[object, ...]] = []
 
-    async def answer(self, text: str | None = None, show_alert: bool = False) -> None:
-        self.answers.append((text, show_alert))
+    async def answer(self, *args, **kwargs) -> None:
+        self.answers.append((args, kwargs))
+
+
+class RecordingMessage:
+    def __init__(self) -> None:
+        self.from_user = User()
+        self.answers: list[tuple[str, object | None]] = []
+
+    async def answer(self, text: str, reply_markup=None, **kwargs):
+        self.answers.append((text, reply_markup))
+        return EditableMessage()
 
 
 class _RuntimeRecordingTranslator:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str]] = []
-
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
-        self.calls.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
 
 
@@ -151,7 +142,117 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.max_upload_mb, 50)
         self.assertEqual(config.object_storage_root, "var/object-storage")
         self.assertEqual(config.persistent_jobs_db_path, "var/jobs.sqlite3")
-        self.assertEqual(config.translation_execution_mode, "inline")
+        self.assertEqual(config.max_parallel_work_units, 1)
+        self.assertEqual(config.provider_parallel_capacity, 1)
+        self.assertEqual(config.security_max_events_per_run, 20)
+        self.assertEqual(config.security_max_unsafe_model_outputs_per_run, 3)
+        self.assertEqual(config.security_max_repair_failures_per_run, 1)
+        self.assertEqual(config.security_user_cooldown_thresholds_per_window, 2)
+        self.assertEqual(config.security_user_cooldown_window_seconds, 3600)
+        self.assertEqual(config.security_user_cooldown_seconds, 900)
+        self.assertEqual(config.callback_spam_min_interval_seconds, 0.7)
+        self.assertEqual(config.callback_spam_burst_limit, 20)
+        self.assertEqual(config.callback_spam_burst_window_seconds, 10.0)
+        self.assertEqual(config.user_action_lock_ttl_seconds, 900.0)
+
+    def test_callback_spam_guard_blocks_fast_duplicate_actions(self):
+        now = 100.0
+        guard = _CallbackSpamGuard(
+            min_interval_seconds=0.7,
+            burst_limit=20,
+            burst_window_seconds=10.0,
+            clock=lambda: now,
+        )
+
+        self.assertTrue(guard.allow(user_id=42, action="my_books"))
+        self.assertFalse(guard.allow(user_id=42, action="my_books"))
+
+        now = 100.8
+
+        self.assertTrue(guard.allow(user_id=42, action="my_books"))
+
+    def test_callback_spam_guard_blocks_user_bursts_across_actions(self):
+        now = 100.0
+        guard = _CallbackSpamGuard(
+            min_interval_seconds=0.0,
+            burst_limit=2,
+            burst_window_seconds=10.0,
+            clock=lambda: now,
+        )
+
+        self.assertTrue(guard.allow(user_id=42, action="book_detail:1"))
+        now = 101.0
+        self.assertTrue(guard.allow(user_id=42, action="book_detail:2"))
+        now = 102.0
+        self.assertFalse(guard.allow(user_id=42, action="download_book:1"))
+
+        now = 112.1
+
+        self.assertTrue(guard.allow(user_id=42, action="download_book:1"))
+
+    def test_user_action_guard_blocks_duplicate_translation_starts_until_finished(self):
+        now = 100.0
+        guard = _UserActionInFlightGuard(ttl_seconds=30.0, clock=lambda: now)
+
+        self.assertTrue(guard.try_begin(user_id=42, action="translation_start"))
+        now = 131.0
+
+        self.assertTrue(guard.try_begin(user_id=42, action="translation_start"))
+        self.assertFalse(guard.try_begin(user_id=42, action="translation_start"))
+
+        guard.finish(user_id=42, action="translation_start")
+
+        self.assertTrue(guard.try_begin(user_id=42, action="translation_start"))
+
+    def test_user_action_guard_expires_abandoned_actions(self):
+        now = 100.0
+        guard = _UserActionInFlightGuard(ttl_seconds=30.0, clock=lambda: now)
+
+        self.assertTrue(guard.try_begin(user_id=42, action="translation_start"))
+
+    async def test_callback_spam_helper_answers_and_skips_duplicate_callback(self):
+        now = 100.0
+        guard = _CallbackSpamGuard(
+            min_interval_seconds=0.7,
+            burst_limit=20,
+            burst_window_seconds=10.0,
+            clock=lambda: now,
+        )
+        callback = RecordingCallback(data="my_books")
+
+        self.assertFalse(await _answer_callback_if_spam(callback, guard))
+        self.assertTrue(await _answer_callback_if_spam(callback, guard))
+
+        self.assertEqual(len(callback.answers), 1)
+
+    async def test_confirm_guard_ignores_duplicate_start_without_progress_message(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+        guard = _UserActionInFlightGuard(ttl_seconds=30.0)
+        self.assertTrue(guard.try_begin(user_id=42, action="translation_start"))
+        message = RecordingMessage()
+
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            action_guard=guard,
+        )
+
+        self.assertEqual(message.answers, [])
+        self.assertIsNotNone(service.get_pending(42))
 
     def test_build_translation_service_wires_local_object_storage(self):
         with TemporaryDirectory() as temp_dir:
@@ -159,9 +260,11 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 BotRuntimeConfig(
                     object_storage_root=temp_dir,
                     persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
                 )
             )
             self.addCleanup(service.close)
+            self.assertIsInstance(service._document_sandbox, DocumentSandbox)
 
             upload = service.store_uploaded_document(
                 user_telegram_id=42,
@@ -173,12 +276,40 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(upload.source_object_key)
             self.assertTrue((Path(temp_dir) / upload.source_object_key).exists())
 
+    def test_build_translation_service_wires_user_activity_store(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
+                    admin_db_path=str(admin_db_path),
+                )
+            )
+            self.addCleanup(service.close)
+
+            service.prepare_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.",
+                source_language="en",
+                target_language="uk",
+            )
+
+            with SQLiteUserActivityStore(admin_db_path) as activity_store:
+                events = activity_store.list_events(actor_id="telegram:42")
+
+            self.assertIn("document.estimated", [event.event_type for event in events])
+
     def test_build_translation_service_wires_persistent_txt_confirmation(self):
         with TemporaryDirectory() as temp_dir:
             service = build_translation_service(
                 BotRuntimeConfig(
                     object_storage_root=str(Path(temp_dir) / "objects"),
                     persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
+                    translation_run_log_root=str(Path(temp_dir) / "translation-runs"),
                     max_fragment_chars=5,
                 )
             )
@@ -203,188 +334,101 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(job.result_file_name, "notes.uk.txt")
             self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
 
-    def test_build_translation_service_wires_worker_mode_queue_confirmation(self):
-        with TemporaryDirectory() as temp_dir:
-            service = build_translation_service(
-                BotRuntimeConfig(
-                    object_storage_root=str(Path(temp_dir) / "objects"),
-                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
-                    job_store_backend="sqlite",
-                    translation_execution_mode="worker",
-                    max_fragment_chars=5,
+    def test_build_deepseek_translator_keeps_single_key_client(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEY": "single-key",
+                "DEEPSEEK_BASE_URL": "https://deepseek.test",
+            },
+            clear=False,
+        ):
+            translator = build_deepseek_translator(
+                Settings(deepseek_model="deepseek-test")
+            )
+
+        self.assertIsInstance(translator, DeepSeekClient)
+
+    def test_build_deepseek_translator_uses_key_pool_for_multiple_keys(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEYS": "key-a, key-b",
+                "DEEPSEEK_BASE_URL": "https://deepseek.test",
+                "DEEPSEEK_MAX_PARALLEL_PER_KEY": "2",
+                "DEEPSEEK_CHANNEL_COOLDOWN_SECONDS": "7",
+                "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS": "31",
+                "DEEPSEEK_CHANNEL_WEIGHTS": "3, 1",
+            },
+            clear=False,
+        ):
+            translator = build_deepseek_translator(
+                Settings(deepseek_model="deepseek-test")
+            )
+
+        self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
+        snapshot = translator.snapshot()
+        self.assertEqual([channel.label for channel in snapshot], ["deepseek-1", "deepseek-2"])
+        self.assertEqual([channel.max_parallel_requests for channel in snapshot], [2, 2])
+        self.assertEqual([channel.weight for channel in snapshot], [3, 1])
+
+    def test_build_deepseek_translator_deduplicates_multiple_keys(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEYS": "key-a, key-a, key-b",
+                "DEEPSEEK_BASE_URL": "https://deepseek.test",
+            },
+            clear=False,
+        ):
+            translator = build_deepseek_translator(
+                Settings(deepseek_model="deepseek-test")
+            )
+
+        self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
+        self.assertEqual([channel.label for channel in translator.snapshot()], ["deepseek-1", "deepseek-2"])
+
+    def test_invalid_deepseek_channel_weights_fall_back_to_one(self):
+        with self.assertLogs("translator_service.bot.runtime", level="WARNING") as logs:
+            with patch.dict(
+                "os.environ",
+                {
+                    "DEEPSEEK_API_KEYS": "key-a, key-b",
+                    "DEEPSEEK_BASE_URL": "https://deepseek.test",
+                    "DEEPSEEK_CHANNEL_WEIGHTS": "3",
+                },
+                clear=False,
+            ):
+                translator = build_deepseek_translator(
+                    Settings(deepseek_model="deepseek-test")
                 )
-            )
-            self.addCleanup(service.close)
-            service.store_uploaded_document(
-                user_telegram_id=42,
-                file_name="notes.txt",
-                content=b"One.\n\nTwo.",
-                source_language="en",
-            )
-            service.prepare_pending_upload(
-                user_telegram_id=42,
-                target_language="uk",
-            )
-            translator = _RuntimeRecordingTranslator()
 
-            job = service.confirm_pending_translation(
-                user_telegram_id=42,
-                translator=translator,
-            )
+        self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
+        self.assertEqual([channel.weight for channel in translator.snapshot()], [1, 1])
+        self.assertIn("Ignoring invalid DeepSeek channel weights", logs.output[0])
 
-            self.assertEqual(job.id, "job-1")
-            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
-            self.assertIsNone(job.result_file_name)
-            self.assertIsNone(job.result_content)
-            self.assertEqual(translator.calls, [])
+    def test_deepseek_parallel_capacity_matches_keys_and_per_key_limit(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEYS": "key-a, key-b, key-a, key-c",
+                "DEEPSEEK_MAX_PARALLEL_PER_KEY": "2",
+            },
+            clear=False,
+        ):
+            self.assertEqual(_deepseek_parallel_capacity_from_env(), 6)
 
-    async def test_worker_mode_confirm_message_reports_queued_without_file(self):
-        with TemporaryDirectory() as temp_dir:
-            service = build_translation_service(
-                BotRuntimeConfig(
-                    object_storage_root=str(Path(temp_dir) / "objects"),
-                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
-                    job_store_backend="sqlite",
-                    translation_execution_mode="worker",
-                    max_fragment_chars=5,
-                )
-            )
-            self.addCleanup(service.close)
-            service.store_uploaded_document(
-                user_telegram_id=42,
-                file_name="notes.txt",
-                content=b"One.\n\nTwo.",
-                source_language="en",
-            )
-            service.prepare_pending_upload(
-                user_telegram_id=42,
-                target_language="uk",
-            )
-            message = AnswerRecordingMessage()
-            translator = _RuntimeRecordingTranslator()
-
-            await _confirm_pending_translation(
-                message=message,
-                service=service,
-                translator=translator,
-            )
-
-            self.assertIn("Translation has started", message.answers[-1])
-            self.assertIn("Progress is saved", message.answers[-1])
-            self.assertIn("notes.txt", message.answers[-1])
-            self.assertEqual(message.documents, [])
-            self.assertEqual(translator.calls, [])
-
-    async def test_resume_persistent_translation_callback_requeues_job(self):
-        with TemporaryDirectory() as temp_dir:
-            service = build_translation_service(
-                BotRuntimeConfig(
-                    object_storage_root=str(Path(temp_dir) / "objects"),
-                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
-                    job_store_backend="sqlite",
-                    translation_execution_mode="worker",
-                    max_fragment_chars=5,
-                )
-            )
-            self.addCleanup(service.close)
-            store = service._persistent_job_store
-            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
-            callback = RecordingCallback(data=f"resume:{job.id}")
-
-            await _handle_resume_persistent_translation_callback(
-                callback=callback,
-                service=service,
-            )
-
-            self.assertEqual(
-                store.get_job(job.id).status,
-                PersistentTranslationJobStatus.QUEUED,
-            )
-            self.assertEqual(callback.answers[-1], ("Translation resumed.", False))
-
-    async def test_download_persistent_translation_callback_sends_partial_file(self):
-        with TemporaryDirectory() as temp_dir:
-            service = build_translation_service(
-                BotRuntimeConfig(
-                    object_storage_root=str(Path(temp_dir) / "objects"),
-                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
-                    job_store_backend="sqlite",
-                    translation_execution_mode="worker",
-                    max_fragment_chars=5,
-                )
-            )
-            self.addCleanup(service.close)
-            store = service._persistent_job_store
-            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
-            first = store.list_work_units(job.id)[0]
-            store.complete_work_unit(
-                first.id,
-                translated_text="[uk] One",
-                prompt_tokens=1,
-                completion_tokens=1,
-                cache_hit_tokens=0,
-                cache_miss_tokens=1,
-            )
-            callback = RecordingCallback(data=f"download_partial:{job.id}")
-
-            await _download_persistent_translation_callback(
-                callback=callback,
-                service=service,
-                partial=True,
-            )
-
-            self.assertEqual(callback.answers[-1], (None, False))
-            self.assertEqual(len(callback.message.documents), 1)
-            self.assertEqual(
-                callback.message.documents[0].filename,
-                "notes.uk.partial.txt",
-            )
-
-    async def test_download_persistent_translation_callback_handles_missing_message(self):
-        with TemporaryDirectory() as temp_dir:
-            service = build_translation_service(
-                BotRuntimeConfig(
-                    object_storage_root=str(Path(temp_dir) / "objects"),
-                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
-                    job_store_backend="sqlite",
-                    translation_execution_mode="worker",
-                    max_fragment_chars=5,
-                )
-            )
-            self.addCleanup(service.close)
-            store = service._persistent_job_store
-            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
-            first = store.list_work_units(job.id)[0]
-            store.complete_work_unit(
-                first.id,
-                translated_text="[uk] One",
-                prompt_tokens=1,
-                completion_tokens=1,
-                cache_hit_tokens=0,
-                cache_miss_tokens=1,
-            )
-            callback = RecordingCallback(data=f"download_partial:{job.id}")
-            callback.message = None
-
-            await _download_persistent_translation_callback(
-                callback=callback,
-                service=service,
-                partial=True,
-            )
-
-            self.assertEqual(callback.answers[-1], ("Cannot send file here.", True))
-
-    def test_worker_mode_translator_does_not_require_deepseek_key(self):
-        settings = Settings(translation_execution_mode="worker")
-
-        translator = build_deepseek_translator(settings)
-
-        with self.assertRaisesRegex(RuntimeError, "must not translate inline"):
-            translator.translate(
-                text="Hello",
-                source_language="en",
-                target_language="uk",
-            )
+    def test_deepseek_parallel_capacity_falls_back_to_single_key(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEY": "single-key",
+                "DEEPSEEK_API_KEYS": "",
+                "DEEPSEEK_MAX_PARALLEL_PER_KEY": "3",
+            },
+            clear=False,
+        ):
+            self.assertEqual(_deepseek_parallel_capacity_from_env(), 3)
 
     def test_language_button_filter_ignores_missing_message_text(self):
         self.assertFalse(_is_language_button_text(None))
@@ -429,6 +473,42 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.wrap_future(future)
         self.assertEqual(message.bot.edits[0][4], "HTML")
 
+    def test_progress_edit_scheduler_throttles_frequent_updates(self):
+        progress_stats = {"last_edit_scheduled_at": 10.0}
+
+        self.assertFalse(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=12.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 10.0)
+        self.assertTrue(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=15.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 15.0)
+
+    def test_message_edit_error_logs_retry_after_without_traceback(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        class FakeFuture:
+            def result(self):
+                raise FakeRetryAfter(
+                    "Telegram server says - Flood control exceeded. Retry in 13 seconds."
+                )
+
+        with self.assertLogs("translator_service.bot.runtime", level="WARNING") as logs:
+            _log_message_edit_error(FakeFuture())
+
+        self.assertIn("flood control", logs.output[0].lower())
+        self.assertIn("13", logs.output[0])
+
     def test_cancel_inline_keyboard_uses_callback_data(self):
         keyboard = _cancel_inline_keyboard("en")
 
@@ -443,11 +523,82 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             [[button.text for button in row] for row in keyboard.keyboard],
             [
                 ["📖 Translate a Book"],
+                ["📚 My Books"],
                 ["🧵 How It Works", "🌍 Language"],
                 ["⚙️ Settings"],
                 ["Help"],
             ],
         )
+
+    def test_my_books_keyboard_opens_last_book_and_each_book_detail(self):
+        keyboard = _my_books_keyboard(
+            [
+                {"job_id": "job-1", "file_name": "first.epub", "has_result": True},
+                {"job_id": "job-2", "file_name": "second.docx", "has_result": False},
+                {"job_id": "job-3", "file_name": "third.txt", "has_result": True},
+            ],
+            interface_language="en",
+        )
+
+        self.assertEqual(
+            [
+                [(button.text, button.callback_data) for button in row]
+                for row in keyboard.inline_keyboard
+            ],
+            [
+                [("Last Book", "book_detail:job-1")],
+                [("Book 1", "book_detail:job-1")],
+                [("Book 2", "book_detail:job-2")],
+                [("Book 3", "book_detail:job-3")],
+            ],
+        )
+
+    def test_my_book_detail_keyboard_uses_status_specific_actions(self):
+        from translator_service.bot.runtime import _my_book_detail_keyboard
+
+        keyboard = _my_book_detail_keyboard(
+            {
+                "job_id": "job-1",
+                "has_result": True,
+                "can_resume": True,
+            },
+            interface_language="en",
+        )
+
+        self.assertEqual(
+            [
+                [(button.text, button.callback_data) for button in row]
+                for row in keyboard.inline_keyboard
+            ],
+            [
+                [("Download Translation", "download_book:job-1")],
+                [("Continue Translation", "resume_book:job-1")],
+                [("Delete Book", "delete_book:job-1")],
+                [("Back to My Books", "my_books")],
+            ],
+        )
+
+    async def test_callback_message_helper_edits_existing_inline_message(self):
+        message = EditableMessage()
+        await _edit_callback_message(
+            message,
+            text="My Books",
+            reply_markup="inline-keyboard",
+        )
+
+        self.assertEqual(message.edited_texts, ["My Books"])
+        self.assertEqual(message.edited_reply_markups, ["inline-keyboard"])
+
+    async def test_callback_message_helper_drops_reply_keyboard_markup(self):
+        message = EditableMessage()
+        await _edit_callback_message(
+            message,
+            text="Book deleted.",
+            reply_markup=_main_menu_keyboard("en"),
+        )
+
+        self.assertEqual(message.edited_texts, ["Book deleted."])
+        self.assertEqual(message.edited_reply_markups, [None])
 
     def test_progress_preview_helper_respects_user_setting(self):
         with TemporaryDirectory() as temp_dir:
@@ -455,6 +606,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 BotRuntimeConfig(
                     object_storage_root=str(Path(temp_dir) / "objects"),
                     persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
                 )
             )
             self.addCleanup(service.close)
@@ -474,10 +626,39 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [[button.text for button in row] for row in keyboard.keyboard],
             [
-                ["Показывать фрагмент"],
+                ["Показывать отрывок"],
+                ["Сбросить настройки"],
                 ["Главное меню"],
             ],
         )
+
+    def test_progress_message_uses_current_user_interface_language(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
+                )
+            )
+            self.addCleanup(service.close)
+            service.set_interface_language(user_telegram_id=42, language_code="ru")
+
+            text = _progress_message_for_current_user_language(
+                service=service,
+                user_telegram_id=42,
+                completed_fragments=1,
+                total_fragments=4,
+                estimated_total_seconds=120,
+                elapsed_seconds=30,
+                last_translated_text="переведенный отрывок",
+                activity_indicator="·",
+                activity_phrase_index=1,
+            )
+
+            self.assertIn("Прогресс перевода", text)
+            self.assertIn("Осталось", text)
+            self.assertIn("Последний переведенный отрывок", text)
 
     def test_document_size_guard_uses_telegram_metadata_before_download(self):
         class Document:
@@ -486,7 +667,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_document_exceeds_upload_limit(Document(), max_upload_mb=5))
         self.assertFalse(_document_exceeds_upload_limit(Document(), max_upload_mb=6))
 
-    def test_translation_progress_log_includes_last_translated_fragment_preview(self):
+    def test_translation_progress_log_excludes_last_translated_fragment_preview(self):
         output = io.StringIO()
 
         with redirect_stdout(output):
@@ -503,8 +684,9 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertNotIn("private source text", output.getvalue())
-        self.assertIn("last_translated=", output.getvalue())
-        self.assertIn("translated text with a second line", output.getvalue())
+        self.assertNotIn("last_translated=", output.getvalue())
+        self.assertNotIn("translated text with a second line", output.getvalue())
+        self.assertIn("translated_chars=34", output.getvalue())
         self.assertIn("tokens=9", output.getvalue())
 
     def test_spinner_frame_cycles(self):
@@ -571,6 +753,30 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cache_hit_tokens=300", text)
         self.assertIn("cache_miss_tokens=700", text)
 
+    def test_cancelled_progress_update_is_reported_as_stopping(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            _print_translation_progress_update(
+                progress=TranslationProgress(
+                    completed_fragments=35,
+                    total_fragments=1002,
+                    source_text="One.",
+                    translated_text="Один.",
+                    elapsed_seconds=94.84,
+                    prompt_tokens=51695,
+                    completion_tokens=3986,
+                    total_tokens=55681,
+                ),
+                elapsed_total_seconds=251,
+                is_stopping=True,
+            )
+
+        text = output.getvalue()
+        self.assertIn("TRANSLATION STOPPING", text)
+        self.assertIn("fragment=35/1002", text)
+        self.assertNotIn("status=ok", text)
+
     def test_failed_translation_summary_is_not_green(self):
         output = io.StringIO()
 
@@ -595,59 +801,6 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("\033[92m", text)
         self.assertIn("TRANSLATION FINISHED", text)
         self.assertIn("status=failed", text)
-
-
-def _persistent_job_with_failed_unit(
-    store: SQLiteTranslationJobStore,
-    *,
-    user_id: str,
-):
-    job = store.create_job(
-        order_id="order-1",
-        user_id=user_id,
-        file_id="file-1",
-        file_name="notes.txt",
-        document_kind="txt",
-        source_language="en",
-        target_language="uk",
-        adapter_version="txt-v1",
-        prompt_version="prompt-v1",
-        pricing_snapshot_id="pricing-v1",
-        source_object_key="original/file-1.txt",
-    )
-    store.add_work_units(
-        job.id,
-        [
-            WorkUnitPlan(
-                sequence=1,
-                source_block_ids=("block-1",),
-                source_text_hash="hash-1",
-                prompt_tier="default",
-                source_language="en",
-                target_language="uk",
-                source_object_key="intermediate/unit-1.txt",
-            ),
-            WorkUnitPlan(
-                sequence=2,
-                source_block_ids=("block-2",),
-                source_text_hash="hash-2",
-                prompt_tier="default",
-                source_language="en",
-                target_language="uk",
-                source_object_key="intermediate/unit-2.txt",
-            ),
-        ],
-    )
-    first = store.claim_next_work_unit(job.id, worker_id="worker-a")
-    store.fail_work_unit(
-        first.id,
-        error_message="provider timeout",
-        retry_count=1,
-        worker_id="worker-a",
-    )
-    second = store.claim_next_work_unit(job.id, worker_id="worker-a")
-    assert second is not None
-    return job
 
 
 if __name__ == "__main__":

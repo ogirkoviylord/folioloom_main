@@ -1,35 +1,53 @@
+from dataclasses import dataclass
 import asyncio
 import hashlib
 import inspect
 import logging
 import os
+import threading
 import time
-from dataclasses import dataclass
 
 from translator_service.bot.messages import (
     build_back_to_menu_message,
+    build_book_deleted_message,
     build_cancel_requested_message,
+    build_delete_book_confirmation_message,
+    build_delete_unavailable_message,
+    build_download_unavailable_message,
     build_help_message,
     build_how_it_works_message,
     build_language_selected_message,
     build_language_selection_message,
-    build_main_menu,
-    build_no_pending_translation_message,
+    build_my_book_detail_message,
+    build_my_books_message,
     build_nothing_to_cancel_message,
+    build_no_pending_translation_message,
     build_pending_translation_message,
     build_settings_message,
+    build_settings_reset_message,
     build_start_message,
-    build_translation_job_status_message,
     build_translation_language_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
     build_upload_error_message,
     build_upload_prompt_message,
+    build_translation_job_status_message,
+    get_main_menu_text,
+    get_main_menu_button_text,
     get_back_text,
     get_cancel_text,
     get_confirm_translation_text,
-    get_main_menu_button_text,
+    get_download_book_text,
+    get_last_book_text,
+    get_open_book_text,
+    get_download_translation_text,
+    get_continue_translation_text,
+    get_delete_book_text,
+    get_confirm_delete_book_text,
+    get_keep_book_text,
+    get_back_to_my_books_text,
     get_toggle_progress_preview_text,
+    get_reset_settings_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
@@ -37,30 +55,48 @@ from translator_service.bot.messages import (
     is_how_it_works_text,
     is_language_menu_text,
     is_main_menu_text,
+    is_my_books_text,
     is_settings_text,
-    is_toggle_progress_preview_text,
     is_translate_book_text,
+    is_toggle_progress_preview_text,
+    is_reset_settings_text,
+    build_main_menu,
 )
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
+from translator_service.deepseek_key_pool import (
+    DeepSeekChannelConfig,
+    DeepSeekKeyPoolTranslator,
+)
+from translator_service.document_sandbox import DocumentSandbox, DocumentSandboxLimits
 from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import InMemoryTranslationJobRepository
-from translator_service.job_store_factory import create_translation_job_store
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     find_language_by_button_text,
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
+from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.pricing import PricingRules
-from translator_service.translation_jobs import TextTranslator, TranslationProgress
+from translator_service.security_telemetry import (
+    SecurityCooldownActive,
+    SecurityCooldownPolicy,
+    SecurityThresholdPolicy,
+)
+from translator_service.translation_jobs import TranslationProgress
+from translator_service.translation_jobs import TextTranslator
+from translator_service.user_activity import SQLiteUserActivityStore
+from translator_service.users import SQLiteUserSettingsRepository
+
 
 logger = logging.getLogger(__name__)
 
 TRANSLATION_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 TRANSLATION_SPINNER_INTERVAL_SECONDS = 5
+TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS = 5
 HEARTBEAT_PATTERNS = {
     "calm_dots": ("·", "•", "●", "•"),
     "fleuron": ("❦", "❧", "❦", "❧"),
@@ -78,9 +114,94 @@ class BotRuntimeConfig:
     max_upload_mb: int = 50
     object_storage_root: str = "var/object-storage"
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
-    job_store_backend: str = "sqlite"
-    postgres_dsn: str = "postgresql://translator:translator@localhost:5432/translator"
-    translation_execution_mode: str = "inline"
+    user_settings_db_path: str = "var/user-settings.sqlite3"
+    admin_db_path: str = "var/admin.sqlite3"
+    translation_run_log_root: str = "var/translation-runs"
+    max_parallel_work_units: int = 1
+    provider_parallel_capacity: int = 1
+    security_max_events_per_run: int = 20
+    security_max_unsafe_model_outputs_per_run: int = 3
+    security_max_repair_failures_per_run: int = 1
+    security_user_cooldown_thresholds_per_window: int = 2
+    security_user_cooldown_window_seconds: int = 3600
+    security_user_cooldown_seconds: int = 900
+    callback_spam_min_interval_seconds: float = 0.7
+    callback_spam_burst_limit: int = 20
+    callback_spam_burst_window_seconds: float = 10.0
+    user_action_lock_ttl_seconds: float = 900.0
+
+
+class _CallbackSpamGuard:
+    def __init__(
+        self,
+        *,
+        min_interval_seconds: float,
+        burst_limit: int,
+        burst_window_seconds: float,
+        clock=time.monotonic,
+    ) -> None:
+        self._min_interval_seconds = max(0.0, min_interval_seconds)
+        self._burst_limit = max(1, burst_limit)
+        self._burst_window_seconds = max(0.1, burst_window_seconds)
+        self._clock = clock
+        self._last_action_at: dict[tuple[int, str], float] = {}
+        self._user_action_times: dict[int, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def allow(self, *, user_id: int, action: str) -> bool:
+        now = self._clock()
+        normalized_action = action or "unknown"
+        key = (user_id, normalized_action)
+        with self._lock:
+            recent_times = [
+                action_at
+                for action_at in self._user_action_times.get(user_id, [])
+                if now - action_at <= self._burst_window_seconds
+            ]
+            if len(recent_times) >= self._burst_limit:
+                self._user_action_times[user_id] = recent_times
+                return False
+
+            last_action_at = self._last_action_at.get(key)
+            if (
+                last_action_at is not None
+                and now - last_action_at < self._min_interval_seconds
+            ):
+                self._user_action_times[user_id] = recent_times
+                return False
+
+            recent_times.append(now)
+            self._user_action_times[user_id] = recent_times
+            self._last_action_at[key] = now
+            return True
+
+
+class _UserActionInFlightGuard:
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float,
+        clock=time.monotonic,
+    ) -> None:
+        self._ttl_seconds = max(1.0, ttl_seconds)
+        self._clock = clock
+        self._expires_at: dict[tuple[int, str], float] = {}
+        self._lock = threading.Lock()
+
+    def try_begin(self, *, user_id: int, action: str) -> bool:
+        now = self._clock()
+        key = (user_id, action or "unknown")
+        with self._lock:
+            expires_at = self._expires_at.get(key)
+            if expires_at is not None and expires_at > now:
+                return False
+            self._expires_at[key] = now + self._ttl_seconds
+            return True
+
+    def finish(self, *, user_id: int, action: str) -> None:
+        key = (user_id, action or "unknown")
+        with self._lock:
+            self._expires_at.pop(key, None)
 
 
 def build_default_pricing_rules() -> PricingRules:
@@ -103,36 +224,139 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_upload_mb=config.max_upload_mb,
         max_fragment_chars=config.max_fragment_chars,
         file_storage=LocalObjectStorage(config.object_storage_root),
-        persistent_job_store=create_translation_job_store(config),
-        translation_execution_mode=config.translation_execution_mode,
+        persistent_job_store=SQLiteTranslationJobStore(
+            config.persistent_jobs_db_path,
+        ),
+        translation_run_log_root=config.translation_run_log_root,
+        user_settings_repository=SQLiteUserSettingsRepository(
+            config.user_settings_db_path,
+        ),
+        activity_store=SQLiteUserActivityStore(config.admin_db_path),
+        max_parallel_work_units=config.max_parallel_work_units,
+        provider_parallel_capacity=config.provider_parallel_capacity,
+        document_sandbox=DocumentSandbox(
+            limits=DocumentSandboxLimits(timeout_seconds=15.0),
+        ),
+        security_threshold_policy=SecurityThresholdPolicy(
+            max_events_per_run=config.security_max_events_per_run,
+            max_unsafe_model_outputs_per_run=(
+                config.security_max_unsafe_model_outputs_per_run
+            ),
+            max_repair_failures_per_run=config.security_max_repair_failures_per_run,
+        ),
+        security_cooldown_policy=SecurityCooldownPolicy(
+            max_thresholds_per_window=(
+                config.security_user_cooldown_thresholds_per_window
+            ),
+            window_seconds=config.security_user_cooldown_window_seconds,
+            cooldown_seconds=config.security_user_cooldown_seconds,
+        ),
     )
-
-
-class _WorkerModeTranslator:
-    def translate(
-        self,
-        *,
-        text: str,
-        source_language: str,
-        target_language: str,
-    ) -> str:
-        raise RuntimeError("Telegram bot worker mode must not translate inline")
 
 
 def build_deepseek_translator(settings: Settings) -> TextTranslator:
-    if settings.translation_execution_mode == "worker":
-        return _WorkerModeTranslator()
+    api_keys = _deepseek_api_keys_from_env()
+    if not api_keys:
+        raise RuntimeError("DEEPSEEK_API_KEY or DEEPSEEK_API_KEYS is not set")
 
-    api_key = os.getenv("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    timeout_seconds = _env_float("DEEPSEEK_TIMEOUT_SECONDS", 120.0)
+    retry_attempts = _env_int("DEEPSEEK_RETRY_ATTEMPTS", 3)
+    retry_delay_seconds = _env_float("DEEPSEEK_RETRY_DELAY_SECONDS", 1.0)
 
-    return DeepSeekClient(
-        api_key=api_key,
-        model=settings.deepseek_model,
-        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-        timeout_seconds=120,
+    if len(api_keys) == 1:
+        return DeepSeekClient(
+            api_key=api_keys[0],
+            model=settings.deepseek_model,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            retry_attempts=retry_attempts,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+
+    max_parallel_per_key = _env_int("DEEPSEEK_MAX_PARALLEL_PER_KEY", 1)
+    cooldown_seconds = _env_float("DEEPSEEK_CHANNEL_COOLDOWN_SECONDS", 30.0)
+    max_cooldown_seconds = _env_float(
+        "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS",
+        max(300.0, cooldown_seconds),
     )
+    channel_weights = _deepseek_channel_weights_from_env(len(api_keys))
+    return DeepSeekKeyPoolTranslator(
+        channels=[
+            DeepSeekChannelConfig(
+                api_key=api_key,
+                label=f"deepseek-{index}",
+                max_parallel_requests=max_parallel_per_key,
+                weight=channel_weights[index - 1],
+            )
+            for index, api_key in enumerate(api_keys, start=1)
+        ],
+        model=settings.deepseek_model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        retry_attempts=retry_attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        cooldown_seconds=cooldown_seconds,
+        max_cooldown_seconds=max_cooldown_seconds,
+    )
+
+
+def _deepseek_api_keys_from_env() -> list[str]:
+    key_list = os.getenv("DEEPSEEK_API_KEYS", "")
+    candidates = key_list.split(",") if key_list else [os.getenv("DEEPSEEK_API_KEY", "")]
+    keys: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        api_key = candidate.strip()
+        if not api_key or api_key in seen:
+            continue
+        seen.add(api_key)
+        keys.append(api_key)
+    return keys
+
+
+def _deepseek_parallel_capacity_from_env() -> int:
+    return max(1, len(_deepseek_api_keys_from_env())) * _env_int(
+        "DEEPSEEK_MAX_PARALLEL_PER_KEY",
+        1,
+    )
+
+
+def _deepseek_channel_weights_from_env(channel_count: int) -> list[int]:
+    raw = os.getenv("DEEPSEEK_CHANNEL_WEIGHTS", "")
+    if not raw.strip():
+        return [1] * channel_count
+    try:
+        weights = [int(part.strip()) for part in raw.split(",")]
+    except ValueError:
+        logger.warning("Ignoring invalid DeepSeek channel weights: %r", raw)
+        return [1] * channel_count
+    if len(weights) != channel_count or any(weight < 1 for weight in weights):
+        logger.warning("Ignoring invalid DeepSeek channel weights: %r", raw)
+        return [1] * channel_count
+    return weights
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning("Ignoring invalid integer environment value: %s=%r", name, raw)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        logger.warning("Ignoring invalid float environment value: %s=%r", name, raw)
+        return default
 
 
 def create_router(
@@ -146,9 +370,73 @@ def create_router(
     from aiogram.types import CallbackQuery, Message
 
     router = Router()
+    callback_spam_guard = _CallbackSpamGuard(
+        min_interval_seconds=config.callback_spam_min_interval_seconds,
+        burst_limit=config.callback_spam_burst_limit,
+        burst_window_seconds=config.callback_spam_burst_window_seconds,
+    )
+    user_action_guard = _UserActionInFlightGuard(
+        ttl_seconds=config.user_action_lock_ttl_seconds,
+    )
+
+    def record_message_activity(
+        message: Message,
+        *,
+        event_type: str,
+        action: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        user_id = getattr(getattr(message, "from_user", None), "id", None)
+        if user_id is None:
+            return
+        service.record_user_activity(
+            user_telegram_id=user_id,
+            event_type=event_type,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            metadata=metadata,
+        )
+
+    def record_callback_activity(
+        callback: CallbackQuery,
+        *,
+        event_type: str,
+        action: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        user_id = getattr(getattr(callback, "from_user", None), "id", None)
+        if user_id is None:
+            return
+        service.record_user_activity(
+            user_telegram_id=user_id,
+            event_type=event_type,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            metadata={"callback_data": callback.data, **(metadata or {})},
+        )
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="start",
+            target_type="command",
+            target_id="/start",
+        )
+        if not service.has_interface_language(message.from_user.id):
+            await message.answer(
+                build_language_selection_message(interface_language="en"),
+                reply_markup=_interface_language_keyboard(),
+            )
+            return
+
         await message.answer(
             build_start_message(
                 interface_language=service.get_interface_language(message.from_user.id)
@@ -160,15 +448,29 @@ def create_router(
 
     @router.message(Command("menu"))
     async def menu(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="menu",
+            target_type="command",
+            target_id="/menu",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         service.discard_pending_translation(message.from_user.id)
         await message.answer(
-            build_start_message(interface_language=interface_language),
+            get_main_menu_text(interface_language=interface_language),
             reply_markup=_main_menu_keyboard(interface_language),
         )
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="help",
+            target_type="command",
+            target_id="/help",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
             build_help_message(interface_language),
@@ -177,6 +479,13 @@ def create_router(
 
     @router.message(Command("language"))
     async def language(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="language",
+            target_type="command",
+            target_id="/language",
+        )
         await message.answer(
             build_language_selection_message(
                 interface_language=service.get_interface_language(message.from_user.id)
@@ -189,12 +498,19 @@ def create_router(
         interface_language = service.get_interface_language(message.from_user.id)
         service.discard_pending_translation(message.from_user.id)
         await message.answer(
-            build_start_message(interface_language=interface_language),
+            get_main_menu_text(interface_language=interface_language),
             reply_markup=_main_menu_keyboard(interface_language),
         )
 
     @router.message(F.text.func(is_translate_book_text))
     async def translate_book(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="translate_book",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
             build_upload_prompt_message(interface_language),
@@ -203,11 +519,276 @@ def create_router(
 
     @router.message(F.text.func(is_how_it_works_text))
     async def how_it_works(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="how_it_works",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
             build_how_it_works_message(interface_language),
             reply_markup=_menu_detail_keyboard(interface_language),
         )
+
+    @router.message(F.text.func(is_my_books_text))
+    async def my_books(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="my_books",
+        )
+        interface_language = service.get_interface_language(message.from_user.id)
+        books = service.list_user_books(user_telegram_id=message.from_user.id)
+        await message.answer(
+            build_my_books_message(books, interface_language=interface_language),
+            reply_markup=(
+                _my_books_keyboard(books, interface_language=interface_language)
+                or _menu_detail_keyboard(interface_language)
+            ),
+        )
+
+    @router.callback_query(F.data == "my_books")
+    async def my_books_callback(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="clicked",
+            target_type="callback",
+            target_id="my_books",
+        )
+        if callback.message is None:
+            await callback.answer()
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        books = service.list_user_books(user_telegram_id=callback.from_user.id)
+        await callback.answer()
+        await _edit_callback_message(
+            callback.message,
+            build_my_books_message(books, interface_language=interface_language),
+            reply_markup=(
+                _my_books_keyboard(books, interface_language=interface_language)
+                or _menu_detail_keyboard(interface_language)
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("book_detail:"))
+    async def book_detail(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="opened",
+            target_type="book",
+            target_id=job_id,
+        )
+        book = service.get_user_book_detail(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if book is None or callback.message is None:
+            await callback.answer(
+                build_download_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        await callback.answer()
+        await _edit_callback_message(
+            callback.message,
+            build_my_book_detail_message(book, interface_language=interface_language),
+            reply_markup=_my_book_detail_keyboard(
+                book,
+                interface_language=interface_language,
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("resume_book:"))
+    async def resume_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="resume_requested",
+            target_type="book",
+            target_id=job_id,
+        )
+        book = service.get_user_book_detail(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if book is None or not book.can_resume or callback.message is None:
+            await callback.answer(
+                build_download_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        if not user_action_guard.try_begin(
+            user_id=callback.from_user.id,
+            action="translation_start",
+        ):
+            await callback.answer()
+            return
+
+        try:
+            await callback.answer()
+            await _resume_user_book_translation(
+                message=callback.message,
+                user_telegram_id=callback.from_user.id,
+                job_id=job_id,
+                service=service,
+                translator=translator,
+            )
+        finally:
+            user_action_guard.finish(
+                user_id=callback.from_user.id,
+                action="translation_start",
+            )
+
+    @router.callback_query(F.data.startswith("delete_book:"))
+    async def delete_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="delete_requested",
+            target_type="book",
+            target_id=job_id,
+        )
+        book = service.get_user_book_detail(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if book is None or callback.message is None:
+            await callback.answer(
+                build_delete_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        await callback.answer()
+        await _edit_callback_message(
+            callback.message,
+            build_delete_book_confirmation_message(
+                book,
+                interface_language=interface_language,
+            ),
+            reply_markup=_delete_book_confirmation_keyboard(
+                job_id,
+                interface_language=interface_language,
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("keep_book:"))
+    async def keep_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        book = service.get_user_book_detail(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if book is None or callback.message is None:
+            await callback.answer(
+                build_delete_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        await callback.answer()
+        await _edit_callback_message(
+            callback.message,
+            build_my_book_detail_message(book, interface_language=interface_language),
+            reply_markup=_my_book_detail_keyboard(
+                book,
+                interface_language=interface_language,
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("confirm_delete_book:"))
+    async def confirm_delete_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="delete_confirmed",
+            target_type="book",
+            target_id=job_id,
+        )
+        if callback.message is None:
+            await callback.answer(
+                build_delete_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        deleted = service.delete_user_book(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if not deleted:
+            await callback.answer(
+                build_delete_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        await callback.answer()
+        books = service.list_user_books(user_telegram_id=callback.from_user.id)
+        await _edit_callback_message(
+            callback.message,
+            build_book_deleted_message(interface_language),
+            reply_markup=(
+                _my_books_keyboard(books, interface_language=interface_language)
+                or _menu_detail_keyboard(interface_language)
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("download_book:"))
+    async def download_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="download_requested",
+            target_type="book",
+            target_id=job_id,
+        )
+        result = service.get_user_book_result(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        if result is None or callback.message is None:
+            await callback.answer(
+                build_download_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        await callback.answer()
+        await _send_user_book_result(callback.message, result)
 
     @router.message(F.text.func(is_help_text))
     async def help_text(message: Message) -> None:
@@ -227,6 +808,13 @@ def create_router(
 
     @router.message(F.text.func(is_settings_text))
     async def settings_menu(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="settings",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
             build_settings_message(
@@ -245,6 +833,13 @@ def create_router(
 
     @router.message(F.text.func(is_toggle_progress_preview_text))
     async def toggle_progress_preview(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="toggle_progress_preview",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         enabled = not service.get_progress_preview_enabled(message.from_user.id)
         service.set_progress_preview_enabled(
@@ -260,6 +855,23 @@ def create_router(
                 interface_language,
                 progress_preview_enabled=enabled,
             ),
+        )
+
+    @router.message(F.text.func(is_reset_settings_text))
+    async def reset_settings(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="reset_settings",
+        )
+        interface_language = service.get_interface_language(message.from_user.id)
+        service.reset_user_settings(message.from_user.id)
+        await message.answer(build_settings_reset_message(interface_language))
+        await message.answer(
+            build_language_selection_message(interface_language="en"),
+            reply_markup=_interface_language_keyboard(),
         )
 
     @router.message(F.text.func(_is_language_button_text))
@@ -283,6 +895,7 @@ def create_router(
                 )
             except (
                 DocumentEstimationNotReadyError,
+                SecurityCooldownActive,
                 TextExtractionError,
                 UnsupportedDocumentError,
                 ValueError,
@@ -310,28 +923,59 @@ def create_router(
             )
         )
         await message.answer(
-            build_start_message(interface_language=language_option.code),
+            get_main_menu_text(interface_language=language_option.code),
             reply_markup=_main_menu_keyboard(language_option.code),
         )
 
     @router.message(Command("confirm"))
     async def confirm(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="confirm",
+            target_type="command",
+            target_id="/confirm",
+        )
         await _confirm_pending_translation(
             message=message,
             service=service,
             translator=translator,
+            action_guard=user_action_guard,
         )
 
     @router.message(Command("cancel"))
     async def cancel(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="cancel",
+            target_type="command",
+            target_id="/cancel",
+        )
         await _cancel_active_translation(message=message, service=service)
 
     @router.message(F.text.func(is_cancel_text))
     async def cancel_text(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="cancel",
+        )
         await _cancel_active_translation(message=message, service=service)
 
     @router.callback_query(F.data == "cancel_translation")
     async def cancel_callback(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="cancel_requested",
+            target_type="translation",
+            target_id="active",
+        )
         interface_language = service.get_interface_language(callback.from_user.id)
         if service.cancel_translation(callback.from_user.id):
             await callback.answer(build_cancel_requested_message(interface_language))
@@ -342,49 +986,41 @@ def create_router(
             show_alert=True,
         )
 
-    @router.callback_query(F.data.func(_is_resume_callback_data))
-    async def resume_persistent_callback(callback: CallbackQuery) -> None:
-        await _handle_resume_persistent_translation_callback(
-            callback=callback,
-            service=service,
-        )
-
-    @router.callback_query(F.data.func(_is_download_partial_callback_data))
-    async def download_partial_persistent_callback(callback: CallbackQuery) -> None:
-        await _download_persistent_translation_callback(
-            callback=callback,
-            service=service,
-            partial=True,
-        )
-
-    @router.callback_query(F.data.func(_is_download_final_callback_data))
-    async def download_final_persistent_callback(callback: CallbackQuery) -> None:
-        await _download_persistent_translation_callback(
-            callback=callback,
-            service=service,
-            partial=False,
-        )
-
     @router.message(F.text.func(is_back_text))
     async def back_text(message: Message) -> None:
         interface_language = service.get_interface_language(message.from_user.id)
         service.discard_pending_translation(message.from_user.id)
         await message.answer(build_back_to_menu_message(interface_language))
         await message.answer(
-            build_start_message(interface_language=interface_language),
+            get_main_menu_text(interface_language=interface_language),
             reply_markup=_main_menu_keyboard(interface_language),
         )
 
     @router.message(F.text.func(is_confirm_translation_text))
     async def confirm_text(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="confirm_translation",
+        )
         await _confirm_pending_translation(
             message=message,
             service=service,
             translator=translator,
+            action_guard=user_action_guard,
         )
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.command.received",
+            action="status",
+            target_type="command",
+            target_id="/status",
+        )
         interface_language = service.get_interface_language(message.from_user.id)
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
@@ -414,6 +1050,18 @@ def create_router(
     @router.message(F.document)
     async def document_upload(message: Message) -> None:
         document = message.document
+        record_message_activity(
+            message,
+            event_type="document.uploaded",
+            action="uploaded",
+            target_type="document",
+            target_id=document.file_name or "document.txt",
+            metadata={
+                "file_name": document.file_name or "document.txt",
+                "file_size": getattr(document, "file_size", None),
+                "mime_type": getattr(document, "mime_type", None),
+            },
+        )
         if _document_exceeds_upload_limit(document, max_upload_mb=config.max_upload_mb):
             error = FileTooLargeError(
                 f"File exceeds the upload limit of {config.max_upload_mb} MB"
@@ -436,6 +1084,7 @@ def create_router(
             )
         except (
             DocumentEstimationNotReadyError,
+            SecurityCooldownActive,
             TextExtractionError,
             UnsupportedDocumentError,
             ValueError,
@@ -486,9 +1135,10 @@ def _main_menu_keyboard(interface_language: str = "en"):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=menu[0])],
-            [KeyboardButton(text=menu[1]), KeyboardButton(text=menu[2])],
-            [KeyboardButton(text=menu[3])],
+            [KeyboardButton(text=menu[1])],
+            [KeyboardButton(text=menu[2]), KeyboardButton(text=menu[3])],
             [KeyboardButton(text=menu[4])],
+            [KeyboardButton(text=menu[5])],
         ],
         resize_keyboard=True,
     )
@@ -511,6 +1161,7 @@ def _settings_keyboard(
                     )
                 )
             ],
+            [KeyboardButton(text=get_reset_settings_text(interface_language))],
             [KeyboardButton(text=get_main_menu_button_text(interface_language))],
         ],
         resize_keyboard=True,
@@ -524,9 +1175,114 @@ def _menu_detail_keyboard(interface_language: str = "en"):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=menu[0])],
+            [KeyboardButton(text=menu[1])],
             [KeyboardButton(text=get_main_menu_button_text(interface_language))],
         ],
         resize_keyboard=True,
+    )
+
+
+def _my_books_keyboard(books, interface_language: str = "en"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    rows = []
+    book_list = list(books)
+    if not book_list:
+        return None
+
+    latest_job_id = _book_job_id(book_list[0])
+    if latest_job_id:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=get_last_book_text(interface_language),
+                    callback_data=f"book_detail:{latest_job_id}",
+                )
+            ]
+        )
+    for index, book in enumerate(book_list, start=1):
+        job_id = _book_job_id(book)
+        if not job_id:
+            continue
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=get_open_book_text(index, interface_language),
+                    callback_data=f"book_detail:{job_id}",
+                )
+            ]
+        )
+
+    if not rows:
+        return None
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _my_book_detail_keyboard(book, interface_language: str = "en"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    job_id = _book_job_id(book)
+    if not job_id:
+        return None
+
+    rows = []
+    if _book_has_result(book):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=get_download_translation_text(interface_language),
+                    callback_data=f"download_book:{job_id}",
+                )
+            ]
+        )
+    if _book_can_resume(book):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=get_continue_translation_text(interface_language),
+                    callback_data=f"resume_book:{job_id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=get_delete_book_text(interface_language),
+                callback_data=f"delete_book:{job_id}",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=get_back_to_my_books_text(interface_language),
+                callback_data="my_books",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _delete_book_confirmation_keyboard(job_id: str, interface_language: str = "en"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=get_confirm_delete_book_text(interface_language),
+                    callback_data=f"confirm_delete_book:{job_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=get_keep_book_text(interface_language),
+                    callback_data=f"keep_book:{job_id}",
+                )
+            ],
+        ]
     )
 
 
@@ -587,6 +1343,62 @@ def _is_language_button_text(text: str | None) -> bool:
     return find_language_by_button_text(text) is not None
 
 
+def _book_has_result(book) -> bool:
+    if isinstance(book, dict):
+        return bool(book.get("has_result"))
+    return bool(getattr(book, "has_result", False))
+
+
+def _book_job_id(book) -> str | None:
+    if isinstance(book, dict):
+        job_id = book.get("job_id")
+    else:
+        job_id = getattr(book, "job_id", None)
+    return str(job_id) if job_id else None
+
+
+def _book_can_resume(book) -> bool:
+    if isinstance(book, dict):
+        return bool(book.get("can_resume"))
+    return bool(getattr(book, "can_resume", False))
+
+
+async def _send_user_book_result(message, result) -> None:
+    from aiogram.types import BufferedInputFile
+
+    await message.answer_document(
+        BufferedInputFile(result.content, filename=result.file_name)
+    )
+
+
+async def _edit_callback_message(message, text: str, reply_markup=None) -> None:
+    result = message.edit_text(
+        text,
+        reply_markup=_inline_reply_markup_or_none(reply_markup),
+    )
+    if inspect.isawaitable(result):
+        await result
+
+
+def _inline_reply_markup_or_none(reply_markup):
+    if reply_markup is None:
+        return None
+    if hasattr(reply_markup, "inline_keyboard"):
+        return reply_markup
+    if hasattr(reply_markup, "keyboard"):
+        return None
+    return reply_markup
+
+
+async def _answer_callback_if_spam(callback, guard: _CallbackSpamGuard) -> bool:
+    user_id = getattr(getattr(callback, "from_user", None), "id", 0)
+    action = str(getattr(callback, "data", "") or "unknown")
+    if guard.allow(user_id=user_id, action=action):
+        return False
+    await callback.answer()
+    return True
+
+
 def _document_exceeds_upload_limit(document, *, max_upload_mb: int) -> bool:
     file_size = getattr(document, "file_size", None)
     if file_size is None:
@@ -594,7 +1406,62 @@ def _document_exceeds_upload_limit(document, *, max_upload_mb: int) -> bool:
     return int(file_size) > max_upload_mb * 1024 * 1024
 
 
+def _progress_message_for_current_user_language(
+    *,
+    service: BotTranslationService,
+    user_telegram_id: int,
+    completed_fragments: int,
+    total_fragments: int,
+    estimated_total_seconds: int | None,
+    elapsed_seconds: int,
+    last_translated_text: str | None,
+    activity_indicator: str,
+    activity_phrase_index: int,
+) -> str:
+    interface_language = service.get_interface_language(user_telegram_id)
+    return build_translation_progress_message(
+        completed_fragments=completed_fragments,
+        total_fragments=total_fragments,
+        interface_language=interface_language,
+        estimated_total_seconds=estimated_total_seconds,
+        elapsed_seconds=elapsed_seconds,
+        last_translated_text=_include_progress_preview(
+            service,
+            user_telegram_id,
+            last_translated_text,
+        ),
+        activity_indicator=activity_indicator,
+        activity_phrase_index=activity_phrase_index,
+    )
+
+
 async def _confirm_pending_translation(
+    *,
+    message,
+    service: BotTranslationService,
+    translator: TextTranslator,
+    action_guard: _UserActionInFlightGuard | None = None,
+) -> None:
+    if action_guard is not None and not action_guard.try_begin(
+        user_id=message.from_user.id,
+        action="translation_start",
+    ):
+        return
+    try:
+        await _run_confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+        )
+    finally:
+        if action_guard is not None:
+            action_guard.finish(
+                user_id=message.from_user.id,
+                action="translation_start",
+            )
+
+
+async def _run_confirm_pending_translation(
     *,
     message,
     service: BotTranslationService,
@@ -620,14 +1487,17 @@ async def _confirm_pending_translation(
         "completion_tokens": 0,
         "cache_hit_tokens": 0,
         "cache_miss_tokens": 0,
+        "last_edit_scheduled_at": started_at,
     }
     progress_message = await message.answer(
-        build_translation_progress_message(
+        _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=message.from_user.id,
             completed_fragments=0,
             total_fragments=total_fragments,
-            interface_language=interface_language,
             estimated_total_seconds=pending.estimated_seconds if pending else None,
             elapsed_seconds=0,
+            last_translated_text=None,
             activity_indicator=_next_heartbeat_frame(heartbeat_pattern, -1),
             activity_phrase_index=0,
         ),
@@ -638,8 +1508,9 @@ async def _confirm_pending_translation(
     stop_heartbeat = asyncio.Event()
 
     def report_progress(progress: TranslationProgress | tuple[int, int]) -> None:
+        now = time.monotonic()
         completed_fragments, total = _progress_counts(progress)
-        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        elapsed_seconds = max(1, round(now - started_at))
         estimated_total_seconds = None
         if completed_fragments > 0:
             estimated_total_seconds = round(
@@ -651,17 +1522,14 @@ async def _confirm_pending_translation(
         progress_stats["estimated_total_seconds"] = estimated_total_seconds
         progress_stats["last_translated_text"] = last_translated_text
         progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
-        progress_text = build_translation_progress_message(
+        progress_text = _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=message.from_user.id,
             completed_fragments=completed_fragments,
             total_fragments=total,
-            interface_language=interface_language,
             estimated_total_seconds=estimated_total_seconds,
             elapsed_seconds=elapsed_seconds,
-            last_translated_text=_include_progress_preview(
-                service,
-                message.from_user.id,
-                last_translated_text,
-            ),
+            last_translated_text=last_translated_text,
             activity_indicator=_next_heartbeat_frame(
                 str(progress_stats["heartbeat_pattern"]),
                 int(progress_stats["spinner_index"]) - 1
@@ -674,16 +1542,20 @@ async def _confirm_pending_translation(
             progress_stats["completion_tokens"] += progress.completion_tokens
             progress_stats["cache_hit_tokens"] += progress.prompt_cache_hit_tokens
             progress_stats["cache_miss_tokens"] += progress.prompt_cache_miss_tokens
-            _print_translation_progress(
+            _print_translation_progress_update(
                 progress=progress,
                 elapsed_total_seconds=elapsed_seconds,
+                is_stopping=service.is_translation_cancelling(message.from_user.id),
             )
-        _schedule_message_edit(
-            loop=loop,
-            message=progress_message,
-            text=progress_text,
-            reply_markup=_cancel_inline_keyboard(interface_language),
-        )
+        if _should_schedule_progress_edit(progress_stats, now=now):
+            _schedule_message_edit(
+                loop=loop,
+                message=progress_message,
+                text=progress_text,
+                reply_markup=_cancel_inline_keyboard(
+                    service.get_interface_language(message.from_user.id)
+                ),
+            )
 
     heartbeat_task = asyncio.create_task(
         _run_translation_progress_heartbeat(
@@ -704,6 +1576,11 @@ async def _confirm_pending_translation(
             translator=translator,
             progress_callback=report_progress,
         )
+    except SecurityCooldownActive as error:
+        stop_heartbeat.set()
+        await heartbeat_task
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
     except ValueError as error:
         stop_heartbeat.set()
         await heartbeat_task
@@ -732,8 +1609,179 @@ async def _confirm_pending_translation(
     await message.answer(
         build_translation_job_status_message(
             job,
-            interface_language=interface_language,
+            interface_language=service.get_interface_language(message.from_user.id),
         )
+    )
+    if job.result_file_name and job.result_content:
+        from aiogram.types import BufferedInputFile
+
+        await message.answer_document(
+            BufferedInputFile(job.result_content, filename=job.result_file_name)
+        )
+
+
+async def _resume_user_book_translation(
+    *,
+    message,
+    user_telegram_id: int,
+    job_id: str,
+    service: BotTranslationService,
+    translator: TextTranslator,
+) -> None:
+    interface_language = service.get_interface_language(user_telegram_id)
+    heartbeat_pattern = _choose_heartbeat_pattern_name(
+        user_telegram_id=user_telegram_id,
+        file_name=job_id,
+    )
+    started_at = time.monotonic()
+    progress_stats = {
+        "completed": 0,
+        "total": 0,
+        "estimated_total_seconds": None,
+        "last_translated_text": None,
+        "spinner_index": 0,
+        "heartbeat_pattern": heartbeat_pattern,
+        "tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "last_edit_scheduled_at": started_at,
+    }
+    await _edit_callback_message(
+        message,
+        _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            completed_fragments=0,
+            total_fragments=0,
+            estimated_total_seconds=None,
+            elapsed_seconds=0,
+            last_translated_text=None,
+            activity_indicator=_next_heartbeat_frame(heartbeat_pattern, -1),
+            activity_phrase_index=0,
+        ),
+        reply_markup=_cancel_inline_keyboard(interface_language),
+    )
+    loop = asyncio.get_running_loop()
+    stop_heartbeat = asyncio.Event()
+
+    def report_progress(progress: TranslationProgress | tuple[int, int]) -> None:
+        now = time.monotonic()
+        completed_fragments, total = _progress_counts(progress)
+        elapsed_seconds = max(1, round(now - started_at))
+        estimated_total_seconds = None
+        if completed_fragments > 0:
+            estimated_total_seconds = round(
+                elapsed_seconds / completed_fragments * max(total, completed_fragments)
+            )
+        last_translated_text = _progress_translated_text(progress)
+        progress_stats["completed"] = completed_fragments
+        progress_stats["total"] = total
+        progress_stats["estimated_total_seconds"] = estimated_total_seconds
+        progress_stats["last_translated_text"] = last_translated_text
+        progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
+        progress_text = _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            completed_fragments=completed_fragments,
+            total_fragments=total,
+            estimated_total_seconds=estimated_total_seconds,
+            elapsed_seconds=elapsed_seconds,
+            last_translated_text=last_translated_text,
+            activity_indicator=_next_heartbeat_frame(
+                str(progress_stats["heartbeat_pattern"]),
+                int(progress_stats["spinner_index"]) - 1,
+            ),
+            activity_phrase_index=int(progress_stats["spinner_index"]),
+        )
+        if isinstance(progress, TranslationProgress):
+            progress_stats["tokens"] += progress.total_tokens
+            progress_stats["prompt_tokens"] += progress.prompt_tokens
+            progress_stats["completion_tokens"] += progress.completion_tokens
+            progress_stats["cache_hit_tokens"] += progress.prompt_cache_hit_tokens
+            progress_stats["cache_miss_tokens"] += progress.prompt_cache_miss_tokens
+            _print_translation_progress_update(
+                progress=progress,
+                elapsed_total_seconds=elapsed_seconds,
+                is_stopping=service.is_translation_cancelling(user_telegram_id),
+            )
+        if _should_schedule_progress_edit(progress_stats, now=now):
+            _schedule_message_edit(
+                loop=loop,
+                message=message,
+                text=progress_text,
+                reply_markup=_cancel_inline_keyboard(
+                    service.get_interface_language(user_telegram_id)
+                ),
+            )
+
+    heartbeat_task = asyncio.create_task(
+        _run_translation_progress_heartbeat(
+            stop_event=stop_heartbeat,
+            loop=loop,
+            message=message,
+            interface_language=interface_language,
+            service=service,
+            user_telegram_id=user_telegram_id,
+            started_at=started_at,
+            progress_stats=progress_stats,
+        )
+    )
+    try:
+        job = await asyncio.to_thread(
+            service.resume_user_book_translation,
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
+            translator=translator,
+            progress_callback=report_progress,
+        )
+    except SecurityCooldownActive as error:
+        stop_heartbeat.set()
+        await heartbeat_task
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
+    finally:
+        stop_heartbeat.set()
+
+    await heartbeat_task
+    if job is None:
+        await message.answer(build_download_unavailable_message(interface_language))
+        return
+
+    _print_translation_summary(
+        job_id=job.id,
+        file_name=job.file_name,
+        result_file_name=job.result_file_name,
+        document_kind=job.document_kind.value,
+        completed_fragments=progress_stats["completed"],
+        total_fragments=int(progress_stats["total"]),
+        elapsed_seconds=time.monotonic() - started_at,
+        prompt_tokens=progress_stats["prompt_tokens"],
+        completion_tokens=progress_stats["completion_tokens"],
+        total_tokens=progress_stats["tokens"],
+        prompt_cache_hit_tokens=progress_stats["cache_hit_tokens"],
+        prompt_cache_miss_tokens=progress_stats["cache_miss_tokens"],
+        status=job.status.value,
+    )
+    detail = service.get_user_book_detail(
+        user_telegram_id=user_telegram_id,
+        job_id=job.id,
+    )
+    await _edit_callback_message(
+        message,
+        build_translation_job_status_message(
+            job,
+            interface_language=service.get_interface_language(user_telegram_id),
+        ),
+        reply_markup=(
+            _my_book_detail_keyboard(
+                detail,
+                interface_language=service.get_interface_language(user_telegram_id),
+            )
+            if detail is not None
+            else None
+        ),
     )
     if job.result_file_name and job.result_content:
         from aiogram.types import BufferedInputFile
@@ -750,75 +1798,6 @@ async def _cancel_active_translation(*, message, service: BotTranslationService)
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
-
-
-async def _handle_resume_persistent_translation_callback(
-    *,
-    callback,
-    service: BotTranslationService,
-) -> None:
-    try:
-        job_id = _callback_job_id(callback.data, prefix="resume:")
-        service.resume_persistent_translation(
-            user_telegram_id=callback.from_user.id,
-            job_id=job_id,
-        )
-    except (PermissionError, RuntimeError, ValueError) as error:
-        await callback.answer(str(error), show_alert=True)
-        return
-
-    await callback.answer("Translation resumed.")
-
-
-async def _download_persistent_translation_callback(
-    *,
-    callback,
-    service: BotTranslationService,
-    partial: bool,
-) -> None:
-    prefix = "download_partial:" if partial else "download_final:"
-    try:
-        job_id = _callback_job_id(callback.data, prefix=prefix)
-        download = service.get_persistent_translation_download(
-            user_telegram_id=callback.from_user.id,
-            job_id=job_id,
-            partial=partial,
-        )
-    except (PermissionError, RuntimeError, ValueError) as error:
-        await callback.answer(str(error), show_alert=True)
-        return
-
-    from aiogram.types import BufferedInputFile
-
-    if callback.message is None:
-        await callback.answer("Cannot send file here.", show_alert=True)
-        return
-
-    await callback.message.answer_document(
-        BufferedInputFile(download.content, filename=download.file_name)
-    )
-    await callback.answer()
-
-
-def _callback_job_id(data: str | None, *, prefix: str) -> str:
-    if data is None or not data.startswith(prefix):
-        raise ValueError("Invalid translation action")
-    job_id = data.removeprefix(prefix).strip()
-    if not job_id:
-        raise ValueError("Translation job id is missing")
-    return job_id
-
-
-def _is_resume_callback_data(data: str | None) -> bool:
-    return bool(data and data.startswith("resume:"))
-
-
-def _is_download_partial_callback_data(data: str | None) -> bool:
-    return bool(data and data.startswith("download_partial:"))
-
-
-def _is_download_final_callback_data(data: str | None) -> bool:
-    return bool(data and data.startswith("download_final:"))
 
 
 async def _run_translation_progress_heartbeat(
@@ -842,8 +1821,9 @@ async def _run_translation_progress_heartbeat(
         except asyncio.TimeoutError:
             pass
 
+        now = time.monotonic()
         progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
-        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        elapsed_seconds = max(1, round(now - started_at))
         completed_fragments = int(progress_stats["completed"])
         total_fragments = int(progress_stats["total"])
         estimated_total_seconds = progress_stats["estimated_total_seconds"]
@@ -853,24 +1833,21 @@ async def _run_translation_progress_heartbeat(
                 / completed_fragments
                 * max(total_fragments, completed_fragments)
             )
-        progress_text = build_translation_progress_message(
+        progress_text = _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=user_telegram_id,
             completed_fragments=completed_fragments,
             total_fragments=total_fragments,
-            interface_language=interface_language,
             estimated_total_seconds=(
                 int(estimated_total_seconds)
                 if estimated_total_seconds is not None
                 else None
             ),
             elapsed_seconds=elapsed_seconds,
-            last_translated_text=_include_progress_preview(
-                service,
-                user_telegram_id,
-                (
-                    str(progress_stats["last_translated_text"])
-                    if progress_stats["last_translated_text"]
-                    else None
-                ),
+            last_translated_text=(
+                str(progress_stats["last_translated_text"])
+                if progress_stats["last_translated_text"]
+                else None
             ),
             activity_indicator=_next_heartbeat_frame(
                 str(progress_stats["heartbeat_pattern"]),
@@ -878,12 +1855,15 @@ async def _run_translation_progress_heartbeat(
             ),
             activity_phrase_index=int(progress_stats["spinner_index"]),
         )
-        _schedule_message_edit(
-            loop=loop,
-            message=message,
-            text=progress_text,
-            reply_markup=_cancel_inline_keyboard(interface_language),
-        )
+        if _should_schedule_progress_edit(progress_stats, now=now):
+            _schedule_message_edit(
+                loop=loop,
+                message=message,
+                text=progress_text,
+                reply_markup=_cancel_inline_keyboard(
+                    service.get_interface_language(user_telegram_id)
+                ),
+            )
 
 
 def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
@@ -896,7 +1876,7 @@ def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
                 text=text,
                 chat_id=chat.id,
                 message_id=message_id,
-                reply_markup=reply_markup,
+                reply_markup=_inline_reply_markup_or_none(reply_markup),
                 parse_mode="HTML",
             )
             return
@@ -910,11 +1890,35 @@ def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
     return future
 
 
+def _should_schedule_progress_edit(
+    progress_stats: dict[str, object],
+    *,
+    now: float,
+    min_interval_seconds: float = TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS,
+) -> bool:
+    last_edit_scheduled_at = progress_stats.get("last_edit_scheduled_at")
+    if last_edit_scheduled_at is not None:
+        elapsed = now - float(last_edit_scheduled_at)
+        if elapsed < min_interval_seconds:
+            return False
+
+    progress_stats["last_edit_scheduled_at"] = now
+    return True
+
+
 def _log_message_edit_error(future) -> None:
     try:
         future.result()
     except Exception as error:
         message = str(error)
+        retry_after = getattr(error, "retry_after", None)
+        if retry_after is not None or "retry after" in message.lower():
+            logger.warning(
+                "Telegram flood control while editing progress message; retry_after=%s message=%s",
+                retry_after if retry_after is not None else "unknown",
+                message,
+            )
+            return
         if "message can't be edited" in message:
             logger.warning("Telegram refused to edit translation progress message: %s", message)
             return
@@ -969,7 +1973,6 @@ def _print_translation_progress(
     elapsed_total_seconds: int,
 ) -> None:
     status = "ok" if progress.success else "failed"
-    last_translated = _terminal_preview(progress.translated_text)
     print(
         "[translation] "
         f"fragment={progress.completed_fragments}/{progress.total_fragments} "
@@ -979,17 +1982,37 @@ def _print_translation_progress(
         f"tokens={progress.total_tokens} "
         f"prompt_tokens={progress.prompt_tokens} "
         f"completion_tokens={progress.completion_tokens} "
-        f"translated_chars={len(progress.translated_text)} "
-        f"last_translated={last_translated!r}",
+        f"translated_chars={len(progress.translated_text)}",
         flush=True,
     )
 
 
-def _terminal_preview(text: str, *, max_chars: int = 240) -> str:
-    preview = " ".join(text.split())
-    if len(preview) <= max_chars:
-        return preview
-    return f"{preview[: max_chars - 1]}…"
+def _print_translation_progress_update(
+    *,
+    progress: TranslationProgress,
+    elapsed_total_seconds: int,
+    is_stopping: bool,
+) -> None:
+    if not is_stopping:
+        _print_translation_progress(
+            progress=progress,
+            elapsed_total_seconds=elapsed_total_seconds,
+        )
+        return
+
+    print(
+        "TRANSLATION STOPPING "
+        f"fragment={progress.completed_fragments}/{progress.total_fragments} "
+        "status=stopping "
+        f"fragment_time={progress.elapsed_seconds:.2f}s "
+        f"elapsed={elapsed_total_seconds}s "
+        f"tokens={progress.total_tokens} "
+        f"prompt_tokens={progress.prompt_tokens} "
+        f"completion_tokens={progress.completion_tokens} "
+        f"translated_chars={len(progress.translated_text)} "
+        "note=waiting_for_active_requests",
+        flush=True,
+    )
 
 
 def _print_translation_summary(
@@ -1044,9 +2067,25 @@ async def run_bot() -> None:
         max_upload_mb=settings.max_upload_mb,
         object_storage_root=settings.object_storage_root,
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
-        job_store_backend=settings.job_store_backend,
-        postgres_dsn=settings.postgres_dsn,
-        translation_execution_mode=settings.translation_execution_mode,
+        user_settings_db_path=settings.user_settings_db_path,
+        admin_db_path=settings.admin_db_path,
+        translation_run_log_root=settings.translation_run_log_root,
+        max_parallel_work_units=settings.translation_max_parallel_units,
+        provider_parallel_capacity=_deepseek_parallel_capacity_from_env(),
+        security_max_events_per_run=settings.security_max_events_per_run,
+        security_max_unsafe_model_outputs_per_run=(
+            settings.security_max_unsafe_model_outputs_per_run
+        ),
+        security_max_repair_failures_per_run=(
+            settings.security_max_repair_failures_per_run
+        ),
+        security_user_cooldown_thresholds_per_window=(
+            settings.security_user_cooldown_thresholds_per_window
+        ),
+        security_user_cooldown_window_seconds=(
+            settings.security_user_cooldown_window_seconds
+        ),
+        security_user_cooldown_seconds=settings.security_user_cooldown_seconds,
     )
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)

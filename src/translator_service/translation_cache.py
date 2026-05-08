@@ -7,8 +7,10 @@ import json
 from typing import Protocol
 
 from translator_service.structure_optimizer import PromptTier
-from translator_service.text_analysis import detect_text_type
-from translator_service.translation_profiles import target_language_policy_signature
+from translator_service.translation_policy import (
+    build_translation_policy,
+    translation_policy_signature,
+)
 
 
 class TranslationCache(Protocol):
@@ -94,8 +96,12 @@ def _cache_key(
         "version": 1,
         "source_language": source_language.strip().lower(),
         "target_language": target_language.strip().lower(),
-        "target_language_policy": target_language_policy_signature(target_language),
-        "source_text_policy": _source_text_policy_signature(source_texts),
+        "translation_policies": _translation_policy_signatures(
+            source_texts=source_texts,
+            source_language=source_language,
+            target_language=target_language,
+            prompt_tier=prompt_tier,
+        ),
         "prompt_tier": prompt_tier.value,
         "source_texts": [_normalize_text(text) for text in source_texts],
     }
@@ -103,8 +109,24 @@ def _cache_key(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _source_text_policy_signature(source_texts: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(detect_text_type(text).value for text in source_texts)
+def _translation_policy_signatures(
+    *,
+    source_texts: tuple[str, ...],
+    source_language: str,
+    target_language: str,
+    prompt_tier: PromptTier,
+) -> tuple[str, ...]:
+    return tuple(
+        translation_policy_signature(
+            build_translation_policy(
+                text=text,
+                source_language=source_language,
+                target_language=target_language,
+                prompt_tier=prompt_tier,
+            )
+        )
+        for text in source_texts
+    )
 
 
 def _normalize_text(text: str) -> str:

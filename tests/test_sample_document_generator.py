@@ -33,6 +33,8 @@ class SampleDocumentGeneratorTest(unittest.TestCase):
         self.assertIn("He made a decision after a high-level overview", document_xml)
         self.assertIn("Set the API endpoint", document_xml)
         self.assertIn("Maria Johnson visited Baker Street", document_xml)
+        self.assertIn("Українська: Вона тихо зачинила двері", document_xml)
+        self.assertIn("Deutsch: Die Ergebnisse deuten", document_xml)
         self.assertIn("${API_TOKEN}", document_xml)
         self.assertIn("<w:tbl>", document_xml)
 
@@ -45,6 +47,8 @@ class SampleDocumentGeneratorTest(unittest.TestCase):
         self.assertIn("The room held its breath", combined)
         self.assertIn("English: The endpoint failed", combined)
         self.assertIn("Zażółć gęślą jaźń", combined)
+        self.assertIn("中文: 请保留变量", combined)
+        self.assertIn("العربية: تم توقيع العقد", combined)
         self.assertIn("https://example.com/v1/items", combined)
         self.assertIn("<strong>API endpoint</strong>", combined)
 

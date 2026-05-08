@@ -8,6 +8,7 @@ services:
       - "8000:8000"
     volumes:
       - object-storage:/data/object-storage
+      - runtime-data:/data/runtime
       - run-logs:/data/run-logs
     depends_on:
       postgres:
@@ -20,6 +21,7 @@ services:
     restart: unless-stopped
     volumes:
       - object-storage:/data/object-storage
+      - runtime-data:/data/runtime
       - run-logs:/data/run-logs
     depends_on:
       postgres:
@@ -32,6 +34,7 @@ services:
     restart: unless-stopped
     volumes:
       - object-storage:/data/object-storage
+      - runtime-data:/data/runtime
       - run-logs:/data/run-logs
     depends_on:
       postgres:
@@ -49,12 +52,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
 volumes:
   postgres-data:
   object-storage:
+  runtime-data:
   run-logs:

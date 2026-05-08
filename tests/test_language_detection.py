@@ -5,6 +5,7 @@ from translator_service.language_detection import (
     detect_language_from_text,
     detect_languages_from_text,
     format_detected_source_language,
+    format_detected_source_languages,
 )
 
 
@@ -85,7 +86,21 @@ class LanguageDetectionTest(unittest.TestCase):
                 requested_source_language="auto",
                 detected_language=DetectedLanguage(code="en", name="English"),
             ),
-            "auto (English)",
+            "English",
+        )
+
+    def test_formats_mixed_auto_source_language_with_primary_and_admixtures(self):
+        self.assertEqual(
+            format_detected_source_languages(
+                requested_source_language="auto",
+                detected_languages=[
+                    DetectedLanguage(code="ru", name="Russian"),
+                    DetectedLanguage(code="en", name="English"),
+                    DetectedLanguage(code="nl", name="Dutch"),
+                ],
+                primary_language=DetectedLanguage(code="ru", name="Russian"),
+            ),
+            "Russian (admixtures: English, Dutch)",
         )
 
     def test_formats_unknown_auto_source_language_for_user(self):

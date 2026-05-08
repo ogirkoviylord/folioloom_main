@@ -57,6 +57,43 @@ PYTHONPATH=src python3 -m compileall src
 DEEPSEEK_API_KEY='your_key' PYTHONPATH=src python3 -m translator_service.deepseek_probe
 ```
 
+## DeepSeek API Channels
+
+For local development with one API key, keep using:
+
+```bash
+DEEPSEEK_API_KEY='your_key'
+```
+
+For multiple internal API channels, provide a comma-separated key list:
+
+```bash
+DEEPSEEK_API_KEYS='key_one,key_two,key_three' \
+DEEPSEEK_MAX_PARALLEL_PER_KEY='1' \
+DEEPSEEK_CHANNEL_COOLDOWN_SECONDS='30' \
+DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS='300' \
+DEEPSEEK_CHANNEL_WEIGHTS='1,1,1'
+```
+
+The bot treats these keys as internal reliability channels. Users do not see or choose provider channels. Repeated keys are ignored after their first occurrence, and invalid weights fall back to `1` for every channel.
+
+## Scheduler Runtime
+
+The production scheduler is PostgreSQL-first. `SCHEDULER_BACKEND=sqlite` keeps
+local development on the SQLite adapter; `SCHEDULER_BACKEND=postgres` uses the
+psycopg-backed repository and the same scheduler contract.
+
+Useful settings:
+
+- `SCHEDULER_LEASE_SECONDS`: claim lease duration for one work unit.
+- `SCHEDULER_POLL_SECONDS`: worker sleep interval when no work is due.
+- `SCHEDULER_RETRY_BASE_DELAY_SECONDS`: first retry backoff.
+- `SCHEDULER_RETRY_MAX_DELAY_SECONDS`: maximum retry backoff.
+- `POSTGRES_DSN`: PostgreSQL connection string for production scheduler state.
+
+Redis is not required for scheduler correctness. If a notification layer is
+added, workers must still be able to recover by scanning due PostgreSQL rows.
+
 ## TXT Translation Probe
 
 ```bash

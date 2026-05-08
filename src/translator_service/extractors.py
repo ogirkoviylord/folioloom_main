@@ -7,6 +7,10 @@ from zipfile import BadZipFile, ZipFile
 MAX_ARCHIVE_ENTRY_COUNT = 512
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 20 * 1024 * 1024
+MAX_XML_BYTES = 5 * 1024 * 1024
+MAX_XML_DEPTH = 80
+MAX_XML_ELEMENT_COUNT = 100_000
+MAX_EPUB_TEXT_BLOCKS = 20_000
 
 
 class TextExtractionError(ValueError):
@@ -56,10 +60,10 @@ def extract_docx_text_blocks(content: bytes) -> list[str]:
 
 
 def _extract_docx_part_text_blocks(document_xml: bytes) -> list[str]:
-    try:
-        document = ElementTree.fromstring(document_xml)
-    except ElementTree.ParseError as error:
-        raise TextExtractionError("DOCX document XML is not readable") from error
+    document = parse_xml_document(
+        document_xml,
+        parse_error_message="DOCX document XML is not readable",
+    )
 
     namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
     paragraphs: list[str] = []
@@ -122,13 +126,19 @@ def extract_text_from_epub(content: bytes) -> str:
 
 
 def extract_epub_text_blocks(content: bytes) -> list[str]:
+    from translator_service.format_adapters.epub_repair import (
+        repair_epub_for_processing,
+    )
+
+    repaired = repair_epub_for_processing(content)
     try:
-        with ZipFile(BytesIO(content)) as epub:
+        with ZipFile(BytesIO(repaired.content)) as epub:
             validate_archive_members(epub)
             xhtml_files = _epub_text_item_names(epub)
             blocks: list[str] = []
             for file_name in xhtml_files:
                 blocks.extend(_extract_xhtml_text_blocks(epub.read(file_name)))
+                validate_epub_text_block_count(len(blocks))
     except (BadZipFile, KeyError) as error:
         raise TextExtractionError(
             "EPUB file does not contain readable book text"
@@ -143,7 +153,11 @@ def validate_archive_members(archive: ZipFile) -> None:
         raise TextExtractionError("Document archive contains too many files")
 
     total_uncompressed = 0
+    member_names: set[str] = set()
     for member in members:
+        if member.filename in member_names:
+            raise TextExtractionError("Document archive contains duplicate file names")
+        member_names.add(member.filename)
         if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
             raise TextExtractionError("Document archive member is too large")
         total_uncompressed += member.file_size
@@ -151,11 +165,48 @@ def validate_archive_members(archive: ZipFile) -> None:
             raise TextExtractionError("Document archive is too large after extraction")
 
 
-def _extract_xhtml_text_blocks(content: bytes) -> list[str]:
+def parse_xml_document(content: bytes, *, parse_error_message: str) -> ElementTree.Element:
+    validate_xml_bytes(content)
     try:
         document = ElementTree.fromstring(content)
     except ElementTree.ParseError as error:
-        raise TextExtractionError("EPUB XHTML content is not readable") from error
+        raise TextExtractionError(parse_error_message) from error
+    validate_xml_tree(document)
+    return document
+
+
+def validate_xml_bytes(content: bytes) -> None:
+    if len(content) > MAX_XML_BYTES:
+        raise TextExtractionError("Document XML part is too large")
+
+    lowered = content.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise TextExtractionError("Document XML entities are not supported")
+
+
+def validate_xml_tree(document: ElementTree.Element) -> None:
+    element_count = 0
+    stack: list[tuple[ElementTree.Element, int]] = [(document, 1)]
+    while stack:
+        element, depth = stack.pop()
+        element_count += 1
+        if element_count > MAX_XML_ELEMENT_COUNT:
+            raise TextExtractionError("Document XML contains too many elements")
+        if depth > MAX_XML_DEPTH:
+            raise TextExtractionError("Document XML nesting is too deep")
+        stack.extend((child, depth + 1) for child in list(element))
+
+
+def validate_epub_text_block_count(block_count: int) -> None:
+    if block_count > MAX_EPUB_TEXT_BLOCKS:
+        raise TextExtractionError("EPUB file contains too many text blocks")
+
+
+def _extract_xhtml_text_blocks(content: bytes) -> list[str]:
+    document = parse_xml_document(
+        content,
+        parse_error_message="EPUB XHTML content is not readable",
+    )
 
     blocks: list[str] = []
     for element in document.iter():
@@ -165,6 +216,7 @@ def _extract_xhtml_text_blocks(content: bytes) -> list[str]:
         text = _visible_text(element)
         if text:
             blocks.append(text)
+            validate_epub_text_block_count(len(blocks))
 
     return blocks
 
@@ -203,15 +255,26 @@ def _epub_text_item_names(epub: ZipFile) -> list[str]:
         return archive_names
 
     archive_name_set = set(archive_names)
-    ordered = [name for name in spine_names if name in archive_name_set]
-    ordered.extend(name for name in archive_names if name not in set(ordered))
+    ordered: list[str] = []
+    seen_names: set[str] = set()
+    for name in spine_names:
+        if name in archive_name_set and name not in seen_names:
+            ordered.append(name)
+            seen_names.add(name)
+    for name in archive_names:
+        if name not in seen_names:
+            ordered.append(name)
+            seen_names.add(name)
     return ordered
 
 
 def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
     try:
-        container = ElementTree.fromstring(epub.read("META-INF/container.xml"))
-    except (KeyError, ElementTree.ParseError):
+        container = parse_xml_document(
+            epub.read("META-INF/container.xml"),
+            parse_error_message="EPUB container XML is not readable",
+        )
+    except KeyError:
         return []
 
     rootfile = next(
@@ -230,8 +293,11 @@ def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
         return []
 
     try:
-        package = ElementTree.fromstring(epub.read(opf_path))
-    except (KeyError, ElementTree.ParseError):
+        package = parse_xml_document(
+            epub.read(opf_path),
+            parse_error_message="EPUB package XML is not readable",
+        )
+    except KeyError:
         return []
 
     manifest = {

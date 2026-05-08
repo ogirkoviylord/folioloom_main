@@ -13,16 +13,22 @@ class LanguagesTest(unittest.TestCase):
         self.assertEqual(
             [(language.code, language.button_text) for language in SUPPORTED_TARGET_LANGUAGES],
             [
-                ("ru", "Русский"),
-                ("uk", "Українська"),
-                ("fr", "Français"),
-                ("es", "Español"),
-                ("en", "English"),
-                ("nl", "Nederlands"),
+                ("ru", "🇷🇺 Русский"),
+                ("uk", "🇺🇦 Українська"),
+                ("fr", "🇫🇷 Français"),
+                ("es", "🇪🇸 Español"),
+                ("en", "🇬🇧 English"),
+                ("nl", "🇳🇱 Nederlands"),
             ],
         )
 
     def test_finds_language_by_button_text_case_insensitively(self):
+        language = find_language_by_button_text(" 🇳🇱 nederlands ")
+
+        self.assertEqual(language.code, "nl")
+        self.assertEqual(language.name, "Dutch")
+
+    def test_finds_language_by_legacy_button_text(self):
         language = find_language_by_button_text(" nederlands ")
 
         self.assertEqual(language.code, "nl")

@@ -24,6 +24,7 @@ class TranslationJobStatus(StrEnum):
     QUEUED = "queued"
     TRANSLATING = "translating"
     READY = "ready"
+    PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

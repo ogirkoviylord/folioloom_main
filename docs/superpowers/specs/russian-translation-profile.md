@@ -4,6 +4,8 @@ This profile defines how the service should translate documents into Russian. It
 
 The profile is intentionally layered: universal document-safety rules remain shared, while Russian-specific decisions live here.
 
+The Russian profile does not compete with `TranslationPolicy` or the provider prompt. `TranslationPolicy` is the structured decision object, this profile supplies the Russian target-language branch, and the provider prompt is generated from both. Universal safety rules keep protected content stable; this profile decides Russian-specific presentation for non-protected language, such as natural word order, ordinary personal-name transliteration, terminology choices, title capitalization, and typography.
+
 ## Status
 
 - Priority: first quality-development target language.
