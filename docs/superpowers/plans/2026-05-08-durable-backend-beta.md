@@ -1340,7 +1340,7 @@ git commit -m "chore: configure durable server compose stack"
 **Files:**
 - Create: `docs/deployment/server-beta.md`
 
-- [ ] **Step 1: Create deployment runbook**
+- [x] **Step 1: Create deployment runbook**
 
 Create `docs/deployment/server-beta.md`:
 
@@ -1451,7 +1451,7 @@ docker run --rm -v new-project-2_object-storage:/data/object-storage -v "$PWD":/
 ```
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/deployment/server-beta.md
