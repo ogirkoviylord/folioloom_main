@@ -120,6 +120,21 @@ class PostgreSQLTranslationJobStore:
             return None
         return _job_from_row(row)
 
+    def list_claimable_jobs(self) -> list[PersistentTranslationJob]:
+        rows = self._connection.execute(
+            """
+            SELECT * FROM translation_jobs
+            WHERE status IN (%s, %s, %s)
+            ORDER BY created_at, id
+            """,
+            (
+                PersistentTranslationJobStatus.QUEUED.value,
+                PersistentTranslationJobStatus.TRANSLATING.value,
+                PersistentTranslationJobStatus.INTERRUPTED.value,
+            ),
+        ).fetchall()
+        return [_job_from_row(row) for row in rows]
+
     def add_work_units(
         self,
         job_id: str,

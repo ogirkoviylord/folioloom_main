@@ -41,6 +41,9 @@ class TranslationJobStore(Protocol):
     def get_job(self, job_id: str) -> PersistentTranslationJob | None:
         ...
 
+    def list_claimable_jobs(self) -> list[PersistentTranslationJob]:
+        ...
+
     def add_work_units(
         self,
         job_id: str,

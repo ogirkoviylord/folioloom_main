@@ -89,6 +89,50 @@ class PostgreSQLTranslationJobStoreTests(unittest.TestCase):
         self.assertEqual(claimed[0].sequence, 1)
         self.assertEqual(claimed[0].status, PersistentWorkUnitStatus.TRANSLATING)
 
+    def test_list_claimable_jobs_returns_queued_translating_and_interrupted_jobs(self):
+        queued = _job_with_units(self.store)
+        translating = _job_with_units(self.store)
+        interrupted = _job_with_units(self.store)
+        ready = _job_with_units(self.store)
+        cancelled = _job_with_units(self.store)
+
+        self.store.claim_next_work_unit(translating.id, worker_id="worker-a")
+        failed_unit = self.store.claim_next_work_unit(
+            interrupted.id,
+            worker_id="worker-a",
+        )
+        self.store.fail_work_unit(
+            failed_unit.id,
+            error_message="provider read timeout",
+            retry_count=1,
+        )
+        for unit in self.store.list_work_units(ready.id):
+            claimed = self.store.claim_next_work_unit(ready.id, worker_id="worker-a")
+            self.store.complete_work_unit(
+                claimed.id,
+                translated_text=f"Done {unit.sequence}",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cache_hit_tokens=0,
+                cache_miss_tokens=1,
+            )
+        self.store.cancel_job(cancelled.id)
+
+        claimable = self.store.list_claimable_jobs()
+
+        self.assertEqual(
+            [job.id for job in claimable],
+            [queued.id, translating.id, interrupted.id],
+        )
+        self.assertEqual(
+            [job.status for job in claimable],
+            [
+                PersistentTranslationJobStatus.QUEUED,
+                PersistentTranslationJobStatus.TRANSLATING,
+                PersistentTranslationJobStatus.INTERRUPTED,
+            ],
+        )
+
     def test_cancel_and_resume_preserve_completed_work_and_retry_failed_units(self):
         job = _job_with_units(self.store)
         first = self.store.claim_next_work_unit(job.id, worker_id="worker-a")

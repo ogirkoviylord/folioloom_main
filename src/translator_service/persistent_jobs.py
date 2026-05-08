@@ -1,9 +1,9 @@
+import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-import json
 from pathlib import Path
-import sqlite3
 
 
 class PersistentTranslationJobStatus(StrEnum):
@@ -197,6 +197,21 @@ class SQLiteTranslationJobStore:
         if row is None:
             return None
         return _job_from_row(row)
+
+    def list_claimable_jobs(self) -> list[PersistentTranslationJob]:
+        rows = self._connection.execute(
+            """
+            SELECT * FROM translation_jobs
+            WHERE status IN (?, ?, ?)
+            ORDER BY created_at, id
+            """,
+            (
+                PersistentTranslationJobStatus.QUEUED.value,
+                PersistentTranslationJobStatus.TRANSLATING.value,
+                PersistentTranslationJobStatus.INTERRUPTED.value,
+            ),
+        ).fetchall()
+        return [_job_from_row(row) for row in rows]
 
     def add_work_units(
         self,
