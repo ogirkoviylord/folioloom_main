@@ -1,17 +1,20 @@
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import time
 
 from translator_service.bot_translation_service import (
     BotTranslationService,
-    PendingUpload,
     PendingTranslation,
+    PendingUpload,
 )
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
-from translator_service.job_runner import DocumentKind
-from translator_service.job_runner import InMemoryTranslationJobRepository, TranslationJobStatus
+from translator_service.job_runner import (
+    DocumentKind,
+    InMemoryTranslationJobRepository,
+    TranslationJobStatus,
+)
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
@@ -58,6 +61,16 @@ class BlockingTranslator:
 
 
 class BotTranslationServiceTest(unittest.TestCase):
+    def test_rejects_unknown_translation_execution_mode(self):
+        with self.assertRaisesRegex(ValueError, "translation_execution_mode"):
+            BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                translation_execution_mode="wroker",
+            )
+
     def test_prepares_txt_estimate_for_uploaded_document(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
@@ -308,6 +321,101 @@ class BotTranslationServiceTest(unittest.TestCase):
                     PersistentWorkUnitStatus.TRANSLATED,
                 ],
             )
+
+    def test_worker_mode_confirmation_queues_persistent_txt_without_inline_translation(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_execution_mode="worker",
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            persisted_job = persistent_store.get_job(job.id)
+            work_units = persistent_store.list_work_units(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertIsNone(job.result_file_name)
+            self.assertIsNone(job.result_content)
+            self.assertIsNone(service.get_pending(42))
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.QUEUED,
+            )
+            self.assertEqual(
+                [unit.status for unit in work_units],
+                [
+                    PersistentWorkUnitStatus.PENDING,
+                    PersistentWorkUnitStatus.PENDING,
+                ],
+            )
+
+    def test_worker_mode_rejects_non_persistent_path_without_inline_translation(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_execution_mode="worker",
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="contract.docx",
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+                    </w:document>
+                    """
+                ),
+                source_language="en",
+            )
+            pending = service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="fr",
+            )
+            translator = RecordingTranslator()
+
+            with self.assertRaisesRegex(ValueError, "Worker mode currently supports"):
+                service.confirm_pending_translation(
+                    user_telegram_id=42,
+                    translator=translator,
+                )
+
+            self.assertEqual(service.get_pending(42), pending)
+            self.assertEqual(translator.requests, [])
 
     def test_persistent_txt_cancellation_returns_partial_result(self):
         with TemporaryDirectory() as temp_dir:

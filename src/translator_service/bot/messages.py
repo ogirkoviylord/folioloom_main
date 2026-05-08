@@ -1,6 +1,7 @@
 import html
 from pathlib import PurePath
 
+from translator_service.bot_translation_service import PendingTranslation
 from translator_service.documents import (
     EmptyDocumentError,
     FileTooLargeError,
@@ -8,14 +9,12 @@ from translator_service.documents import (
 )
 from translator_service.extractors import TextExtractionError
 from translator_service.job_runner import TranslationJob, TranslationJobStatus
-from translator_service.bot_translation_service import PendingTranslation
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     language_code_for_name,
     localized_language_name_for_code,
 )
 from translator_service.order_estimates import OrderEstimate
-
 
 CONFIRM_TRANSLATION_TEXT = "Start Translation"
 SUPPORTED_TRANSLATION_FORMATS = ("EPUB", "DOCX", "TXT")
@@ -119,7 +118,7 @@ MESSAGES = {
         "preservation_note": "I’ll preserve chapters, paragraphs, and as much formatting as the current file allows.",
         "confirm_instruction": "Press “{confirm_text}” to start translation.",
         "queue_instruction": "Press “{confirm_text}” to queue translation.",
-        "queued": "Your translation is queued: {file_name}.",
+        "queued": "Translation has started: {file_name}.\n\nYou can leave the bot. Progress is saved.",
         "translating": "Your translation is in progress: {file_name}.",
         "ready": "Your translation is ready.\n\nYou can download the translated file below: {result_name}.",
         "cancelled": "Translation cancelled.\n\nPartial result: {result_name}.",
@@ -242,7 +241,7 @@ MESSAGES = {
         "preservation_note": "Я сохраню главы, абзацы и форматирование настолько, насколько позволяет исходный файл.",
         "confirm_instruction": "Нажмите «{confirm_text}», чтобы начать перевод.",
         "queue_instruction": "Нажмите «{confirm_text}», чтобы поставить перевод в очередь.",
-        "queued": "Перевод в очереди: {file_name}.",
+        "queued": "Перевод запущен: {file_name}.\n\nМожете выйти из бота. Прогресс сохранен.",
         "translating": "Перевод выполняется: {file_name}.",
         "ready": "Перевод готов.\n\nВы можете скачать файл ниже: {result_name}.",
         "cancelled": "Перевод отменен.\n\nЧастичный результат: {result_name}.",
@@ -339,7 +338,7 @@ for _language_code, _fallbacks in {
         "preservation_note": "Я збережу розділи, абзаци й форматування настільки, наскільки це дозволяє початковий файл.",
         "confirm_instruction": "Натисніть «{confirm_text}», щоб почати переклад.",
         "queue_instruction": "Натисніть «{confirm_text}», щоб поставити переклад у чергу.",
-        "queued": "Переклад у черзі: {file_name}.",
+        "queued": "Переклад запущено: {file_name}.\n\nМожете вийти з бота. Прогрес збережено.",
         "translating": "Переклад виконується: {file_name}.",
         "ready": "Переклад готовий.\n\nВи можете завантажити файл нижче: {result_name}.",
         "cancelled": "Переклад скасовано.\n\nЧастковий результат: {result_name}.",
@@ -418,7 +417,7 @@ for _language_code, _fallbacks in {
         "preservation_note": "Je préserverai les chapitres, paragraphes et autant de mise en forme que le fichier le permet.",
         "confirm_instruction": "Appuyez sur « {confirm_text} » pour lancer la traduction.",
         "queue_instruction": "Appuyez sur « {confirm_text} » pour mettre la traduction en file d’attente.",
-        "queued": "Votre traduction est en file d’attente : {file_name}.",
+        "queued": "La traduction a commencé : {file_name}.\n\nVous pouvez quitter le bot. La progression est enregistrée.",
         "translating": "Votre traduction est en cours : {file_name}.",
         "ready": "Votre traduction est prête.\n\nVous pouvez télécharger le fichier ci-dessous : {result_name}.",
         "cancelled": "Traduction annulée.\n\nRésultat partiel : {result_name}.",
@@ -497,7 +496,7 @@ for _language_code, _fallbacks in {
         "preservation_note": "Conservaré capítulos, párrafos y tanto formato como permita el archivo actual.",
         "confirm_instruction": "Pulsa «{confirm_text}» para iniciar la traducción.",
         "queue_instruction": "Pulsa «{confirm_text}» para poner la traducción en cola.",
-        "queued": "Tu traducción está en cola: {file_name}.",
+        "queued": "La traducción ha empezado: {file_name}.\n\nPuedes salir del bot. El progreso está guardado.",
         "translating": "Tu traducción está en curso: {file_name}.",
         "ready": "Tu traducción está lista.\n\nPuedes descargar el archivo abajo: {result_name}.",
         "cancelled": "Traducción cancelada.\n\nResultado parcial: {result_name}.",
@@ -576,7 +575,7 @@ for _language_code, _fallbacks in {
         "preservation_note": "Ik behoud hoofdstukken, alinea’s en zoveel opmaak als het huidige bestand toelaat.",
         "confirm_instruction": "Druk op “{confirm_text}” om de vertaling te starten.",
         "queue_instruction": "Druk op “{confirm_text}” om de vertaling in de wachtrij te zetten.",
-        "queued": "Je vertaling staat in de wachtrij: {file_name}.",
+        "queued": "De vertaling is gestart: {file_name}.\n\nJe kunt de bot verlaten. De voortgang is opgeslagen.",
         "translating": "Je vertaling wordt uitgevoerd: {file_name}.",
         "ready": "Je vertaling is klaar.\n\nJe kunt het bestand hieronder downloaden: {result_name}.",
         "cancelled": "Vertaling geannuleerd.\n\nGedeeltelijk resultaat: {result_name}.",

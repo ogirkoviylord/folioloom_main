@@ -55,7 +55,7 @@ from translator_service.languages import (
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
 from translator_service.pricing import PricingRules
-from translator_service.translation_jobs import TranslationProgress
+from translator_service.translation_jobs import TextTranslator, TranslationProgress
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ class BotRuntimeConfig:
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
     job_store_backend: str = "sqlite"
     postgres_dsn: str = "postgresql://translator:translator@localhost:5432/translator"
+    translation_execution_mode: str = "inline"
 
 
 def build_default_pricing_rules() -> PricingRules:
@@ -103,10 +104,25 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_fragment_chars=config.max_fragment_chars,
         file_storage=LocalObjectStorage(config.object_storage_root),
         persistent_job_store=create_translation_job_store(config),
+        translation_execution_mode=config.translation_execution_mode,
     )
 
 
-def build_deepseek_translator(settings: Settings) -> DeepSeekClient:
+class _WorkerModeTranslator:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        raise RuntimeError("Telegram bot worker mode must not translate inline")
+
+
+def build_deepseek_translator(settings: Settings) -> TextTranslator:
+    if settings.translation_execution_mode == "worker":
+        return _WorkerModeTranslator()
+
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY is not set")
@@ -122,7 +138,7 @@ def build_deepseek_translator(settings: Settings) -> DeepSeekClient:
 def create_router(
     *,
     service: BotTranslationService,
-    translator: DeepSeekClient,
+    translator: TextTranslator,
     config: BotRuntimeConfig,
 ):
     from aiogram import F, Router
@@ -559,7 +575,7 @@ async def _confirm_pending_translation(
     *,
     message,
     service: BotTranslationService,
-    translator: DeepSeekClient,
+    translator: TextTranslator,
 ) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
     pending = service.get_pending(message.from_user.id)
@@ -938,6 +954,7 @@ async def run_bot() -> None:
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
         job_store_backend=settings.job_store_backend,
         postgres_dsn=settings.postgres_dsn,
+        translation_execution_mode=settings.translation_execution_mode,
     )
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)

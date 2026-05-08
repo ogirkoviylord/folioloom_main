@@ -83,7 +83,12 @@ class BotTranslationService:
         translation_cache: TranslationCache | None = None,
         file_storage: LocalObjectStorage | None = None,
         persistent_job_store: TranslationJobStore | None = None,
+        translation_execution_mode: str = "inline",
     ) -> None:
+        if translation_execution_mode not in {"inline", "worker"}:
+            raise ValueError(
+                "translation_execution_mode must be either 'inline' or 'worker'"
+            )
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
         self._max_upload_mb = max_upload_mb
@@ -96,6 +101,7 @@ class BotTranslationService:
         self._translation_cache = translation_cache or MemoryTranslationCache()
         self._file_storage = file_storage
         self._persistent_job_store = persistent_job_store
+        self._translation_execution_mode = translation_execution_mode
         self._state_lock = RLock()
 
     def close(self) -> None:
@@ -290,20 +296,38 @@ class BotTranslationService:
                 "Only TXT, DOCX, and EPUB confirmation is supported in the prototype"
             )
 
-        if self._should_use_persistent_txt_path(
+        use_persistent_txt_path = self._should_use_persistent_txt_path(
             document_kind=document_kind,
             pending=pending,
-        ):
-            cancellation_token = CancellationToken()
+        )
+        if self._translation_execution_mode == "worker" and not use_persistent_txt_path:
             with self._state_lock:
-                self._active_cancellations[user_telegram_id] = cancellation_token
+                self._pending.setdefault(user_telegram_id, pending)
+            raise ValueError(
+                "Worker mode currently supports queued TXT translations with "
+                "persistent storage only"
+            )
+
+        if use_persistent_txt_path:
             try:
-                job = self._confirm_persistent_txt_translation(
-                    pending=pending,
-                    translator=translator,
-                    progress_callback=progress_callback,
-                    cancellation_token=cancellation_token,
-                )
+                if self._translation_execution_mode == "worker":
+                    job = self._queue_persistent_txt_translation(pending=pending)
+                else:
+                    cancellation_token = CancellationToken()
+                    with self._state_lock:
+                        self._active_cancellations[user_telegram_id] = (
+                            cancellation_token
+                        )
+                    try:
+                        job = self._confirm_persistent_txt_translation(
+                            pending=pending,
+                            translator=translator,
+                            progress_callback=progress_callback,
+                            cancellation_token=cancellation_token,
+                        )
+                    finally:
+                        with self._state_lock:
+                            self._active_cancellations.pop(user_telegram_id, None)
             except Exception as error:
                 logger.exception(
                     "Translation job failed: file_name=%s user_telegram_id=%s",
@@ -317,9 +341,6 @@ class BotTranslationService:
                     document_kind=document_kind,
                     error_message=str(error),
                 )
-            finally:
-                with self._state_lock:
-                    self._active_cancellations.pop(user_telegram_id, None)
 
             if job.status is TranslationJobStatus.FAILED:
                 with self._state_lock:
@@ -389,17 +410,7 @@ class BotTranslationService:
         assert self._persistent_job_store is not None
         assert pending.source_object_key is not None
 
-        plan = create_persistent_txt_job_plan(
-            store=self._persistent_job_store,
-            storage=self._file_storage,
-            order_id=f"prototype-order-{pending.user_telegram_id}-{int(time.time())}",
-            user_id=f"telegram:{pending.user_telegram_id}",
-            source_object_key=pending.source_object_key,
-            file_name=pending.file_name,
-            source_language=pending.source_language,
-            target_language=pending.target_language,
-            max_fragment_chars=self._max_fragment_chars,
-        )
+        plan = self._create_persistent_txt_job_plan(pending)
         total_fragments = len(plan.work_units)
 
         while True:
@@ -461,6 +472,40 @@ class BotTranslationService:
             job_id=plan.job.id,
             partial=False,
             status=TranslationJobStatus.READY,
+        )
+
+    def _queue_persistent_txt_translation(
+        self,
+        *,
+        pending: PendingTranslation,
+    ) -> TranslationJob:
+        plan = self._create_persistent_txt_job_plan(pending)
+        return TranslationJob(
+            id=plan.job.id,
+            document_kind=DocumentKind.TXT,
+            user_telegram_id=pending.user_telegram_id,
+            file_name=pending.file_name,
+            content=pending.content,
+            source_language=pending.source_language,
+            target_language=pending.target_language,
+            status=TranslationJobStatus.QUEUED,
+        )
+
+    def _create_persistent_txt_job_plan(self, pending: PendingTranslation):
+        assert self._file_storage is not None
+        assert self._persistent_job_store is not None
+        assert pending.source_object_key is not None
+
+        return create_persistent_txt_job_plan(
+            store=self._persistent_job_store,
+            storage=self._file_storage,
+            order_id=f"prototype-order-{pending.user_telegram_id}-{int(time.time())}",
+            user_id=f"telegram:{pending.user_telegram_id}",
+            source_object_key=pending.source_object_key,
+            file_name=pending.file_name,
+            source_language=pending.source_language,
+            target_language=pending.target_language,
+            max_fragment_chars=self._max_fragment_chars,
         )
 
     def _build_persistent_txt_result_job(

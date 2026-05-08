@@ -6,10 +6,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from translator_service.bot.runtime import (
-    BotRuntimeConfig,
     HEARTBEAT_PATTERNS,
+    BotRuntimeConfig,
     _cancel_inline_keyboard,
     _choose_heartbeat_pattern_name,
+    _confirm_pending_translation,
     _document_exceeds_upload_limit,
     _include_progress_preview,
     _is_language_button_text,
@@ -20,9 +21,12 @@ from translator_service.bot.runtime import (
     _print_translation_summary,
     _schedule_message_edit,
     _settings_keyboard,
+    build_deepseek_translator,
     build_default_pricing_rules,
     build_translation_service,
 )
+from translator_service.config import Settings
+from translator_service.job_runner import TranslationJobStatus
 from translator_service.translation_jobs import TranslationProgress
 
 
@@ -72,8 +76,30 @@ class BotBackedMessage:
         self.message_id = 55
 
 
+class FromUser:
+    id = 42
+
+
+class AnswerRecordingMessage:
+    def __init__(self) -> None:
+        self.from_user = FromUser()
+        self.answers: list[str] = []
+        self.documents: list[object] = []
+
+    async def answer(self, text: str, **kwargs):
+        self.answers.append(text)
+        return EditableMessage()
+
+    async def answer_document(self, document) -> None:
+        self.documents.append(document)
+
+
 class _RuntimeRecordingTranslator:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.calls.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
 
 
@@ -95,6 +121,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.max_upload_mb, 50)
         self.assertEqual(config.object_storage_root, "var/object-storage")
         self.assertEqual(config.persistent_jobs_db_path, "var/jobs.sqlite3")
+        self.assertEqual(config.translation_execution_mode, "inline")
 
     def test_build_translation_service_wires_local_object_storage(self):
         with TemporaryDirectory() as temp_dir:
@@ -145,6 +172,90 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(job.id, "job-1")
             self.assertEqual(job.result_file_name, "notes.uk.txt")
             self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
+
+    def test_build_translation_service_wires_worker_mode_queue_confirmation(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    job_store_backend="sqlite",
+                    translation_execution_mode="worker",
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            translator = _RuntimeRecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.id, "job-1")
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertIsNone(job.result_file_name)
+            self.assertIsNone(job.result_content)
+            self.assertEqual(translator.calls, [])
+
+    async def test_worker_mode_confirm_message_reports_queued_without_file(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    job_store_backend="sqlite",
+                    translation_execution_mode="worker",
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            message = AnswerRecordingMessage()
+            translator = _RuntimeRecordingTranslator()
+
+            await _confirm_pending_translation(
+                message=message,
+                service=service,
+                translator=translator,
+            )
+
+            self.assertIn("Translation has started", message.answers[-1])
+            self.assertIn("Progress is saved", message.answers[-1])
+            self.assertIn("notes.txt", message.answers[-1])
+            self.assertEqual(message.documents, [])
+            self.assertEqual(translator.calls, [])
+
+    def test_worker_mode_translator_does_not_require_deepseek_key(self):
+        settings = Settings(translation_execution_mode="worker")
+
+        translator = build_deepseek_translator(settings)
+
+        with self.assertRaisesRegex(RuntimeError, "must not translate inline"):
+            translator.translate(
+                text="Hello",
+                source_language="en",
+                target_language="uk",
+            )
 
     def test_language_button_filter_ignores_missing_message_text(self):
         self.assertFalse(_is_language_button_text(None))
