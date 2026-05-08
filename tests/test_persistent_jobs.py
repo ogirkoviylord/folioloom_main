@@ -1,7 +1,7 @@
+import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from concurrent.futures import ThreadPoolExecutor
-import unittest
 
 from translator_service.job_store import TranslationJobStore
 from translator_service.persistent_jobs import (
@@ -120,6 +120,48 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(
             persisted_job.status,
             PersistentTranslationJobStatus.TRANSLATING,
+        )
+
+    def test_list_claimable_jobs_returns_queued_translating_and_interrupted_jobs(self):
+        store = self._memory_store()
+        queued = _job_with_units(store)
+        translating = _job_with_units(store)
+        interrupted = _job_with_units(store)
+        ready = _job_with_units(store)
+        cancelled = _job_with_units(store)
+
+        store.claim_next_work_unit(translating.id, worker_id="worker-a")
+        failed_unit = store.claim_next_work_unit(interrupted.id, worker_id="worker-a")
+        store.fail_work_unit(
+            failed_unit.id,
+            error_message="provider read timeout",
+            retry_count=1,
+        )
+        for unit in store.list_work_units(ready.id):
+            claimed = store.claim_next_work_unit(ready.id, worker_id="worker-a")
+            store.complete_work_unit(
+                claimed.id,
+                translated_text=f"Done {unit.sequence}",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cache_hit_tokens=0,
+                cache_miss_tokens=1,
+            )
+        store.cancel_job(cancelled.id)
+
+        claimable = store.list_claimable_jobs()
+
+        self.assertEqual(
+            [job.id for job in claimable],
+            [queued.id, translating.id, interrupted.id],
+        )
+        self.assertEqual(
+            [job.status for job in claimable],
+            [
+                PersistentTranslationJobStatus.QUEUED,
+                PersistentTranslationJobStatus.TRANSLATING,
+                PersistentTranslationJobStatus.INTERRUPTED,
+            ],
         )
 
     def test_complete_work_units_stores_usage_and_marks_job_ready(self):

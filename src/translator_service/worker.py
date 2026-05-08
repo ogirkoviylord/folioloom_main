@@ -1,18 +1,22 @@
+import logging
+import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-import logging
 from typing import Protocol
 
+from translator_service.config import Settings, validate_server_settings
+from translator_service.deepseek_client import DeepSeekClient
 from translator_service.file_storage import (
     LocalObjectStorage,
     StoredFile,
     StoredFileKind,
 )
+from translator_service.job_store import TranslationJobStore
+from translator_service.job_store_factory import create_translation_job_store
 from translator_service.persistent_jobs import (
     PersistentWorkUnit,
-    SQLiteTranslationJobStore,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +43,7 @@ class ProviderUsage:
 
 def run_next_persistent_work_unit(
     *,
-    store: SQLiteTranslationJobStore,
+    store: TranslationJobStore,
     job_id: str,
     worker_id: str,
     source_loader: Callable[[PersistentWorkUnit], str],
@@ -81,7 +85,7 @@ def run_next_persistent_work_unit(
 
 def run_next_stored_text_work_unit(
     *,
-    store: SQLiteTranslationJobStore,
+    store: TranslationJobStore,
     storage: LocalObjectStorage,
     job_id: str,
     worker_id: str,
@@ -101,9 +105,31 @@ def run_next_stored_text_work_unit(
     )
 
 
+def run_worker_tick(
+    *,
+    store: TranslationJobStore,
+    storage: LocalObjectStorage,
+    worker_id: str,
+    translator: PersistentWorkUnitTranslator,
+    lease_seconds: int = 900,
+) -> int:
+    _ = lease_seconds
+    for job in store.list_claimable_jobs():
+        work_unit = run_next_stored_text_work_unit(
+            store=store,
+            storage=storage,
+            job_id=job.id,
+            worker_id=worker_id,
+            translator=translator,
+        )
+        if work_unit is not None:
+            return 1
+    return 0
+
+
 def assemble_translated_text_result(
     *,
-    store: SQLiteTranslationJobStore,
+    store: TranslationJobStore,
     storage: LocalObjectStorage,
     job_id: str,
     file_name: str,
@@ -163,7 +189,39 @@ def _load_work_unit_text(
 
 
 def main() -> None:
-    print("Worker placeholder is ready.")
+    logging.basicConfig(level=logging.INFO)
+    settings = Settings()
+    validate_server_settings(settings)
+
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+
+    store = create_translation_job_store(settings)
+    storage = LocalObjectStorage(settings.object_storage_root)
+    translator = DeepSeekClient(
+        api_key=api_key,
+        model=settings.deepseek_model,
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        timeout_seconds=120,
+    )
+
+    logger.info("Worker started: worker_id=%s", settings.worker_id)
+    try:
+        while True:
+            processed = run_worker_tick(
+                store=store,
+                storage=storage,
+                worker_id=settings.worker_id,
+                translator=translator,
+                lease_seconds=settings.work_unit_lease_seconds,
+            )
+            if processed == 0:
+                time.sleep(settings.worker_poll_seconds)
+    except KeyboardInterrupt:
+        logger.info("Worker stopped: worker_id=%s", settings.worker_id)
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":

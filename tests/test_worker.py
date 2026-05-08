@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.persistent_jobs import (
@@ -15,6 +15,7 @@ from translator_service.worker import (
     assemble_translated_text_result,
     run_next_persistent_work_unit,
     run_next_stored_text_work_unit,
+    run_worker_tick,
 )
 
 
@@ -131,6 +132,86 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(
                 translator.calls,
                 [("First paragraph", "en", "uk")],
+            )
+
+    def test_worker_tick_processes_one_unit_from_first_claimable_job(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            first_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="first.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            second_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="second.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second paragraph",
+            )
+            store = self._store()
+            first_job = _job_with_stored_unit(store, first_source.object_key)
+            second_job = _job_with_stored_unit(store, second_source.object_key)
+            translator = RecordingTranslator()
+
+            processed = run_worker_tick(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+            )
+
+            self.assertEqual(processed, 1)
+            self.assertEqual(
+                translator.calls,
+                [("First paragraph", "en", "uk")],
+            )
+            self.assertEqual(
+                store.list_work_units(first_job.id)[0].status,
+                PersistentWorkUnitStatus.TRANSLATED,
+            )
+            self.assertEqual(
+                store.list_work_units(second_job.id)[0].status,
+                PersistentWorkUnitStatus.PENDING,
+            )
+
+    def test_worker_tick_skips_claimable_job_with_active_unit(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            blocked_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="blocked.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Blocked paragraph",
+            )
+            next_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="next.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Next paragraph",
+            )
+            store = self._store()
+            blocked_job = _job_with_stored_unit(store, blocked_source.object_key)
+            next_job = _job_with_stored_unit(store, next_source.object_key)
+            store.claim_next_work_unit(blocked_job.id, worker_id="worker-busy")
+            translator = RecordingTranslator()
+
+            processed = run_worker_tick(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+            )
+
+            self.assertEqual(processed, 1)
+            self.assertEqual(translator.calls, [("Next paragraph", "en", "uk")])
+            self.assertEqual(
+                store.list_work_units(blocked_job.id)[0].status,
+                PersistentWorkUnitStatus.TRANSLATING,
+            )
+            self.assertEqual(
+                store.list_work_units(next_job.id)[0].status,
+                PersistentWorkUnitStatus.TRANSLATED,
             )
 
     def test_assembles_translated_text_result_into_object_storage(self):
