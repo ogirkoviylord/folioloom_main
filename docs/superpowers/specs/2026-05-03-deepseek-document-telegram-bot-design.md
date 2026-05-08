@@ -6,25 +6,40 @@ Build FolioLoom, an independent Telegram service for paid book, chapter, and man
 
 ## Workspace Policy
 
-All new development and experimental bot updates must be made in the dev workspace:
-
-```text
-/path/to/local-workspace/Documents/New project 2 dev
-```
-
-The release workspace is reserved for the stable bot and should receive only reviewed, tested changes that are ready to promote:
+The current release workspace for the first always-on closed beta is:
 
 ```text
 /path/to/local-workspace/Documents/New project 2
 ```
 
-The legacy beta workspace is no longer an active target and must not be used for new changes:
+This workspace should stay on `main` and contains the promoted server-beta
+build that can be deployed and kept running.
+
+Ongoing product development continues in the dev worktree:
 
 ```text
-/path/to/local-workspace/Documents/New project 2 beta
+/path/to/local-workspace/Documents/New project 2 dev
 ```
 
-Any implementation session must verify its working directory before editing files. If the goal is not an explicit release promotion, edits belong in the dev workspace.
+That worktree uses the `codex/dev` branch. New features, quality fixes, and
+experiments should be implemented there first, then promoted intentionally to
+`main` only after review and verification.
+
+Promotion to the release workspace is not required to use git merge. A reviewed
+state can be copied into the release folder when that is the chosen release
+process, but the copied result must still be tested and committed in `main`.
+
+Before any edit, an implementation session must verify the working directory
+and branch with `pwd`, `git branch --show-current`, and `git status --short`.
+
+Local environment files remain untracked:
+
+```text
+.env
+.env.dev
+.env.stable
+.env.beta
+```
 
 ## Clean-Room Boundary
 
@@ -61,14 +76,14 @@ The MVP is split into small services that can run locally with Docker Compose:
 - Telegram bot process for user interaction.
 - FastAPI application for healthchecks and internal service endpoints.
 - PostgreSQL database for users, orders, payments, settings, and task state.
-- Redis-backed queue for background work.
+- PostgreSQL-backed durable work-unit queue for the first closed beta.
 - Worker process for document analysis, translation, and result assembly.
 - File storage abstraction with local storage in development and S3-compatible storage later.
 - DeepSeek client as the only LLM integration.
 
 The user never chooses an LLM provider. DeepSeek model and pricing settings are controlled by service configuration and admin tools.
 
-The production architecture must be hardened before the service accepts broad public traffic or expands into many channels. The Telegram bot must become a thin adapter over a durable backend: uploaded files are stored in object storage, orders and work units are stored in PostgreSQL, translation jobs run in workers through a queue, and every user-visible status can be rebuilt from persisted state. DeepSeek remains the only provider, but the exact model, tariff, token limits, retry policy, prompt versions, and translation policies must be configuration/admin data rather than hardcoded assumptions.
+The production architecture must be hardened before the service accepts broad public traffic or expands into many channels. The Telegram bot must become a thin adapter over a durable backend: uploaded files are stored in object storage, orders and work units are stored in PostgreSQL, translation jobs run in workers through leased work-unit claims, and every user-visible status can be rebuilt from persisted state. DeepSeek remains the only provider, but the exact model, tariff, token limits, retry policy, prompt versions, and translation policies must be configuration/admin data rather than hardcoded assumptions.
 
 ## Multi-Channel Architecture
 
@@ -98,7 +113,10 @@ WhatsApp support is a planned growth channel, not part of the current prototype.
 
 ## Current Prototype Scope
 
-The current local prototype is a runnable Telegram bot with in-memory state. It is not yet the full paid production service, but it already exercises the core document translation loop end to end.
+The current project is a runnable Telegram prototype plus a promoted
+backend-beta foundation. It is not yet the full paid production service, but it
+already exercises the core document translation loop and now has the first
+durable backend pieces needed for closed beta testing.
 
 Implemented prototype capabilities:
 
@@ -122,16 +140,23 @@ Implemented prototype capabilities:
 - Runtime progress and developer logs include per-fragment timing and token usage, including provider cache hit/miss token counters when available.
 - Developer logs may show the latest translated fragment during local debugging, but production logs must redact user document text by default and expose fragment previews only through an explicit admin/debug mode.
 - DOCX and EPUB translation can reuse application-level translation memory for repeated API units through the bot service path, avoiding duplicate provider calls for identical source text, source language, target language, and prompt tier.
+- Worker mode can queue persistent TXT translations instead of translating inside the Telegram process.
+- Persistent jobs and work units can be stored in SQLite for local development or PostgreSQL for server beta.
+- Worker processes claim one available work unit at a time and use stale lease reclaim so work can continue after worker crash or restart.
+- The worker-path storage layer protects against stale workers overwriting a work unit after another worker has reclaimed it.
+- Users can resume owned persistent translation jobs and download freshly assembled partial results from completed work units.
+- The backend exposes `/health` and `/ready` endpoints. Readiness checks object storage and job-store access.
+- Docker Compose starts the server beta stack with `api`, `bot`, `worker`, and PostgreSQL, using durable volumes for PostgreSQL data and local object storage.
+- A server beta deployment runbook exists at `docs/deployment/server-beta.md`.
 
 Prototype storage and processing limits:
 
-- User settings, pending uploads, jobs, and cancellation state are stored in memory.
-- Translation currently runs inside the bot process through a synchronous runner wrapped from the async Telegram handler.
-- The prototype does not yet include real payment provider integration, PostgreSQL persistence, Redis queue workers, object storage, admin tooling, file TTL cleanup, antivirus scanning, parser sandboxing, or production retries.
-- Originals, pending files, jobs, cancellation state, and result bytes are currently stored only in process memory and are lost after bot restart.
-- The current prototype can return partial results while the process is alive, but it cannot resume a stopped translation after bot restart because progress is not yet persisted.
-- The current `codex/dev` backend foundation now includes a local persistent job/work-unit store and local object-storage abstraction. Telegram uploads in dev can already be written to local object storage, and TXT confirmation can run through the persistent planner plus stored worker path.
-- The local backend foundation can store original, intermediate, partial, and final file objects with metadata and checksums; it can also associate jobs and work units with source/result object keys.
+- User settings and some Telegram session state are still in memory.
+- Inline local translation mode still exists for development and format-quality testing.
+- Durable server worker mode is currently complete for persistent TXT work units. DOCX and EPUB still need persistent planners and assemblers before they can safely use the same resumable worker path.
+- The prototype does not yet include real payment provider integration, persisted user settings, full order/payment ledger, file TTL cleanup, antivirus scanning, parser sandboxing, S3-compatible object storage, or production admin UI.
+- Originals, intermediate work-unit files, partial outputs, and final outputs can be stored in local object storage with metadata and checksums.
+- PostgreSQL is now available as the beta job store, but full users/orders/payments/settings data modeling remains future work.
 - Local runtime storage is configured by `OBJECT_STORAGE_ROOT`; local SQLite job state is configured by `PERSISTENT_JOBS_DB_PATH`. The default local runtime directory is ignored by git because it contains generated user/runtime data.
 - Pricing, prompt text, adapter versions, and provider usage diagnostics are still prototype-level and must be moved into versioned configuration, persisted snapshots, and audit-friendly usage events before paid production launch.
 - TXT translation groups paragraphs up to the configured fragment size.
@@ -144,25 +169,26 @@ Prototype storage and processing limits:
 
 ## Current Project Stage
 
-The project is currently in the `dev prototype hardening` stage.
+The project is currently in the `closed beta backend preparation` stage.
 
 What this means:
 
-- The stable `main` workspace contains a runnable Telegram prototype that can be used for real manual quality checks.
-- The active development workspace is `New project 2 dev` on branch `codex/dev`.
-- The legacy `New project 2 beta` workspace is frozen and must not receive new changes.
+- The `main` workspace contains the current promoted server-beta project state.
+- Future development continues in the `codex/dev` worktree and is promoted to `main` deliberately.
 - The core prototype flow is implemented for TXT, DOCX, and EPUB: upload, source-language display, target-language choice, estimate, confirmation, translation, progress, cancellation, partial output, and result delivery.
-- The first production-backend groundwork exists in `codex/dev`: SQLite-backed persistent jobs/work units, local file object storage, a TXT persistent confirmation path, and worker helpers that can load source text from storage and save partial/final outputs back to storage.
+- The backend-beta foundation exists in `main`: SQLite/PostgreSQL persistent jobs and work units, local file object storage, queue-only Telegram confirmation for persistent TXT jobs, durable worker polling, stale lease reclaim, resume/download service methods, and FastAPI health/readiness checks.
+- Server beta deployment is documented and Docker Compose can render the `api`, `bot`, `worker`, and PostgreSQL stack.
 - The main quality focus is no longer "can the bot translate a file at all"; it is now "can the bot preserve document structure and produce commercially acceptable output on difficult real documents."
-- The next architectural priority is wiring that backend foundation into the real translation flow: uploads, planning, progress, worker execution, resume, history, and result delivery must move away from in-memory Telegram state. Broad format/channel expansion should wait until this foundation exists.
+- The next architectural priority is finishing backend integration around real beta usage: persistent history UI, persistent DOCX/EPUB planners, payment/order records, operational admin tooling, file TTL policy, and server smoke testing.
+- Broad format/channel expansion should wait until durable backend, quality evals, and paid-order safety are stable.
 
 Current validation focus:
 
 - Run the stable bot from the `main` workspace for manual translation-quality checks.
-- Reproduce quality issues in the `dev` workspace with fixtures or user-supplied samples.
+- Reproduce and fix quality issues in the `codex/dev` worktree with fixtures or user-supplied samples before promoting changes to `main`.
 - Add failing tests for each confirmed issue before changing parser, protection, batching, or assembly behavior.
 - Use the generated Russian regression sample pack for manual and automated checks of Russian target-language decisions such as calques, technical terms, mixed-language segments, protected tokens, and named entities.
-- Promote `dev` to `main` only after tests pass and the manual behavior is better than the current stable version.
+- Promote experimental branches or copied release states to `main` only after tests pass and the manual behavior is better than the current stable version.
 
 Current stage exit criteria:
 
@@ -170,7 +196,7 @@ Current stage exit criteria:
 - EPUB books translate in reading order, produce useful partial results, and avoid fragment-count surprises between estimate and runtime.
 - Progress and cancellation remain reliable on large books.
 - Terminal logs make completed jobs easy to find and include useful time/token diagnostics.
-- The dev/main workflow is stable enough that new features are tested in `codex/dev` and released intentionally to `main`.
+- Closed beta server startup is reproducible from the deployment runbook, and restart/resume behavior is validated with real jobs.
 
 ## MVP Data Flow
 
@@ -182,7 +208,7 @@ Current stage exit criteria:
 6. The bot shows the detected original language or mixed-language list and asks for the target translation language.
 7. The bot shows price, fragment count, direction, and confirmation controls.
 8. User either goes back to the main menu or confirms the translation.
-9. In the production service, user confirmation charges balance and queues the order. In the current prototype, confirmation starts translation immediately in process.
+9. In the production service, user confirmation charges balance and queues the order. In the current beta foundation, persistent TXT confirmation can queue work for a worker without translating inside the Telegram process; inline mode remains for local format testing.
 10. Worker or prototype runner splits the document into ordered API fragments. For EPUB, ordering must come from the book spine, not ZIP archive order.
 11. Worker or prototype runner translates fragments through the internal LLM integration. For structured formats, text blocks are wrapped in project-specific marked batches so multiple small blocks can be translated in one request and then mapped back to the source document.
 12. The bot shows progress while fragments are translated.
@@ -192,7 +218,7 @@ Current stage exit criteria:
 
 ## Production Backend Data Model
 
-The production backend must make every paid translation auditable and resumable. PostgreSQL is the source of truth; Redis/queue state is only a delivery mechanism and must be reconstructable from database rows.
+The production backend must make every paid translation auditable and resumable. PostgreSQL is the source of truth. For the first closed beta, the PostgreSQL work-unit table is also the durable queue through leased work-unit claims. A separate broker such as Redis may be added later for throughput or scheduling, but broker state must remain reconstructable from database rows.
 
 Required domain records:
 
@@ -206,7 +232,7 @@ Required domain records:
 - usage events: provider request id when available, token usage, cache hit/miss token counts, latency, retries, cache/memory hits, and cost diagnostics;
 - audit events: user-visible state changes, admin changes, payment events, cancellations, resumes, parser warnings, and security decisions.
 
-Current dev implementation mirrors the first subset of this model locally: persistent jobs, persistent work units, source object keys, partial/final output object keys, local file metadata, file checksums, worker status, timing, token usage, and cancellation/interruption state. This is a development bridge, not the final production storage layer; the production target remains PostgreSQL plus S3-compatible object storage.
+Current implementation mirrors the first subset of this model: persistent jobs, persistent work units, source object keys, partial/final output object keys, local file metadata, file checksums, worker status, timing, token usage, stale lease reclaim, cancellation/interruption state, resume, and partial download. SQLite remains a local fallback; PostgreSQL is the server-beta target. S3-compatible object storage remains future work.
 
 The bot must not use Telegram update state as the source of truth for paid work. If Telegram, a worker, or the machine restarts, the backend should still be able to show job status, continue work, rebuild partial output, or explain why the job cannot be resumed.
 
@@ -420,9 +446,9 @@ Crash recovery requirements:
 - Completed work units should use application-level translation memory when possible, but resume must not depend only on cache; completed unit outputs must be stored with the job.
 - Provider responses must be associated with exactly one persisted work unit. Usage, cost, output text, and retry metadata must be written atomically enough that a crash cannot mark unpaid/untranslated work as complete or lose already paid completed work.
 
-Current prototype limitation:
+Current backend limitation:
 
-- The live Telegram prototype still stores pending uploads, jobs, cancellation tokens, and result bytes in memory. It can cancel and return a partial file while the process is alive, but it cannot restore progress after a bot restart. The `codex/dev` backend groundwork now proves the local storage/job pieces separately; the remaining work is to wire them into the Telegram flow and then replace local development storage with production PostgreSQL, queue workers, and object storage.
+- The live Telegram prototype still stores some user/session settings and pending interaction state in memory. Persistent worker mode now proves stored originals, jobs, work units, resume, stale lease reclaim, and partial download for TXT. The remaining work is to extend the same persistent path to DOCX/EPUB, add persistent history UI, persist user settings, and add paid order/payment records.
 
 ## My Books and Translation History
 
@@ -463,36 +489,48 @@ History and resume requirements:
 
 ## Next Development Roadmap
 
-The next work should proceed in this order unless a blocking production bug appears. The main strategic shift after the audit is: keep improving DOCX/EPUB quality, but do not keep expanding formats and social channels on top of in-memory prototype state. Durable backend, evals, cost controls, and safety must become the next foundation.
+The next work should proceed in this order unless a blocking production bug appears. The main strategic shift after the backend work is: prepare the closed beta server path, then keep improving DOCX/EPUB quality on top of durable state. Do not expand formats and social channels until durable backend, evals, cost controls, and safety are strong enough.
 
-### 1. Manual Quality Testing on Stable Main
+### 1. Closed Beta Server Bring-Up
 
-- Run the stable bot from `/path/to/local-workspace/Documents/New project 2`.
-- Use real DOCX and EPUB samples to check translation quality, layout preservation, partial output, progress updates, cancellation, and terminal summaries.
-- Record every visible problem as a concrete reproduction: original file, translated file, target language, expected behavior, actual behavior.
-- Do not fix quality issues directly in `main`; reproduce and fix them in `codex/dev`.
+- Create a real `.env` from `.env.example` with the beta Telegram token and DeepSeek key.
+- Run `docker compose up -d --build` on the target server.
+- Verify `docker compose ps`, `/health`, and `/ready`.
+- Run one small TXT worker-mode job and confirm that queued state, worker processing, final output, logs, and restart behavior work.
+- Kill/restart the worker during a job and verify stale lease reclaim plus resume/partial download.
+- Keep the beta small until operational logs, backup/restore, and failure handling are familiar.
 
 ### 2. Production Backend Foundation
 
-- Move from in-memory Telegram runtime state to persistent backend state.
-- Add PostgreSQL-backed users, channel identities, files, orders, jobs, work units, prompt versions, pricing snapshots, usage events, and payment ledger.
-- Add Redis or another durable queue for background workers.
-- Move translation work out of the Telegram handler into worker jobs.
+- Move remaining Telegram runtime state to persistent backend state.
+- Add PostgreSQL-backed users, channel identities, files, orders, prompt versions, pricing snapshots, usage events, and payment ledger.
+- Keep the PostgreSQL work-unit table as the closed-beta durable queue unless a separate broker becomes necessary.
+- Move DOCX and EPUB translation work out of the Telegram handler into worker jobs.
 - Extend the current local object-storage abstraction toward S3-compatible storage for originals, intermediates, partials, and final files.
 - Persist job IDs, retry attempts, progress, token usage, partial outputs, and final results.
 - Add resumable jobs so cancelled, interrupted, or crashed translations can continue from the last completed work unit.
 - Add status/history UI commands that can show resumable jobs after bot restart.
 
-Completed dev groundwork in this area:
+Completed backend groundwork in this area:
 
 - SQLite-backed persistent jobs and work units with statuses, leases, cancellation/interruption state, source object keys, output object keys, timing, and token usage.
+- PostgreSQL-backed persistent job store with the same job/work-unit contract for server beta.
 - Local object storage for originals, intermediates, partials, and final files with metadata sidecars, SHA-256 checksums, file-name sanitization, and path-traversal protection.
 - Runtime service construction wires Telegram uploads to local object storage through `OBJECT_STORAGE_ROOT`, so uploaded originals can be persisted before the user chooses the target language.
 - Persistent TXT planning can load a stored original file, split it into deterministic paragraph fragments, store each source work unit as an intermediate object, and create pending work-unit rows linked to those objects.
 - Runtime service construction wires SQLite jobs through `PERSISTENT_JOBS_DB_PATH`; TXT confirmation now uses persistent planning and stored worker execution when object storage and persistent jobs are available.
+- Runtime service construction can select SQLite or PostgreSQL through `JOB_STORE_BACKEND` and `POSTGRES_DSN`.
+- Telegram worker mode can queue persistent TXT jobs without requiring the bot process to hold the DeepSeek key or translate inline.
+- Durable worker loop polls claimable jobs, reclaims stale leases, and processes stored text work units.
+- Worker completion/failure updates are fenced by worker ownership so stale workers cannot overwrite a reclaimed unit.
+- Bot service methods can resume owned persistent jobs and assemble fresh partial downloads from completed work units.
+- FastAPI exposes `/health` and `/ready`; readiness checks object storage and the configured job store.
+- Docker Compose is configured for the closed beta stack with `api`, `bot`, `worker`, PostgreSQL healthcheck, durable object-storage volume, and run-log volume.
+- `docs/deployment/server-beta.md` documents server setup, health checks, logs, restart, backup, and restore.
+- Admin operations helpers can normalize job states, summarize worker health, aggregate queue depth, and redact secrets from error excerpts for future operational views.
 - Persistent TXT cancellation assembles a partial output from completed work units and stores the partial object key on the job.
 - Stored-text worker helpers that load source work-unit text from object storage, translate it through the existing worker path, save assembled partial/final text results, and attach result object keys to the job.
-- Environment examples now separate local storage and SQLite job paths for dev, stable, beta, and generic local runs. Generated `var/` runtime data must stay out of git.
+- Environment examples now separate local SQLite/inline defaults from server PostgreSQL/worker defaults. Generated runtime data must stay out of git.
 
 Next backend slice:
 
