@@ -1229,7 +1229,7 @@ git commit -m "feat: add backend readiness checks"
 - Create: `docker-compose.local.yml`
 - Test: manual Docker Compose config validation
 
-- [ ] **Step 1: Preserve local overrides**
+- [x] **Step 1: Preserve local overrides**
 
 Create `docker-compose.local.yml` for local development:
 
@@ -1247,7 +1247,7 @@ services:
     env_file: .env.dev
 ```
 
-- [ ] **Step 2: Harden server compose**
+- [x] **Step 2: Harden server compose**
 
 Update `docker-compose.yml`:
 
@@ -1316,7 +1316,7 @@ volumes:
 
 Redis is removed from the first server beta compose because the durable job table is the queue and source of truth.
 
-- [ ] **Step 3: Validate Compose file**
+- [x] **Step 3: Validate Compose file**
 
 Run:
 
@@ -1326,7 +1326,7 @@ docker compose config
 
 Expected: Compose renders valid YAML with `api`, `bot`, `worker`, and `postgres`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docker-compose.yml docker-compose.local.yml

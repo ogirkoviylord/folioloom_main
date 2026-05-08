@@ -3,44 +3,58 @@ services:
     build: .
     command: uvicorn translator_service.api:create_app --factory --host 0.0.0.0 --port 8000
     env_file: .env
+    restart: unless-stopped
     ports:
       - "8000:8000"
+    volumes:
+      - object-storage:/data/object-storage
+      - run-logs:/data/run-logs
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
 
   bot:
     build: .
     command: python -m translator_service.bot
     env_file: .env
+    restart: unless-stopped
+    volumes:
+      - object-storage:/data/object-storage
+      - run-logs:/data/run-logs
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
 
   worker:
     build: .
     command: python -m translator_service.worker
     env_file: .env
+    restart: unless-stopped
+    volumes:
+      - object-storage:/data/object-storage
+      - run-logs:/data/run-logs
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: translator
       POSTGRES_USER: translator
       POSTGRES_PASSWORD: translator
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U translator -d translator"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
 volumes:
   postgres-data:
-
+  object-storage:
+  run-logs:
