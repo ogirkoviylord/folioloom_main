@@ -26,6 +26,8 @@ from translator_service.language_detection import (
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.persistent_jobs import (
+    PersistentTranslationJob,
+    PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
 )
 from translator_service.persistent_planner import create_persistent_txt_job_plan
@@ -70,6 +72,15 @@ class PendingTranslation:
     source_language_display: str | None = None
     estimated_seconds: int | None = None
     source_object_key: str | None = None
+
+
+@dataclass(frozen=True)
+class PersistentTranslationDownload:
+    job_id: str
+    file_name: str
+    content: bytes
+    content_type: str
+    partial: bool
 
 
 class BotTranslationService:
@@ -272,6 +283,78 @@ class BotTranslationService:
 
         token.cancel()
         return True
+
+    def resume_persistent_translation(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> PersistentTranslationJob:
+        job = self._require_owned_persistent_job(
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
+        )
+        return self._persistent_job_store.resume_job(job.id)
+
+    def get_persistent_translation_download(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+        partial: bool,
+    ) -> PersistentTranslationDownload:
+        job = self._require_owned_persistent_job(
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
+        )
+        if self._file_storage is None:
+            raise RuntimeError("Persistent file storage is not configured")
+
+        object_key = None if partial else job.final_object_key
+        if object_key is None:
+            if not partial and job.status is not PersistentTranslationJobStatus.READY:
+                raise ValueError(f"Persistent translation job is not ready: {job_id}")
+            result_file_name = _translated_file_name(
+                job.file_name,
+                job.target_language,
+                extension=_result_extension_for_document_kind(job.document_kind),
+                is_partial=partial,
+            )
+            stored = assemble_translated_text_result(
+                store=self._persistent_job_store,
+                storage=self._file_storage,
+                job_id=job.id,
+                file_name=result_file_name,
+                partial=partial,
+                content_type=_content_type_for_document_kind(job.document_kind),
+            )
+        else:
+            stored = self._file_storage.get_metadata(object_key)
+
+        return PersistentTranslationDownload(
+            job_id=job.id,
+            file_name=stored.file_name,
+            content=self._file_storage.get_bytes(stored.object_key),
+            content_type=stored.content_type,
+            partial=partial,
+        )
+
+    def _require_owned_persistent_job(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> PersistentTranslationJob:
+        if self._persistent_job_store is None:
+            raise RuntimeError("Persistent translation storage is not configured")
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None:
+            raise ValueError(f"Translation job does not exist: {job_id}")
+        if job.user_id != _persistent_user_id(user_telegram_id):
+            raise PermissionError("Translation job belongs to another user")
+
+        return job
 
     def confirm_pending_translation(
         self,
@@ -500,7 +583,7 @@ class BotTranslationService:
             store=self._persistent_job_store,
             storage=self._file_storage,
             order_id=f"prototype-order-{pending.user_telegram_id}-{int(time.time())}",
-            user_id=f"telegram:{pending.user_telegram_id}",
+            user_id=_persistent_user_id(pending.user_telegram_id),
             source_object_key=pending.source_object_key,
             file_name=pending.file_name,
             source_language=pending.source_language,
@@ -576,6 +659,10 @@ def _failed_translation_job(
     )
 
 
+def _persistent_user_id(user_telegram_id: int) -> str:
+    return f"telegram:{user_telegram_id}"
+
+
 def _completed_persistent_units(
     store: TranslationJobStore,
     job_id: str,
@@ -619,6 +706,26 @@ def _content_type_for_format(document_format: DocumentFormat) -> str:
     if document_format is DocumentFormat.EPUB:
         return "application/epub+zip"
     return "application/octet-stream"
+
+
+def _content_type_for_document_kind(document_kind: str) -> str:
+    if document_kind == DocumentKind.TXT.value:
+        return "text/plain; charset=utf-8"
+    if document_kind == DocumentKind.DOCX.value:
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if document_kind == DocumentKind.EPUB.value:
+        return "application/epub+zip"
+    return "application/octet-stream"
+
+
+def _result_extension_for_document_kind(document_kind: str) -> str:
+    if document_kind == DocumentKind.TXT.value:
+        return "txt"
+    if document_kind == DocumentKind.DOCX.value:
+        return "docx"
+    if document_kind == DocumentKind.EPUB.value:
+        return "epub"
+    return PurePath(document_kind).suffix.lstrip(".") or document_kind
 
 
 def estimate_translation_seconds(fragment_count: int) -> int:

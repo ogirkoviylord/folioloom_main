@@ -19,6 +19,7 @@ from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
+    WorkUnitPlan,
 )
 from translator_service.pricing import PricingRules
 
@@ -417,6 +418,160 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(service.get_pending(42), pending)
             self.assertEqual(translator.requests, [])
 
+    def test_resume_persistent_job_requeues_failed_and_translating_units(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+            persistent_job_store=store,
+            translation_execution_mode="worker",
+        )
+        job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+
+        resumed = service.resume_persistent_translation(
+            user_telegram_id=42,
+            job_id=job.id,
+        )
+
+        self.assertEqual(resumed.status, PersistentTranslationJobStatus.QUEUED)
+        self.assertEqual(
+            [unit.status for unit in store.list_work_units(job.id)],
+            [
+                PersistentWorkUnitStatus.PENDING,
+                PersistentWorkUnitStatus.PENDING,
+            ],
+        )
+
+    def test_resume_persistent_job_rejects_another_users_job(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+            persistent_job_store=store,
+            translation_execution_mode="worker",
+        )
+        job = _persistent_job_with_failed_unit(store, user_id="telegram:100")
+
+        with self.assertRaises(PermissionError):
+            service.resume_persistent_translation(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+    def test_get_persistent_partial_download_assembles_translated_units(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=store,
+                translation_execution_mode="worker",
+            )
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+            first = store.list_work_units(job.id)[0]
+            store.complete_work_unit(
+                first.id,
+                translated_text="[uk] One",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+
+            download = service.get_persistent_translation_download(
+                user_telegram_id=42,
+                job_id=job.id,
+                partial=True,
+            )
+
+            self.assertEqual(download.file_name, "notes.uk.partial.txt")
+            self.assertEqual(download.content, b"[uk] One")
+            self.assertEqual(download.content_type, "text/plain; charset=utf-8")
+            self.assertIsNotNone(store.get_job(job.id).partial_object_key)
+
+    def test_get_persistent_final_download_requires_ready_job(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=store,
+                translation_execution_mode="worker",
+            )
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+
+            with self.assertRaisesRegex(ValueError, "not ready"):
+                service.get_persistent_translation_download(
+                    user_telegram_id=42,
+                    job_id=job.id,
+                    partial=False,
+                )
+
+    def test_get_persistent_partial_download_rebuilds_existing_partial(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=store,
+                translation_execution_mode="worker",
+            )
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+            first = store.list_work_units(job.id)[0]
+            store.complete_work_unit(
+                first.id,
+                translated_text="[uk] One",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            first_download = service.get_persistent_translation_download(
+                user_telegram_id=42,
+                job_id=job.id,
+                partial=True,
+            )
+            store.resume_job(job.id)
+            second = store.claim_next_work_unit(job.id, worker_id="worker-b")
+            store.complete_work_unit(
+                second.id,
+                translated_text="[uk] Two",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+
+            second_download = service.get_persistent_translation_download(
+                user_telegram_id=42,
+                job_id=job.id,
+                partial=True,
+            )
+
+            self.assertEqual(first_download.content, b"[uk] One")
+            self.assertEqual(second_download.content, b"[uk] One\n\n[uk] Two")
+
     def test_persistent_txt_cancellation_returns_partial_result(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
@@ -776,6 +931,59 @@ def _pricing_rules() -> PricingRules:
         service_markup_multiplier=3.0,
         minimum_price_usd=0.10,
     )
+
+
+def _persistent_job_with_failed_unit(
+    store: SQLiteTranslationJobStore,
+    *,
+    user_id: str,
+):
+    job = store.create_job(
+        order_id="order-1",
+        user_id=user_id,
+        file_id="file-1",
+        file_name="notes.txt",
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        adapter_version="txt-v1",
+        prompt_version="prompt-v1",
+        pricing_snapshot_id="pricing-v1",
+        source_object_key="original/file-1.txt",
+    )
+    store.add_work_units(
+        job.id,
+        [
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("block-1",),
+                source_text_hash="hash-1",
+                prompt_tier="default",
+                source_language="en",
+                target_language="uk",
+                source_object_key="intermediate/unit-1.txt",
+            ),
+            WorkUnitPlan(
+                sequence=2,
+                source_block_ids=("block-2",),
+                source_text_hash="hash-2",
+                prompt_tier="default",
+                source_language="en",
+                target_language="uk",
+                source_object_key="intermediate/unit-2.txt",
+            ),
+        ],
+    )
+    first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+    store.fail_work_unit(
+        first.id,
+        error_message="provider timeout",
+        retry_count=1,
+        worker_id="worker-a",
+    )
+    second = store.claim_next_work_unit(job.id, worker_id="worker-a")
+    assert second is not None
+    return job
 
 
 if __name__ == "__main__":
