@@ -70,6 +70,7 @@ def run_next_persistent_work_unit(
             work_unit.id,
             error_message=str(error),
             retry_count=work_unit.retry_count + 1,
+            worker_id=worker_id,
         )
 
     usage = _provider_usage(translator)
@@ -80,6 +81,7 @@ def run_next_persistent_work_unit(
         completion_tokens=usage.completion_tokens,
         cache_hit_tokens=usage.prompt_cache_hit_tokens,
         cache_miss_tokens=usage.prompt_cache_miss_tokens,
+        worker_id=worker_id,
     )
 
 
@@ -113,7 +115,10 @@ def run_worker_tick(
     translator: PersistentWorkUnitTranslator,
     lease_seconds: int = 900,
 ) -> int:
-    _ = lease_seconds
+    store.reclaim_stale_work_units(
+        lease_seconds=lease_seconds,
+        worker_id=worker_id,
+    )
     for job in store.list_claimable_jobs():
         work_unit = run_next_stored_text_work_unit(
             store=store,

@@ -62,6 +62,9 @@ class TranslationJobStore(Protocol):
     ) -> PersistentWorkUnit | None:
         ...
 
+    def reclaim_stale_work_units(self, *, lease_seconds: int, worker_id: str) -> int:
+        ...
+
     def complete_work_unit(
         self,
         work_unit_id: str,
@@ -71,6 +74,7 @@ class TranslationJobStore(Protocol):
         completion_tokens: int,
         cache_hit_tokens: int,
         cache_miss_tokens: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         ...
 
@@ -80,6 +84,7 @@ class TranslationJobStore(Protocol):
         *,
         error_message: str,
         retry_count: int,
+        worker_id: str | None = None,
     ) -> PersistentWorkUnit:
         ...
 

@@ -936,7 +936,7 @@ git commit -m "feat: queue telegram translations for workers"
 - Test: `tests/test_persistent_jobs.py`
 - Test: `tests/test_postgres_jobs.py`
 
-- [ ] **Step 1: Write crash recovery test**
+- [x] **Step 1: Write crash recovery test**
 
 Add this SQLite test:
 
@@ -971,7 +971,7 @@ def test_reclaims_expired_translating_unit_after_worker_crash(self):
     self.assertEqual(second.worker_id, "worker-b")
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -981,7 +981,7 @@ PYTHONPATH=src python3 -m unittest tests.test_persistent_jobs.PersistentJobStore
 
 Expected: failure because `reclaim_stale_work_units` does not exist.
 
-- [ ] **Step 3: Implement stale lease reclaim**
+- [x] **Step 3: Implement stale lease reclaim**
 
 Add to the protocol:
 
@@ -999,7 +999,7 @@ Implement in SQLite and PostgreSQL:
 - update parent job to `queued`;
 - return the number of reclaimed units.
 
-- [ ] **Step 4: Call reclaim from worker loop**
+- [x] **Step 4: Call reclaim from worker loop**
 
 At the start of each `run_worker_tick`, call:
 
@@ -1012,7 +1012,7 @@ store.reclaim_stale_work_units(
 
 When `run_worker_tick` is used in tests, pass `lease_seconds` as an explicit parameter with default `900`.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run:
 
