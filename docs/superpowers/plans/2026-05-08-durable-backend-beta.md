@@ -1128,7 +1128,7 @@ git commit -m "feat: resume persistent translations from telegram"
 - Modify: `src/translator_service/api.py`
 - Test: `tests/test_api.py`
 
-- [ ] **Step 1: Write readiness tests**
+- [x] **Step 1: Write readiness tests**
 
 Create or extend `tests/test_api.py`:
 
@@ -1162,7 +1162,7 @@ class ApiHealthTests(unittest.TestCase):
         self.assertEqual(payload["job_store"], "ok")
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -1172,7 +1172,7 @@ PYTHONPATH=src python3 -m unittest tests.test_api
 
 Expected: failure because `readiness_payload` does not exist.
 
-- [ ] **Step 3: Implement readiness**
+- [x] **Step 3: Implement readiness**
 
 In `src/translator_service/api.py`, add:
 
@@ -1204,7 +1204,7 @@ def ready() -> dict[str, str]:
     return readiness_payload()
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
