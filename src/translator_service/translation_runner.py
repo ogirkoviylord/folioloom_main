@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath, PurePosixPath
 import html
+import logging
 import re
 import time
 from typing import Callable
@@ -12,22 +13,25 @@ from zipfile import BadZipFile, ZipFile
 
 from translator_service.extractors import (
     TextExtractionError,
-    extract_text_from_txt,
+    parse_xml_document,
     validate_archive_members,
+    validate_epub_text_block_count,
 )
 from translator_service.language_detection import detect_languages_from_text
+from translator_service.output_contracts import validate_translation_batch_contract
 from translator_service.protected_text import (
     ProtectedText,
     protect_text,
     restore_protected_text,
 )
+from translator_service.security_telemetry import record_security_event
+from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.structure_optimizer import (
     PromptTier,
     StructuredTextBlock,
     TextBlockKind,
     build_translation_units,
 )
-from translator_service.text_analysis import split_text_into_fragments
 from translator_service.translation_cache import TranslationCache
 from translator_service.translation_jobs import (
     CancellationToken,
@@ -38,6 +42,15 @@ from translator_service.translation_jobs import (
     TranslationJobResult,
     translate_text_fragments,
 )
+from translator_service.translation_context import (
+    TranslationContextMemory,
+    translate_with_context,
+    update_translation_context_memory,
+)
+from translator_service.translation_postprocess import clean_inline_formatting_artifacts
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -60,8 +73,17 @@ def translate_txt_document(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
 ) -> TranslatedDocument:
-    text = extract_text_from_txt(content)
-    fragments = split_text_into_fragments(text, max_fragment_chars=max_fragment_chars)
+    from translator_service.format_adapters.txt_layout import (
+        assemble_txt_document,
+        parse_txt_document,
+        plan_txt_segments,
+    )
+
+    document = parse_txt_document(content)
+    units = plan_txt_segments(document, max_fragment_chars=max_fragment_chars)
+    if not units:
+        raise TextExtractionError("TXT file does not contain translatable text")
+    fragments = [unit.source_text for unit in units]
     try:
         translation = translate_text_fragments(
             fragments=fragments,
@@ -76,13 +98,39 @@ def translate_txt_document(
         translation = error.partial_result
         is_partial = True
 
+    translated_by_segment_id = _translated_txt_segments_by_id(
+        units=units,
+        translated_fragments=translation.fragments,
+    )
+    assembled_text = assemble_txt_document(
+        document,
+        translated_by_segment_id=translated_by_segment_id,
+        translated_only=is_partial,
+    )
     return TranslatedDocument(
         file_name=_translated_txt_file_name(file_name, target_language, is_partial),
         content_type="text/plain; charset=utf-8",
-        content=translation.assembled_text.encode("utf-8"),
-        fragment_count=len(translation.fragments),
+        content=assembled_text.encode("utf-8"),
+        fragment_count=len(translation.fragments) if is_partial else len(units),
         is_partial=is_partial,
     )
+
+
+def _translated_txt_segments_by_id(
+    *,
+    units,
+    translated_fragments: list[FragmentTranslation],
+) -> dict[str, str]:
+    translated_by_segment_id: dict[str, str] = {}
+    units_by_index = {index: unit for index, unit in enumerate(units)}
+    for fragment in translated_fragments:
+        unit = units_by_index.get(fragment.index)
+        if unit is None:
+            continue
+        if len(unit.source_block_ids) != 1:
+            continue
+        translated_by_segment_id[unit.source_block_ids[0]] = fragment.translated_text
+    return translated_by_segment_id
 
 
 def translate_docx_document(
@@ -148,8 +196,14 @@ def translate_epub_document(
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
 ) -> TranslatedDocument:
-    blocks = _extract_epub_blocks(content)
-    translation_units = _group_epub_blocks(
+    from translator_service.format_adapters.epub import (
+        extract_epub_translation_blocks,
+        group_epub_translation_blocks,
+        replace_epub_body_blocks,
+    )
+
+    blocks = extract_epub_translation_blocks(content)
+    translation_units = group_epub_translation_blocks(
         blocks,
         max_fragment_chars=max_fragment_chars,
     )
@@ -167,7 +221,7 @@ def translate_epub_document(
     except TranslationCancelled as error:
         translation = error.partial_result
         is_partial = True
-    translated_content = _replace_epub_blocks(
+    translated_content = replace_epub_body_blocks(
         content,
         blocks,
         translation.fragments,
@@ -265,7 +319,11 @@ def _extract_docx_part_blocks(
     }
     paragraphs: list[_DocxParagraphBlock] = []
     for paragraph in document.findall(".//w:p", namespace):
-        paragraph_text = _docx_paragraph_text(paragraph, namespace=namespace).strip()
+        paragraph_text = _docx_paragraph_text(
+            paragraph,
+            namespace=namespace,
+            include_preserved_text=False,
+        ).strip()
         if paragraph_text:
             is_fixed_width_pseudo_table = _is_fixed_width_pseudo_table_paragraph(
                 paragraph=paragraph,
@@ -336,11 +394,22 @@ def _docx_paragraph_text(
     paragraph: ElementTree.Element,
     *,
     namespace: dict[str, str],
+    include_preserved_text: bool = True,
 ) -> str:
+    preserved_text_node_ids = (
+        set()
+        if include_preserved_text
+        else _docx_non_translatable_text_node_ids(
+            paragraph=paragraph,
+            namespace=namespace,
+        )
+    )
     pieces: list[str] = []
     for element in paragraph.iter():
         local_name = _local_name(element.tag)
         if local_name == "t":
+            if id(element) in preserved_text_node_ids:
+                continue
             pieces.append(element.text or "")
             continue
         if local_name == "tab":
@@ -357,14 +426,6 @@ def _docx_paragraph_protected_phrases(
     namespace: dict[str, str],
 ) -> tuple[str, ...]:
     phrases: list[str] = []
-    for hyperlink in paragraph.findall(".//w:hyperlink", namespace):
-        phrase = "".join(
-            text_node.text or ""
-            for text_node in hyperlink.findall(".//w:t", namespace)
-        ).strip()
-        if phrase:
-            phrases.append(phrase)
-
     return tuple(dict.fromkeys(phrases))
 
 
@@ -431,7 +492,11 @@ def _replace_docx_xml_blocks(content: bytes, replacements: dict[int, str]) -> by
         if not text_nodes:
             continue
 
-        original_text = "".join(text_node.text or "" for text_node in text_nodes).strip()
+        original_text = _docx_paragraph_text(
+            paragraph,
+            namespace=namespace,
+            include_preserved_text=False,
+        ).strip()
         if not original_text:
             continue
 
@@ -583,12 +648,43 @@ def _replace_docx_text_nodes_with_static_ranges(
         for index, text_node in enumerate(text_nodes)
         if index not in preserved_indexes
     ]
+    translated_text = _preserve_static_range_boundary_spacing(
+        text_nodes=text_nodes,
+        preserved_ranges=preserved_ranges,
+        translated_text=translated_text,
+    )
     _replace_text_node_sequence(
         [(text_node, "text") for text_node in translatable_nodes],
         translated_text,
     )
     for index in preserved_indexes:
         text_nodes[index].text = text_nodes[index].text or ""
+
+
+def _preserve_static_range_boundary_spacing(
+    *,
+    text_nodes: list[ElementTree.Element],
+    preserved_ranges: list[tuple[int, int]],
+    translated_text: str,
+) -> str:
+    if not translated_text or not preserved_ranges:
+        return translated_text
+
+    first_preserved_start = preserved_ranges[0][0]
+    if first_preserved_start <= 0:
+        return translated_text
+
+    source_before_preserved = "".join(
+        text_node.text or "" for text_node in text_nodes[:first_preserved_start]
+    )
+    if (
+        source_before_preserved
+        and source_before_preserved[-1].isspace()
+        and not translated_text[-1].isspace()
+    ):
+        return f"{translated_text}{source_before_preserved[-1]}"
+
+    return translated_text
 
 
 def _docx_preserved_text_node_ranges(
@@ -598,23 +694,104 @@ def _docx_preserved_text_node_ranges(
     namespace: dict[str, str],
 ) -> list[tuple[int, int]]:
     index_by_node_id = {id(text_node): index for index, text_node in enumerate(text_nodes)}
-    preserved_indexes: set[int] = set()
+    preserved_text_node_ids = _docx_preserved_text_node_ids(
+        paragraph=paragraph,
+        namespace=namespace,
+    )
+    preserved_indexes = {
+        index
+        for text_node_id, index in index_by_node_id.items()
+        if text_node_id in preserved_text_node_ids
+    }
+
+    return _contiguous_ranges(sorted(preserved_indexes))
+
+
+def _docx_preserved_text_node_ids(
+    *,
+    paragraph: ElementTree.Element,
+    namespace: dict[str, str],
+) -> set[int]:
+    preserved_node_ids: set[int] = set()
 
     for hyperlink in paragraph.findall(".//w:hyperlink", namespace):
         for text_node in hyperlink.findall(".//w:t", namespace):
-            index = index_by_node_id.get(id(text_node))
-            if index is not None:
-                preserved_indexes.add(index)
+            preserved_node_ids.add(id(text_node))
 
     for run in paragraph.findall(".//w:r", namespace):
-        if run.find("w:rPr/w:vertAlign", namespace) is None:
+        if not _is_preserved_docx_run(run, namespace=namespace):
             continue
         for text_node in run.findall(".//w:t", namespace):
-            index = index_by_node_id.get(id(text_node))
-            if index is not None:
-                preserved_indexes.add(index)
+            preserved_node_ids.add(id(text_node))
 
-    return _contiguous_ranges(sorted(preserved_indexes))
+    return preserved_node_ids
+
+
+def _docx_non_translatable_text_node_ids(
+    *,
+    paragraph: ElementTree.Element,
+    namespace: dict[str, str],
+) -> set[int]:
+    preserved_node_ids: set[int] = set()
+
+    for hyperlink in paragraph.findall(".//w:hyperlink", namespace):
+        for text_node in hyperlink.findall(".//w:t", namespace):
+            preserved_node_ids.add(id(text_node))
+
+    for run in paragraph.findall(".//w:r", namespace):
+        if not _is_non_translatable_docx_run(run, namespace=namespace):
+            continue
+        for text_node in run.findall(".//w:t", namespace):
+            preserved_node_ids.add(id(text_node))
+
+    return preserved_node_ids
+
+
+def _is_preserved_docx_run(
+    run: ElementTree.Element,
+    *,
+    namespace: dict[str, str],
+) -> bool:
+    run_properties = run.find("w:rPr", namespace)
+    if run_properties is None:
+        return False
+    if run_properties.find("w:vertAlign", namespace) is not None:
+        return True
+    return _is_non_translatable_docx_run(run, namespace=namespace)
+
+
+def _is_non_translatable_docx_run(
+    run: ElementTree.Element,
+    *,
+    namespace: dict[str, str],
+) -> bool:
+    run_properties = run.find("w:rPr", namespace)
+    if run_properties is None:
+        return False
+    if run_properties.find("w:vanish", namespace) is not None:
+        return True
+
+    run_style = run_properties.find("w:rStyle", namespace)
+    if run_style is not None:
+        style_value = (
+            run_style.get(f"{{{namespace['w']}}}val")
+            or run_style.get("val")
+            or ""
+        )
+        if "donottranslate" in style_value.lower():
+            return True
+
+    color = run_properties.find("w:color", namespace)
+    if color is not None:
+        color_value = (
+            color.get(f"{{{namespace['w']}}}val")
+            or color.get("val")
+            or ""
+        ).strip().lower()
+        if color_value in {"fff", "ffffff", "white"}:
+            return True
+
+    return False
 
 
 def _contiguous_ranges(indexes: list[int]) -> list[tuple[int, int]]:
@@ -686,10 +863,10 @@ def _set_vml_style_dimension(style: str, name: str, value: float) -> str:
 
 
 def _read_docx_xml(content: bytes) -> ElementTree.Element:
-    try:
-        return ElementTree.fromstring(content)
-    except ElementTree.ParseError as error:
-        raise TextExtractionError("DOCX document XML is not readable") from error
+    return parse_xml_document(
+        content,
+        parse_error_message="DOCX document XML is not readable",
+    )
 
 
 def _docx_text_part_names(docx: ZipFile) -> list[str]:
@@ -871,6 +1048,7 @@ def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
                             ),
                         )
                     )
+                    validate_epub_text_block_count(len(blocks))
     except (BadZipFile, KeyError) as error:
         raise TextExtractionError(
             "EPUB file does not contain readable book text"
@@ -1160,6 +1338,7 @@ def _translate_epub_auxiliary_content(
             elif _is_epub_text_item(item.filename):
                 data = _translate_epub_xhtml_auxiliary_text(
                     data,
+                    file_name=item.filename,
                     source_language=source_language,
                     target_language=target_language,
                     translator=translator,
@@ -1176,7 +1355,10 @@ def _translate_epub_opf_metadata(
     target_language: str,
     translator: TextTranslator,
 ) -> bytes:
-    document = ElementTree.fromstring(content)
+    document = parse_xml_document(
+        content,
+        parse_error_message="EPUB package XML is not readable",
+    )
     translatable_elements = [
         element
         for element in document.iter()
@@ -1210,7 +1392,10 @@ def _translate_epub_ncx_text(
     target_language: str,
     translator: TextTranslator,
 ) -> bytes:
-    document = ElementTree.fromstring(content)
+    document = parse_xml_document(
+        content,
+        parse_error_message="EPUB NCX XML is not readable",
+    )
     translatable_elements = [
         element
         for element in document.iter()
@@ -1234,18 +1419,27 @@ def _translate_epub_ncx_text(
 def _translate_epub_xhtml_auxiliary_text(
     content: bytes,
     *,
+    file_name: str,
     source_language: str,
     target_language: str,
     translator: TextTranslator,
 ) -> bytes:
     document = _read_epub_xhtml(content)
     parent_by_child_id = _parent_map(document)
+    is_navigation_document = _is_epub_navigation_document(
+        file_name=file_name,
+        document=document,
+        texts=_epub_text_element_texts(document),
+    )
     elements: list[ElementTree.Element] = []
     seen_element_ids: set[int] = set()
     for element in document.iter():
         if _local_name(element.tag) == "title" or (
             _is_epub_text_element(element)
-            and _is_inside_epub_navigation(element, parent_by_child_id)
+            and (
+                is_navigation_document
+                or _is_inside_epub_navigation(element, parent_by_child_id)
+            )
         ):
             text = _visible_text(element)
             if text and id(element) not in seen_element_ids:
@@ -1277,7 +1471,8 @@ def _translate_epub_auxiliary_strings(
         return []
 
     protected_texts = [protect_text(text) for text in texts]
-    translated_text = translator.translate(
+    translated_text = translate_with_context(
+        translator,
         text=_format_translation_batch(
             [protected_text.text for protected_text in protected_texts],
             source_language_hints=_source_language_hints(
@@ -1287,8 +1482,13 @@ def _translate_epub_auxiliary_strings(
         ),
         source_language=source_language,
         target_language=target_language,
+        translation_context=TranslationContextMemory(),
     )
-    parsed = _parse_translation_batch(translated_text, expected_count=len(texts))
+    parsed = _parse_translation_batch(
+        translated_text,
+        expected_count=len(texts),
+        required_markers=_required_protected_markers(protected_texts),
+    )
     if parsed is None:
         return _translate_texts_individually(
             texts=texts,
@@ -1375,6 +1575,7 @@ def _translate_docx_units(
 ) -> TranslationJobResult:
     translated_blocks: list[FragmentTranslation] = []
     total_units = len(units)
+    context_memory = TranslationContextMemory()
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
@@ -1402,6 +1603,7 @@ def _translate_docx_units(
                     subgroup_blocks[0].text,
                     translator=translator,
                     target_language=target_language,
+                    translation_context=context_memory,
                 )
                 usage = _translator_usage(translator)
                 unit_prompt_tokens += usage[0]
@@ -1417,6 +1619,12 @@ def _translate_docx_units(
                         source_text=subgroup_blocks[0].text,
                         translated_text=translated_text,
                     )
+                )
+                context_memory = _updated_context_memory(
+                    context_memory,
+                    source_text=subgroup_blocks[0].text,
+                    translated_text=translated_text,
+                    target_language=target_language,
                 )
                 continue
 
@@ -1466,13 +1674,15 @@ def _translate_docx_units(
                 [prepared.text for prepared in prepared_blocks],
                 source_language=subgroup_source_language,
             )
-            translated_text = translator.translate(
+            translated_text = translate_with_context(
+                translator,
                 text=_format_translation_batch(
                     [protected_block.text for protected_block in protected_blocks],
                     source_language_hints=source_language_hints,
                 ),
                 source_language=subgroup_source_language,
                 target_language=target_language,
+                translation_context=context_memory,
             )
             usage = _translator_usage(translator)
             unit_prompt_tokens += usage[0]
@@ -1483,6 +1693,7 @@ def _translate_docx_units(
             parsed = _parse_translation_batch(
                 translated_text,
                 expected_count=len(subgroup_blocks),
+                required_markers=_required_protected_markers(protected_blocks),
             )
             if parsed is None:
                 parsed = _translate_texts_individually(
@@ -1490,6 +1701,7 @@ def _translate_docx_units(
                     translator=translator,
                     source_language=subgroup_source_language,
                     target_language=target_language,
+                    translation_context=context_memory,
                 )
             else:
                 parsed = _restore_protected_texts(parsed, protected_blocks)
@@ -1513,6 +1725,20 @@ def _translate_docx_units(
                     strict=True,
                 )
             ]
+            cjk_retry = _retry_untranslated_cjk_docx_blocks(
+                translated_texts=parsed,
+                prepared_blocks=prepared_blocks,
+                protected_blocks=protected_blocks,
+                translator=translator,
+                target_language=target_language,
+                translation_context=context_memory,
+            )
+            parsed = cjk_retry.translated_texts
+            unit_prompt_tokens += cjk_retry.prompt_tokens
+            unit_completion_tokens += cjk_retry.completion_tokens
+            unit_total_tokens += cjk_retry.total_tokens
+            unit_cache_hit_tokens += cjk_retry.prompt_cache_hit_tokens
+            unit_cache_miss_tokens += cjk_retry.prompt_cache_miss_tokens
 
             translated_blocks.extend(
                 FragmentTranslation(
@@ -1537,6 +1763,17 @@ def _translate_docx_units(
             if subgroup_blocks and parsed:
                 last_source_text = subgroup_blocks[-1].text
                 last_translated_text = parsed[-1]
+            for source_block, translated in zip(
+                subgroup_blocks,
+                parsed,
+                strict=True,
+            ):
+                context_memory = _updated_context_memory(
+                    context_memory,
+                    source_text=source_block.text,
+                    translated_text=translated,
+                    target_language=target_language,
+                )
         if progress_callback is not None:
             progress_callback(
                 TranslationProgress(
@@ -1610,6 +1847,7 @@ def _translate_multi_label_docx_block(
     *,
     translator: TextTranslator,
     target_language: str,
+    translation_context: TranslationContextMemory | None = None,
 ) -> str:
     translated_segments: list[str] = []
     for source_language_code, segment_text in _split_labeled_language_segments(text):
@@ -1619,12 +1857,18 @@ def _translate_multi_label_docx_block(
             target_language=target_language,
         )
         protected = protect_text(prepared.text)
-        translated_text = translator.translate(
+        translated_text = translate_with_context(
+            translator,
             text=_format_translation_batch([protected.text]),
             source_language=source_language_code,
             target_language=target_language,
+            translation_context=translation_context,
         )
-        parsed = _parse_translation_batch(translated_text, expected_count=1)
+        parsed = _parse_translation_batch(
+            translated_text,
+            expected_count=1,
+            required_markers=_required_protected_markers([protected]),
+        )
         translated_segment = (
             restore_protected_text(parsed[0], protected.replacements)
             if parsed is not None
@@ -1704,6 +1948,16 @@ class _PreparedDocxBlock:
     fixed_width_source_text: str | None = None
 
 
+@dataclass(frozen=True)
+class _DocxCjkRetryResult:
+    translated_texts: list[str]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+
+
 def _prepare_docx_block_for_translation(
     text: str,
     *,
@@ -1745,6 +1999,10 @@ def _restore_prepared_docx_label(
     prepared_block: _PreparedDocxBlock,
     target_language: str,
 ) -> str:
+    translated_text = clean_inline_formatting_artifacts(
+        translated_text,
+        target_language=target_language,
+    )
     if prepared_block.source_language_code is None:
         return translated_text
 
@@ -1761,6 +2019,150 @@ def _strip_leading_language_label(text: str) -> str:
     if label_match is None:
         return text.strip()
     return text[label_match.end() :].strip()
+
+
+def _retry_untranslated_cjk_docx_blocks(
+    *,
+    translated_texts: list[str],
+    prepared_blocks: list[_PreparedDocxBlock],
+    protected_blocks: list[ProtectedText],
+    translator: TextTranslator,
+    target_language: str,
+    translation_context: TranslationContextMemory | None = None,
+) -> _DocxCjkRetryResult:
+    if _target_language_uses_cjk(target_language):
+        return _DocxCjkRetryResult(translated_texts=translated_texts)
+
+    retry_texts = list(translated_texts)
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    prompt_cache_hit_tokens = 0
+    prompt_cache_miss_tokens = 0
+
+    for index, (translated, prepared, protected) in enumerate(
+        zip(retry_texts, prepared_blocks, protected_blocks, strict=True)
+    ):
+        if not _needs_secondary_script_retry(
+            source_text=protected.text,
+            translated_text=translated,
+            protected_replacements=protected.replacements,
+            target_language=target_language,
+        ):
+            continue
+
+        retried = restore_protected_text(
+            _clean_translated_text(
+                translate_with_context(
+                    translator,
+                    text=protected.text,
+                    source_language="auto",
+                    target_language=target_language,
+                    translation_context=translation_context,
+                )
+            ),
+            protected.replacements,
+        )
+        retried = _restore_prepared_docx_label(
+            translated_text=_restore_fixed_width_pseudo_table_text(
+                source_text=prepared.fixed_width_source_text,
+                translated_text=_known_orthographic_sample_translation(
+                    prepared.text,
+                    source_language="auto",
+                    target_language=target_language,
+                )
+                or retried,
+            ),
+            prepared_block=prepared,
+            target_language=target_language,
+        )
+        retry_texts[index] = retried
+        usage = _translator_usage(translator)
+        prompt_tokens += usage[0]
+        completion_tokens += usage[1]
+        total_tokens += usage[2]
+        prompt_cache_hit_tokens += usage[3]
+        prompt_cache_miss_tokens += usage[4]
+
+    return _DocxCjkRetryResult(
+        translated_texts=retry_texts,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=prompt_cache_miss_tokens,
+    )
+
+
+_LONG_CJK_TEXT_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]{4,}")
+_LONG_RTL_TEXT_RE = re.compile(r"[\u0590-\u05FF\u0600-\u06FF]{3,}")
+
+
+def _needs_secondary_script_retry(
+    *,
+    source_text: str,
+    translated_text: str,
+    protected_replacements: dict[str, str],
+    target_language: str,
+) -> bool:
+    if (
+        not _target_language_uses_cjk(target_language)
+        and _has_untranslated_cjk_text(
+            source_text=source_text,
+            translated_text=translated_text,
+            protected_replacements=protected_replacements,
+        )
+    ):
+        return True
+
+    return (
+        not _target_language_uses_rtl(target_language)
+        and _has_untranslated_rtl_text(
+            source_text=source_text,
+            translated_text=translated_text,
+            protected_replacements=protected_replacements,
+        )
+    )
+
+
+def _has_untranslated_cjk_text(
+    *,
+    source_text: str,
+    translated_text: str,
+    protected_replacements: dict[str, str],
+) -> bool:
+    masked_translated_text = translated_text
+    for original in protected_replacements.values():
+        masked_translated_text = masked_translated_text.replace(original, "")
+
+    return any(
+        match.group(0) in masked_translated_text
+        for match in _LONG_CJK_TEXT_RE.finditer(source_text)
+    )
+
+
+def _has_untranslated_rtl_text(
+    *,
+    source_text: str,
+    translated_text: str,
+    protected_replacements: dict[str, str],
+) -> bool:
+    masked_translated_text = translated_text
+    for original in protected_replacements.values():
+        masked_translated_text = masked_translated_text.replace(original, "")
+
+    return any(
+        match.group(0) in masked_translated_text
+        for match in _LONG_RTL_TEXT_RE.finditer(source_text)
+    )
+
+
+def _target_language_uses_cjk(target_language: str) -> bool:
+    return target_language.strip().lower() in {"zh", "zh-cn", "zh-tw", "ja", "ko"}
+
+
+def _target_language_uses_rtl(target_language: str) -> bool:
+    return target_language.strip().lower() in {"he", "ar"}
 
 
 def _docx_translation_subgroups(
@@ -1926,6 +2328,7 @@ def _translate_epub_units(
 ):
     translated_blocks = []
     total_units = len(units)
+    context_memory = TranslationContextMemory()
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
@@ -1944,7 +2347,10 @@ def _translate_epub_units(
                 FragmentTranslation(
                     index=source_block.index,
                     source_text=source_block.text,
-                    translated_text=translated,
+                    translated_text=clean_inline_formatting_artifacts(
+                        translated,
+                        target_language=target_language,
+                    ),
                 )
                 for source_block, translated in zip(
                     unit.blocks,
@@ -1971,13 +2377,15 @@ def _translate_epub_units(
             [block.text for block in unit.blocks],
             source_language=source_language,
         )
-        translated_text = translator.translate(
+        translated_text = translate_with_context(
+            translator,
             text=_format_translation_batch(
                 [protected_block.text for protected_block in protected_blocks],
                 source_language_hints=source_language_hints,
             ),
             source_language=source_language,
             target_language=target_language,
+            translation_context=context_memory,
         )
         usage = _translator_usage(translator)
         translated_unit_blocks = _parse_epub_translation_unit(
@@ -1987,8 +2395,16 @@ def _translate_epub_units(
             translator=translator,
             source_language=source_language,
             target_language=target_language,
+            translation_context=context_memory,
         )
         translated_blocks.extend(translated_unit_blocks)
+        for translated_block in translated_unit_blocks:
+            context_memory = _updated_context_memory(
+                context_memory,
+                source_text=translated_block.source_text,
+                translated_text=translated_block.translated_text,
+                target_language=target_language,
+            )
         _translation_cache_put(
             translation_cache,
             source_texts=tuple(block.text for block in unit.blocks),
@@ -2044,18 +2460,21 @@ def _translate_marked_text_units(
             [text for _, text in unit.indexed_texts],
             source_language=source_language,
         )
-        translated_text = translator.translate(
+        translated_text = translate_with_context(
+            translator,
             text=_format_translation_batch(
                 [protected_block.text for protected_block in protected_blocks],
                 source_language_hints=source_language_hints,
             ),
             source_language=source_language,
             target_language=target_language,
+            translation_context=context_memory,
         )
         usage = _translator_usage(translator)
         parsed = _parse_translation_batch(
             translated_text,
             expected_count=len(unit.indexed_texts),
+            required_markers=_required_protected_markers(protected_blocks),
         )
         if parsed is None:
             parsed = _translate_texts_individually(
@@ -2063,6 +2482,7 @@ def _translate_marked_text_units(
                 translator=translator,
                 source_language=source_language,
                 target_language=target_language,
+                translation_context=context_memory,
             )
         else:
             parsed = _restore_protected_texts(parsed, protected_blocks)
@@ -2079,6 +2499,17 @@ def _translate_marked_text_units(
                 strict=True,
             )
         )
+        for (_, source_text), translated in zip(
+            unit.indexed_texts,
+            parsed,
+            strict=True,
+        ):
+            context_memory = _updated_context_memory(
+                context_memory,
+                source_text=source_text,
+                translated_text=translated,
+                target_language=target_language,
+            )
         if progress_callback is not None:
             last_source_text = unit.indexed_texts[-1][1] if unit.indexed_texts else ""
             last_translated_text = parsed[-1] if parsed else ""
@@ -2120,6 +2551,25 @@ def _translator_usage(translator: TextTranslator) -> tuple[int, int, int, int, i
         int(getattr(usage, "total_tokens", 0) or 0),
         int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0),
         int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0),
+    )
+
+
+def _updated_context_memory(
+    memory: TranslationContextMemory,
+    *,
+    source_text: str,
+    translated_text: str,
+    target_language: str,
+) -> TranslationContextMemory:
+    decision = detect_russian_quality_track(
+        source_text,
+        target_language=target_language,
+    )
+    return update_translation_context_memory(
+        memory,
+        source_text=source_text,
+        translated_text=translated_text,
+        quality_track=decision.track,
     )
 
 
@@ -2213,10 +2663,12 @@ def _parse_epub_translation_unit(
     translator: TextTranslator,
     source_language: str,
     target_language: str,
+    translation_context: TranslationContextMemory | None = None,
 ) -> list[FragmentTranslation]:
     parsed = _parse_translation_batch(
         translated_text,
         expected_count=len(source_blocks),
+        required_markers=_required_protected_markers(protected_blocks),
     )
     if parsed is None:
         return _translate_epub_blocks_individually(
@@ -2224,6 +2676,7 @@ def _parse_epub_translation_unit(
             translator=translator,
             source_language=source_language,
             target_language=target_language,
+            translation_context=translation_context,
         )
 
     parsed = _restore_protected_texts(parsed, protected_blocks)
@@ -2231,7 +2684,10 @@ def _parse_epub_translation_unit(
         FragmentTranslation(
             index=source_block.index,
             source_text=source_block.text,
-            translated_text=translated,
+            translated_text=clean_inline_formatting_artifacts(
+                translated,
+                target_language=target_language,
+            ),
         )
         for source_block, translated in zip(source_blocks, parsed, strict=True)
     ]
@@ -2241,28 +2697,38 @@ def _parse_translation_batch(
     translated_text: str,
     *,
     expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+    log_rejections: bool = True,
 ) -> list[str] | None:
-    try:
-        document = ElementTree.fromstring(_extract_translation_batch(translated_text))
-        parsed = [
-            _clean_translated_text("".join(block.itertext()).strip())
-            for block in document
-            if _local_name(block.tag) == "translation_block"
-        ]
-    except ElementTree.ParseError:
+    validation = validate_translation_batch_contract(
+        translated_text,
+        expected_count=expected_count,
+        required_markers=required_markers,
+    )
+    parsed = validation.translated_texts
+    if parsed is None:
+        if validation.rejection_reason is not None:
+            if log_rejections:
+                logger.warning(
+                    "Translation batch rejected; reason=%s expected_count=%s",
+                    validation.rejection_reason.value,
+                    expected_count,
+                )
+                record_security_event(
+                    "translation_batch_rejected",
+                    reason=validation.rejection_reason.value,
+                    expected_count=expected_count,
+                    output_chars=len(translated_text),
+                )
         return None
 
-    if len(parsed) != expected_count:
-        return None
-    return parsed
+    return [_strip_model_service_wrappers(text) for text in parsed]
 
 
-def _extract_translation_batch(translated_text: str) -> str:
-    start = translated_text.find("<translation_batch")
-    end = translated_text.rfind("</translation_batch>")
-    if start == -1 or end == -1:
-        return translated_text
-    return translated_text[start : end + len("</translation_batch>")]
+def _required_protected_markers(
+    protected_texts: list[ProtectedText],
+) -> tuple[tuple[str, ...], ...]:
+    return tuple(tuple(protected_text.replacements) for protected_text in protected_texts)
 
 
 def _translate_epub_blocks_individually(
@@ -2271,23 +2737,38 @@ def _translate_epub_blocks_individually(
     translator: TextTranslator,
     source_language: str,
     target_language: str,
+    translation_context: TranslationContextMemory | None = None,
 ) -> list[FragmentTranslation]:
     translated_blocks: list[FragmentTranslation] = []
+    context_memory = translation_context or TranslationContextMemory()
     for source_block in source_blocks:
         protected_source = protect_text(source_block.text)
+        translated_text = restore_protected_text(
+            translate_with_context(
+                translator,
+                text=protected_source.text,
+                source_language=source_language,
+                target_language=target_language,
+                translation_context=context_memory,
+            ),
+            protected_source.replacements,
+        )
+        translated_text = clean_inline_formatting_artifacts(
+            translated_text,
+            target_language=target_language,
+        )
         translated_blocks.append(
             FragmentTranslation(
                 index=source_block.index,
                 source_text=source_block.text,
-                translated_text=restore_protected_text(
-                    translator.translate(
-                        text=protected_source.text,
-                        source_language=source_language,
-                        target_language=target_language,
-                    ),
-                    protected_source.replacements,
-                ),
+                translated_text=translated_text,
             )
+        )
+        context_memory = _updated_context_memory(
+            context_memory,
+            source_text=source_block.text,
+            translated_text=translated_text,
+            target_language=target_language,
         )
     return translated_blocks
 
@@ -2298,21 +2779,30 @@ def _translate_texts_individually(
     translator: TextTranslator,
     source_language: str,
     target_language: str,
+    translation_context: TranslationContextMemory | None = None,
 ) -> list[str]:
     translated_texts: list[str] = []
+    context_memory = translation_context or TranslationContextMemory()
     for text in texts:
         protected_source = protect_text(text)
-        translated_texts.append(
-            restore_protected_text(
-                _clean_translated_text(
-                    translator.translate(
-                        text=protected_source.text,
-                        source_language=source_language,
-                        target_language=target_language,
-                    )
-                ),
-                protected_source.replacements,
-            )
+        translated_text = restore_protected_text(
+            _clean_translated_text(
+                translate_with_context(
+                    translator,
+                    text=protected_source.text,
+                    source_language=source_language,
+                    target_language=target_language,
+                    translation_context=context_memory,
+                )
+            ),
+            protected_source.replacements,
+        )
+        translated_texts.append(translated_text)
+        context_memory = _updated_context_memory(
+            context_memory,
+            source_text=text,
+            translated_text=translated_text,
+            target_language=target_language,
         )
     return translated_texts
 
@@ -2332,7 +2822,11 @@ def _restore_protected_texts(
 
 
 def _clean_translated_text(translated_text: str) -> str:
-    parsed = _parse_translation_batch(translated_text, expected_count=1)
+    parsed = _parse_translation_batch(
+        translated_text,
+        expected_count=1,
+        log_rejections=False,
+    )
     if parsed is not None:
         return parsed[0]
     return _strip_model_service_wrappers(translated_text)
@@ -2497,10 +2991,10 @@ def _nearest_word_boundary(text: str, target: int, *, minimum: int) -> int:
 
 
 def _read_epub_xhtml(content: bytes) -> ElementTree.Element:
-    try:
-        return ElementTree.fromstring(content)
-    except ElementTree.ParseError as error:
-        raise TextExtractionError("EPUB XHTML content is not readable") from error
+    return parse_xml_document(
+        content,
+        parse_error_message="EPUB XHTML content is not readable",
+    )
 
 
 def _iter_epub_text_elements(document: ElementTree.Element):
@@ -2512,6 +3006,15 @@ def _iter_epub_text_elements(document: ElementTree.Element):
 def _visible_text(element: ElementTree.Element) -> str:
     pieces = list(_iter_visible_text(element))
     return " ".join("".join(pieces).split())
+
+
+def _epub_text_element_texts(document: ElementTree.Element) -> list[str]:
+    texts: list[str] = []
+    for element in _iter_epub_text_elements(document):
+        text = _visible_text(element)
+        if text:
+            texts.append(text)
+    return texts
 
 
 def _iter_visible_text(element: ElementTree.Element):
@@ -2543,15 +3046,26 @@ def _epub_text_item_names(epub: ZipFile) -> list[str]:
         return archive_names
 
     archive_name_set = set(archive_names)
-    ordered = [name for name in spine_names if name in archive_name_set]
-    ordered.extend(name for name in archive_names if name not in set(ordered))
+    ordered: list[str] = []
+    seen_names: set[str] = set()
+    for name in spine_names:
+        if name in archive_name_set and name not in seen_names:
+            ordered.append(name)
+            seen_names.add(name)
+    for name in archive_names:
+        if name not in seen_names:
+            ordered.append(name)
+            seen_names.add(name)
     return ordered
 
 
 def _epub_package_path(epub: ZipFile) -> str | None:
     try:
-        container = ElementTree.fromstring(epub.read("META-INF/container.xml"))
-    except (KeyError, ElementTree.ParseError):
+        container = parse_xml_document(
+            epub.read("META-INF/container.xml"),
+            parse_error_message="EPUB container XML is not readable",
+        )
+    except KeyError:
         return None
 
     rootfile = next(
@@ -2573,8 +3087,11 @@ def _epub_spine_text_item_names(epub: ZipFile) -> list[str]:
         return []
 
     try:
-        package = ElementTree.fromstring(epub.read(opf_path))
-    except (KeyError, ElementTree.ParseError):
+        package = parse_xml_document(
+            epub.read(opf_path),
+            parse_error_message="EPUB package XML is not readable",
+        )
+    except KeyError:
         return []
 
     manifest = {

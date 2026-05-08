@@ -6,40 +6,19 @@ Build FolioLoom, an independent Telegram service for paid book, chapter, and man
 
 ## Workspace Policy
 
-The current release workspace for the first always-on closed beta is:
-
-```text
-/Users/yuriimedvediev/Documents/New project 2
-```
-
-This workspace should stay on `main` and contains the promoted server-beta
-build that can be deployed and kept running.
-
-Ongoing product development continues in the dev worktree:
+All new development and experimental bot updates must be made in the dev workspace:
 
 ```text
 /Users/yuriimedvediev/Documents/New project 2 dev
 ```
 
-That worktree uses the `codex/dev` branch. New features, quality fixes, and
-experiments should be implemented there first, then promoted intentionally to
-`main` only after review and verification.
-
-Promotion to the release workspace is not required to use git merge. A reviewed
-state can be copied into the release folder when that is the chosen release
-process, but the copied result must still be tested and committed in `main`.
-
-Before any edit, an implementation session must verify the working directory
-and branch with `pwd`, `git branch --show-current`, and `git status --short`.
-
-Local environment files remain untracked:
+The release workspace is reserved for the stable bot and should receive only reviewed, tested changes that are ready to promote:
 
 ```text
-.env
-.env.dev
-.env.stable
-.env.beta
+/Users/yuriimedvediev/Documents/New project 2
 ```
+
+Any implementation session must verify its working directory before editing files. If the goal is not an explicit release promotion, edits belong in the dev workspace.
 
 ## Clean-Room Boundary
 
@@ -76,14 +55,14 @@ The MVP is split into small services that can run locally with Docker Compose:
 - Telegram bot process for user interaction.
 - FastAPI application for healthchecks and internal service endpoints.
 - PostgreSQL database for users, orders, payments, settings, and task state.
-- PostgreSQL-backed durable work-unit queue for the first closed beta.
+- Redis-backed queue for background work.
 - Worker process for document analysis, translation, and result assembly.
 - File storage abstraction with local storage in development and S3-compatible storage later.
 - DeepSeek client as the only LLM integration.
 
 The user never chooses an LLM provider. DeepSeek model and pricing settings are controlled by service configuration and admin tools.
 
-The production architecture must be hardened before the service accepts broad public traffic or expands into many channels. The Telegram bot must become a thin adapter over a durable backend: uploaded files are stored in object storage, orders and work units are stored in PostgreSQL, translation jobs run in workers through leased work-unit claims, and every user-visible status can be rebuilt from persisted state. DeepSeek remains the only provider, but the exact model, tariff, token limits, retry policy, prompt versions, and translation policies must be configuration/admin data rather than hardcoded assumptions.
+The production architecture must be hardened before the service accepts broad public traffic or expands into many channels. The Telegram bot must become a thin adapter over a durable backend: uploaded files are stored in object storage, orders and work units are stored in PostgreSQL, translation jobs run in workers through a queue, and every user-visible status can be rebuilt from persisted state. DeepSeek remains the only provider, but the exact model, tariff, token limits, retry policy, prompt versions, and translation policies must be configuration/admin data rather than hardcoded assumptions.
 
 ## Multi-Channel Architecture
 
@@ -113,10 +92,7 @@ WhatsApp support is a planned growth channel, not part of the current prototype.
 
 ## Current Prototype Scope
 
-The current project is a runnable Telegram prototype plus a promoted
-backend-beta foundation. It is not yet the full paid production service, but it
-already exercises the core document translation loop and now has the first
-durable backend pieces needed for closed beta testing.
+The current local prototype is a runnable Telegram bot with in-memory state. It is not yet the full paid production service, but it already exercises the core document translation loop end to end.
 
 Implemented prototype capabilities:
 
@@ -133,30 +109,28 @@ Implemented prototype capabilities:
 - During translation, the bot shows a progress bar, elapsed time, approximate remaining time, and a localized inline Cancel button. The `/cancel` command and localized cancel text remain supported as fallback controls.
 - During translation, the progress message includes a throttled activity spinner that updates about every five seconds so users can see that long-running fragments are still active.
 - The Settings screen lets the user hide or show the latest translated passage preview in the progress message. Interface language selection remains available from the main menu and `/language`.
+- The main menu includes a first `My Books` view that lists recent persistent translation jobs and shows per-book download buttons for stored final or partial results.
 - Cancellation stops after the current fragment, marks the job as cancelled, and returns a partial translated file with `.partial` in the name.
 - Translation errors are logged internally with traceback but shown to the user as generic localized failure messages.
 - End-user messages must not mention the internal LLM provider.
+- Russian and Ukrainian now have target-language profile support in the policy/prompt layer. The Ukrainian MVP includes a `ukrainian-v1` profile, regional language-code normalization such as `uk-UA`, and source-pair guidance for English, Russian, and mixed/auto sources into Ukrainian.
 - The DeepSeek client retries temporary network/read failures and temporary HTTP errors so one transient provider or connection issue does not fail a long document immediately.
+- The DeepSeek client wraps document fragments as untrusted content, rejects provider refusals/service messages before assembly, records security telemetry, and can make one repair attempt when model output violates the safety contract.
 - Runtime progress and developer logs include per-fragment timing and token usage, including provider cache hit/miss token counters when available.
 - Developer logs may show the latest translated fragment during local debugging, but production logs must redact user document text by default and expose fragment previews only through an explicit admin/debug mode.
 - DOCX and EPUB translation can reuse application-level translation memory for repeated API units through the bot service path, avoiding duplicate provider calls for identical source text, source language, target language, and prompt tier.
-- Worker mode can queue persistent TXT translations instead of translating inside the Telegram process.
-- Persistent jobs and work units can be stored in SQLite for local development or PostgreSQL for server beta.
-- Worker processes claim one available work unit at a time and use stale lease reclaim so work can continue after worker crash or restart.
-- The worker-path storage layer protects against stale workers overwriting a work unit after another worker has reclaimed it.
-- Users can resume owned persistent translation jobs and download freshly assembled partial results from completed work units.
-- The backend exposes `/health` and `/ready` endpoints. Readiness checks object storage and job-store access.
-- Docker Compose starts the server beta stack with `api`, `bot`, `worker`, and PostgreSQL, using durable volumes for PostgreSQL data and local object storage.
-- A server beta deployment runbook exists at `docs/deployment/server-beta.md`.
+- FastAPI now includes the first admin-console backend skeleton: owner-session auth, RBAC, settings store, encrypted secret store, integration and AI-provider key stores, operations summaries, translation-run log listing, security/audit support, and HTML views. This is an owner/dev console foundation, not yet a public production admin product.
+- A document sandbox wrapper can run extraction, planning, and assembly for TXT, DOCX, and EPUB through a subprocess worker with request/result size checks, resource limits, temporary workspaces, optional network denial, and security telemetry. It is a local application-level guardrail; production still requires OS/container isolation.
 
 Prototype storage and processing limits:
 
-- User settings and some Telegram session state are still in memory.
-- Inline local translation mode still exists for development and format-quality testing.
-- Durable server worker mode is currently complete for persistent TXT work units. DOCX and EPUB still need persistent planners and assemblers before they can safely use the same resumable worker path.
-- The prototype does not yet include real payment provider integration, persisted user settings, full order/payment ledger, file TTL cleanup, antivirus scanning, parser sandboxing, S3-compatible object storage, or production admin UI.
-- Originals, intermediate work-unit files, partial outputs, and final outputs can be stored in local object storage with metadata and checksums.
-- PostgreSQL is now available as the beta job store, but full users/orders/payments/settings data modeling remains future work.
+- User settings, pending uploads, jobs, and cancellation state are stored in memory.
+- Translation currently runs inside the bot process through a synchronous runner wrapped from the async Telegram handler.
+- The prototype does not yet include real payment provider integration, PostgreSQL persistence, Redis queue workers, object storage, admin tooling, file TTL cleanup, antivirus scanning, parser sandboxing, or production retries.
+- Originals, pending files, jobs, cancellation state, and result bytes are currently stored only in process memory and are lost after bot restart.
+- The current prototype can return partial results while the process is alive, but it cannot resume a stopped translation after bot restart because progress is not yet persisted.
+- The current `codex/dev` backend foundation now includes a local persistent job/work-unit store and local object-storage abstraction. Telegram uploads in dev can already be written to local object storage, and TXT confirmation can run through the persistent planner plus stored worker path.
+- The local backend foundation can store original, intermediate, partial, and final file objects with metadata and checksums; it can also associate jobs and work units with source/result object keys.
 - Local runtime storage is configured by `OBJECT_STORAGE_ROOT`; local SQLite job state is configured by `PERSISTENT_JOBS_DB_PATH`. The default local runtime directory is ignored by git because it contains generated user/runtime data.
 - Pricing, prompt text, adapter versions, and provider usage diagnostics are still prototype-level and must be moved into versioned configuration, persisted snapshots, and audit-friendly usage events before paid production launch.
 - TXT translation groups paragraphs up to the configured fragment size.
@@ -165,30 +139,37 @@ Prototype storage and processing limits:
 - DOCX mono-spaced pseudo-table rows are translated, then re-padded so column starts remain aligned when translated cells still fit the available width.
 - EPUB translation follows the EPUB spine reading order, extracts text blocks from common XHTML containers, groups them into marked API batches, parses the marked response, and inserts translations back into their original XHTML positions.
 - EPUB assembly preserves existing inline XHTML elements where possible, including tags such as `strong`, `em`, `a`, and `span`. Exact semantic mapping of translated words to original inline spans is best-effort because translation can change word order and text length.
+- EPUB note-reference anchors such as `<a href="...#n_18"><sup>[18]</sup></a>` are treated as atomic inline markup. Their visible markers are not sent to the LLM as ordinary prose and translated words must not be distributed into the note anchor or superscript node during assembly.
+- XHTML serialization must preserve the default XHTML namespace rather than introducing visible `html:` prefixes in translated content files.
 - Full DOCX styling fidelity and advanced OOXML features such as text boxes, tracked changes internals, floating shapes, complex field codes, embedded objects, exact pagination preservation, and complex run-level reconstruction are not yet production-complete.
 
 ## Current Project Stage
 
-The project is currently in the `closed beta backend preparation` stage.
+The project is currently in the `dev prototype hardening` stage.
 
 What this means:
 
-- The `main` workspace contains the current promoted server-beta project state.
-- Future development continues in the `codex/dev` worktree and is promoted to `main` deliberately.
+- The stable `main` workspace contains a runnable Telegram prototype that can be used for real manual quality checks.
+- The active development workspace is `New project 2 dev` on branch `codex/dev`.
 - The core prototype flow is implemented for TXT, DOCX, and EPUB: upload, source-language display, target-language choice, estimate, confirmation, translation, progress, cancellation, partial output, and result delivery.
-- The backend-beta foundation exists in `main`: SQLite/PostgreSQL persistent jobs and work units, local file object storage, queue-only Telegram confirmation for persistent TXT jobs, durable worker polling, stale lease reclaim, resume/download service methods, and FastAPI health/readiness checks.
-- Server beta deployment is documented and Docker Compose can render the `api`, `bot`, `worker`, and PostgreSQL stack.
+- The first production-backend groundwork exists in `codex/dev`: SQLite-backed persistent jobs/work units, local file object storage, a TXT persistent confirmation path, and worker helpers that can load source text from storage and save partial/final outputs back to storage.
+- Additional hardening foundations now exist in `codex/dev`: persistent planners for TXT, DOCX, and EPUB, document sandbox subprocess execution, security telemetry and summaries, prompt-injection/output-safety checks, a Russian deterministic QA module, an Ukrainian target-language profile MVP, and an owner-facing admin-console backend skeleton.
 - The main quality focus is no longer "can the bot translate a file at all"; it is now "can the bot preserve document structure and produce commercially acceptable output on difficult real documents."
-- The next architectural priority is finishing backend integration around real beta usage: persistent history UI, persistent DOCX/EPUB planners, payment/order records, operational admin tooling, file TTL policy, and server smoke testing.
-- Broad format/channel expansion should wait until durable backend, quality evals, and paid-order safety are stable.
+- The next architectural priority is wiring that backend foundation into the real translation flow: uploads, planning, progress, worker execution, resume, history, and result delivery must move away from in-memory Telegram state. Broad format/channel expansion should wait until this foundation exists.
 
 Current validation focus:
 
 - Run the stable bot from the `main` workspace for manual translation-quality checks.
-- Reproduce and fix quality issues in the `codex/dev` worktree with fixtures or user-supplied samples before promoting changes to `main`.
+- Reproduce quality issues in the `dev` workspace with fixtures or user-supplied samples.
 - Add failing tests for each confirmed issue before changing parser, protection, batching, or assembly behavior.
 - Use the generated Russian regression sample pack for manual and automated checks of Russian target-language decisions such as calques, technical terms, mixed-language segments, protected tokens, and named entities.
-- Promote experimental branches or copied release states to `main` only after tests pass and the manual behavior is better than the current stable version.
+- Use the Ukrainian methodology and profile specs for Ukrainian regression review, especially Russian-to-Ukrainian calques, standard Ukrainian orthography, morphology around protected terms, and mixed-source documents.
+- Promote `dev` to `main` only after tests pass and the manual behavior is better than the current stable version.
+
+Current validation snapshot as of May 8, 2026:
+
+- Focused EPUB, extractor, translation-runner, Ukrainian-profile, source-pair, policy, cache, and compile checks pass in the dev workspace.
+- Full `PYTHONPATH=src python3 -m unittest discover -s tests` currently runs 612 tests with 10 skipped and 2 known failing TXT partial-output assertions. The failures are in persistent TXT cancellation/partial assembly expectations and are not related to EPUB note handling or the Ukrainian profile. They must be resolved before promoting this dev branch to stable/main.
 
 Current stage exit criteria:
 
@@ -196,7 +177,7 @@ Current stage exit criteria:
 - EPUB books translate in reading order, produce useful partial results, and avoid fragment-count surprises between estimate and runtime.
 - Progress and cancellation remain reliable on large books.
 - Terminal logs make completed jobs easy to find and include useful time/token diagnostics.
-- Closed beta server startup is reproducible from the deployment runbook, and restart/resume behavior is validated with real jobs.
+- The dev/main workflow is stable enough that new features are tested in `codex/dev` and released intentionally to `main`.
 
 ## MVP Data Flow
 
@@ -208,7 +189,7 @@ Current stage exit criteria:
 6. The bot shows the detected original language or mixed-language list and asks for the target translation language.
 7. The bot shows price, fragment count, direction, and confirmation controls.
 8. User either goes back to the main menu or confirms the translation.
-9. In the production service, user confirmation charges balance and queues the order. In the current beta foundation, persistent TXT confirmation can queue work for a worker without translating inside the Telegram process; inline mode remains for local format testing.
+9. In the production service, user confirmation charges balance and queues the order. In the current prototype, confirmation starts translation immediately in process.
 10. Worker or prototype runner splits the document into ordered API fragments. For EPUB, ordering must come from the book spine, not ZIP archive order.
 11. Worker or prototype runner translates fragments through the internal LLM integration. For structured formats, text blocks are wrapped in project-specific marked batches so multiple small blocks can be translated in one request and then mapped back to the source document.
 12. The bot shows progress while fragments are translated.
@@ -218,7 +199,7 @@ Current stage exit criteria:
 
 ## Production Backend Data Model
 
-The production backend must make every paid translation auditable and resumable. PostgreSQL is the source of truth. For the first closed beta, the PostgreSQL work-unit table is also the durable queue through leased work-unit claims. A separate broker such as Redis may be added later for throughput or scheduling, but broker state must remain reconstructable from database rows.
+The production backend must make every paid translation auditable and resumable. PostgreSQL is the source of truth; Redis/queue state is only a delivery mechanism and must be reconstructable from database rows.
 
 Required domain records:
 
@@ -227,12 +208,14 @@ Required domain records:
 - orders: estimate snapshot, selected target language, detected source languages, translation policy, payment status, charge/refund ledger links, and user-facing order status;
 - translation jobs: job id, adapter version, prompt version, pricing snapshot, queue status, retry policy, cancellation/resume status, partial output key, and final output key;
 - work units: deterministic reading order, source block ids, source text hash, prompt tier, source/target language context, status, translated output, retry count, timing, token usage, and last error;
+- support tickets and messages: user id, optional linked order/job id, topic, status, channel, localized user messages, staff replies, delivery state, timestamps, and internal notes;
+- FAQ entries: stable entry id, locale, category, title, short Telegram answer, optional long-form/web answer, visibility flag, and updated timestamp;
 - prompt versions: prompt family, version id, allowed modes, output contract, marker protocol, and eval status;
 - pricing snapshots: DeepSeek model id, input cache-hit price, input cache-miss price, output price, service margin, estimate formula version, and effective date;
 - usage events: provider request id when available, token usage, cache hit/miss token counts, latency, retries, cache/memory hits, and cost diagnostics;
 - audit events: user-visible state changes, admin changes, payment events, cancellations, resumes, parser warnings, and security decisions.
 
-Current implementation mirrors the first subset of this model: persistent jobs, persistent work units, source object keys, partial/final output object keys, local file metadata, file checksums, worker status, timing, token usage, stale lease reclaim, cancellation/interruption state, resume, and partial download. SQLite remains a local fallback; PostgreSQL is the server-beta target. S3-compatible object storage remains future work.
+Current dev implementation mirrors the first subset of this model locally: persistent jobs, persistent work units, source object keys, partial/final output object keys, local file metadata, file checksums, worker status, timing, token usage, and cancellation/interruption state. This is a development bridge, not the final production storage layer; the production target remains PostgreSQL plus S3-compatible object storage.
 
 The bot must not use Telegram update state as the source of truth for paid work. If Telegram, a worker, or the machine restarts, the backend should still be able to show job status, continue work, rebuild partial output, or explain why the job cannot be resumed.
 
@@ -258,6 +241,26 @@ The service must treat file formats as separate adapters. Every adapter has its 
 - CSV and TSV: translate selected text columns only; preserve delimiter, quoting, encoding, and row count.
 - DjVu: OCR-first format; use only when the document has no reliable embedded text.
 - MOBI and AZW3: convert through ebook tooling into EPUB-like content, translate, and return EPUB or converted output when quality allows.
+
+### Future Batch Archive Translation
+
+The service should eventually support user-uploaded ZIP archives that contain multiple books or documents. This is a planned expansion after single-file translation, durable backend state, resume, and payment safety are stable.
+
+Initial archive MVP:
+
+- Accept `.zip` uploads only; reject nested archives in the first version.
+- Validate every archive before payment: total archive size, uncompressed size, file count, path traversal, duplicate paths, unsupported file types, and zip-bomb risk.
+- Translate only supported document files inside the archive; ignore or report unsupported non-document files according to a clear policy.
+- Preserve the original folder structure when assembling the translated archive.
+- Estimate total price, total work units, and approximate time for the whole archive before confirmation.
+- Show progress at two levels: completed documents over total documents, and current document work-unit progress.
+- Process documents sequentially for the first version to keep cost, provider rate limits, cancellation, and debugging predictable.
+- Return a translated ZIP result containing successful translated files plus a `translation_report.txt` or `translation_report.json` with per-file status.
+- If one file fails, the whole paid archive job must not be lost. Successful files should still be returned, failed files should be listed in the report, and the job should remain partial/resumable when backend state supports retry.
+- If the user cancels, the service should return a partial ZIP with already translated documents and a report explaining which files are translated, original, skipped, failed, or pending.
+- When durable backend infrastructure is complete, archive jobs must resume from the last completed document/work unit after bot restart, worker crash, provider failure, or user cancellation.
+
+Production archive support must run extraction in a sandboxed worker with strict CPU, memory, disk, file count, path, and wall-clock limits. Archive processing must never trust filenames alone and must never write extracted paths outside the job workspace.
 
 ## Third-Party Components for Format Support
 
@@ -360,6 +363,29 @@ The project is written from scratch, but may depend on independent third-party t
 - If a document requires OCR or conversion, that must be included in the estimate before payment.
 - If the service cannot preserve the original format reliably, it must offer a safe output format such as DOCX or TXT before charging.
 
+## User Settings Persistence
+
+The bot must remember each user's interface preferences across `/start`, bot restarts, and future channel sessions. `/start` is an entry point, not a factory reset.
+
+Persisted user settings should include:
+
+- interface language;
+- whether the latest translated passage preview is shown in progress messages;
+- future default target translation language, if the user explicitly sets one;
+- future advanced toggles such as translate hidden/invisible text, translate hyperlink display text, preserve or translate named entities, preserve or translate technical terms, and terminology mode.
+
+Behavior requirements:
+
+- A new user who has no saved interface language sees the language selection first.
+- A returning user who already selected an interface language goes directly to the main menu on `/start`.
+- Changing interface language applies immediately and is persisted.
+- Active progress messages, cancel buttons, completion messages, failure messages, and partial-result messages must use the user's current interface language at the moment they are sent or edited, not the language captured when the translation started.
+- Translation job settings such as source language, target language, glossary, and translation policy remain fixed per order. Interface language changes must not alter the translation direction or paid job policy.
+- The settings screen must provide a localized `Reset Settings` / `Сбросить настройки` action.
+- Resetting settings restores product defaults, clears optional user preferences, and returns the user to the first-run interface-language selection flow. It must not delete paid order history, uploaded files, balances, or translation results.
+
+Prototype storage may use local SQLite or another small settings repository keyed by Telegram user id. Production storage must use the shared backend user/settings table linked to internal user ids and channel identities.
+
 ## Progress, Cancellation, and Partial Results
 
 Long-running translations must keep the user informed and in control.
@@ -388,6 +414,9 @@ Long-running translations must keep the user informed and in control.
 - TXT partial output contains translated fragments only.
 - DOCX partial output replaces translated blocks and leaves untranslated blocks in the original language.
 - EPUB partial output follows spine reading order: if the user cancels after early fragments, the result contains the beginning of the readable book translated and the rest untouched.
+- If a completed provider response cannot be mapped back to all source blocks during assembly, the service must not fail the whole paid order. It must safely skip the malformed work unit, preserve that section in the original language, assemble a `.partial` result, log the malformed unit id, and keep enough persisted state to retry only that unit later.
+- If the provider returns a valid `translation_batch` wrapper for a stored multi-block work unit, assembly must parse the wrapper and map each block back to its source block ids, even if the model adds harmless attributes such as `source_language` or shifts visible XML ids. This prevents already-paid successful LLM output from being treated as failed just because the persisted worker path stores batched output.
+- Persistent workers must translate multi-block stored work units with the same marked batch contract used by format runners. Before writing a completed work unit to storage, the worker must validate the returned block count, restore protected markers per block, fall back to individual block translation when the provider returns malformed batch markup, and retry obvious untranslated secondary-language spans such as CJK sentence text or detected Dutch leftovers with source language set to `auto`.
 - Internal error details are logged for developers, but end users receive generic localized failure messages.
 
 ## Formatting Preservation Policy
@@ -397,6 +426,7 @@ Structured document adapters must preserve original layout and inline formatting
 - TXT has no styling and therefore returns plain translated text.
 - DOCX must preserve the original OOXML package, paragraphs, tables, headers, footers, notes, comments, media files, and existing text runs where possible. Basic run formatting such as bold, italic, underline, and links must survive translation if the source text used those runs.
 - DOCX must preserve run-level semantic formatting such as superscript, subscript, manual line breaks, tabs, non-breaking spaces, soft hyphens, repeated spacing, and hyperlink relationships. Chemical formulas, mathematical powers, indices, and similar notation must not be flattened into ordinary text.
+- DOCX and future rich-format adapters must detect hidden, invisible, or intentionally non-visible text such as `w:vanish` runs, white-on-white text, transparent text, hidden shapes, and similar constructs. By default, the service must preserve these runs exactly and must not make them visible or translate them accidentally. A user-facing pre-confirmation switch must eventually allow `translate hidden/invisible text` for users who intentionally need that content translated.
 - EPUB must preserve the EPUB package and XHTML element tree where possible. Inline tags such as `strong`, `em`, `a`, `span`, `sup`, and `sub` must survive translation.
 - Future rich formats such as RTF, FB2, HTML, ODT, and converted PDF outputs must use the same rule: translate text nodes/runs, not flatten the document into dry plain text.
 - If exact layout or style preservation is impossible for a format, the service must show a risk warning before payment or offer a safer output format such as DOCX or TXT.
@@ -416,6 +446,78 @@ The current dev stabilization work is focused on making complex DOCX and EPUB tr
 - Partial DOCX and EPUB results must represent user-visible reading order. Cancelling after early progress should produce the beginning of the document/book translated, not arbitrary metadata or archive-order text.
 - The current dev prototype has local object storage for originals and generated files, but it still lacks production file lifecycle controls. Production must add durable object storage, TTL cleanup, upload quarantine, file validation, antivirus scanning, size limits, and parser sandboxing before accepting arbitrary public traffic.
 - The current format pipeline should be split into clearer modules as it hardens: format adapters (`txt`, `docx`, `epub`), common extraction/estimation contracts, structure optimizer/chunker, protected-text engine, LLM client, translation orchestrator, progress reporter, and output assembler. Large all-in-one translation files should not become the long-term architecture.
+
+## Automatic Translation Run Logs
+
+During the current quality-development stage, every translation started through the bot or local translation runner must create a local run log automatically. The user should not need to ask for logs after a bad translation; the act of translating a document must leave enough evidence for the team and Codex to inspect what happened.
+
+The first implementation should be file-based rather than a database feature. A full production database remains a later backend goal, but quality work needs a simple artifact that can be opened, attached to issues, compared between runs, and read by both humans and tools.
+
+Recommended local layout:
+
+```text
+var/translation-runs/
+  2026-05-07T12-40-31Z_job-12_book-ru/
+    summary.md
+    run.json
+    events.jsonl
+    fragments/
+      0001.json
+      0002.json
+```
+
+`summary.md` is the human-readable report. It should show:
+
+- job id or prototype job id;
+- order id when available;
+- file name, document kind, file size, and source object key when available;
+- source language, detected source-language display, target language, interface language, and selected translation policy;
+- translator identity: provider family, configured model id, prompt version, adapter version, protection/profile/cache-key versions, and translation quality route;
+- start time, finish time, elapsed time, final status, cancellation state, and failure reason when applicable;
+- total fragments/work units, completed units, failed/skipped/malformed units, retry count, and partial/final output file names or object keys;
+- token totals: prompt tokens, completion tokens, provider cache-hit tokens, provider cache-miss tokens, total tokens, and application-level translation-memory hits when available;
+- notable warnings: provider commentary removed, malformed batch response, untranslated secondary-language retry, protected-marker restoration issue, assembly skip, Telegram progress-edit failure, or result assembly fallback.
+
+`run.json` is the stable machine-readable snapshot for the whole run. It should contain the same top-level facts as `summary.md`, plus structured fields for versions, paths, status, totals, and configuration. It should avoid depending on Markdown parsing.
+
+`events.jsonl` is the chronological event stream. Each line is one JSON object with at least `timestamp`, `event_type`, `job_id`, and a small event payload. Expected event types include:
+
+- `run_started`;
+- `upload_stored`;
+- `estimate_created`;
+- `job_created`;
+- `work_unit_planned`;
+- `work_unit_started`;
+- `provider_request_started`;
+- `provider_request_finished`;
+- `work_unit_retry`;
+- `work_unit_finished`;
+- `work_unit_failed`;
+- `partial_result_assembled`;
+- `final_result_assembled`;
+- `run_cancelled`;
+- `run_failed`;
+- `run_finished`.
+
+Each `fragments/NNNN.json` file stores the diagnostic detail for one API work unit. In the dev/local quality mode it should include the full source text sent to translation and the full translated text after cleanup/restoration, because this is the most useful evidence when improving translation quality. It should also include source block ids, prompt tier, source text hash, source/target language, elapsed seconds, token usage, retry attempts, cache/memory hit state, warnings, and any error message.
+
+The logger must be automatic and low-friction:
+
+- It is enabled by default in the dev workspace.
+- It writes under a configurable `TRANSLATION_RUN_LOG_ROOT`, defaulting to `var/translation-runs`.
+- It must be called from the shared translation orchestration path, not only from Telegram handlers, so TXT, DOCX, EPUB, smoke probes, and future worker execution can all produce comparable logs.
+- It must create the run directory as soon as a translation is confirmed or a local runner starts, then append events as work progresses.
+- It must flush enough information after each completed or failed work unit that a process crash still leaves useful diagnostics.
+- It must never require a separate manual export command for ordinary quality work.
+
+The log format should be deliberately boring: UTF-8 Markdown, JSON, and JSON Lines only. This keeps it easy for humans to inspect and easy for Codex or future scripts to parse.
+
+Privacy policy for the current stage:
+
+- Dev/local quality logs may include full user document text and full translated text.
+- These logs are runtime artifacts and must remain ignored by git.
+- Production logs must later support a redacted mode that stores hashes, metadata, timings, tokens, warnings, and short opt-in previews instead of full text.
+- The redacted production mode is explicitly out of scope for the first logging slice, but the logger API should keep text capture isolated enough that redaction can be added without rewriting every translation path.
 
 ## Resume and Crash Recovery Policy
 
@@ -442,13 +544,63 @@ Crash recovery requirements:
 - If the user cancels, the job becomes resumable unless the file expired, was deleted, or the adapter version can no longer reconstruct the same output safely.
 - If a provider request fails after all retries, the job should become interrupted or failed-resumable rather than losing progress.
 - The service must be able to rebuild a partial output from persisted completed fragments at any time before file TTL expiry.
+- A paid job with skipped or malformed work units must be considered partial/resumable, not a new payable order. Retrying skipped units must reuse the original uploaded file, stored work-unit plan, pricing snapshot, and already completed translations.
 - Resume must be idempotent: pressing Continue twice must not duplicate work or corrupt output.
 - Completed work units should use application-level translation memory when possible, but resume must not depend only on cache; completed unit outputs must be stored with the job.
 - Provider responses must be associated with exactly one persisted work unit. Usage, cost, output text, and retry metadata must be written atomically enough that a crash cannot mark unpaid/untranslated work as complete or lose already paid completed work.
 
-Current backend limitation:
+Current prototype limitation:
 
-- The live Telegram prototype still stores some user/session settings and pending interaction state in memory. Persistent worker mode now proves stored originals, jobs, work units, resume, stale lease reclaim, and partial download for TXT. The remaining work is to extend the same persistent path to DOCX/EPUB, add persistent history UI, persist user settings, and add paid order/payment records.
+- The live Telegram prototype still stores pending uploads, jobs, cancellation tokens, and result bytes in memory. It can cancel and return a partial file while the process is alive, but it cannot restore progress after a bot restart. The `codex/dev` backend groundwork now proves the local storage/job pieces separately; the remaining work is to wire them into the Telegram flow and then replace local development storage with production PostgreSQL, queue workers, and object storage.
+
+## Translation Queue, Fair Scheduling, and Multichannel Execution
+
+FolioLoom must use a durable translation queue before exposing larger-scale multichannel translation. The queue is a product and reliability requirement, not only an infrastructure detail: it protects users from lost work, prevents one user from monopolizing the service, keeps provider/API limits under control, and makes status, cancellation, resume, and history trustworthy.
+
+User confirmation must create a durable `translation_job` and enqueue it. Telegram handlers must not run heavy translation work directly in production. The production flow should be:
+
+1. Telegram receives the file and selected settings.
+2. The backend validates format, size, rights reminders, and estimate state.
+3. Confirmation creates an order/job record with the selected source language, target language, translation policy, quality route, pricing snapshot, and file metadata.
+4. The backend creates deterministic work units from the document.
+5. The scheduler leases jobs/work units to workers according to global capacity, user limits, and fairness rules.
+6. Workers translate leased work units, persist progress, usage, and output, then release or renew leases.
+7. The assembler builds partial or final output from persisted completed units.
+8. Telegram renders status and sends final or partial results from backend state.
+
+The queue must have two levels:
+
+- `translation_job`: the user-visible book/chapter/manuscript order.
+- `translation_work_unit`: an internal ordered fragment, chapter, section, or chunk that can be translated, retried, resumed, and assembled deterministically.
+
+The user sees job-level states such as `queued`, `preparing`, `translating`, `assembling`, `ready`, `paused`, `interrupted`, `failed`, `cancelled`, and `expired`. Work-unit states remain internal except through aggregate progress such as chapter/fragment count, percentage, and latest safe preview.
+
+Scheduling must not be naive FIFO. A single user who uploads many files must not block users with smaller jobs. The production scheduler should use fair scheduling across users, such as round-robin or weighted fair queuing:
+
+- each scheduling cycle should claim a bounded amount of work per user;
+- global capacity should be shared across active users before giving extra capacity to users with large backlogs;
+- a user with many queued files can keep progressing, but cannot consume all workers;
+- small jobs should be able to start within a reasonable time even when large books or batches are waiting.
+
+Initial non-pricing limits should be configurable and conservative:
+
+- maximum active translation jobs per user;
+- maximum queued jobs per user;
+- maximum active work units per user;
+- maximum active work units per job;
+- maximum active jobs/work units across the whole service;
+- maximum provider requests per minute and per key;
+- maximum retry attempts per work unit;
+- daily or rolling usage budget by characters/tokens/cost;
+- global emergency pause when provider errors, budget limits, or rate limits spike.
+
+The exact numeric defaults should be finalized during implementation after measuring current file sizes, token usage, worker behavior, and provider limits. As a starting product shape, the service should prevent ordinary users from submitting very large backlogs such as 150 files at once. A future batch translation flow may support large multi-file orders, but it should be explicit, resumable, cost-estimated, and protected by separate limits.
+
+Multichannel translation must run through the queue. The user should not directly choose a raw worker count or provider channel count. The system may process multiple work units in parallel when it is safe for the selected document, adapter, translation policy, and quality route. Parallel execution must preserve deterministic reading order in the assembled output, share required glossary/translation policy context, and avoid duplicate charging or duplicate provider calls for the same leased work unit.
+
+The UI should describe multichannel capacity in user-friendly terms such as `processing`, `faster delivery`, or `priority processing`, not as provider channels or worker counts. If the service is busy, the bot should calmly explain that the file is saved in the queue and show status rather than returning a generic failure.
+
+Pricing and premium policy are intentionally unresolved. The architecture must support future priority tiers through fields such as `priority`, `tier`, `max_active_jobs`, `max_pending_jobs`, `max_active_units`, and `priority_weight`, but the initial design must work without paid tiers. A later pricing-policy design should decide whether higher queue priority, higher backlog limits, faster delivery, batch translation, or stronger model routes become paid capabilities.
 
 ## My Books and Translation History
 
@@ -459,6 +611,7 @@ The user-facing section should be called `My Books` in English and `Мои кн�
 `My Books` must support:
 
 - showing the user's recent translated books/manuscripts with title or filename, source language, target language, status, creation date, and whether a result file is available;
+- showing a book cover when the source format exposes one, and a tasteful FolioLoom placeholder tile when no cover is available;
 - showing the most recent translation first, with a quick path to the last translated file and its current state;
 - opening a single book/job detail screen with status, translation direction, selected translation policy, progress, created/updated time, and available actions;
 - downloading the final translated file while it is still within file TTL;
@@ -487,66 +640,91 @@ History and resume requirements:
 - Result files must follow TTL and deletion policy; expired results remain visible as records but cannot be downloaded unless the service can rebuild them safely from persisted work units.
 - The latest-book shortcut is a convenience view over the same job history, not a separate storage path.
 
+## Book Covers, FAQ, and Support UX
+
+FolioLoom should make the user's history feel like a small personal book shelf, not a raw file list. Cover handling belongs to the `My Books` experience and must be data-backed rather than decorative only.
+
+Cover behavior:
+
+- If the source document contains an accessible original cover, the service should store a safe derived cover preview and show it in `My Books` and job detail views.
+- If there is no cover, the UI should show a FolioLoom placeholder tile based on the title or filename, language direction, and job status.
+- Placeholder tiles should feel like book/workshop labels, not generic file icons. They may use restrained typography, the title, status, language pair, and a small FolioLoom mark.
+- Cover previews and placeholder tiles must not be required for translation correctness. If cover extraction fails, the job remains usable and the UI falls back to a placeholder.
+- Uploaded cover images are untrusted file content and must follow the same storage, TTL, ownership, and safety rules as other derived artifacts.
+
+Help must evolve into three separate surfaces:
+
+- `Help`: practical in-bot guidance for limits, supported formats, rights reminders, preparation advice, downloads, and common failures.
+- `FAQ`: a localized knowledge base for common questions. Telegram should show short answers; a future web page can show longer answers and richer navigation.
+- `Contact Support`: a feedback/ticket flow for user-specific problems that FAQ cannot answer.
+
+The feedback form should be short and Telegram-friendly:
+
+1. User opens Help or a job detail screen.
+2. User chooses `Contact Support`.
+3. Bot asks for the topic, such as translation issue, file problem, payment, account/history, or other.
+4. If launched from a job detail screen, the ticket is linked to that job automatically.
+5. User writes the message.
+6. Bot confirms delivery with a localized acknowledgement such as `Message delivered. We'll get back to you here.` / `Сообщение доставлено. Мы ответим вам здесь.`
+
+Support tickets must be a separate backend domain/module, not hidden inside Telegram handler state. The support domain must support ticket status, message history, staff replies, optional job/order links, internal notes, and future admin tooling. User-facing support messages must not expose provider stack traces, internal model names, raw prompt failures, storage paths, or payment internals.
+
+FAQ and support content must use the same localization strategy as the rest of the bot. Every supported interface language should have either a native FAQ entry or a deliberate fallback policy. Adding a new interface language must make missing FAQ/support copy visible in tests or localization checks.
+
 ## Next Development Roadmap
 
-The next work should proceed in this order unless a blocking production bug appears. The main strategic shift after the backend work is: prepare the closed beta server path, then keep improving DOCX/EPUB quality on top of durable state. Do not expand formats and social channels until durable backend, evals, cost controls, and safety are strong enough.
+The next work should proceed in this order unless a blocking production bug appears. The main strategic shift after the audit is: keep improving DOCX/EPUB quality, but do not keep expanding formats and social channels on top of in-memory prototype state. Durable backend, evals, cost controls, and safety must become the next foundation.
 
-### 1. Closed Beta Server Bring-Up
+### 1. Manual Quality Testing on Stable Main
 
-- Create a real `.env` from `.env.example` with the beta Telegram token and DeepSeek key.
-- Run `docker compose up -d --build` on the target server.
-- Verify `docker compose ps`, `/health`, and `/ready`.
-- Run one small TXT worker-mode job and confirm that queued state, worker processing, final output, logs, and restart behavior work.
-- Kill/restart the worker during a job and verify stale lease reclaim plus resume/partial download.
-- Keep the beta small until operational logs, backup/restore, and failure handling are familiar.
+- Run the stable bot from `/Users/yuriimedvediev/Documents/New project 2`.
+- Use real DOCX and EPUB samples to check translation quality, layout preservation, partial output, progress updates, cancellation, and terminal summaries.
+- Record every visible problem as a concrete reproduction: original file, translated file, target language, expected behavior, actual behavior.
+- Do not fix quality issues directly in `main`; reproduce and fix them in `codex/dev`.
 
 ### 2. Production Backend Foundation
 
-- Move remaining Telegram runtime state to persistent backend state.
-- Add PostgreSQL-backed users, channel identities, files, orders, prompt versions, pricing snapshots, usage events, and payment ledger.
-- Keep the PostgreSQL work-unit table as the closed-beta durable queue unless a separate broker becomes necessary.
-- Move DOCX and EPUB translation work out of the Telegram handler into worker jobs.
+- Move from in-memory Telegram runtime state to persistent backend state.
+- Add PostgreSQL-backed users, channel identities, files, orders, jobs, work units, prompt versions, pricing snapshots, usage events, and payment ledger.
+- Add Redis or another durable queue for background workers.
+- Move translation work out of the Telegram handler into worker jobs.
 - Extend the current local object-storage abstraction toward S3-compatible storage for originals, intermediates, partials, and final files.
 - Persist job IDs, retry attempts, progress, token usage, partial outputs, and final results.
 - Add resumable jobs so cancelled, interrupted, or crashed translations can continue from the last completed work unit.
 - Add status/history UI commands that can show resumable jobs after bot restart.
 
-Completed backend groundwork in this area:
+Completed dev groundwork in this area:
 
 - SQLite-backed persistent jobs and work units with statuses, leases, cancellation/interruption state, source object keys, output object keys, timing, and token usage.
-- PostgreSQL-backed persistent job store with the same job/work-unit contract for server beta.
 - Local object storage for originals, intermediates, partials, and final files with metadata sidecars, SHA-256 checksums, file-name sanitization, and path-traversal protection.
 - Runtime service construction wires Telegram uploads to local object storage through `OBJECT_STORAGE_ROOT`, so uploaded originals can be persisted before the user chooses the target language.
 - Persistent TXT planning can load a stored original file, split it into deterministic paragraph fragments, store each source work unit as an intermediate object, and create pending work-unit rows linked to those objects.
 - Runtime service construction wires SQLite jobs through `PERSISTENT_JOBS_DB_PATH`; TXT confirmation now uses persistent planning and stored worker execution when object storage and persistent jobs are available.
-- Runtime service construction can select SQLite or PostgreSQL through `JOB_STORE_BACKEND` and `POSTGRES_DSN`.
-- Telegram worker mode can queue persistent TXT jobs without requiring the bot process to hold the DeepSeek key or translate inline.
-- Durable worker loop polls claimable jobs, reclaims stale leases, and processes stored text work units.
-- Worker completion/failure updates are fenced by worker ownership so stale workers cannot overwrite a reclaimed unit.
-- Bot service methods can resume owned persistent jobs and assemble fresh partial downloads from completed work units.
-- FastAPI exposes `/health` and `/ready`; readiness checks object storage and the configured job store.
-- Docker Compose is configured for the closed beta stack with `api`, `bot`, `worker`, PostgreSQL healthcheck, durable object-storage volume, and run-log volume.
-- `docs/deployment/server-beta.md` documents server setup, health checks, logs, restart, backup, and restore.
-- Admin operations helpers can normalize job states, summarize worker health, aggregate queue depth, and redact secrets from error excerpts for future operational views.
+- The Telegram prototype can show a simple `My Books` history from local persistent jobs and offers per-book download buttons for every listed job that has a stored final or partial result. Detailed job cards, pagination, and resume actions remain future backend work.
 - Persistent TXT cancellation assembles a partial output from completed work units and stores the partial object key on the job.
+- Persistent planners now exist for TXT, DOCX, and EPUB and use the same format-adapter plans as estimation/runtime, so stored work units can preserve adapter block ids, prompt tiers, and source object references across formats.
+- Persistent DOCX and EPUB assembly can rebuild partial/final outputs from stored block-aligned work-unit translations while preserving untranslated source content for pending or malformed units where safe.
 - Stored-text worker helpers that load source work-unit text from object storage, translate it through the existing worker path, save assembled partial/final text results, and attach result object keys to the job.
-- Environment examples now separate local SQLite/inline defaults from server PostgreSQL/worker defaults. Generated runtime data must stay out of git.
+- Environment examples now separate local storage and SQLite job paths for dev, stable, and generic local runs. Generated `var/` runtime data must stay out of git.
+- Document sandbox v1 can extract, plan, and assemble TXT/DOCX/EPUB through a constrained subprocess and records sandbox failures as security telemetry.
+- Admin console v1 backend modules now cover auth, RBAC, settings, encrypted secrets, integrations, AI provider keys, operations summaries, audit, security surfaces, and translation-run log listing.
 
 Next backend slice:
 
-- Add persistent DOCX and EPUB planners using the same fragment counts as estimation/runtime.
-- Run translation through resumable worker jobs rather than directly inside the Telegram handler.
+- Run DOCX and EPUB translation through resumable worker jobs rather than directly inside the Telegram handler.
 - Rebuild partial/final files from completed persisted work units after cancellation, interruption, or bot restart.
 - Expose job status/history commands in the bot using internal job IDs.
+- Resolve the current TXT partial-output contract mismatch so full `unittest discover` is green again before release promotion.
 
 ### 3. Evaluation and QA Harness
 
 - Build a golden corpus with real-style TXT, DOCX, EPUB, and later PDF/RTF/ODT samples across Russian, Ukrainian, English, French, Spanish, and mixed-language content.
+- Add automatic file-based translation run logs for every dev translation so each manual quality issue has a ready-made `summary.md`, `run.json`, `events.jsonl`, and per-fragment source/translation artifacts.
 - Add deterministic invariants: no leaked markers, no provider commentary, no untranslated human-language segments above an allowed threshold, no broken links, no lost notes, no flattened superscript/subscript, no damaged pseudo-tables, and no changed structured tokens.
 - Add visual QA for DOCX through LibreOffice rendering where XML tests are insufficient. Compare page counts, visible text blocks, major layout shifts, tables, headers/footers, and clipped text.
 - Add EPUB validation through EPUB structure checks and EPUBCheck where available.
 - Add LLM-as-judge or human review rubrics for translation quality only after deterministic safety checks pass, so subjective scoring does not hide structural regressions.
-- Store eval results by adapter version, prompt version, model/pricing configuration, and translation policy.
+- Store eval results and manual quality findings by adapter version, prompt version, model/pricing configuration, translation policy, and translation run log id.
 
 ### 4. DOCX Quality Hardening
 
@@ -674,18 +852,91 @@ The bot stores language choices as short internal codes but provider prompts mus
 
 Translation quality must be developed per target language, not only through one global prompt. Universal document-safety rules remain shared, but terminology, named entities, typography, genre behavior, and source-target exceptions must move into target-language profiles.
 
+Translation policy, target-language profiles, and provider prompts are separate layers of one system, not competing sources of truth. The service first builds a structured translation policy from the document, source/target language, detected text type, user/job settings, profile versions, prompt versions, protection versions, and output contract. The provider system prompt is then rendered from that policy.
+
+Required precedence:
+
+1. Universal document-safety rules protect structure, markers, code, URLs, identifiers, retries, cache compatibility, resume, and output contracts.
+2. Order-specific translation policy fixes user/job choices such as target language, detected or selected text type, quality route, terminology mode, name/entity handling, glossary, hidden-text handling, and link-text handling.
+3. Target-language profiles refine style, terminology, typography, named-entity behavior, source-pair exceptions, and text-type behavior for the selected target language.
+4. Text-type instructions choose the relevant profile branch for the current document or fragment.
+5. Provider prompts are generated from the resulting policy and must not contain independent rules that contradict the structured policy.
+
+When a generic prompt rule and a target-language profile appear to overlap, the generic rule protects safety-critical invariants while the target-language profile decides language-specific presentation. For example, the generic rule preserves URLs, code identifiers, legal names, and protected markers, while the Russian profile may transliterate ordinary personal names, translate descriptive titles, or choose Russian typography where doing so does not alter protected content.
+
+Every policy field that can change output must be included in cache keys and stored with the translation run or job before production use. Run logs should record the rendered policy snapshot so Russian QA can be traced back to the exact profile, prompt, protection, detected text type, and output-contract versions used.
+
 The per-language design method is documented in `docs/superpowers/specs/translation-language-quality-methodology.md`. A language profile is not beta-ready until it has explicit decisions, examples, regression samples, and acceptance checks for every section in that methodology.
 
 Current target-language quality priorities:
 
-1. Russian: first quality-development target language because the team can manually QA it quickly and it exposes hard policy issues such as English calques, borrowed technical terms, transliteration, inflection around preserved terms, and literary naturalness. Russian is not assumed to be the main market.
-2. English: important for international texts, reverse-direction translation, and broad market reach.
-3. Ukrainian: important for near-term users and Slavic-language edge cases.
+1. Russian: first quality-development target language because the team can manually QA it quickly and it exposes hard policy issues such as English calques, borrowed technical terms, transliteration, inflection around preserved terms, and literary naturalness. Russian now has the first full profile/spec/regression direction, but still needs broader deterministic QA and manual corpus review before paid production.
+2. Ukrainian: first additional Slavic target profile and the template for adding languages after Russian. The `ukrainian-v1` MVP is implemented in the target-language profile layer with English/Russian/auto source-pair guidance and methodology documentation; it still needs a dedicated Ukrainian deterministic QA module and generated Ukrainian regression corpus.
+3. English: important for international texts, reverse-direction translation, and broad market reach.
 4. French, Spanish, and Dutch: current supported targets that should receive profiles after Russian/English/Ukrainian foundations are stable.
 5. Polish, Turkish, German: planned future expansion after the product has a complete working translation loop.
 6. Chinese, Japanese, Korean, and Arabic: later expansion requiring additional layout, segmentation, typography, RTL/CJK, and QA work.
 
-The first target-language profile is `docs/superpowers/specs/russian-translation-profile.md`.
+Current profile source-of-truth documents:
+
+- Russian: `docs/superpowers/specs/russian-translation-profile.md`.
+- Ukrainian methodology and design: `docs/superpowers/specs/ukrainian-translation-profile.md` and `docs/superpowers/specs/2026-05-08-ukrainian-translation-profile-design.md`.
+
+## Interface Modes and Translation Quality
+
+FolioLoom should separate interface complexity from translation quality and pricing. These are independent product axes:
+
+- `Interface Mode`: controls how many choices the user sees.
+- `Translation Quality`: controls the backend translation route, expected cost, latency, and quality target.
+
+`Interface Mode` should support:
+
+- `Simple`: the default user experience. The user uploads a file, chooses the target language, reviews the estimate, and confirms. Detailed translation policy choices use safe defaults and should not clutter the confirmation screen.
+- `Advanced`: a fuller workshop-style experience for users who want control over order-specific translation policy, such as name handling, technical terminology behavior, hyperlink text handling, hidden text handling, glossary choices, and future document-specific options.
+
+Advanced interface mode must not automatically mean a more expensive provider route. It only exposes more controls. Order-specific options such as name handling must remain tied to the current translation job, not global bot settings, because the right choice can differ from book to book.
+
+`Translation Quality` should support:
+
+- `Standard`: the default quality route for general books, chapters, and long-form texts. It should balance quality, cost, speed, and consistency.
+- `High Precision`: a higher-cost route for technical, medical, legal, academic, financial, reference, or terminology-heavy documents where accuracy and consistency are more important than speed or price.
+
+High Precision may use a stronger provider model/API tier, additional validation, stricter prompts, smaller fragments, glossary enforcement, or future QA passes. The user-facing UI must describe the result as a quality level, not expose provider branding such as model names. Provider/model selection remains backend configuration.
+
+High Precision can justify a higher price because it may consume more expensive model capacity, more tokens, more validation passes, or slower worker time. Pricing must be based on a persisted pricing snapshot so the user sees the expected cost before confirmation and the backend can audit which quality route was used.
+
+For medical, legal, financial, and other high-stakes documents, the bot must stay honest: High Precision improves translation care, terminology stability, and consistency, but it does not replace expert review. The confirmation flow should include a calm localized reminder when the selected domain or quality route implies high-stakes usage.
+
+The selected translation quality route must be stored with the job, included in cache keys where it can affect output, included in cost/usage diagnostics, and shown in the order summary before payment or confirmation. Resume, retry, partial output, and final output must use the same quality route unless the user explicitly starts a new order.
+
+## Bot Design Roadmap
+
+The bot UI should evolve in focused design slices so the Telegram interface stays calm while the translation system becomes more capable.
+
+Current design priorities:
+
+1. Keep the main menu clean and avoid duplicate entry points. Language selection belongs in the main menu and `/language`; Settings should not contain a second language-change button.
+2. Preserve the FolioLoom brand voice across all current interface languages. User-facing copy should remain short, literary, calm, and specific to books/manuscripts rather than generic file conversion.
+3. Keep progress UX alive but unobtrusive: localized activity phrases, heartbeat symbols, elapsed/remaining time, cancel control, and optional latest-passage preview in an expandable quote.
+4. Separate `How It Works`, `Help`, `FAQ`, and `Contact Support`: How It Works explains the translation flow, Help gives practical limits and preparation advice, FAQ answers common questions, and Contact Support creates user-specific tickets.
+5. Add support ticket creation through Help once the backend has a support/ticket domain. Ticket creation must be localized, attach the relevant job/order when launched from a job context, confirm delivery to the user, and avoid exposing internal provider errors.
+6. Add order-specific translation options before confirmation, not as global bot settings. Name handling, terminology behavior, link visible-text behavior, hidden text handling, glossary choices, and similar controls belong to a specific translation job.
+7. Implement `Simple` and `Advanced` interface modes. Simple mode should hide most per-order choices behind safe defaults. Advanced mode should expose them in a workshop-style confirmation flow.
+8. Add `Translation Quality` as a separate choice from interface mode. `Standard` and `High Precision` must remain independent from whether the user is using Simple or Advanced UI.
+9. Design the durable translation queue before exposing larger-scale multichannel translation. Queue behavior must include fair scheduling across users, configurable usage limits, resumable work units, global/provider backpressure, and future-ready priority fields without deciding premium pricing yet.
+10. Add `My Books` only after durable job history, result storage, ownership checks, download, partial download, status, pagination, and safe resume are wired into the Telegram flow. When cover previews are available, show original covers; otherwise show FolioLoom placeholder tiles.
+11. After each new UI slice, review `/start`, upload, target language choice, estimate, confirmation, progress, cancellation, success, errors, Settings, Help, FAQ, Contact Support, How It Works, and future My Books screens as one coherent conversation.
+
+Near-term design order:
+
+1. Save the current UI/text checkpoint.
+2. Add per-order translation options before confirmation.
+3. Add Simple/Advanced interface mode behavior.
+4. Add Standard/High Precision quality selection and pricing snapshot display.
+5. Design and implement the durable queue, fair scheduler, user limits, and multichannel worker policy.
+6. Design and implement FAQ plus a minimal localized feedback form with delivered confirmation.
+7. Design and implement My Books/history once durable resume and result retrieval are real, including cover previews and FolioLoom placeholder tiles.
+8. Design the support ticket backend/domain and admin workflow after the feedback form proves the minimum support flow.
 
 ## Name and Term Preservation Policy
 
@@ -696,12 +947,13 @@ The service must support configurable preservation of names and terms. This is a
 - Named-entity handling must support multiple modes: preserve original, translate descriptive name, transliterate/transcribe into the target script, use glossary-pinned form, preserve with translated explanation in parentheses, or translate with original in parentheses.
 - Default behavior should be conservative for technical and business documents: preserve company names, brands, URLs, code-like labels, placeholders, and protected terms unless the user explicitly chooses to localize them.
 - Russian target translations should default to preserving brands, product names, code identifiers, API/library/package names, URLs, and legal company names; transliterating ordinary personal names when the document is intended for Russian readers; and translating descriptive titles or institution names only when they are not protected official names.
-- Link URLs must always be preserved. Link visible text may be translated or preserved depending on the selected mode.
+- Link URLs and relationship targets must always be preserved. Link visible text must be controlled separately from the URL. Required link-text modes: `preserve link text unchanged`, `translate ordinary link text`, and `translate descriptive link text but preserve raw URLs, emails, query parameters, anchors, IDs, and code-like link labels`. The selected mode must be shown before confirmation and stored with the job.
 - Terminology handling must support at least four policies: translate terms into the target language, transliterate/transcribe terms into the target script, preserve original terms unchanged, or use glossary-pinned forms.
 - Technical-literature mode should default to preserving or transliterating established terms instead of over-localizing them. For example, a term like `placeholder` may become `плейсхолдер` or remain `placeholder`, depending on the selected terminology policy; it must not be inconsistently translated across the same document.
 - The service should recognize that some borrowed terms are already natural target-language words in technical contexts. For Russian technical documents, words such as `плейсхолдер`, `промпт`, `токен`, `callback`, `endpoint`, `framework`, and similar terms may need preservation or transcription rather than literal translation.
 - Users must eventually be able to switch technical-term handling before confirmation. Required options: `preserve technical terms`, `translate technical terms`, `transliterate technical terms`, and `use glossary`. This switch applies to terms such as `endnote`, `tracked changes`, `query-параметры`, `regex`, `placeholder`, `callback`, `endpoint`, file-format names, API terms, and other domain terms.
 - The selected technical-term policy must be visible in the order summary before payment/confirmation and must be stored with the job so retries, partial results, and downloaded outputs use the same terminology behavior.
+- Hidden/invisible text handling must be part of the same structured translation policy. Required modes: `preserve hidden text unchanged` as the default, and `translate hidden text while preserving invisibility` as an explicit opt-in. The selected mode must be visible in the confirmation summary, stored with the job, included in cache keys, and applied consistently to DOCX and future formats that expose hidden or invisible text.
 - Name handling is a per-translation pre-confirmation choice, not a global bot setting. The user should choose it while preparing a specific book/manuscript, after target language selection and before final confirmation.
 - The initial user-facing name-handling options should be limited to clear presets such as `preserve names`, `translate names where appropriate`, and `transliterate names`. Advanced category-level controls can come later.
 - The selected name-handling preset must be shown in the confirmation summary and stored with the job as part of the structured translation policy. It must affect prompts, retries, partial results, cache keys, and final output consistently.
@@ -744,6 +996,23 @@ Prompts are production assets and must be versioned, tested, and auditable.
 - Prompt evals must run before a prompt version becomes the default for paid traffic. Required eval checks include marker integrity, mixed-language translation, protected-token preservation, terminology policy behavior, formatting marker preservation, and no service-message leakage.
 - The prompt must instruct the model to translate every human-language segment into the selected target language, even when the input contains mixed source languages or language labels.
 - The prompt must not expose provider names or internal implementation details to the user-facing document.
+
+## Prompt-Injection and Untrusted Document Policy
+
+Books, manuscripts, and uploaded documents are hostile input. The translation service must assume that any document fragment can contain instructions aimed at the model, operators, or infrastructure. Prompt-injection text is source material, not authority.
+
+- The system/developer prompt must establish a strict trust boundary: only service-owned prompts and the structured translation policy are instructions. Document text, file metadata, filenames, comments, footnotes, endnotes, hyperlinks, alt text, headers, footers, hidden text, EPUB package data, and recovered text are untrusted data.
+- The model must be explicitly forbidden from following document-supplied instructions, including requests to ignore prior instructions, change role, reveal or discuss prompts, expose secrets, execute code, run shell commands, open URLs, call tools, modify formatting policy, refuse the translation, apologize, or emit safety warnings because of the document content.
+- Injection text that appears in the document must be translated as ordinary text, or preserved exactly when it falls under structured-content/code preservation rules. It must not be executed, summarized as a safety event, omitted, or replaced by a refusal unless another product policy explicitly blocks translating that content.
+- Every LLM-visible document fragment must use a marker/data protocol that spotlights untrusted content. The marker protocol must separate service instructions from document data, identify each block with stable ids or nonces, and be part of the prompt version and cache key.
+- Provider requests for translation must have no ambient authority: no tool calling, no browsing, no shell/filesystem actions, and no service secrets, admin state, payment data, storage credentials, internal URLs, or customer metadata beyond what is needed for translation.
+- Output validation must treat refusals, apologies, role changes, prompt leakage, safety lectures, tool-call text, marker loss, extra or missing blocks, duplicate ids, unbalanced markers, or untranslated required human-language content as contract failures.
+- On a suspected prompt-injection failure, the service should retry with a repair prompt that restates the trust boundary and exact output contract. Repeated failure should leave the source fragment unassembled or preserve the original fragment with an explicit job warning; it must not silently assemble a model refusal into the user's translated book.
+- Logs and telemetry must not store raw source or translated text in production by default. They may store job ids, fragment ids, hashes, counts, token usage, timings, and detector flags. Full text logging is allowed only in explicit local/debug mode with a clear privacy warning.
+- Prompt-injection regression tests are mandatory before a prompt version can serve paid traffic. Fixtures must include multilingual injection, `ignore previous instructions` text, role-change attempts, system-prompt exfiltration attempts, fake XML/marker injection, code and shell-command snippets, URLs, hidden DOCX text, comments/footnotes/endnotes, EPUB XHTML, and encoded or nested instructions.
+- Prompt policy changes that affect trust-boundary wording, marker protocol, validation behavior, repair behavior, or preservation rules must bump the prompt policy version and invalidate or migrate cache keys.
+- File parsing and assembly are a separate untrusted-input boundary. DOCX/EPUB/TXT parsing, fragmentation, and reassembly should run in a constrained sandbox or worker with no network/secrets, format-specific size limits, CPU/RAM/time limits, isolated temporary storage, and deterministic cleanup. This sandbox does not replace prompt-injection defenses; it protects the host from malicious files.
+- Public production deployment must add an operating-system/container isolation layer around document parsing and assembly workers. The Python sandbox is an application-level guardrail, not a complete containment boundary. Release-ready deployments must run document workers as a separate low-privilege user or container with no service secrets, no outbound network, read-only filesystem except for an isolated temporary workspace, explicit CPU/RAM/process/file-size limits, and a hardened seccomp/AppArmor or equivalent profile where the platform supports it. This is a production release gate, not a blocker for local/dev validation.
 
 ## Translation Modes
 
@@ -789,9 +1058,11 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - DeepSeek-compatible chat completion client and smoke probes.
 - DeepSeek client retries temporary network/read failures and temporary provider HTTP errors.
 - DeepSeek usage parsing includes prompt tokens, completion tokens, total tokens, provider cache-hit tokens, and provider cache-miss tokens.
+- DeepSeek translation path wraps untrusted document text, rejects provider refusals/service messages, records security telemetry, and can retry once with a repair prompt.
 - TXT validation, estimation, translation, and result file generation.
 - DOCX extraction, estimation, translation, and basic DOCX result assembly.
 - EPUB extraction, estimation, translation, and EPUB result assembly.
+- Document sandbox v1 for TXT/DOCX/EPUB extraction, planning, and assembly through a constrained subprocess worker.
 - Localized bot interface for Russian, Ukrainian, French, Spanish, English, and Dutch.
 - Separate interface language and target translation language flows.
 - Localized confirmation buttons.
@@ -809,7 +1080,11 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - Runtime service construction can persist uploaded originals to local object storage before estimation when `OBJECT_STORAGE_ROOT` is configured.
 - Runtime service construction can persist job/work-unit state to SQLite when `PERSISTENT_JOBS_DB_PATH` is configured.
 - Persistent TXT planning creates stored intermediate work-unit files and persistent work-unit rows from a stored original file, and TXT confirmation can execute through that stored worker path.
+- Persistent DOCX and EPUB planning creates stored intermediate work-unit files and persistent work-unit rows from stored originals using the public format-adapter plans.
 - Persistent TXT cancellation returns a partial translated TXT file and stores the partial object key for future resume/history work.
+- Persistent DOCX assembly can parse stored `translation_batch` work-unit output and can assemble a partial DOCX with original text preserved for malformed work units instead of failing the whole result.
+- Persistent EPUB assembly can assemble partial/final EPUB results from stored block translations and preserve original book structure for pending content.
+- Persistent worker execution now normalizes multi-block DOCX/EPUB work units before saving them: stored translated output is block-aligned plain text, not raw provider XML, and CJK/Dutch secondary-language leftovers get a targeted retry.
 - Worker groundwork can load source work-unit text from object storage, translate it through the existing persistent worker path, save assembled partial/final text outputs, and attach result object keys back to the job.
 - Progress messages include elapsed time, estimated remaining time, and the visible cancel instruction in one message.
 - Progress messages include a throttled activity spinner so long-running fragments do not look frozen.
@@ -822,19 +1097,24 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - DOCX mono-spaced pseudo-table rows are translated and re-padded to preserve column starts where possible.
 - DOCX estimation and language detection include the same translatable DOCX parts as runtime translation.
 - DOCX mixed-language blocks can be translated by detected source-language segment, including multiple language labels inside one paragraph.
-- DOCX translation protects hyperlink visible text, subscript/superscript runs, technical tokens, structured data, URLs, placeholders, code-like identifiers, JSON/YAML/XML/HTML snippets, repeated spaces, non-breaking spaces, and soft hyphens from model damage.
+- DOCX translation currently protects hyperlink visible text, subscript/superscript runs, technical tokens, structured data, URLs, placeholders, code-like identifiers, JSON/YAML/XML/HTML snippets, repeated spaces, non-breaking spaces, and soft hyphens from model damage. Future link-text policy controls must allow translating ordinary hyperlink anchor text without changing the underlying URL or relationship target.
+- Hidden or invisible DOCX text is preserved unchanged by default, with a planned per-order switch to translate it while keeping the original invisibility/hidden formatting.
 - Technical term preservation has a baseline glossary for terms such as `endnote`, `tracked changes`, `query-параметры`, `regex`, and `placeholder`, with a future user-facing switch planned for preservation/translation/transliteration/glossary modes.
 - Known orthographic samples such as Polish `Zażółć gęślą jaźń` are normalized as orthographic tests instead of accepting transliterated nonsense from the model.
 - EPUB translation uses OPF spine reading order, groups XHTML blocks into marked API batches, and preserves partial results in reading order.
 - EPUB translation preserves inline XHTML formatting nodes, including `strong`, `em`, and links, instead of flattening the block into plain text.
+- EPUB translation preserves footnote/note-reference anchors as atomic markup and avoids serializing translated XHTML with visible `html:` prefixes.
 - Application-level translation memory is implemented for DOCX and EPUB units and is wired through the bot service and job runner.
+- Russian deterministic quality checks cover preservation of URLs, placeholders, identifiers, dates, numbers, currency, protected markers, provider commentary, and obvious untranslated-source residue.
+- Ukrainian target-language profile MVP adds standard Ukrainian guidance, anti-calque rules, terminology/name handling, typography, text-type behavior, quality-track prompts, cache-policy signatures, and source-pair profiles for English/Russian/auto into Ukrainian.
+- Admin console backend skeleton covers owner auth, RBAC, settings, encrypted secrets, integration connections, AI provider keys, operations summaries, audit/security surfaces, and translation-run log summaries.
 - Terminal completion summaries are highlighted for successful/cancelled translations and include job id, file names, document kind, elapsed time, fragment totals, average fragment time, and token totals.
 - Provider prompts use human-readable language names from the shared language registry.
 - Auto-source provider prompts instruct the model to translate every human language in mixed-language fragments into the target language.
 
 ## Acceptance Criteria
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests` runs the test suite without external dependencies.
+- Release promotion requires `PYTHONPATH=src python3 -m unittest discover -s tests` to run the test suite without external dependencies and without failures. The current dev snapshot has a known TXT partial-output mismatch documented in `Current Project Stage`; that is a blocker for promotion, not an accepted release state.
 - `PYTHONPATH=src python3 -m compileall src` compiles source files successfully.
 - Application settings can be created from environment defaults.
 - FastAPI healthcheck returns service name and status.
@@ -848,16 +1128,21 @@ This slice does not call Telegram, DeepSeek, PostgreSQL, or Redis yet. It establ
 - User-facing messages do not reveal the internal LLM provider.
 - Balance and order payment tests cover top-up, insufficient balance, order charge, and refund behavior without external services.
 - EPUB translation tests cover div-based book text, spine reading order, grouped API fragments, and preservation of the `mimetype` item.
-- EPUB translation tests cover preservation of inline formatting nodes such as `strong`.
+- EPUB translation tests cover preservation of inline formatting nodes such as `strong`, footnote/note-reference anchors, and default XHTML namespace serialization without visible `html:` prefixes.
 - DOCX translation tests cover batch-marker parsing, basic run-level formatting preservation, headers, footers, footnotes, endnotes, comments, source-language segmented translation, hyperlink anchor preservation, subscript/superscript preservation, pseudo-table re-padding, structured-data protection, technical-term preservation, orthographic sample handling, and ensure internal XML markers do not leak into the result document.
-- DeepSeek client tests cover transient network retries, temporary HTTP retries, cache token parsing, and fast failure for local SSL certificate configuration problems.
+- DeepSeek client tests cover transient network retries, temporary HTTP retries, cache token parsing, provider refusal rejection/repair, security telemetry capture, and fast failure for local SSL certificate configuration problems.
 - Bot translation service tests cover DOCX and EPUB translation memory through the real confirmation path.
 - Bot runtime tests cover progress logging without leaking user text, highlighted completion summaries, upload size pre-checks, and spinner frame cycling.
 - Language detection tests cover mixed-language source display.
 - Language tests cover shared language-name resolution for provider prompts.
-- Persistent planner and bot-runtime tests cover creating TXT jobs from object storage, running TXT confirmation through stored work units, returning final TXT output, and returning partial TXT output on cancellation.
+- Automatic translation run-log tests cover creating a run directory, writing `summary.md`, `run.json`, `events.jsonl`, and recording full per-fragment source/translated text in dev/local mode without a manual export command.
+- Persistent planner and bot-runtime tests cover creating TXT/DOCX/EPUB jobs from object storage, running TXT confirmation through stored work units, returning final TXT output, and returning partial TXT output on cancellation.
 - Backend persistence tests cover job/work-unit state, source object keys, partial/final output object keys, cancellation/interruption state, stored-text worker execution, and result assembly into object storage.
 - File storage tests cover write/read, persisted metadata, checksum recording, file-name sanitization, path-traversal protection, delete behavior, and empty-content rejection.
-- Future backend tests must cover full Telegram-to-worker resume, real worker lease/idempotency under concurrency, pricing snapshots, prompt version persistence, per-work-unit token accounting in production storage, file TTL cleanup, and redacted production logging.
+- Document sandbox tests cover TXT/DOCX/EPUB extraction, planning, and assembly through the subprocess worker, including timeout, size-limit, malformed-response, and failure telemetry behavior.
+- Security tests cover model-output safety, prompt-injection regressions, security event summaries, and user/job-level threshold handling.
+- Admin tests cover owner auth, RBAC permission mapping, settings validation, encrypted secret storage, integration connection management, AI provider key summaries, operations summaries, audit logging, route access, and translation-run log summaries.
+- Translation profile tests cover Russian and Ukrainian target-language profiles, language-code normalization, Ukrainian policy/cache signatures, and Ukrainian source-pair guidance for English, Russian, and mixed/auto sources.
+- Future backend tests must cover full Telegram-to-worker resume, fair scheduling across users, user/global queue limits, real worker lease/idempotency under concurrency, provider backpressure behavior, pricing snapshots, prompt version persistence, per-work-unit token accounting in production storage, file TTL cleanup, and redacted production logging.
 - Future eval gates must cover no leaked service messages, no leaked internal markers, mixed-language translation into the selected target language, protected technical notation, visual DOCX sanity checks, and EPUB reading-order partial output.
 - The repository contains no copied AGPL implementation artifacts.

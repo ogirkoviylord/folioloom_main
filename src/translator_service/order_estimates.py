@@ -1,21 +1,15 @@
 from dataclasses import dataclass
 
+from translator_service.document_sandbox import DocumentSandbox
 from translator_service.documents import DocumentFormat, DocumentUpload
-from translator_service.extractors import (
-    extract_text_from_txt,
+from translator_service.format_adapters.contracts import FormatAdapterPlan
+from translator_service.format_adapters import (
+    plan_docx_translation,
+    plan_epub_translation,
+    plan_txt_translation,
 )
 from translator_service.pricing import PricingRules, estimate_price
-from translator_service.structure_optimizer import (
-    StructuredTextBlock,
-    build_translation_units,
-    estimate_unit_input_tokens,
-)
-from translator_service.text_analysis import TextAnalysis, estimate_text_volume
-from translator_service.translation_runner import (
-    _extract_docx_blocks,
-    _extract_epub_blocks,
-    _group_epub_blocks,
-)
+from translator_service.text_analysis import TextAnalysis
 
 
 @dataclass(frozen=True)
@@ -39,7 +33,23 @@ def estimate_order(
     content: bytes,
     pricing_rules: PricingRules,
     max_fragment_chars: int,
+    document_sandbox: DocumentSandbox | None = None,
 ) -> OrderEstimate:
+    if document_sandbox is not None and upload.document_format in {
+        DocumentFormat.TXT,
+        DocumentFormat.DOCX,
+        DocumentFormat.EPUB,
+    }:
+        return _estimate_adapter_plan_from_plan(
+            upload=upload,
+            plan=document_sandbox.plan_translation(
+                document_format=upload.document_format,
+                content=content,
+                max_fragment_chars=max_fragment_chars,
+            ),
+            pricing_rules=pricing_rules,
+        )
+
     if upload.document_format is DocumentFormat.TXT:
         return estimate_txt_order(
             upload=upload,
@@ -77,12 +87,16 @@ def estimate_txt_order(
     if upload.document_format is not DocumentFormat.TXT:
         raise ValueError("TXT estimator can only process TXT uploads")
 
-    text = extract_text_from_txt(content)
-    return _estimate_extracted_text(
-        upload=upload,
-        text=text,
-        pricing_rules=pricing_rules,
+    plan = plan_txt_translation(
+        content=content,
         max_fragment_chars=max_fragment_chars,
+    )
+    return _estimate_adapter_plan(
+        upload=upload,
+        character_count=plan.character_count,
+        estimated_input_tokens=plan.estimated_input_tokens,
+        fragment_count=plan.fragment_count,
+        pricing_rules=pricing_rules,
     )
 
 
@@ -96,24 +110,17 @@ def estimate_docx_order(
     if upload.document_format is not DocumentFormat.DOCX:
         raise ValueError("DOCX estimator can only process DOCX uploads")
 
-    blocks = _extract_docx_blocks(content)
-    text = "\n\n".join(block.text for block in blocks)
-    estimate = _estimate_structured_blocks(
-        upload=upload,
-        text=text,
-        blocks=[
-            StructuredTextBlock(
-                index=index,
-                text=block.text,
-                kind=block.kind,
-                group_id=block.group_id,
-            )
-            for index, block in enumerate(blocks)
-        ],
-        pricing_rules=pricing_rules,
+    plan = plan_docx_translation(
+        content=content,
         max_fragment_chars=max_fragment_chars,
     )
-    return estimate
+    return _estimate_adapter_plan(
+        upload=upload,
+        character_count=plan.character_count,
+        estimated_input_tokens=plan.estimated_input_tokens,
+        fragment_count=plan.fragment_count,
+        pricing_rules=pricing_rules,
+    )
 
 
 def estimate_epub_order(
@@ -126,70 +133,31 @@ def estimate_epub_order(
     if upload.document_format is not DocumentFormat.EPUB:
         raise ValueError("EPUB estimator can only process EPUB uploads")
 
-    blocks = _extract_epub_blocks(content)
-    translation_units = _group_epub_blocks(
-        blocks,
+    plan = plan_epub_translation(
+        content=content,
         max_fragment_chars=max_fragment_chars,
     )
-    translatable_blocks = [
-        block
-        for unit in translation_units
-        for block in unit.blocks
-    ]
-    text = "\n\n".join(block.text for block in translatable_blocks)
-    estimate = _estimate_structured_blocks(
+    return _estimate_adapter_plan(
         upload=upload,
-        text=text,
-        blocks=[
-            StructuredTextBlock(
-                index=index,
-                text=block.text,
-                kind=block.kind,
-                group_id=block.group_id,
-            )
-            for index, block in enumerate(translatable_blocks)
-        ],
+        character_count=plan.character_count,
+        estimated_input_tokens=plan.estimated_input_tokens,
+        fragment_count=plan.fragment_count,
         pricing_rules=pricing_rules,
-        max_fragment_chars=max_fragment_chars,
-    )
-    return estimate
-
-
-def _estimate_extracted_text(
-    *,
-    upload: DocumentUpload,
-    text: str,
-    pricing_rules: PricingRules,
-    max_fragment_chars: int,
-) -> OrderEstimate:
-    text_analysis = estimate_text_volume(text, max_fragment_chars=max_fragment_chars)
-    price_estimate = estimate_price(text_analysis, pricing_rules)
-
-    return OrderEstimate(
-        file_name=upload.file_name,
-        document_format=upload.document_format,
-        character_count=text_analysis.character_count,
-        estimated_input_tokens=price_estimate.estimated_input_tokens,
-        estimated_output_tokens=price_estimate.estimated_output_tokens,
-        fragment_count=text_analysis.fragment_count,
-        price_usd=price_estimate.price_usd,
     )
 
 
-def _estimate_structured_blocks(
+def _estimate_adapter_plan(
     *,
     upload: DocumentUpload,
-    text: str,
-    blocks: list[StructuredTextBlock],
+    character_count: int,
+    estimated_input_tokens: int,
+    fragment_count: int,
     pricing_rules: PricingRules,
-    max_fragment_chars: int,
 ) -> OrderEstimate:
-    units = build_translation_units(blocks, max_fragment_chars=max_fragment_chars)
-    normalized_text = text.strip()
     text_analysis = TextAnalysis(
-        character_count=len(normalized_text),
-        estimated_input_tokens=estimate_unit_input_tokens(units),
-        fragment_count=len(units),
+        character_count=character_count,
+        estimated_input_tokens=estimated_input_tokens,
+        fragment_count=fragment_count,
     )
     price_estimate = estimate_price(text_analysis, pricing_rules)
 
@@ -201,4 +169,19 @@ def _estimate_structured_blocks(
         estimated_output_tokens=price_estimate.estimated_output_tokens,
         fragment_count=text_analysis.fragment_count,
         price_usd=price_estimate.price_usd,
+    )
+
+
+def _estimate_adapter_plan_from_plan(
+    *,
+    upload: DocumentUpload,
+    plan: FormatAdapterPlan,
+    pricing_rules: PricingRules,
+) -> OrderEstimate:
+    return _estimate_adapter_plan(
+        upload=upload,
+        character_count=plan.character_count,
+        estimated_input_tokens=plan.estimated_input_tokens,
+        fragment_count=plan.fragment_count,
+        pricing_rules=pricing_rules,
     )

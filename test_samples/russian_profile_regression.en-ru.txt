@@ -1,10 +1,12 @@
 Russian Translation Regression Sample Pack
 
 Target language: ru
-Purpose: manual and automated QA for English/mixed-source translation into Russian.
+Purpose: manual and automated QA for many-source translation into Russian.
 
 ## ru-ordinary-calque-decision-overview
 Category: ordinary_prose
+Source language: en
+Quality track: precision
 Expected text type: general
 
 Source:
@@ -14,6 +16,16 @@ Expected behavior:
 - Avoid сделал решение.
 - Avoid mechanical высокоуровневый обзор in general prose.
 
+Banned outputs:
+- сделал решение
+- высокоуровневый обзор
+
+Required preservations:
+- system
+
+Reference translation:
+Он принял решение после общего описания системы.
+
 Required prompt terms:
 - made a decision
 - решил
@@ -22,6 +34,8 @@ Required prompt terms:
 
 ## ru-literary-rain-window
 Category: literary
+Source language: en
+Quality track: literary
 Expected text type: literary fiction
 
 Source:
@@ -31,12 +45,26 @@ Expected behavior:
 - Preserve imagery and rhythm.
 - Do not flatten the sentence into neutral explanation.
 
+Banned outputs:
+- Комната удерживала свое дыхание
+- дождь прослеживал
+
+Required preservations:
+- room
+- rain
+- window
+
+Reference translation:
+Комната словно затаила дыхание, пока дождь чертил серебряные линии на стекле.
+
 Required prompt terms:
 - voice, rhythm
 - imagery
 
 ## ru-technical-api-placeholder-callback
 Category: technical
+Source language: en
+Quality track: precision
 Expected text type: technical
 
 Source:
@@ -45,6 +73,18 @@ Set the API endpoint and pass the placeholder token to the callback handler.
 Expected behavior:
 - Preserve API and technical identifiers.
 - Use stable Russian technical terminology or controlled transcription.
+
+Banned outputs:
+- конечная точка API
+- знак-заполнитель
+
+Required preservations:
+- API
+- endpoint
+- callback
+
+Reference translation:
+Укажите API endpoint и передайте токен-плейсхолдер в callback-обработчик.
 
 Required prompt terms:
 - technical documentation
@@ -55,6 +95,8 @@ Required prompt terms:
 
 ## ru-business-acme-obligation
 Category: business_legal
+Source language: en
+Quality track: precision
 Expected text type: business/legal-like
 
 Source:
@@ -64,6 +106,17 @@ Expected behavior:
 - Preserve legal company name and date.
 - Preserve obligation without creative paraphrase.
 
+Banned outputs:
+- обещает
+- когда-нибудь
+
+Required preservations:
+- Acme B.V.
+- 15 March 2026
+
+Reference translation:
+Acme B.V. обязуется предоставить материалы до 15 марта 2026 года в соответствии с настоящим соглашением.
+
 Required prompt terms:
 - formal Russian
 - obligations
@@ -71,6 +124,8 @@ Required prompt terms:
 
 ## ru-scientific-correlation-hedging
 Category: scientific
+Source language: en
+Quality track: precision
 Expected text type: scientific/academic
 
 Source:
@@ -80,6 +135,14 @@ Expected behavior:
 - Preserve hedging.
 - Do not overstate the conclusion.
 
+Banned outputs:
+- доказывают
+- однозначно подтверждают
+
+Required preservations:
+- moderate correlation
+- sample size
+
 Required prompt terms:
 - Preserve claims
 - hedging
@@ -87,6 +150,8 @@ Required prompt terms:
 
 ## ru-journalistic-officials-policy
 Category: journalistic
+Source language: en
+Quality track: precision
 Expected text type: journalistic/publicistic
 
 Source:
@@ -96,6 +161,14 @@ Expected behavior:
 - Preserve attribution.
 - Use readable Russian publicistic rhythm.
 
+Banned outputs:
+- без источника
+- как известно
+
+Required preservations:
+- Officials said
+- public consultations
+
 Required prompt terms:
 - publicistic
 - facts
@@ -103,6 +176,8 @@ Required prompt terms:
 
 ## ru-mixed-language-labels
 Category: mixed_language
+Source language: auto
+Quality track: precision
 Expected text type: mixed/unknown
 
 Source:
@@ -112,12 +187,24 @@ Expected behavior:
 - Translate all human-language segments into Russian.
 - Treat the Polish pangram as an orthographic sample.
 
+Banned outputs:
+- The endpoint failed
+- De klant bevestigde
+
+Required preservations:
+- English:
+- Polski:
+- Nederlands:
+- endpoint
+
 Required prompt terms:
 - conservative general Russian
 - technical and named-entity protections
 
 ## ru-named-entities-maria-openai
 Category: named_entities
+Source language: en
+Quality track: precision
 Expected text type: general
 
 Source:
@@ -127,12 +214,22 @@ Expected behavior:
 - Transliterate ordinary personal names.
 - Preserve brand spelling.
 
+Banned outputs:
+- OpenAI Research команда
+
+Required preservations:
+- Maria Johnson
+- Baker Street
+- OpenAI
+
 Required prompt terms:
 - Transliterate ordinary personal names
 - Preserve brands
 
 ## ru-protected-content-token-url-row
 Category: protected_content
+Source language: en
+Quality track: precision
 Expected text type: technical
 
 Source:
@@ -142,12 +239,23 @@ Expected behavior:
 - Preserve placeholder, URL, and row identifier byte-for-byte.
 - Translate surrounding prose only.
 
+Banned outputs:
+- ${ТОКЕН_API}
+- СТРОКА-001
+
+Required preservations:
+- ${API_TOKEN}
+- https://example.com/v1/items
+- ROW-001
+
 Required prompt terms:
 - Do not add Russian case endings
 - protected markers
 
 ## ru-heading-title-case
 Category: heading_title_case
+Source language: en
+Quality track: precision
 Expected text type: general
 
 Source:
@@ -156,5 +264,294 @@ Translation Quality Roadmap
 Expected behavior:
 - Use Russian sentence-style capitalization.
 
+Banned outputs:
+- Дорожная Карта Качества Перевода
+
+Required preservations:
+- Translation Quality Roadmap
+
 Required prompt terms:
 - natural modern Russian
+
+## ru-uk-literary-door
+Category: literary
+Source language: uk
+Quality track: literary
+Expected text type: general
+
+Source:
+Українська: Вона тихо зачинила двері, і дім знову навчився мовчати.
+
+Expected behavior:
+- Translate Ukrainian prose into natural Russian.
+- Preserve the quiet literary image.
+
+Banned outputs:
+- дом научился молчать
+
+Required preservations:
+- Вона
+- дім
+
+Reference translation:
+Она тихо закрыла дверь, и дом снова научился молчать.
+
+Required prompt terms:
+- Literary Russian quality track
+- voice, rhythm
+
+## ru-pl-orthography-sample
+Category: mixed_language
+Source language: pl
+Quality track: precision
+Expected text type: general
+
+Source:
+Polski: Zażółć gęślą jaźń — próbka polskich znaków.
+
+Expected behavior:
+- Treat Polish pangram text as an orthographic sample.
+- Do not render the pangram as nonsense prose.
+
+Banned outputs:
+- Пожелти гуслью душу
+
+Required preservations:
+- ż
+- ó
+- ł
+- ć
+- ę
+- ś
+- ą
+- ź
+- ń
+
+Reference translation:
+Проверка польских диакритических знаков: ż, ó, ł, ć, ę, ś, ą, ź, ń.
+
+Required prompt terms:
+- Precision Russian quality track
+- structure, code
+
+## ru-nl-business-order
+Category: business_legal
+Source language: nl
+Quality track: precision
+Expected text type: general
+
+Source:
+Nederlands: De klant bevestigde de bestelling en betaalt binnen 14 dagen.
+
+Expected behavior:
+- Translate Dutch business text into clear Russian.
+- Preserve payment timing.
+
+Banned outputs:
+- bestelling
+- binnen 14 dagen
+
+Required preservations:
+- 1
+- 4
+
+Required prompt terms:
+- Precision Russian quality track
+- dates, numbers
+
+## ru-de-scientific-results
+Category: scientific
+Source language: de
+Quality track: precision
+Expected text type: general
+
+Source:
+Deutsch: Die Ergebnisse deuten auf einen moderaten Zusammenhang hin, aber die Stichprobe ist klein.
+
+Expected behavior:
+- Preserve scientific hedging.
+- Do not overstate German source claims.
+
+Banned outputs:
+- доказывают
+- Zusammenhang
+
+Required preservations:
+- moderaten
+- Stichprobe
+
+Required prompt terms:
+- Precision Russian quality track
+- terminology
+
+## ru-fr-hotel-price
+Category: ordinary_prose
+Source language: fr
+Quality track: precision
+Expected text type: general
+
+Source:
+Français: Où est l’hôtel? Cela coûte 1 234,56 € aujourd’hui.
+
+Expected behavior:
+- Translate French question naturally.
+- Preserve amount and currency.
+
+Banned outputs:
+- Où est
+- coûte
+
+Required preservations:
+- 1 234,56 €
+
+Required prompt terms:
+- Precision Russian quality track
+- dates, numbers
+
+## ru-es-marketing-claim
+Category: technical
+Source language: es
+Quality track: precision
+Expected text type: general
+
+Source:
+Español: La versión beta mejora la velocidad un 20 %, sin cambiar la API pública.
+
+Expected behavior:
+- Preserve measured claim without exaggeration.
+- Preserve API spelling.
+
+Banned outputs:
+- гарантирует
+- API pública
+
+Required preservations:
+- 20 %
+- API
+
+Required prompt terms:
+- Precision Russian quality track
+- URLs, IDs
+
+## ru-zh-placeholder-variable
+Category: protected_content
+Source language: zh
+Quality track: precision
+Expected text type: technical
+
+Source:
+中文: 请保留变量 ${API_TOKEN}，并将说明翻译成俄语。
+
+Expected behavior:
+- Translate Chinese instruction text into Russian.
+- Preserve placeholder exactly.
+
+Banned outputs:
+- 请保留变量
+- ${ТОКЕН_API}
+
+Required preservations:
+- ${API_TOKEN}
+
+Required prompt terms:
+- Precision Russian quality track
+- placeholders
+
+## ru-ja-product-name
+Category: named_entities
+Source language: ja
+Quality track: precision
+Expected text type: general
+
+Source:
+日本語: OpenAI Research は新しいモデル ID GPT-5.4 を発表しました。
+
+Expected behavior:
+- Translate Japanese sentence into Russian.
+- Preserve brand and model identifier.
+
+Banned outputs:
+- 発表しました
+- ОпенАИ
+
+Required preservations:
+- OpenAI Research
+- GPT-5.4
+
+Required prompt terms:
+- Preserve brands
+- Precision Russian quality track
+
+## ru-ko-ui-label
+Category: technical
+Source language: ko
+Quality track: precision
+Expected text type: general
+
+Source:
+한국어: 설정 화면에서 callback URL을 입력하고 저장을 누르세요.
+
+Expected behavior:
+- Translate Korean UI instruction into Russian.
+- Preserve callback URL term.
+
+Banned outputs:
+- 설정 화면
+- 저장을
+
+Required preservations:
+- callback URL
+
+Required prompt terms:
+- callback
+- Precision Russian quality track
+
+## ru-he-rtl-greeting
+Category: ordinary_prose
+Source language: he
+Quality track: precision
+Expected text type: general
+
+Source:
+עברית: שלום עולם — זהו טקסט קצר בתוך מסמך מעורב.
+
+Expected behavior:
+- Translate Hebrew RTL text into Russian.
+- Do not leave sentence-length RTL text untranslated.
+
+Banned outputs:
+- שלום עולם
+- טקסט קצר
+
+Required preservations:
+- עברית:
+
+Required prompt terms:
+- Precision Russian quality track
+- structure
+
+## ru-ar-contract-signed
+Category: business_legal
+Source language: ar
+Quality track: precision
+Expected text type: general
+
+Source:
+العربية: تم توقيع العقد في 5 مايو 2026 ويجب حفظ رقم المستند DOC-77.
+
+Expected behavior:
+- Translate Arabic legal-like text into Russian.
+- Preserve date and document identifier.
+
+Banned outputs:
+- تم توقيع
+- رقم المستند
+
+Required preservations:
+- 5
+- 2026
+- DOC-77
+
+Required prompt terms:
+- Precision Russian quality track
+- legal obligations

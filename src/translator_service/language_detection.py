@@ -37,7 +37,9 @@ def detect_language_from_text(text: str) -> DetectedLanguage | None:
 
     cyrillic_count = len(re.findall(r"[а-яё]", joined))
     latin_count = len(re.findall(r"[a-záéíóúüñàâçèêëîïôûùüÿœæ]", joined))
-    if cyrillic_count > latin_count:
+    if cyrillic_count > latin_count or (
+        cyrillic_count >= 40 and cyrillic_count >= latin_count * 0.8
+    ):
         return DetectedLanguage(code="ru", name="Russian")
 
     scores = _latin_language_scores(letters)
@@ -119,6 +121,7 @@ def format_detected_source_language(
     return format_detected_source_languages(
         requested_source_language=requested_source_language,
         detected_languages=[detected_language],
+        primary_language=detected_language,
     )
 
 
@@ -126,6 +129,7 @@ def format_detected_source_languages(
     *,
     requested_source_language: str,
     detected_languages: list[DetectedLanguage],
+    primary_language: DetectedLanguage | None = None,
 ) -> str:
     if requested_source_language != "auto":
         return requested_source_language
@@ -134,10 +138,20 @@ def format_detected_source_languages(
         return "auto (unknown)"
 
     if len(detected_languages) == 1:
-        return f"auto ({detected_languages[0].name})"
+        return detected_languages[0].name
 
-    names = ", ".join(language.name for language in detected_languages)
-    return f"auto (mixed: {names})"
+    primary = (
+        primary_language
+        if primary_language in detected_languages
+        else detected_languages[0]
+    )
+    admixtures = [
+        language.name for language in detected_languages if language.code != primary.code
+    ]
+    if not admixtures:
+        return primary.name
+
+    return f"{primary.name} (admixtures: {', '.join(admixtures)})"
 
 
 def _word_score(words: list[str], dictionary: set[str]) -> int:

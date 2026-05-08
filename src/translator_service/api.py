@@ -1,7 +1,4 @@
-from pathlib import Path
-
 from translator_service.config import Settings
-from translator_service.job_store_factory import create_translation_job_store
 
 
 def health_payload(settings: Settings | None = None) -> dict[str, str]:
@@ -12,36 +9,17 @@ def health_payload(settings: Settings | None = None) -> dict[str, str]:
     }
 
 
-def readiness_payload(settings: Settings | None = None) -> dict[str, str]:
-    active_settings = settings or Settings()
-    storage_root = Path(active_settings.object_storage_root)
-    storage_root.mkdir(parents=True, exist_ok=True)
-    probe_path = storage_root / ".ready"
-    probe_path.write_text("ok", encoding="utf-8")
-    probe_path.unlink(missing_ok=True)
-
-    store = create_translation_job_store(active_settings)
-    store.close()
-
-    return {
-        "service": active_settings.service_name,
-        "status": "ready",
-        "object_storage": "ok",
-        "job_store": "ok",
-    }
-
-
-def create_app():
+def create_app(settings: Settings | None = None):
     from fastapi import FastAPI
 
-    app = FastAPI(title=Settings().service_name)
+    from translator_service.admin.routes import create_admin_router
+
+    active_settings = settings or Settings()
+    app = FastAPI(title=active_settings.service_name)
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return health_payload()
+        return health_payload(active_settings)
 
-    @app.get("/ready")
-    def ready() -> dict[str, str]:
-        return readiness_payload()
-
+    app.include_router(create_admin_router(active_settings))
     return app

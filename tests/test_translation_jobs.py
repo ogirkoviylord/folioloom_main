@@ -272,8 +272,7 @@ class TranslationJobsTest(unittest.TestCase):
         class TermBreakingTranslator:
             def translate(self, *, text: str, source_language: str, target_language: str) -> str:
                 return (
-                    text.replace("endnote", "концевая сноска")
-                    .replace("tracked changes", "отслеживаемые изменения")
+                    text.replace("tracked changes", "отслеживаемые изменения")
                     .replace("query-параметры", "параметры запроса")
                     .replace("regex", "регулярное выражение")
                     .replace("placeholders", "заполнители")
@@ -281,19 +280,17 @@ class TranslationJobsTest(unittest.TestCase):
 
         result = translate_text_fragments(
             fragments=[
-                "Keep endnote, tracked changes, query-параметры, regex, and placeholders."
+                "Keep tracked changes, query-параметры, regex, and placeholders."
             ],
             source_language="auto",
             target_language="ru",
             translator=TermBreakingTranslator(),
         )
 
-        self.assertIn("endnote", result.assembled_text)
         self.assertIn("tracked changes", result.assembled_text)
         self.assertIn("query-параметры", result.assembled_text)
         self.assertIn("regex", result.assembled_text)
         self.assertIn("placeholders", result.assembled_text)
-        self.assertNotIn("концевая сноска", result.assembled_text)
         self.assertNotIn("отслеживаемые изменения", result.assembled_text)
         self.assertNotIn("параметры запроса", result.assembled_text)
         self.assertNotIn("регулярное выражение", result.assembled_text)

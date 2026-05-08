@@ -1,7 +1,7 @@
 import html
 from pathlib import PurePath
 
-from translator_service.bot_translation_service import PendingTranslation
+from translator_service.bot.activity_phrases import get_activity_phrases
 from translator_service.documents import (
     EmptyDocumentError,
     FileTooLargeError,
@@ -9,12 +9,15 @@ from translator_service.documents import (
 )
 from translator_service.extractors import TextExtractionError
 from translator_service.job_runner import TranslationJob, TranslationJobStatus
+from translator_service.bot_translation_service import PendingTranslation
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     language_code_for_name,
     localized_language_name_for_code,
 )
 from translator_service.order_estimates import OrderEstimate
+from translator_service.security_telemetry import SecurityCooldownActive
+
 
 CONFIRM_TRANSLATION_TEXT = "Start Translation"
 SUPPORTED_TRANSLATION_FORMATS = ("EPUB", "DOCX", "TXT")
@@ -26,6 +29,7 @@ MESSAGES = {
     "en": {
         "main_menu": [
             "📖 Translate a Book",
+            "📚 My Books",
             "🧵 How It Works",
             "🌍 Language",
             "⚙️ Settings",
@@ -49,20 +53,22 @@ MESSAGES = {
         ),
         "help": (
             "Help\n\n"
-            "FolioLoom translates books, chapters, and manuscripts into other languages.\n\n"
-            "How it works:\n"
-            "1. Send a supported file.\n"
-            "2. Choose the target language.\n"
-            "3. Confirm the settings.\n"
-            "4. Download the translated result.\n\n"
-            "For best results, use clean {formats} files and review the final translation before publishing.\n\n"
+            "FolioLoom is for translating books, chapters, and manuscripts.\n\n"
+            "Good to know:\n"
+            "- Use clean {formats} files.\n"
+            "- Very large books may take time.\n"
+            "- Split difficult manuscripts into chapters if needed.\n"
+            "- Review the final translation before publishing.\n\n"
             "Only upload texts you own or have permission to translate."
         ),
         "how_it_works": (
             "How FolioLoom Works\n\n"
-            "FolioLoom reads your book, keeps the structure, and prepares a translation into the language you choose.\n\n"
-            "It is designed for books, chapters, manuscripts, and long-form texts.\n\n"
-            "For publication-quality work, always review the final translation with an editor."
+            "1. Send a supported book, chapter, or manuscript.\n"
+            "2. Choose the language for the translation.\n"
+            "3. Review the estimate and settings.\n"
+            "4. Start the translation.\n"
+            "5. Download the result when it is ready.\n\n"
+            "I keep chapters, paragraphs, and document structure as carefully as the current file allows."
         ),
         "interface_language_prompt": "Language\n\nChoose interface language:",
         "interface_language_selected": "Interface language: {language_text}.",
@@ -72,8 +78,49 @@ MESSAGES = {
         "settings_preview_on": "On",
         "settings_preview_off": "Off",
         "settings_language": "Interface language",
+        "my_books_title": "My Books",
+        "my_books_empty": "No books yet. Send a book or manuscript to start your first translation.",
+        "my_books_download_hint": "Open a book below to view status, continue, or download.",
+        "last_book": "Last Book",
+        "book_button": "Book {index}",
+        "back_to_my_books": "Back to My Books",
+        "book_detail_title": "Book Details",
+        "book_detail_file": "File",
+        "book_detail_format": "Format",
+        "book_detail_language": "Language",
+        "book_detail_status": "Status",
+        "book_detail_result": "Result",
+        "book_detail_updated": "Updated",
+        "final_download_available": "Final download available",
+        "partial_download_available": "Partial download available",
+        "resume_available": "This translation can be continued from saved progress.",
+        "resume_unavailable": "This translation cannot be continued right now.",
+        "download_available": "download available",
+        "download_missing": "no download yet",
+        "download_book": "Download {index}",
+        "download_translation": "Download Translation",
+        "continue_translation": "Continue Translation",
+        "delete_book": "Delete Book",
+        "confirm_delete_book": "Yes, Delete Book",
+        "keep_book": "Keep Book",
+        "delete_book_confirm": "Delete this book?\n\nThis removes {file_name} from My Books and deletes its stored files from FolioLoom. This cannot be undone.",
+        "book_deleted": "Book deleted.",
+        "delete_unavailable": "This book could not be deleted.",
+        "download_unavailable": "This file is not available for download yet.",
+        "status_queued": "Queued",
+        "status_translating": "Translating",
+        "status_assembling": "Assembling",
+        "status_partial": "Partial",
+        "status_cancel_requested": "Stopping",
+        "status_cancelled": "Cancelled",
+        "status_interrupted": "Interrupted",
+        "status_failed": "Failed",
+        "status_ready": "Ready",
+        "status_expired": "Expired",
         "hide_preview": "Hide Preview",
         "show_preview": "Show Preview",
+        "reset_settings": "Reset Settings",
+        "settings_reset": "Settings have been reset. Please choose interface language again.",
         "translation_language_prompt": (
             "File received.\n\n"
             "Title: {file_name}\n"
@@ -82,16 +129,9 @@ MESSAGES = {
             "Choose the target language."
         ),
         "original_language": "Source language",
+        "source_language_with_admixtures": "{primary}; admixtures: {admixtures}",
         "progress": "Translation progress",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "Turning the next page",
-            "Keeping chapters in order",
-            "The commas are behaving",
-            "Following the author’s voice",
-            "Preparing the next passage",
-            "Working through the text",
-        ),
         "back": "Back",
         "back_to_menu": "Returning to the Main menu.",
         "cancel": "Cancel",
@@ -100,8 +140,8 @@ MESSAGES = {
         "time_left": "Time left",
         "estimated_time": "Estimated time",
         "time_unknown": "estimating",
-        "last_fragment": "Last translated fragment",
-        "cancel_requested": "Stopping translation after the current fragment.",
+        "last_fragment": "Latest translated passage",
+        "cancel_requested": "Stopping translation after the current passage.",
         "nothing_to_cancel": "There is no active translation to stop.",
         "no_pending_translation": "There is no translation waiting for confirmation.",
         "estimate_title": "Translation estimate",
@@ -110,7 +150,6 @@ MESSAGES = {
         "file": "File",
         "format": "Format",
         "characters": "Characters",
-        "fragments": "Fragments",
         "tokens": "Estimated tokens",
         "price": "Price",
         "from": "From",
@@ -118,9 +157,10 @@ MESSAGES = {
         "preservation_note": "I’ll preserve chapters, paragraphs, and as much formatting as the current file allows.",
         "confirm_instruction": "Press “{confirm_text}” to start translation.",
         "queue_instruction": "Press “{confirm_text}” to queue translation.",
-        "queued": "Translation has started: {file_name}.\n\nYou can leave the bot. Progress is saved.",
+        "queued": "Your translation is queued: {file_name}.",
         "translating": "Your translation is in progress: {file_name}.",
         "ready": "Your translation is ready.\n\nYou can download the translated file below: {result_name}.",
+        "partial": "Translation finished with skipped passages.\n\nPartial result: {result_name}.\n\nSome problematic passages were kept in the original language. You can retry them later without uploading the file again.",
         "cancelled": "Translation cancelled.\n\nPartial result: {result_name}.",
         "failed": "Something went wrong while translating.\n\nYour file is safe. Please try again, or return to the main menu.",
         "status": "Translation status: {status}",
@@ -142,6 +182,10 @@ MESSAGES = {
             "Something went wrong while translating.\n\n"
             "Your file is safe. Please try again, or return to the main menu."
         ),
+        "security_cooldown": (
+            "For safety, new translations are temporarily paused for this account.\n\n"
+            "Please try again later."
+        ),
         "unknown_text": (
             "Send a book, chapter, or manuscript to begin, or choose an option from the menu."
         ),
@@ -149,6 +193,7 @@ MESSAGES = {
     "ru": {
         "main_menu": [
             "📖 Перевести книгу",
+            "📚 Мои книги",
             "🧵 Как это работает",
             "🌍 Язык",
             "⚙️ Настройки",
@@ -172,31 +217,74 @@ MESSAGES = {
         ),
         "help": (
             "Помощь\n\n"
-            "FolioLoom переводит книги, главы и рукописи на другие языки.\n\n"
-            "Как это работает:\n"
-            "1. Отправьте поддерживаемый файл.\n"
-            "2. Выберите язык перевода.\n"
-            "3. Подтвердите настройки.\n"
-            "4. Скачайте готовый перевод.\n\n"
-            "Для лучшего результата используйте чистые файлы {formats} и проверьте перевод перед публикацией.\n\n"
+            "FolioLoom создан для перевода книг, глав и рукописей.\n\n"
+            "Полезно знать:\n"
+            "- Используйте чистые файлы {formats}.\n"
+            "- Очень большие книги могут переводиться дольше.\n"
+            "- Сложные рукописи при необходимости лучше делить на главы.\n"
+            "- Перед публикацией проверьте финальный перевод.\n\n"
             "Загружайте только тексты, которые принадлежат вам или на перевод которых у вас есть разрешение."
         ),
         "how_it_works": (
             "Как работает FolioLoom\n\n"
-            "FolioLoom читает книгу, сохраняет структуру и готовит перевод на выбранный язык.\n\n"
-            "Сервис создан для книг, глав, рукописей и длинных текстов.\n\n"
-            "Для публикационного качества всегда проверяйте финальный перевод с редактором."
+            "1. Отправьте поддерживаемую книгу, главу или рукопись.\n"
+            "2. Выберите язык перевода.\n"
+            "3. Проверьте оценку и настройки.\n"
+            "4. Запустите перевод.\n"
+            "5. Скачайте результат, когда он будет готов.\n\n"
+            "Я сохраняю главы, абзацы и структуру документа настолько бережно, насколько позволяет исходный файл."
         ),
         "interface_language_prompt": "Язык\n\nВыберите язык интерфейса:",
         "interface_language_selected": "Язык интерфейса: {language_text}.",
         "settings_title": "Настройки",
         "settings_body": "Выберите, как FolioLoom будет работать для вас.",
-        "settings_preview": "Последний фрагмент",
+        "settings_preview": "Последний отрывок",
         "settings_preview_on": "включен",
         "settings_preview_off": "выключен",
         "settings_language": "Язык интерфейса",
-        "hide_preview": "Скрыть фрагмент",
-        "show_preview": "Показывать фрагмент",
+        "my_books_title": "Мои книги",
+        "my_books_empty": "Книг пока нет. Отправьте книгу или рукопись, чтобы начать первый перевод.",
+        "my_books_download_hint": "Откройте книгу ниже, чтобы посмотреть статус, продолжить или скачать перевод.",
+        "last_book": "Последняя книга",
+        "book_button": "Книга {index}",
+        "back_to_my_books": "Назад к моим книгам",
+        "book_detail_title": "Карточка книги",
+        "book_detail_file": "Файл",
+        "book_detail_format": "Формат",
+        "book_detail_language": "Язык",
+        "book_detail_status": "Статус",
+        "book_detail_result": "Результат",
+        "book_detail_updated": "Обновлено",
+        "final_download_available": "Финальный файл доступен для скачивания",
+        "partial_download_available": "Частичный файл доступен для скачивания",
+        "resume_available": "Этот перевод можно продолжить с сохраненного места.",
+        "resume_unavailable": "Этот перевод сейчас нельзя продолжить.",
+        "download_available": "можно скачать",
+        "download_missing": "файла пока нет",
+        "download_book": "Скачать {index}",
+        "download_translation": "Скачать перевод",
+        "continue_translation": "Продолжить перевод",
+        "delete_book": "Удалить книгу",
+        "confirm_delete_book": "Да, удалить книгу",
+        "keep_book": "Оставить книгу",
+        "delete_book_confirm": "Удалить эту книгу?\n\n{file_name} исчезнет из «Моих книг», а сохраненные файлы будут удалены с сервера FolioLoom. Это нельзя отменить.",
+        "book_deleted": "Книга удалена.",
+        "delete_unavailable": "Эту книгу не получилось удалить.",
+        "download_unavailable": "Этот файл пока нельзя скачать.",
+        "status_queued": "В очереди",
+        "status_translating": "Переводится",
+        "status_assembling": "Собирается",
+        "status_partial": "Частичный",
+        "status_cancel_requested": "Останавливается",
+        "status_cancelled": "Отменен",
+        "status_interrupted": "Прерван",
+        "status_failed": "Ошибка",
+        "status_ready": "Готов",
+        "status_expired": "Истек",
+        "hide_preview": "Скрыть отрывок",
+        "show_preview": "Показывать отрывок",
+        "reset_settings": "Сбросить настройки",
+        "settings_reset": "Настройки сброшены. Выберите язык интерфейса заново.",
         "translation_language_prompt": (
             "Файл получен.\n\n"
             "Название: {file_name}\n"
@@ -205,16 +293,9 @@ MESSAGES = {
             "Теперь выберите язык перевода."
         ),
         "original_language": "Язык оригинала",
+        "source_language_with_admixtures": "{primary}; примеси: {admixtures}",
         "progress": "Прогресс перевода",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "Переворачиваю следующую страницу",
-            "Главы остаются на своих местах",
-            "Запятые ведут себя прилично",
-            "Бережно веду голос автора",
-            "Готовлю следующий фрагмент",
-            "Перевожу текст",
-        ),
         "back": "Назад",
         "back_to_menu": "Возвращаемся в главное меню.",
         "cancel": "Отмена",
@@ -223,8 +304,8 @@ MESSAGES = {
         "time_left": "Осталось",
         "estimated_time": "Примерное время",
         "time_unknown": "уточняется",
-        "last_fragment": "Последний переведенный фрагмент",
-        "cancel_requested": "Останавливаю перевод после текущего фрагмента.",
+        "last_fragment": "Последний переведенный отрывок",
+        "cancel_requested": "Останавливаю перевод после текущего отрывка.",
         "nothing_to_cancel": "Сейчас нет активного перевода для остановки.",
         "no_pending_translation": "Нет перевода, который ожидает подтверждения.",
         "estimate_title": "Оценка перевода",
@@ -233,7 +314,6 @@ MESSAGES = {
         "file": "Файл",
         "format": "Формат",
         "characters": "Символов",
-        "fragments": "Фрагментов",
         "tokens": "Примерные токены",
         "price": "Цена",
         "from": "С языка",
@@ -241,9 +321,10 @@ MESSAGES = {
         "preservation_note": "Я сохраню главы, абзацы и форматирование настолько, насколько позволяет исходный файл.",
         "confirm_instruction": "Нажмите «{confirm_text}», чтобы начать перевод.",
         "queue_instruction": "Нажмите «{confirm_text}», чтобы поставить перевод в очередь.",
-        "queued": "Перевод запущен: {file_name}.\n\nМожете выйти из бота. Прогресс сохранен.",
+        "queued": "Перевод в очереди: {file_name}.",
         "translating": "Перевод выполняется: {file_name}.",
         "ready": "Перевод готов.\n\nВы можете скачать файл ниже: {result_name}.",
+        "partial": "Перевод завершен с пропущенными отрывками.\n\nЧастичный результат: {result_name}.\n\nПроблемные отрывки оставлены в оригинале. Позже их можно будет повторить без новой загрузки файла.",
         "cancelled": "Перевод отменен.\n\nЧастичный результат: {result_name}.",
         "failed": "Во время перевода что-то пошло не так.\n\nФайл не потерян. Попробуйте еще раз или вернитесь в главное меню.",
         "status": "Статус перевода: {status}",
@@ -275,6 +356,7 @@ for _language_code, _fallbacks in {
     "uk": {
         "main_menu": [
             "📖 Перекласти книгу",
+            "📚 Мої книги",
             "🧵 Як це працює",
             "🌍 Мова",
             "⚙️ Налаштування",
@@ -290,14 +372,56 @@ for _language_code, _fallbacks in {
         "interface_language_selected": "Мова інтерфейсу: {language_text}.",
         "settings_title": "Налаштування",
         "settings_body": "Оберіть, як FolioLoom працюватиме для вас.",
-        "settings_preview": "Останній фрагмент",
+        "settings_preview": "Останній уривок",
         "settings_preview_on": "увімкнено",
         "settings_preview_off": "вимкнено",
         "settings_language": "Мова інтерфейсу",
-        "hide_preview": "Сховати фрагмент",
-        "show_preview": "Показувати фрагмент",
+        "my_books_title": "Мої книги",
+        "my_books_empty": "Книг ще немає. Надішліть книгу або рукопис, щоб почати перший переклад.",
+        "my_books_download_hint": "Відкрийте книгу нижче, щоб переглянути статус, продовжити або завантажити переклад.",
+        "last_book": "Остання книга",
+        "book_button": "Книга {index}",
+        "back_to_my_books": "Назад до моїх книг",
+        "book_detail_title": "Картка книги",
+        "book_detail_file": "Файл",
+        "book_detail_format": "Формат",
+        "book_detail_language": "Мова",
+        "book_detail_status": "Статус",
+        "book_detail_result": "Результат",
+        "book_detail_updated": "Оновлено",
+        "final_download_available": "Фінальний файл доступний для завантаження",
+        "partial_download_available": "Частковий файл доступний для завантаження",
+        "resume_available": "Цей переклад можна продовжити зі збереженого місця.",
+        "resume_unavailable": "Цей переклад зараз не можна продовжити.",
+        "download_available": "можна завантажити",
+        "download_missing": "файла ще немає",
+        "download_book": "Завантажити {index}",
+        "download_translation": "Завантажити переклад",
+        "continue_translation": "Продовжити переклад",
+        "delete_book": "Видалити книгу",
+        "confirm_delete_book": "Так, видалити книгу",
+        "keep_book": "Залишити книгу",
+        "delete_book_confirm": "Видалити цю книгу?\n\n{file_name} зникне з «Моїх книг», а збережені файли буде видалено із сервера FolioLoom. Це не можна скасувати.",
+        "book_deleted": "Книгу видалено.",
+        "delete_unavailable": "Цю книгу не вдалося видалити.",
+        "download_unavailable": "Цей файл ще не можна завантажити.",
+        "status_queued": "У черзі",
+        "status_translating": "Перекладається",
+        "status_assembling": "Збирається",
+        "status_partial": "Частковий",
+        "status_cancel_requested": "Зупиняється",
+        "status_cancelled": "Скасовано",
+        "status_interrupted": "Перервано",
+        "status_failed": "Помилка",
+        "status_ready": "Готово",
+        "status_expired": "Строк минув",
+        "hide_preview": "Сховати уривок",
+        "show_preview": "Показувати уривок",
+        "reset_settings": "Скинути налаштування",
+        "settings_reset": "Налаштування скинуто. Виберіть мову інтерфейсу знову.",
         "translation_language_prompt": "Файл отримано.\n\nНазва: {file_name}\nФормат: {file_format}\n{source_language_line}\nТепер виберіть мову перекладу.",
         "original_language": "Мова оригіналу",
+        "source_language_with_admixtures": "{primary}; домішки: {admixtures}",
         "back": "Назад",
         "back_to_menu": "Повертаємося до головного меню.",
         "cancel": "Скасувати",
@@ -306,25 +430,17 @@ for _language_code, _fallbacks in {
         "from": "З мови",
         "to": "Мовою",
         "formats": "Підтримувані формати: {formats}.",
-        "help": "Допомога\n\nFolioLoom перекладає книги, розділи та рукописи іншими мовами.\n\nЯк це працює:\n1. Надішліть підтримуваний файл.\n2. Виберіть мову перекладу.\n3. Підтвердьте налаштування.\n4. Завантажте готовий переклад.\n\nДля найкращого результату використовуйте чисті файли {formats} і перевіряйте фінальний переклад перед публікацією.\n\nЗавантажуйте лише тексти, які належать вам або які ви маєте право перекладати.",
-        "how_it_works": "Як працює FolioLoom\n\nFolioLoom читає книгу, зберігає структуру й готує переклад вибраною мовою.\n\nСервіс створений для книг, розділів, рукописів і довгих текстів.\n\nДля публікаційної якості завжди перевіряйте фінальний переклад з редактором.",
+        "help": "Допомога\n\nFolioLoom створений для перекладу книг, розділів і рукописів.\n\nКорисно знати:\n- Використовуйте чисті файли {formats}.\n- Дуже великі книги можуть перекладатися довше.\n- Складні рукописи за потреби краще ділити на розділи.\n- Перед публікацією перевіряйте фінальний переклад.\n\nЗавантажуйте лише тексти, які належать вам або які ви маєте право перекладати.",
+        "how_it_works": "Як працює FolioLoom\n\n1. Надішліть підтримувану книгу, розділ або рукопис.\n2. Виберіть мову перекладу.\n3. Перевірте оцінку та налаштування.\n4. Запустіть переклад.\n5. Завантажте результат, коли він буде готовий.\n\nЯ зберігаю розділи, абзаци й структуру документа настільки дбайливо, наскільки дозволяє початковий файл.",
         "progress": "Прогрес перекладу",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "Гортаю наступну сторінку",
-            "Розділи тримаються купи",
-            "Коми поводяться чемно",
-            "Бережу голос автора",
-            "Готую наступний фрагмент",
-            "Перекладаю текст",
-        ),
         "cancel_hint": "Щоб зупинити переклад, натисніть «{cancel_text}» або надішліть /cancel.",
         "elapsed": "Минуло",
         "time_left": "Залишилось",
         "estimated_time": "Орієнтовний час",
         "time_unknown": "уточнюється",
-        "last_fragment": "Останній перекладений фрагмент",
-        "cancel_requested": "Зупиняю переклад після поточного фрагмента.",
+        "last_fragment": "Останній перекладений уривок",
+        "cancel_requested": "Зупиняю переклад після поточного уривка.",
         "nothing_to_cancel": "Зараз немає активного перекладу для зупинки.",
         "no_pending_translation": "Немає перекладу, який очікує підтвердження.",
         "estimate_title": "Оцінка перекладу",
@@ -332,15 +448,15 @@ for _language_code, _fallbacks in {
         "file": "Файл",
         "format": "Формат",
         "characters": "Символів",
-        "fragments": "Фрагментів",
         "tokens": "Орієнтовні токени",
         "price": "Ціна",
         "preservation_note": "Я збережу розділи, абзаци й форматування настільки, наскільки це дозволяє початковий файл.",
         "confirm_instruction": "Натисніть «{confirm_text}», щоб почати переклад.",
         "queue_instruction": "Натисніть «{confirm_text}», щоб поставити переклад у чергу.",
-        "queued": "Переклад запущено: {file_name}.\n\nМожете вийти з бота. Прогрес збережено.",
+        "queued": "Переклад у черзі: {file_name}.",
         "translating": "Переклад виконується: {file_name}.",
         "ready": "Переклад готовий.\n\nВи можете завантажити файл нижче: {result_name}.",
+        "partial": "Переклад завершено з пропущеними уривками.\n\nЧастковий результат: {result_name}.\n\nПроблемні уривки залишено в оригіналі. Пізніше їх можна буде повторити без нового завантаження файлу.",
         "cancelled": "Переклад скасовано.\n\nЧастковий результат: {result_name}.",
         "failed": "Під час перекладу щось пішло не так.\n\nФайл не втрачено. Спробуйте ще раз або поверніться до головного меню.",
         "status": "Статус перекладу: {status}",
@@ -354,6 +470,7 @@ for _language_code, _fallbacks in {
     "fr": {
         "main_menu": [
             "📖 Traduire un livre",
+            "📚 Mes livres",
             "🧵 Fonctionnement",
             "🌍 Langue",
             "⚙️ Réglages",
@@ -373,10 +490,52 @@ for _language_code, _fallbacks in {
         "settings_preview_on": "activé",
         "settings_preview_off": "désactivé",
         "settings_language": "Langue de l’interface",
+        "my_books_title": "Mes livres",
+        "my_books_empty": "Aucun livre pour le moment. Envoyez un livre ou un manuscrit pour lancer votre première traduction.",
+        "my_books_download_hint": "Ouvrez un livre ci-dessous pour voir son statut, continuer ou télécharger.",
+        "last_book": "Dernier livre",
+        "book_button": "Livre {index}",
+        "back_to_my_books": "Retour à Mes livres",
+        "book_detail_title": "Détails du livre",
+        "book_detail_file": "Fichier",
+        "book_detail_format": "Format",
+        "book_detail_language": "Langue",
+        "book_detail_status": "Statut",
+        "book_detail_result": "Résultat",
+        "book_detail_updated": "Mis à jour",
+        "final_download_available": "Téléchargement final disponible",
+        "partial_download_available": "Téléchargement partiel disponible",
+        "resume_available": "Cette traduction peut reprendre depuis la progression enregistrée.",
+        "resume_unavailable": "Cette traduction ne peut pas être reprise pour le moment.",
+        "download_available": "téléchargement disponible",
+        "download_missing": "pas encore de fichier",
+        "download_book": "Télécharger {index}",
+        "download_translation": "Télécharger la traduction",
+        "continue_translation": "Continuer la traduction",
+        "delete_book": "Supprimer le livre",
+        "confirm_delete_book": "Oui, supprimer",
+        "keep_book": "Garder le livre",
+        "delete_book_confirm": "Supprimer ce livre ?\n\n{file_name} sera retiré de Mes livres et ses fichiers enregistrés seront supprimés du serveur FolioLoom. Cette action est définitive.",
+        "book_deleted": "Livre supprimé.",
+        "delete_unavailable": "Ce livre n’a pas pu être supprimé.",
+        "download_unavailable": "Ce fichier n’est pas encore disponible au téléchargement.",
+        "status_queued": "En file d’attente",
+        "status_translating": "En traduction",
+        "status_assembling": "Assemblage",
+        "status_partial": "Partiel",
+        "status_cancel_requested": "Arrêt en cours",
+        "status_cancelled": "Annulée",
+        "status_interrupted": "Interrompue",
+        "status_failed": "Échec",
+        "status_ready": "Prête",
+        "status_expired": "Expirée",
         "hide_preview": "Masquer l’aperçu",
         "show_preview": "Afficher l’aperçu",
+        "reset_settings": "Réinitialiser les réglages",
+        "settings_reset": "Les réglages ont été réinitialisés. Choisissez de nouveau la langue de l’interface.",
         "translation_language_prompt": "Fichier reçu.\n\nTitre : {file_name}\nFormat : {file_format}\n{source_language_line}\nChoisissez maintenant la langue de traduction.",
         "original_language": "Langue source",
+        "source_language_with_admixtures": "{primary}; éléments mêlés : {admixtures}",
         "back": "Retour",
         "back_to_menu": "Retour au menu principal.",
         "cancel": "Annuler",
@@ -385,25 +544,17 @@ for _language_code, _fallbacks in {
         "from": "Depuis",
         "to": "Vers",
         "formats": "Formats pris en charge : {formats}.",
-        "help": "Aide\n\nFolioLoom traduit des livres, chapitres et manuscrits vers d’autres langues.\n\nFonctionnement :\n1. Envoyez un fichier pris en charge.\n2. Choisissez la langue cible.\n3. Confirmez les réglages.\n4. Téléchargez le résultat traduit.\n\nPour de meilleurs résultats, utilisez des fichiers {formats} propres et relisez la traduction avant publication.\n\nN’envoyez que des textes qui vous appartiennent ou que vous avez le droit de traduire.",
-        "how_it_works": "Comment fonctionne FolioLoom\n\nFolioLoom lit votre livre, conserve sa structure et prépare une traduction dans la langue choisie.\n\nIl est conçu pour les livres, chapitres, manuscrits et textes longs.\n\nPour une qualité de publication, relisez toujours la traduction finale avec un éditeur.",
+        "help": "Aide\n\nFolioLoom est conçu pour traduire des livres, chapitres et manuscrits.\n\nÀ savoir :\n- Utilisez des fichiers {formats} propres.\n- Les très grands livres peuvent prendre du temps.\n- Si besoin, divisez les manuscrits difficiles en chapitres.\n- Relisez la traduction finale avant publication.\n\nN’envoyez que des textes qui vous appartiennent ou que vous avez le droit de traduire.",
+        "how_it_works": "Comment fonctionne FolioLoom\n\n1. Envoyez un livre, un chapitre ou un manuscrit pris en charge.\n2. Choisissez la langue de traduction.\n3. Vérifiez l’estimation et les réglages.\n4. Lancez la traduction.\n5. Téléchargez le résultat quand il est prêt.\n\nJe préserve les chapitres, les paragraphes et la structure du document aussi soigneusement que le fichier le permet.",
         "progress": "Progression de la traduction",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "Je tourne la page suivante",
-            "Les chapitres restent en ordre",
-            "Les virgules se tiennent bien",
-            "Je garde le ton de l’auteur",
-            "Je prépare le prochain passage",
-            "Travail sur le texte",
-        ),
         "cancel_hint": "Pour arrêter la traduction, appuyez sur « {cancel_text} » ou envoyez /cancel.",
         "elapsed": "Écoulé",
         "time_left": "Temps restant",
         "estimated_time": "Durée estimée",
         "time_unknown": "estimation en cours",
-        "last_fragment": "Dernier fragment traduit",
-        "cancel_requested": "J’arrête la traduction après le fragment en cours.",
+        "last_fragment": "Dernier passage traduit",
+        "cancel_requested": "J’arrête la traduction après le passage en cours.",
         "nothing_to_cancel": "Aucune traduction active à arrêter.",
         "no_pending_translation": "Aucune traduction n’attend de confirmation.",
         "estimate_title": "Estimation de traduction",
@@ -411,15 +562,15 @@ for _language_code, _fallbacks in {
         "file": "Fichier",
         "format": "Format",
         "characters": "Caractères",
-        "fragments": "Fragments",
         "tokens": "Jetons estimés",
         "price": "Prix",
         "preservation_note": "Je préserverai les chapitres, paragraphes et autant de mise en forme que le fichier le permet.",
         "confirm_instruction": "Appuyez sur « {confirm_text} » pour lancer la traduction.",
         "queue_instruction": "Appuyez sur « {confirm_text} » pour mettre la traduction en file d’attente.",
-        "queued": "La traduction a commencé : {file_name}.\n\nVous pouvez quitter le bot. La progression est enregistrée.",
+        "queued": "Votre traduction est en file d’attente : {file_name}.",
         "translating": "Votre traduction est en cours : {file_name}.",
         "ready": "Votre traduction est prête.\n\nVous pouvez télécharger le fichier ci-dessous : {result_name}.",
+        "partial": "La traduction est terminée avec des passages ignorés.\n\nRésultat partiel : {result_name}.\n\nLes passages problématiques ont été conservés dans la langue d'origine. Vous pourrez les relancer plus tard sans téléverser à nouveau le fichier.",
         "cancelled": "Traduction annulée.\n\nRésultat partiel : {result_name}.",
         "failed": "Un problème est survenu pendant la traduction.\n\nVotre fichier est en sécurité. Réessayez ou revenez au menu principal.",
         "status": "Statut de la traduction : {status}",
@@ -433,6 +584,7 @@ for _language_code, _fallbacks in {
     "es": {
         "main_menu": [
             "📖 Traducir un libro",
+            "📚 Mis libros",
             "🧵 Cómo funciona",
             "🌍 Idioma",
             "⚙️ Ajustes",
@@ -452,10 +604,52 @@ for _language_code, _fallbacks in {
         "settings_preview_on": "activada",
         "settings_preview_off": "desactivada",
         "settings_language": "Idioma de la interfaz",
+        "my_books_title": "Mis libros",
+        "my_books_empty": "Todavía no hay libros. Envía un libro o manuscrito para iniciar tu primera traducción.",
+        "my_books_download_hint": "Abre un libro debajo para ver el estado, continuar o descargar.",
+        "last_book": "Último libro",
+        "book_button": "Libro {index}",
+        "back_to_my_books": "Volver a Mis libros",
+        "book_detail_title": "Detalles del libro",
+        "book_detail_file": "Archivo",
+        "book_detail_format": "Formato",
+        "book_detail_language": "Idioma",
+        "book_detail_status": "Estado",
+        "book_detail_result": "Resultado",
+        "book_detail_updated": "Actualizado",
+        "final_download_available": "Descarga final disponible",
+        "partial_download_available": "Descarga parcial disponible",
+        "resume_available": "Esta traducción puede continuar desde el progreso guardado.",
+        "resume_unavailable": "Esta traducción no se puede continuar ahora mismo.",
+        "download_available": "descarga disponible",
+        "download_missing": "sin archivo todavía",
+        "download_book": "Descargar {index}",
+        "download_translation": "Descargar traducción",
+        "continue_translation": "Continuar traducción",
+        "delete_book": "Eliminar libro",
+        "confirm_delete_book": "Sí, eliminar libro",
+        "keep_book": "Conservar libro",
+        "delete_book_confirm": "¿Eliminar este libro?\n\n{file_name} desaparecerá de Mis libros y sus archivos guardados se eliminarán del servidor de FolioLoom. Esta acción no se puede deshacer.",
+        "book_deleted": "Libro eliminado.",
+        "delete_unavailable": "No se pudo eliminar este libro.",
+        "download_unavailable": "Este archivo todavía no está disponible para descargar.",
+        "status_queued": "En cola",
+        "status_translating": "Traduciéndose",
+        "status_assembling": "Preparando archivo",
+        "status_partial": "Parcial",
+        "status_cancel_requested": "Deteniéndose",
+        "status_cancelled": "Cancelada",
+        "status_interrupted": "Interrumpida",
+        "status_failed": "Error",
+        "status_ready": "Lista",
+        "status_expired": "Caducada",
         "hide_preview": "Ocultar vista",
         "show_preview": "Mostrar vista",
+        "reset_settings": "Restablecer ajustes",
+        "settings_reset": "Los ajustes se han restablecido. Elige de nuevo el idioma de la interfaz.",
         "translation_language_prompt": "Archivo recibido.\n\nTítulo: {file_name}\nFormato: {file_format}\n{source_language_line}\nAhora elige el idioma de traducción.",
         "original_language": "Idioma original",
+        "source_language_with_admixtures": "{primary}; mezclas: {admixtures}",
         "back": "Atrás",
         "back_to_menu": "Volvemos al menú principal.",
         "cancel": "Cancelar",
@@ -464,25 +658,17 @@ for _language_code, _fallbacks in {
         "from": "Desde",
         "to": "A",
         "formats": "Formatos admitidos: {formats}.",
-        "help": "Ayuda\n\nFolioLoom traduce libros, capítulos y manuscritos a otros idiomas.\n\nCómo funciona:\n1. Envía un archivo admitido.\n2. Elige el idioma de destino.\n3. Confirma los ajustes.\n4. Descarga el resultado traducido.\n\nPara obtener mejores resultados, usa archivos {formats} limpios y revisa la traducción final antes de publicarla.\n\nSube solo textos que te pertenezcan o que tengas permiso para traducir.",
-        "how_it_works": "Cómo funciona FolioLoom\n\nFolioLoom lee tu libro, conserva la estructura y prepara una traducción al idioma que elijas.\n\nEstá diseñado para libros, capítulos, manuscritos y textos largos.\n\nPara calidad de publicación, revisa siempre la traducción final con un editor.",
+        "help": "Ayuda\n\nFolioLoom está pensado para traducir libros, capítulos y manuscritos.\n\nConviene saber:\n- Usa archivos {formats} limpios.\n- Los libros muy grandes pueden tardar.\n- Si hace falta, divide los manuscritos difíciles en capítulos.\n- Revisa la traducción final antes de publicarla.\n\nSube solo textos que te pertenezcan o que tengas permiso para traducir.",
+        "how_it_works": "Cómo funciona FolioLoom\n\n1. Envía un libro, capítulo o manuscrito admitido.\n2. Elige el idioma de traducción.\n3. Revisa la estimación y los ajustes.\n4. Inicia la traducción.\n5. Descarga el resultado cuando esté listo.\n\nConservo capítulos, párrafos y la estructura del documento con todo el cuidado que permita el archivo.",
         "progress": "Progreso de traducción",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "Pasando la siguiente página",
-            "Los capítulos siguen en orden",
-            "Las comas se portan bien",
-            "Cuidando la voz del autor",
-            "Preparando el siguiente pasaje",
-            "Trabajando el texto",
-        ),
         "cancel_hint": "Para detener la traducción, pulsa «{cancel_text}» o envía /cancel.",
         "elapsed": "Transcurrido",
         "time_left": "Restante",
         "estimated_time": "Tiempo estimado",
         "time_unknown": "calculando",
-        "last_fragment": "Último fragmento traducido",
-        "cancel_requested": "Detendré la traducción después del fragmento actual.",
+        "last_fragment": "Último pasaje traducido",
+        "cancel_requested": "Detendré la traducción después del pasaje actual.",
         "nothing_to_cancel": "No hay una traducción activa para detener.",
         "no_pending_translation": "No hay ninguna traducción esperando confirmación.",
         "estimate_title": "Estimación de traducción",
@@ -490,15 +676,15 @@ for _language_code, _fallbacks in {
         "file": "Archivo",
         "format": "Formato",
         "characters": "Caracteres",
-        "fragments": "Fragmentos",
         "tokens": "Tokens estimados",
         "price": "Precio",
         "preservation_note": "Conservaré capítulos, párrafos y tanto formato como permita el archivo actual.",
         "confirm_instruction": "Pulsa «{confirm_text}» para iniciar la traducción.",
         "queue_instruction": "Pulsa «{confirm_text}» para poner la traducción en cola.",
-        "queued": "La traducción ha empezado: {file_name}.\n\nPuedes salir del bot. El progreso está guardado.",
+        "queued": "Tu traducción está en cola: {file_name}.",
         "translating": "Tu traducción está en curso: {file_name}.",
         "ready": "Tu traducción está lista.\n\nPuedes descargar el archivo abajo: {result_name}.",
+        "partial": "La traducción terminó con pasajes omitidos.\n\nResultado parcial: {result_name}.\n\nLos pasajes problemáticos se conservaron en el idioma original. Más adelante podrás reintentarlos sin volver a subir el archivo.",
         "cancelled": "Traducción cancelada.\n\nResultado parcial: {result_name}.",
         "failed": "Algo salió mal durante la traducción.\n\nTu archivo está a salvo. Inténtalo de nuevo o vuelve al menú principal.",
         "status": "Estado de traducción: {status}",
@@ -512,6 +698,7 @@ for _language_code, _fallbacks in {
     "nl": {
         "main_menu": [
             "📖 Boek vertalen",
+            "📚 Mijn boeken",
             "🧵 Zo werkt het",
             "🌍 Taal",
             "⚙️ Instellingen",
@@ -531,10 +718,52 @@ for _language_code, _fallbacks in {
         "settings_preview_on": "aan",
         "settings_preview_off": "uit",
         "settings_language": "Interfacetaal",
+        "my_books_title": "Mijn boeken",
+        "my_books_empty": "Nog geen boeken. Stuur een boek of manuscript om je eerste vertaling te starten.",
+        "my_books_download_hint": "Open hieronder een boek om de status te bekijken, verder te gaan of te downloaden.",
+        "last_book": "Laatste boek",
+        "book_button": "Boek {index}",
+        "back_to_my_books": "Terug naar Mijn boeken",
+        "book_detail_title": "Boekdetails",
+        "book_detail_file": "Bestand",
+        "book_detail_format": "Formaat",
+        "book_detail_language": "Taal",
+        "book_detail_status": "Status",
+        "book_detail_result": "Resultaat",
+        "book_detail_updated": "Bijgewerkt",
+        "final_download_available": "Definitieve download beschikbaar",
+        "partial_download_available": "Gedeeltelijke download beschikbaar",
+        "resume_available": "Deze vertaling kan vanaf de opgeslagen voortgang worden hervat.",
+        "resume_unavailable": "Deze vertaling kan nu niet worden hervat.",
+        "download_available": "download beschikbaar",
+        "download_missing": "nog geen bestand",
+        "download_book": "Download {index}",
+        "download_translation": "Vertaling downloaden",
+        "continue_translation": "Vertaling hervatten",
+        "delete_book": "Boek verwijderen",
+        "confirm_delete_book": "Ja, boek verwijderen",
+        "keep_book": "Boek bewaren",
+        "delete_book_confirm": "Dit boek verwijderen?\n\n{file_name} verdwijnt uit Mijn boeken en de opgeslagen bestanden worden van de FolioLoom-server verwijderd. Dit kan niet ongedaan worden gemaakt.",
+        "book_deleted": "Boek verwijderd.",
+        "delete_unavailable": "Dit boek kon niet worden verwijderd.",
+        "download_unavailable": "Dit bestand is nog niet beschikbaar om te downloaden.",
+        "status_queued": "In wachtrij",
+        "status_translating": "Wordt vertaald",
+        "status_assembling": "Wordt samengesteld",
+        "status_partial": "Gedeeltelijk",
+        "status_cancel_requested": "Wordt gestopt",
+        "status_cancelled": "Geannuleerd",
+        "status_interrupted": "Onderbroken",
+        "status_failed": "Mislukt",
+        "status_ready": "Klaar",
+        "status_expired": "Verlopen",
         "hide_preview": "Voorbeeld verbergen",
         "show_preview": "Voorbeeld tonen",
+        "reset_settings": "Instellingen resetten",
+        "settings_reset": "De instellingen zijn gereset. Kies opnieuw de interfacetaal.",
         "translation_language_prompt": "Bestand ontvangen.\n\nTitel: {file_name}\nFormaat: {file_format}\n{source_language_line}\nKies nu de taal waarnaar je wilt vertalen.",
         "original_language": "Brontaal",
+        "source_language_with_admixtures": "{primary}; bijmenging: {admixtures}",
         "back": "Terug",
         "back_to_menu": "Terug naar het Hoofdmenu.",
         "cancel": "Annuleren",
@@ -543,25 +772,17 @@ for _language_code, _fallbacks in {
         "from": "Van",
         "to": "Naar",
         "formats": "Ondersteunde formaten: {formats}.",
-        "help": "Hulp\n\nFolioLoom vertaalt boeken, hoofdstukken en manuscripten naar andere talen.\n\nZo werkt het:\n1. Stuur een ondersteund bestand.\n2. Kies de doeltaal.\n3. Bevestig de instellingen.\n4. Download het vertaalde resultaat.\n\nGebruik voor het beste resultaat schone {formats}-bestanden en controleer de vertaling voor publicatie.\n\nUpload alleen teksten die van jou zijn of waarvoor je toestemming hebt om ze te vertalen.",
-        "how_it_works": "Zo werkt FolioLoom\n\nFolioLoom leest je boek, behoudt de structuur en maakt een vertaling in de taal die je kiest.\n\nHet is ontworpen voor boeken, hoofdstukken, manuscripten en lange teksten.\n\nVoor publicatiekwaliteit: laat de eindvertaling altijd nakijken door een redacteur.",
+        "help": "Hulp\n\nFolioLoom is bedoeld voor het vertalen van boeken, hoofdstukken en manuscripten.\n\nGoed om te weten:\n- Gebruik schone {formats}-bestanden.\n- Zeer grote boeken kunnen tijd kosten.\n- Splits lastige manuscripten indien nodig in hoofdstukken.\n- Controleer de eindvertaling voor publicatie.\n\nUpload alleen teksten die van jou zijn of waarvoor je toestemming hebt om ze te vertalen.",
+        "how_it_works": "Zo werkt FolioLoom\n\n1. Stuur een ondersteund boek, hoofdstuk of manuscript.\n2. Kies de taal voor de vertaling.\n3. Controleer de inschatting en instellingen.\n4. Start de vertaling.\n5. Download het resultaat zodra het klaar is.\n\nIk behoud hoofdstukken, alinea’s en documentstructuur zo zorgvuldig als het bestand toelaat.",
         "progress": "Vertaalvoortgang",
         "activity": "{phrase} {indicator}",
-        "activity_phrases": (
-            "De volgende bladzijde draait",
-            "De hoofdstukken blijven op volgorde",
-            "De komma’s gedragen zich",
-            "De stem van de auteur blijft dichtbij",
-            "De volgende passage wordt voorbereid",
-            "Aan de tekst werken",
-        ),
         "cancel_hint": "Om de vertaling te stoppen, druk op “{cancel_text}” of stuur /cancel.",
         "elapsed": "Verstreken",
         "time_left": "Resterende tijd",
         "estimated_time": "Geschatte tijd",
         "time_unknown": "wordt geschat",
-        "last_fragment": "Laatste vertaalde fragment",
-        "cancel_requested": "Ik stop de vertaling na het huidige fragment.",
+        "last_fragment": "Laatste vertaalde passage",
+        "cancel_requested": "Ik stop de vertaling na de huidige passage.",
         "nothing_to_cancel": "Er is nu geen actieve vertaling om te stoppen.",
         "no_pending_translation": "Er wacht geen vertaling op bevestiging.",
         "estimate_title": "Vertaalinschatting",
@@ -569,15 +790,15 @@ for _language_code, _fallbacks in {
         "file": "Bestand",
         "format": "Formaat",
         "characters": "Tekens",
-        "fragments": "Fragmenten",
         "tokens": "Geschatte tokens",
         "price": "Prijs",
         "preservation_note": "Ik behoud hoofdstukken, alinea’s en zoveel opmaak als het huidige bestand toelaat.",
         "confirm_instruction": "Druk op “{confirm_text}” om de vertaling te starten.",
         "queue_instruction": "Druk op “{confirm_text}” om de vertaling in de wachtrij te zetten.",
-        "queued": "De vertaling is gestart: {file_name}.\n\nJe kunt de bot verlaten. De voortgang is opgeslagen.",
+        "queued": "Je vertaling staat in de wachtrij: {file_name}.",
         "translating": "Je vertaling wordt uitgevoerd: {file_name}.",
         "ready": "Je vertaling is klaar.\n\nJe kunt het bestand hieronder downloaden: {result_name}.",
+        "partial": "De vertaling is voltooid met overgeslagen passages.\n\nGedeeltelijk resultaat: {result_name}.\n\nProblematische passages zijn in de oorspronkelijke taal bewaard. Je kunt ze later opnieuw proberen zonder het bestand opnieuw te uploaden.",
         "cancelled": "Vertaling geannuleerd.\n\nGedeeltelijk resultaat: {result_name}.",
         "failed": "Er ging iets mis tijdens het vertalen.\n\nJe bestand is veilig. Probeer het opnieuw of ga terug naar het hoofdmenu.",
         "status": "Vertaalstatus: {status}",
@@ -598,15 +819,13 @@ def build_main_menu(interface_language: str = "en") -> list[str]:
 
 def build_start_message(interface_language: str = "en") -> str:
     messages = _messages(interface_language)
-    menu_lines = "\n".join(f"- {item}" for item in build_main_menu(interface_language))
     return (
         f"{messages['start_title']}\n\n"
         f"{messages['tagline']}\n\n"
         f"{messages['start_body']}\n\n"
         f"{messages['permission_note']}\n\n"
         f"{messages['formats'].format(formats=_supported_formats_text())}\n\n"
-        f"{messages['main_menu_title']}\n"
-        f"{messages['main_menu_prompt']}\n{menu_lines}"
+        f"{messages['main_menu_prompt']}"
     )
 
 
@@ -656,6 +875,86 @@ def build_settings_message(
         f"{messages['settings_preview']}: {preview_status}\n"
         f"{messages['settings_language']}: {language_name}"
     )
+
+
+def build_my_books_message(
+    books,
+    interface_language: str = "en",
+) -> str:
+    messages = _messages(interface_language)
+    if not books:
+        return f"{messages['my_books_title']}\n\n{messages['my_books_empty']}"
+
+    lines = [messages["my_books_title"], ""]
+    latest = _book_value(books[0])
+    lines.extend(
+        [
+            f"{messages['last_book']}: {latest.get('file_name', '-')}",
+            "",
+        ]
+    )
+    for index, book in enumerate(books, start=1):
+        value = _book_value(book)
+        availability = (
+            messages["download_available"]
+            if bool(value.get("has_result"))
+            else messages["download_missing"]
+        )
+        lines.append(
+            f"{index}. {value.get('file_name', '-')}"
+            f" · {_language_pair_text(value, interface_language)}"
+            f" · {_status_label(value.get('status', '-'), interface_language)}"
+            f" · {availability}"
+        )
+    lines.extend(["", messages["my_books_download_hint"]])
+    return "\n".join(lines)
+
+
+def build_my_book_detail_message(book, interface_language: str = "en") -> str:
+    messages = _messages(interface_language)
+    value = _book_value(book)
+    result_text = messages["download_missing"]
+    if bool(value.get("has_result")):
+        result_text = (
+            messages["partial_download_available"]
+            if bool(value.get("has_partial_result"))
+            else messages["final_download_available"]
+        )
+    resume_text = (
+        messages["resume_available"]
+        if bool(value.get("can_resume"))
+        else messages["resume_unavailable"]
+    )
+    updated_at = value.get("updated_at")
+    lines = [
+        messages["book_detail_title"],
+        "",
+        f"{messages['book_detail_file']}: {value.get('file_name', '-')}",
+        f"{messages['book_detail_format']}: {str(value.get('document_kind', '-')).upper()}",
+        f"{messages['book_detail_language']}: {_language_pair_text(value, interface_language)}",
+        f"{messages['book_detail_status']}: {_status_label(value.get('status', '-'), interface_language)}",
+        f"{messages['book_detail_result']}: {result_text}",
+    ]
+    if updated_at:
+        lines.append(f"{messages['book_detail_updated']}: {updated_at}")
+    lines.extend(["", resume_text])
+    return "\n".join(lines)
+
+
+def build_delete_book_confirmation_message(book, interface_language: str = "en") -> str:
+    messages = _messages(interface_language)
+    value = _book_value(book)
+    return messages["delete_book_confirm"].format(
+        file_name=value.get("file_name", "-")
+    )
+
+
+def build_book_deleted_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["book_deleted"]
+
+
+def build_delete_unavailable_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["delete_unavailable"]
 
 
 def build_language_selection_message(interface_language: str = "en") -> str:
@@ -709,7 +1008,6 @@ def build_order_estimate_message(
         f"{messages['file']}: {estimate.file_name}\n"
         f"{messages['format']}: {estimate.document_format.value.upper()}\n"
         f"{messages['characters']}: {estimate.character_count}\n"
-        f"{messages['fragments']}: {estimate.fragment_count}\n"
         f"{messages['price']}: ${estimate.price_usd:.2f}\n\n"
         f"{messages['queue_instruction'].format(confirm_text=confirm_text)}"
     )
@@ -726,7 +1024,6 @@ def build_pending_translation_message(
         f"{messages['book']}: {pending.file_name}\n"
         f"{messages['from']}: {_localized_source_language_display_text(pending.source_language_display, pending.source_language, interface_language)}\n"
         f"{messages['to']}: {localized_language_name_for_code(pending.target_language, interface_language)}\n"
-        f"{messages['fragments']}: {pending.fragment_count}\n"
         f"{messages['estimated_time']}: {_format_duration(pending.estimated_seconds or 0, interface_language)}\n"
         f"{messages['price']}: ${pending.price_usd:.2f}\n\n"
         f"{messages['preservation_note']}\n\n"
@@ -757,20 +1054,24 @@ def is_translate_book_text(text: str | None) -> bool:
     return _matches_main_menu_item(text, 0)
 
 
-def is_how_it_works_text(text: str | None) -> bool:
+def is_my_books_text(text: str | None) -> bool:
     return _matches_main_menu_item(text, 1)
 
 
-def is_language_menu_text(text: str | None) -> bool:
+def is_how_it_works_text(text: str | None) -> bool:
     return _matches_main_menu_item(text, 2)
 
 
-def is_settings_text(text: str | None) -> bool:
+def is_language_menu_text(text: str | None) -> bool:
     return _matches_main_menu_item(text, 3)
 
 
-def is_help_text(text: str | None) -> bool:
+def is_settings_text(text: str | None) -> bool:
     return _matches_main_menu_item(text, 4)
+
+
+def is_help_text(text: str | None) -> bool:
+    return _matches_main_menu_item(text, 5)
 
 
 def is_toggle_progress_preview_text(text: str | None) -> bool:
@@ -783,6 +1084,10 @@ def is_toggle_progress_preview_text(text: str | None) -> bool:
         for messages in MESSAGES.values()
         for key in ("hide_preview", "show_preview")
     }
+
+
+def is_reset_settings_text(text: str | None) -> bool:
+    return _matches_localized_text(text, "reset_settings")
 
 
 def is_main_menu_text(text: str | None) -> bool:
@@ -838,7 +1143,7 @@ def build_translation_progress_message(
 
     return (
         f"{messages['progress']}: [{bar}] "
-        f"{completed_fragments}/{total_fragments} ({percent}%)"
+        f"{percent}%"
         f"{elapsed_line}\n"
         f"{messages['time_left']}: {time_left}"
         f"\n{messages['activity'].format(phrase=get_progress_activity_phrase(interface_language, activity_phrase_index), indicator=activity_indicator)}"
@@ -855,7 +1160,7 @@ def get_progress_activity_phrase(
     interface_language: str = "en",
     phrase_index: int = 0,
 ) -> str:
-    phrases = _messages(interface_language)["activity_phrases"]
+    phrases = get_activity_phrases(interface_language)
     return phrases[phrase_index % len(phrases)]
 
 
@@ -869,6 +1174,10 @@ def build_no_pending_translation_message(interface_language: str = "en") -> str:
 
 def build_back_to_menu_message(interface_language: str = "en") -> str:
     return _messages(interface_language)["back_to_menu"]
+
+
+def build_settings_reset_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["settings_reset"]
 
 
 def build_cancel_hint_message(interface_language: str = "en") -> str:
@@ -919,6 +1228,10 @@ def build_translation_job_status_message(
         result_name = job.result_file_name or "результат"
         return messages["ready"].format(result_name=result_name)
 
+    if job.status is TranslationJobStatus.PARTIAL:
+        result_name = job.result_file_name or "partial result"
+        return messages["partial"].format(result_name=result_name)
+
     if job.status is TranslationJobStatus.FAILED:
         return messages["failed"]
 
@@ -945,8 +1258,54 @@ def get_toggle_progress_preview_text(
     return _messages(interface_language)[key]
 
 
+def get_reset_settings_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["reset_settings"]
+
+
+def get_download_book_text(index: int, interface_language: str = "en") -> str:
+    return _messages(interface_language)["download_book"].format(index=index)
+
+
+def get_last_book_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["last_book"]
+
+
+def get_open_book_text(index: int, interface_language: str = "en") -> str:
+    return _messages(interface_language)["book_button"].format(index=index)
+
+
+def get_download_translation_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["download_translation"]
+
+
+def get_continue_translation_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["continue_translation"]
+
+
+def get_delete_book_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["delete_book"]
+
+
+def get_confirm_delete_book_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["confirm_delete_book"]
+
+
+def get_keep_book_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["keep_book"]
+
+
+def get_back_to_my_books_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["back_to_my_books"]
+
+
+def build_download_unavailable_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["download_unavailable"]
+
+
 def build_upload_error_message(error: Exception, interface_language: str = "en") -> str:
     messages = _messages(interface_language)
+    if isinstance(error, SecurityCooldownActive):
+        return messages.get("security_cooldown", messages["translation_failed"])
     if isinstance(error, UnsupportedDocumentError):
         return messages["unsupported_file"].format(formats=_supported_formats_lines())
     if isinstance(error, ValueError) and "TXT, DOCX, and EPUB" in str(error):
@@ -962,6 +1321,43 @@ def build_upload_error_message(error: Exception, interface_language: str = "en")
 
 def _messages(interface_language: str) -> dict:
     return MESSAGES.get(interface_language, MESSAGES["en"])
+
+
+def _book_value(book, key: str | None = None):
+    if isinstance(book, dict):
+        return book if key is None else book.get(key)
+    if key is None:
+        return {
+            "file_name": getattr(book, "file_name", "-"),
+            "job_id": getattr(book, "job_id", "-"),
+            "document_kind": getattr(book, "document_kind", "-"),
+            "source_language": getattr(book, "source_language", "-"),
+            "target_language": getattr(book, "target_language", "-"),
+            "status": getattr(book, "status", "-"),
+            "has_result": getattr(book, "has_result", False),
+            "has_partial_result": getattr(book, "has_partial_result", False),
+            "can_resume": getattr(book, "can_resume", False),
+            "created_at": getattr(book, "created_at", None),
+            "updated_at": getattr(book, "updated_at", None),
+        }
+    return getattr(book, key)
+
+
+def _language_pair_text(book: dict, interface_language: str) -> str:
+    source_language = str(book.get("source_language") or "-")
+    target_language = str(book.get("target_language") or "-")
+    source_text = localized_language_name_for_code(source_language, interface_language)
+    target_text = localized_language_name_for_code(target_language, interface_language)
+    return f"{source_text} -> {target_text}"
+
+
+def _status_label(status: object, interface_language: str) -> str:
+    raw_status = str(status or "-")
+    messages = _messages(interface_language)
+    return messages.get(
+        f"status_{raw_status}",
+        raw_status.replace("_", " ").title(),
+    )
 
 
 def _time_units(interface_language: str) -> dict[str, str]:
@@ -985,6 +1381,23 @@ def _localized_source_language_display_text(
         return localized_language_name_for_code(source_language, interface_language)
 
     normalized = display.strip()
+    if "(admixtures:" in normalized.lower() and normalized.endswith(")"):
+        primary, detail = normalized.split("(", 1)
+        names = detail[:-1].split(":", 1)[1]
+        localized_primary = _localized_name_from_display_name(
+            primary.strip(),
+            interface_language,
+        )
+        localized_admixtures = [
+            _localized_name_from_display_name(name.strip(), interface_language)
+            for name in names.split(",")
+            if name.strip()
+        ]
+        return _messages(interface_language)["source_language_with_admixtures"].format(
+            primary=localized_primary,
+            admixtures=", ".join(localized_admixtures),
+        )
+
     if normalized.lower().startswith("auto"):
         auto_text = localized_language_name_for_code("auto", interface_language)
         if "(" not in normalized or not normalized.endswith(")"):

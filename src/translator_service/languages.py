@@ -6,15 +6,46 @@ class LanguageOption:
     code: str
     name: str
     button_text: str
+    legacy_button_text: str | None = None
 
 
 SUPPORTED_TARGET_LANGUAGES = [
-    LanguageOption(code="ru", name="Russian", button_text="Русский"),
-    LanguageOption(code="uk", name="Ukrainian", button_text="Українська"),
-    LanguageOption(code="fr", name="French", button_text="Français"),
-    LanguageOption(code="es", name="Spanish", button_text="Español"),
-    LanguageOption(code="en", name="English", button_text="English"),
-    LanguageOption(code="nl", name="Dutch", button_text="Nederlands"),
+    LanguageOption(
+        code="ru",
+        name="Russian",
+        button_text="🇷🇺 Русский",
+        legacy_button_text="Русский",
+    ),
+    LanguageOption(
+        code="uk",
+        name="Ukrainian",
+        button_text="🇺🇦 Українська",
+        legacy_button_text="Українська",
+    ),
+    LanguageOption(
+        code="fr",
+        name="French",
+        button_text="🇫🇷 Français",
+        legacy_button_text="Français",
+    ),
+    LanguageOption(
+        code="es",
+        name="Spanish",
+        button_text="🇪🇸 Español",
+        legacy_button_text="Español",
+    ),
+    LanguageOption(
+        code="en",
+        name="English",
+        button_text="🇬🇧 English",
+        legacy_button_text="English",
+    ),
+    LanguageOption(
+        code="nl",
+        name="Dutch",
+        button_text="🇳🇱 Nederlands",
+        legacy_button_text="Nederlands",
+    ),
 ]
 
 _SOURCE_LANGUAGE_NAMES = {
@@ -142,6 +173,11 @@ def find_language_by_button_text(text: str | None) -> LanguageOption | None:
     for language in SUPPORTED_TARGET_LANGUAGES:
         if language.button_text.lower() == normalized:
             return language
+        if (
+            language.legacy_button_text
+            and language.legacy_button_text.lower() == normalized
+        ):
+            return language
 
     return None
 
@@ -173,7 +209,14 @@ def localized_language_name_for_code(
 def language_code_for_name(language_name: str) -> str | None:
     normalized = language_name.strip().lower()
     for language in SUPPORTED_TARGET_LANGUAGES:
-        if language.name.lower() == normalized or language.button_text.lower() == normalized:
+        if (
+            language.name.lower() == normalized
+            or language.button_text.lower() == normalized
+            or (
+                language.legacy_button_text is not None
+                and language.legacy_button_text.lower() == normalized
+            )
+        ):
             return language.code
     for code, name in _SOURCE_LANGUAGE_NAMES.items():
         if name.lower() == normalized:

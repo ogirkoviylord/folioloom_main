@@ -1,12 +1,15 @@
-import logging
-import time
 from dataclasses import dataclass
-from pathlib import PurePath
+import logging
+import math
+from pathlib import Path, PurePath
 from threading import RLock
+import time
 from typing import Callable
 
+from translator_service.document_sandbox import DocumentSandbox
 from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.extractors import (
+    TextExtractionError,
     extract_text_from_docx,
     extract_text_from_epub,
     extract_text_from_txt,
@@ -19,32 +22,65 @@ from translator_service.job_runner import (
     TranslationJobStatus,
     run_translation_job,
 )
-from translator_service.job_store import TranslationJobStore
 from translator_service.language_detection import (
+    detect_language_from_text,
     detect_languages_from_text,
     format_detected_source_languages,
 )
 from translator_service.order_estimates import estimate_order
 from translator_service.persistent_jobs import (
-    PersistentTranslationJob,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
+    SQLiteTranslationJobStore,
 )
-from translator_service.persistent_planner import create_persistent_txt_job_plan
+from translator_service.persistent_assembly import (
+    assemble_persistent_txt_result,
+    assemble_persistent_docx_result,
+    assemble_persistent_epub_result,
+    count_unassembled_work_units,
+)
+from translator_service.persistent_planner import (
+    create_persistent_docx_job_plan,
+    create_persistent_epub_job_plan,
+    create_persistent_txt_job_plan,
+)
 from translator_service.pricing import PricingRules
-from translator_service.translation_cache import (
-    MemoryTranslationCache,
-    TranslationCache,
+from translator_service.security_telemetry import (
+    SecurityCooldownPolicy,
+    SecurityCooldownTracker,
+    SecurityEventLimiter,
+    SecurityThresholdExceeded,
+    SecurityThresholdPolicy,
+    normalize_security_event,
 )
+from translator_service.translation_cache import MemoryTranslationCache, TranslationCache
 from translator_service.translation_jobs import (
     CancellationToken,
     TextTranslator,
     TranslationProgress,
 )
-from translator_service.worker import (
-    assemble_translated_text_result,
-    run_next_stored_text_work_unit,
+from translator_service.translation_policy import (
+    build_translation_policy,
+    translation_policy_signature,
 )
+from translator_service.translation_run_logs import (
+    TranslationFragmentLog,
+    TranslationRunLogger,
+    TranslationRunMetadata,
+)
+from translator_service.user_activity import (
+    ActivityActorType,
+    ActivityOutcome,
+    ActivitySurface,
+    SQLiteUserActivityStore,
+    UserActivityEventInput,
+)
+from translator_service.users import SQLiteUserSettingsRepository
+from translator_service.worker import (
+    run_next_stored_text_work_unit,
+    run_stored_text_job_parallel_until_idle,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +111,36 @@ class PendingTranslation:
 
 
 @dataclass(frozen=True)
-class PersistentTranslationDownload:
+class UserBookSummary:
+    job_id: str
+    file_name: str
+    document_kind: str
+    source_language: str
+    target_language: str
+    status: str
+    has_result: bool
+    has_partial_result: bool = False
+    can_resume: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class UserBookResult:
     job_id: str
     file_name: str
     content: bytes
     content_type: str
-    partial: bool
+
+
+@dataclass
+class _ActiveTranslationCancellation:
+    token: CancellationToken
+    user_id: str
+    job_id: str | None = None
+    completed_fragments: int = 0
+    total_fragments: int = 0
+    cancel_requested: bool = False
 
 
 class BotTranslationService:
@@ -93,13 +153,17 @@ class BotTranslationService:
         max_fragment_chars: int,
         translation_cache: TranslationCache | None = None,
         file_storage: LocalObjectStorage | None = None,
-        persistent_job_store: TranslationJobStore | None = None,
-        translation_execution_mode: str = "inline",
+        persistent_job_store: SQLiteTranslationJobStore | None = None,
+        translation_run_log_root: str | Path | None = None,
+        user_settings_repository: SQLiteUserSettingsRepository | None = None,
+        max_parallel_work_units: int = 1,
+        provider_parallel_capacity: int = 1,
+        use_scheduler_runner: bool = False,
+        document_sandbox: DocumentSandbox | None = None,
+        security_threshold_policy: SecurityThresholdPolicy | None = None,
+        security_cooldown_policy: SecurityCooldownPolicy | None = None,
+        activity_store: SQLiteUserActivityStore | None = None,
     ) -> None:
-        if translation_execution_mode not in {"inline", "worker"}:
-            raise ValueError(
-                "translation_execution_mode must be either 'inline' or 'worker'"
-            )
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
         self._max_upload_mb = max_upload_mb
@@ -108,16 +172,145 @@ class BotTranslationService:
         self._pending: dict[int, PendingTranslation] = {}
         self._interface_languages: dict[int, str] = {}
         self._progress_preview_enabled: dict[int, bool] = {}
-        self._active_cancellations: dict[int, CancellationToken] = {}
+        self._active_cancellations: dict[int, _ActiveTranslationCancellation] = {}
         self._translation_cache = translation_cache or MemoryTranslationCache()
         self._file_storage = file_storage
         self._persistent_job_store = persistent_job_store
-        self._translation_execution_mode = translation_execution_mode
+        self._translation_run_log_root = (
+            Path(translation_run_log_root)
+            if translation_run_log_root is not None
+            else None
+        )
+        self._user_settings_repository = user_settings_repository
+        self._max_parallel_work_units = max(1, max_parallel_work_units)
+        self._provider_parallel_capacity = max(1, provider_parallel_capacity)
+        self._use_scheduler_runner = use_scheduler_runner
+        self._document_sandbox = document_sandbox
+        self._security_threshold_policy = (
+            security_threshold_policy or SecurityThresholdPolicy()
+        )
+        self._security_cooldown_tracker = SecurityCooldownTracker(
+            security_cooldown_policy
+        )
+        self._activity_store = activity_store
         self._state_lock = RLock()
 
     def close(self) -> None:
         if self._persistent_job_store is not None:
             self._persistent_job_store.close()
+        if self._user_settings_repository is not None:
+            self._user_settings_repository.close()
+        if self._activity_store is not None:
+            self._activity_store.close()
+
+    def record_user_activity(
+        self,
+        *,
+        user_telegram_id: int,
+        event_type: str,
+        action: str,
+        surface: ActivitySurface | str = ActivitySurface.BOT,
+        outcome: ActivityOutcome | str = ActivityOutcome.SUCCESS,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        job_id: str | None = None,
+        order_id: str | None = None,
+        translation_run_dir: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type=event_type,
+            action=action,
+            surface=surface,
+            outcome=outcome,
+            target_type=target_type,
+            target_id=target_id,
+            job_id=job_id,
+            order_id=order_id,
+            translation_run_dir=translation_run_dir,
+            metadata=metadata,
+        )
+
+    def _record_activity_for_user(
+        self,
+        *,
+        user_telegram_id: int,
+        event_type: str,
+        action: str,
+        surface: ActivitySurface | str = ActivitySurface.BOT,
+        outcome: ActivityOutcome | str = ActivityOutcome.SUCCESS,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        job_id: str | None = None,
+        order_id: str | None = None,
+        translation_run_dir: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        if self._activity_store is None:
+            return
+        try:
+            self._activity_store.record_event(
+                UserActivityEventInput(
+                    actor_type=ActivityActorType.USER,
+                    actor_id=f"telegram:{user_telegram_id}",
+                    channel="telegram",
+                    channel_user_id=str(user_telegram_id),
+                    surface=surface,
+                    event_type=event_type,
+                    action=action,
+                    target_type=target_type,
+                    target_id=target_id,
+                    outcome=outcome,
+                    job_id=job_id,
+                    order_id=order_id,
+                    translation_run_dir=translation_run_dir,
+                    metadata=metadata or {},
+                )
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record user activity: event_type=%s user_telegram_id=%s",
+                event_type,
+                user_telegram_id,
+            )
+
+    def _assert_security_cooldown_allows(self, user_telegram_id: int) -> None:
+        self._security_cooldown_tracker.assert_allowed(
+            _security_user_id(user_telegram_id)
+        )
+
+    def _record_security_threshold_for_user(
+        self,
+        *,
+        user_telegram_id: int,
+        run_logger: TranslationRunLogger | None,
+    ) -> None:
+        cooldown = self._security_cooldown_tracker.record_threshold_exceeded(
+            _security_user_id(user_telegram_id)
+        )
+        if cooldown is None or run_logger is None:
+            return
+        run_logger.record_security_event(
+            "security_user_cooldown_started",
+            {
+                "cooldown_seconds": cooldown.remaining_seconds,
+                "cooldown_remaining_seconds": cooldown.remaining_seconds,
+            },
+        )
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            surface=ActivitySurface.SECURITY,
+            event_type="security.user_cooldown_started",
+            action="blocked",
+            outcome=ActivityOutcome.BLOCKED,
+            translation_run_dir=str(run_logger.run_dir),
+            metadata={
+                "cooldown_seconds": cooldown.remaining_seconds,
+                "cooldown_remaining_seconds": cooldown.remaining_seconds,
+                "security_state": "limited",
+            },
+        )
 
     def store_uploaded_document(
         self,
@@ -127,6 +320,7 @@ class BotTranslationService:
         content: bytes,
         source_language: str,
     ) -> PendingUpload:
+        self._assert_security_cooldown_allows(user_telegram_id)
         upload = validate_document_upload(
             file_name=file_name,
             size_bytes=len(content),
@@ -157,6 +351,7 @@ class BotTranslationService:
                 document_format=upload.document_format,
                 content=content,
                 source_language=source_language,
+                document_sandbox=self._document_sandbox,
             ),
             source_object_key=source_object_key,
         )
@@ -174,6 +369,7 @@ class BotTranslationService:
         user_telegram_id: int,
         target_language: str,
     ) -> PendingTranslation:
+        self._assert_security_cooldown_allows(user_telegram_id)
         with self._state_lock:
             pending_upload = self._pending_uploads.get(user_telegram_id)
             if pending_upload is None:
@@ -205,6 +401,7 @@ class BotTranslationService:
         source_language_display: str | None = None,
         source_object_key: str | None = None,
     ) -> PendingTranslation:
+        self._assert_security_cooldown_allows(user_telegram_id)
         upload = validate_document_upload(
             file_name=file_name,
             size_bytes=len(content),
@@ -222,6 +419,7 @@ class BotTranslationService:
             content=content,
             pricing_rules=self._pricing_rules,
             max_fragment_chars=self._max_fragment_chars,
+            document_sandbox=self._document_sandbox,
         )
         pending = PendingTranslation(
             user_telegram_id=user_telegram_id,
@@ -236,12 +434,48 @@ class BotTranslationService:
                 document_format=upload.document_format,
                 content=content,
                 source_language=source_language,
+                document_sandbox=self._document_sandbox,
             ),
-            estimated_seconds=estimate_translation_seconds(estimate.fragment_count),
+            estimated_seconds=estimate_translation_seconds(
+                estimate.fragment_count,
+                max_parallel_work_units=self._max_parallel_work_units,
+                provider_parallel_capacity=self._provider_parallel_capacity,
+            ),
             source_object_key=source_object_key,
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="translation.target_language.selected",
+            action="selected",
+            target_type="language",
+            target_id=target_language,
+            metadata={
+                "target_language": target_language,
+                "file_name": file_name,
+                "source_language": source_language,
+            },
+        )
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="document.estimated",
+            action="estimated",
+            target_type="document",
+            target_id=file_name,
+            metadata={
+                "file_name": file_name,
+                "document_kind": _document_kind_from_format(
+                    upload.document_format
+                ).value,
+                "source_language": source_language,
+                "target_language": target_language,
+                "source_language_display": pending.source_language_display,
+                "fragment_count": pending.fragment_count,
+                "price_usd": pending.price_usd,
+                "estimated_seconds": pending.estimated_seconds,
+            },
+        )
         return pending
 
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
@@ -255,12 +489,50 @@ class BotTranslationService:
         return removed_pending is not None or removed_upload is not None
 
     def set_interface_language(self, *, user_telegram_id: int, language_code: str) -> None:
+        if self._user_settings_repository is not None:
+            self._user_settings_repository.set_interface_language(
+                telegram_id=user_telegram_id,
+                language_code=language_code,
+            )
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type="user.interface_language.changed",
+                action="changed",
+                target_type="setting",
+                target_id="interface_language",
+                metadata={"language_code": language_code},
+            )
+            return
+
         with self._state_lock:
             self._interface_languages[user_telegram_id] = language_code
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="user.interface_language.changed",
+            action="changed",
+            target_type="setting",
+            target_id="interface_language",
+            metadata={"language_code": language_code},
+        )
 
     def get_interface_language(self, user_telegram_id: int) -> str:
+        if self._user_settings_repository is not None:
+            return (
+                self._user_settings_repository.get(user_telegram_id).interface_language
+                or "en"
+            )
+
         with self._state_lock:
             return self._interface_languages.get(user_telegram_id, "en")
+
+    def has_interface_language(self, user_telegram_id: int) -> bool:
+        if self._user_settings_repository is not None:
+            return self._user_settings_repository.has_interface_language(
+                user_telegram_id
+            )
+
+        with self._state_lock:
+            return user_telegram_id in self._interface_languages
 
     def set_progress_preview_enabled(
         self,
@@ -268,93 +540,440 @@ class BotTranslationService:
         user_telegram_id: int,
         enabled: bool,
     ) -> None:
+        if self._user_settings_repository is not None:
+            self._user_settings_repository.set_progress_preview_enabled(
+                telegram_id=user_telegram_id,
+                enabled=enabled,
+            )
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type="user.setting.changed",
+                action="changed",
+                target_type="setting",
+                target_id="progress_preview_enabled",
+                metadata={
+                    "setting_key": "progress_preview_enabled",
+                    "new_value": enabled,
+                },
+            )
+            return
+
         with self._state_lock:
             self._progress_preview_enabled[user_telegram_id] = enabled
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="user.setting.changed",
+            action="changed",
+            target_type="setting",
+            target_id="progress_preview_enabled",
+            metadata={"setting_key": "progress_preview_enabled", "new_value": enabled},
+        )
 
     def get_progress_preview_enabled(self, user_telegram_id: int) -> bool:
+        if self._user_settings_repository is not None:
+            return self._user_settings_repository.get(
+                user_telegram_id
+            ).progress_preview_enabled
+
         with self._state_lock:
             return self._progress_preview_enabled.get(user_telegram_id, True)
 
-    def cancel_translation(self, user_telegram_id: int) -> bool:
+    def reset_user_settings(self, user_telegram_id: int) -> None:
+        if self._user_settings_repository is not None:
+            self._user_settings_repository.reset(user_telegram_id)
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type="user.settings.reset",
+                action="reset",
+                target_type="settings",
+                target_id="user_preferences",
+            )
+            return
+
         with self._state_lock:
-            token = self._active_cancellations.get(user_telegram_id)
-        if token is None:
-            return False
-
-        token.cancel()
-        return True
-
-    def resume_persistent_translation(
-        self,
-        *,
-        user_telegram_id: int,
-        job_id: str,
-    ) -> PersistentTranslationJob:
-        job = self._require_owned_persistent_job(
+            self._interface_languages.pop(user_telegram_id, None)
+            self._progress_preview_enabled.pop(user_telegram_id, None)
+        self._record_activity_for_user(
             user_telegram_id=user_telegram_id,
-            job_id=job_id,
+            event_type="user.settings.reset",
+            action="reset",
+            target_type="settings",
+            target_id="user_preferences",
         )
-        return self._persistent_job_store.resume_job(job.id)
 
-    def get_persistent_translation_download(
+    def list_user_books(
         self,
         *,
         user_telegram_id: int,
-        job_id: str,
-        partial: bool,
-    ) -> PersistentTranslationDownload:
-        job = self._require_owned_persistent_job(
-            user_telegram_id=user_telegram_id,
-            job_id=job_id,
-        )
-        if self._file_storage is None:
-            raise RuntimeError("Persistent file storage is not configured")
-
-        object_key = None if partial else job.final_object_key
-        if object_key is None:
-            if not partial and job.status is not PersistentTranslationJobStatus.READY:
-                raise ValueError(f"Persistent translation job is not ready: {job_id}")
-            result_file_name = _translated_file_name(
-                job.file_name,
-                job.target_language,
-                extension=_result_extension_for_document_kind(job.document_kind),
-                is_partial=partial,
-            )
-            stored = assemble_translated_text_result(
-                store=self._persistent_job_store,
-                storage=self._file_storage,
-                job_id=job.id,
-                file_name=result_file_name,
-                partial=partial,
-                content_type=_content_type_for_document_kind(job.document_kind),
-            )
-        else:
-            stored = self._file_storage.get_metadata(object_key)
-
-        return PersistentTranslationDownload(
-            job_id=job.id,
-            file_name=stored.file_name,
-            content=self._file_storage.get_bytes(stored.object_key),
-            content_type=stored.content_type,
-            partial=partial,
-        )
-
-    def _require_owned_persistent_job(
-        self,
-        *,
-        user_telegram_id: int,
-        job_id: str,
-    ) -> PersistentTranslationJob:
+        limit: int = 5,
+    ) -> list[UserBookSummary]:
         if self._persistent_job_store is None:
-            raise RuntimeError("Persistent translation storage is not configured")
+            return []
+
+        return [
+            self._book_summary_from_job(job)
+            for job in self._persistent_job_store.list_jobs_for_user(
+                f"telegram:{user_telegram_id}",
+                limit=limit,
+            )
+        ]
+
+    def get_user_book_detail(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> UserBookSummary | None:
+        if self._persistent_job_store is None:
+            return None
 
         job = self._persistent_job_store.get_job(job_id)
-        if job is None:
-            raise ValueError(f"Translation job does not exist: {job_id}")
-        if job.user_id != _persistent_user_id(user_telegram_id):
-            raise PermissionError("Translation job belongs to another user")
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return None
 
-        return job
+        return self._book_summary_from_job(job)
+
+    def resume_user_book(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> UserBookSummary | None:
+        if self._persistent_job_store is None:
+            return None
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return None
+        if not _can_resume_persistent_job(job.status.value):
+            return self._book_summary_from_job(job)
+
+        return self._book_summary_from_job(self._persistent_job_store.resume_job(job_id))
+
+    def resume_user_book_translation(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+        translator: TextTranslator,
+        progress_callback: Callable[[TranslationProgress], None] | None = None,
+    ) -> TranslationJob | None:
+        self._assert_security_cooldown_allows(user_telegram_id)
+        if self._persistent_job_store is None or self._file_storage is None:
+            return None
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return None
+        if not _can_resume_persistent_job(job.status.value):
+            return None
+
+        document_kind = DocumentKind(job.document_kind)
+        source_content = (
+            self._file_storage.get_bytes(job.source_object_key)
+            if self._file_storage.exists(job.source_object_key)
+            else b""
+        )
+        pending = PendingTranslation(
+            user_telegram_id=user_telegram_id,
+            file_name=job.file_name,
+            content=source_content,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            price_usd=0.0,
+            fragment_count=len(self._persistent_job_store.list_work_units(job_id)),
+            source_object_key=job.source_object_key,
+        )
+        resumed = self._persistent_job_store.resume_job(job_id)
+        total_fragments = len(self._persistent_job_store.list_work_units(job_id))
+        run_logger = self._start_translation_run_logger(
+            pending=pending,
+            document_kind=document_kind,
+            job_id=resumed.id,
+            translator=translator,
+            adapter_version=resumed.adapter_version,
+            prompt_version=resumed.prompt_version,
+        )
+        if run_logger is not None:
+            run_logger.record_event(
+                "job_resumed",
+                {
+                    "job_id": resumed.id,
+                    "fragment_count": total_fragments,
+                    "source_object_key": resumed.source_object_key,
+                },
+            )
+
+        security_limiter = SecurityEventLimiter(self._security_threshold_policy)
+        progress_with_logging = _progress_callback_with_run_logging(
+            run_logger=run_logger,
+            progress_callback=progress_callback,
+            translator=translator,
+            security_limiter=security_limiter,
+        )
+        cancellation_token = CancellationToken()
+        self._set_active_translation(
+            user_telegram_id=user_telegram_id,
+            cancellation_token=cancellation_token,
+            job_id=resumed.id,
+            total_fragments=total_fragments,
+        )
+        try:
+            if self._use_scheduler_runner:
+                return self._run_scheduler_backed_persistent_translation(
+                    document_kind=document_kind,
+                    pending=pending,
+                    translator=translator,
+                    progress_callback=self._track_active_progress(
+                        user_telegram_id=user_telegram_id,
+                        progress_callback=progress_with_logging,
+                    ),
+                    cancellation_token=cancellation_token,
+                    job_id=resumed.id,
+                    total_fragments=total_fragments,
+                    run_logger=run_logger,
+                    security_limiter=security_limiter,
+                )
+
+            return self._run_parallel_persistent_translation(
+                document_kind=document_kind,
+                pending=pending,
+                translator=translator,
+                progress_callback=self._track_active_progress(
+                    user_telegram_id=user_telegram_id,
+                    progress_callback=progress_with_logging,
+                ),
+                cancellation_token=cancellation_token,
+                job_id=resumed.id,
+                total_fragments=total_fragments,
+                run_logger=run_logger,
+                security_limiter=security_limiter,
+            )
+        except Exception as error:
+            logger.exception(
+                "Resumed translation job failed: job_id=%s user_telegram_id=%s",
+                job_id,
+                user_telegram_id,
+            )
+            if isinstance(error, SecurityThresholdExceeded):
+                self._record_security_threshold_for_user(
+                    user_telegram_id=user_telegram_id,
+                    run_logger=run_logger,
+                )
+            else:
+                self._persistent_job_store.mark_job_interrupted(job_id)
+            failed_job = _failed_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                error_message=str(error),
+                job_id=job_id,
+            )
+            _finish_run_logger(
+                run_logger,
+                status=failed_job.status.value,
+                result_file_name=failed_job.result_file_name,
+                error_message=failed_job.error_message,
+            )
+            return failed_job
+        finally:
+            with self._state_lock:
+                self._active_cancellations.pop(user_telegram_id, None)
+
+    def get_latest_user_book_result(
+        self,
+        *,
+        user_telegram_id: int,
+    ) -> UserBookResult | None:
+        if self._persistent_job_store is None or self._file_storage is None:
+            return None
+
+        for job in self._persistent_job_store.list_jobs_for_user(
+            f"telegram:{user_telegram_id}",
+            limit=10,
+        ):
+            result = self._book_result_from_object_key(job)
+            if result is not None:
+                return result
+
+        return None
+
+    def get_user_book_result(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> UserBookResult | None:
+        if self._persistent_job_store is None or self._file_storage is None:
+            return None
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return None
+
+        return self._book_result_from_object_key(job)
+
+    def delete_user_book(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> bool:
+        if self._persistent_job_store is None:
+            return False
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return False
+
+        with self._state_lock:
+            token = self._active_cancellations.get(user_telegram_id)
+        if token is not None:
+            token.cancel()
+
+        object_keys = {
+            key
+            for key in (
+                job.source_object_key,
+                job.partial_object_key,
+                job.final_object_key,
+            )
+            if key
+        }
+        object_keys.update(
+            unit.source_object_key
+            for unit in self._persistent_job_store.list_work_units(job_id)
+            if unit.source_object_key
+        )
+
+        deleted = self._persistent_job_store.delete_job(job_id)
+        if not deleted:
+            return False
+
+        if self._file_storage is not None:
+            for object_key in object_keys:
+                self._file_storage.delete(object_key)
+        return True
+
+    def _book_result_from_object_key(self, job) -> UserBookResult | None:
+        if self._file_storage is None:
+            return None
+
+        object_key = job.final_object_key or job.partial_object_key
+        if object_key is None or not self._file_storage.exists(object_key):
+            return None
+
+        metadata = self._file_storage.get_metadata(object_key)
+        return UserBookResult(
+            job_id=job.id,
+            file_name=metadata.file_name,
+            content=self._file_storage.get_bytes(object_key),
+            content_type=metadata.content_type,
+        )
+
+    def _book_summary_from_job(self, job) -> UserBookSummary:
+        return UserBookSummary(
+            job_id=job.id,
+            file_name=job.file_name,
+            document_kind=job.document_kind,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            status=job.status.value,
+            has_result=bool(job.final_object_key or job.partial_object_key),
+            has_partial_result=bool(job.partial_object_key and not job.final_object_key),
+            can_resume=_can_resume_persistent_job(job.status.value),
+            created_at=job.created_at.isoformat(timespec="minutes"),
+            updated_at=job.updated_at.isoformat(timespec="minutes"),
+        )
+
+    def cancel_translation(self, user_telegram_id: int) -> bool:
+        with self._state_lock:
+            active = self._active_cancellations.get(user_telegram_id)
+            if active is not None:
+                active.cancel_requested = True
+                snapshot = _ActiveTranslationCancellation(
+                    token=active.token,
+                    user_id=active.user_id,
+                    job_id=active.job_id,
+                    completed_fragments=active.completed_fragments,
+                    total_fragments=active.total_fragments,
+                    cancel_requested=True,
+                )
+        if active is None:
+            return False
+
+        snapshot.token.cancel()
+        _print_translation_cancel_requested(snapshot)
+        return True
+
+    def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+        with self._state_lock:
+            active = self._active_cancellations.get(user_telegram_id)
+            return bool(active and active.cancel_requested)
+
+    def _set_active_translation(
+        self,
+        *,
+        user_telegram_id: int,
+        cancellation_token: CancellationToken,
+        job_id: str | None = None,
+        total_fragments: int = 0,
+    ) -> None:
+        with self._state_lock:
+            self._active_cancellations[user_telegram_id] = (
+                _ActiveTranslationCancellation(
+                    token=cancellation_token,
+                    user_id=f"telegram:{user_telegram_id}",
+                    job_id=job_id,
+                    total_fragments=total_fragments,
+                )
+            )
+
+    def _mark_active_translation_job(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+        total_fragments: int,
+    ) -> None:
+        with self._state_lock:
+            active = self._active_cancellations.get(user_telegram_id)
+            if active is None:
+                return
+            active.job_id = job_id
+            active.total_fragments = total_fragments
+
+    def _update_active_translation_progress(
+        self,
+        *,
+        user_telegram_id: int,
+        completed_fragments: int,
+        total_fragments: int,
+    ) -> None:
+        with self._state_lock:
+            active = self._active_cancellations.get(user_telegram_id)
+            if active is None:
+                return
+            active.completed_fragments = completed_fragments
+            active.total_fragments = total_fragments
+
+    def _track_active_progress(
+        self,
+        *,
+        user_telegram_id: int,
+        progress_callback: Callable[[TranslationProgress], None] | None,
+    ) -> Callable[[TranslationProgress], None] | None:
+        if progress_callback is None:
+            return None
+
+        def report(progress: TranslationProgress) -> None:
+            self._update_active_translation_progress(
+                user_telegram_id=user_telegram_id,
+                completed_fragments=progress.completed_fragments,
+                total_fragments=progress.total_fragments,
+            )
+            progress_callback(progress)
+
+        return report
 
     def confirm_pending_translation(
         self,
@@ -363,6 +982,7 @@ class BotTranslationService:
         translator: TextTranslator,
         progress_callback: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJob:
+        self._assert_security_cooldown_allows(user_telegram_id)
         with self._state_lock:
             pending = self._pending.pop(user_telegram_id, None)
             if pending is None:
@@ -378,56 +998,120 @@ class BotTranslationService:
             raise ValueError(
                 "Only TXT, DOCX, and EPUB confirmation is supported in the prototype"
             )
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="translation.confirmed",
+            action="confirmed",
+            target_type="document",
+            target_id=pending.file_name,
+            metadata={
+                "file_name": pending.file_name,
+                "document_kind": document_kind.value,
+                "source_language": pending.source_language,
+                "target_language": pending.target_language,
+                "fragment_count": pending.fragment_count,
+            },
+        )
 
-        use_persistent_txt_path = self._should_use_persistent_txt_path(
+        if self._should_use_persistent_document_path(
             document_kind=document_kind,
             pending=pending,
-        )
-        if self._translation_execution_mode == "worker" and not use_persistent_txt_path:
-            with self._state_lock:
-                self._pending.setdefault(user_telegram_id, pending)
-            raise ValueError(
-                "Worker mode currently supports queued TXT translations with "
-                "persistent storage only"
+        ):
+            cancellation_token = CancellationToken()
+            self._set_active_translation(
+                user_telegram_id=user_telegram_id,
+                cancellation_token=cancellation_token,
+                total_fragments=pending.fragment_count,
             )
-
-        if use_persistent_txt_path:
             try:
-                if self._translation_execution_mode == "worker":
-                    job = self._queue_persistent_txt_translation(pending=pending)
-                else:
-                    cancellation_token = CancellationToken()
-                    with self._state_lock:
-                        self._active_cancellations[user_telegram_id] = (
-                            cancellation_token
-                        )
-                    try:
-                        job = self._confirm_persistent_txt_translation(
-                            pending=pending,
-                            translator=translator,
-                            progress_callback=progress_callback,
-                            cancellation_token=cancellation_token,
-                        )
-                    finally:
-                        with self._state_lock:
-                            self._active_cancellations.pop(user_telegram_id, None)
+                job = self._confirm_persistent_translation(
+                    document_kind=document_kind,
+                    pending=pending,
+                    translator=translator,
+                    progress_callback=self._track_active_progress(
+                        user_telegram_id=user_telegram_id,
+                        progress_callback=progress_callback,
+                    ),
+                    cancellation_token=cancellation_token,
+                )
             except Exception as error:
                 logger.exception(
                     "Translation job failed: file_name=%s user_telegram_id=%s",
                     pending.file_name,
                     user_telegram_id,
                 )
-                with self._state_lock:
-                    self._pending.setdefault(user_telegram_id, pending)
+                if not isinstance(error, SecurityThresholdExceeded):
+                    with self._state_lock:
+                        self._pending.setdefault(user_telegram_id, pending)
+                self._record_activity_for_user(
+                    user_telegram_id=user_telegram_id,
+                    event_type="translation.failed",
+                    action="failed",
+                    outcome=(
+                        ActivityOutcome.BLOCKED
+                        if isinstance(error, SecurityThresholdExceeded)
+                        else ActivityOutcome.FAILURE
+                    ),
+                    target_type="document",
+                    target_id=pending.file_name,
+                    metadata={
+                        "file_name": pending.file_name,
+                        "document_kind": document_kind.value,
+                        "source_language": pending.source_language,
+                        "target_language": pending.target_language,
+                        "error_type": error.__class__.__name__,
+                        "error_message": str(error),
+                    },
+                )
                 return _failed_translation_job(
                     pending=pending,
                     document_kind=document_kind,
                     error_message=str(error),
                 )
+            finally:
+                with self._state_lock:
+                    self._active_cancellations.pop(user_telegram_id, None)
 
-            if job.status is TranslationJobStatus.FAILED:
+            if (
+                job.status is TranslationJobStatus.FAILED
+                and not _is_security_threshold_error(job.error_message)
+            ):
                 with self._state_lock:
                     self._pending.setdefault(user_telegram_id, pending)
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type=(
+                    "translation.completed"
+                    if job.status is TranslationJobStatus.READY
+                    else (
+                        "translation.cancelled"
+                        if job.status is TranslationJobStatus.CANCELLED
+                        else "translation.failed"
+                    )
+                ),
+                action=job.status.value,
+                outcome=(
+                    ActivityOutcome.SUCCESS
+                    if job.status is TranslationJobStatus.READY
+                    else (
+                        ActivityOutcome.IGNORED
+                        if job.status is TranslationJobStatus.CANCELLED
+                        else ActivityOutcome.FAILURE
+                    )
+                ),
+                target_type="document",
+                target_id=pending.file_name,
+                job_id=job.id,
+                metadata={
+                    "file_name": pending.file_name,
+                    "document_kind": document_kind.value,
+                    "source_language": pending.source_language,
+                    "target_language": pending.target_language,
+                    "result_file_name": job.result_file_name,
+                    "status": job.status.value,
+                    "error_message": job.error_message,
+                },
+            )
             return job
 
         queued_job = self._job_repository.create_job(
@@ -438,52 +1122,210 @@ class BotTranslationService:
             source_language=pending.source_language,
             target_language=pending.target_language,
         )
+        run_logger = self._start_translation_run_logger(
+            pending=pending,
+            document_kind=document_kind,
+            job_id=queued_job.id,
+            translator=translator,
+        )
+        if run_logger is not None:
+            run_logger.record_event("job_created", {"job_id": queued_job.id})
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="translation.started",
+            action="started",
+            target_type="document",
+            target_id=pending.file_name,
+            job_id=queued_job.id,
+            translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+            metadata={
+                "file_name": pending.file_name,
+                "document_kind": document_kind.value,
+                "source_language": pending.source_language,
+                "target_language": pending.target_language,
+                "fragment_count": pending.fragment_count,
+            },
+        )
+        security_limiter = SecurityEventLimiter(self._security_threshold_policy)
+        progress_with_logging = _progress_callback_with_run_logging(
+            run_logger=run_logger,
+            progress_callback=progress_callback,
+            translator=translator,
+            security_limiter=security_limiter,
+        )
         cancellation_token = CancellationToken()
-        with self._state_lock:
-            self._active_cancellations[user_telegram_id] = cancellation_token
+        self._set_active_translation(
+            user_telegram_id=user_telegram_id,
+            cancellation_token=cancellation_token,
+            job_id=queued_job.id,
+            total_fragments=pending.fragment_count,
+        )
         try:
             run_translation_job(
                 repository=self._job_repository,
                 job_id=queued_job.id,
                 max_fragment_chars=self._max_fragment_chars,
                 translator=translator,
-                progress_callback=progress_callback,
+                progress_callback=self._track_active_progress(
+                    user_telegram_id=user_telegram_id,
+                    progress_callback=progress_with_logging,
+                ),
                 cancellation_token=cancellation_token,
                 translation_cache=self._translation_cache,
             )
-        except Exception:
+        except Exception as error:
             failed_job = self._job_repository.get(queued_job.id)
-            logger.exception(
-                "Translation job failed: job_id=%s file_name=%s user_telegram_id=%s",
-                failed_job.id,
-                failed_job.file_name,
-                failed_job.user_telegram_id,
+            if isinstance(error, SecurityThresholdExceeded):
+                logger.warning(
+                    "Translation stopped by security threshold: "
+                    "job_id=%s file_name=%s user_telegram_id=%s reason=%s",
+                    failed_job.id,
+                    failed_job.file_name,
+                    failed_job.user_telegram_id,
+                    error,
+                )
+            else:
+                logger.exception(
+                    "Translation job failed: "
+                    "job_id=%s file_name=%s user_telegram_id=%s",
+                    failed_job.id,
+                    failed_job.file_name,
+                    failed_job.user_telegram_id,
+                )
+            _record_translator_security_events(
+                run_logger,
+                translator,
+                security_limiter=security_limiter,
+                phase="failure",
             )
-            with self._state_lock:
-                self._pending.setdefault(user_telegram_id, pending)
+            if isinstance(error, SecurityThresholdExceeded):
+                self._record_security_threshold_for_user(
+                    user_telegram_id=user_telegram_id,
+                    run_logger=run_logger,
+                )
+            else:
+                with self._state_lock:
+                    self._pending.setdefault(user_telegram_id, pending)
+            _finish_run_logger(
+                run_logger,
+                status=failed_job.status.value,
+                result_file_name=failed_job.result_file_name,
+                error_message=failed_job.error_message,
+            )
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type="translation.failed",
+                action="failed",
+                outcome=(
+                    ActivityOutcome.BLOCKED
+                    if isinstance(error, SecurityThresholdExceeded)
+                    else ActivityOutcome.FAILURE
+                ),
+                target_type="document",
+                target_id=pending.file_name,
+                job_id=queued_job.id,
+                translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+                metadata={
+                    "file_name": pending.file_name,
+                    "document_kind": document_kind.value,
+                    "source_language": pending.source_language,
+                    "target_language": pending.target_language,
+                    "error_type": error.__class__.__name__,
+                    "error_message": failed_job.error_message,
+                },
+            )
             return self._job_repository.get(queued_job.id)
         finally:
             with self._state_lock:
                 self._active_cancellations.pop(user_telegram_id, None)
 
-        return self._job_repository.get(queued_job.id)
+        completed_job = self._job_repository.get(queued_job.id)
+        _finish_run_logger(
+            run_logger,
+            status=completed_job.status.value,
+            result_file_name=completed_job.result_file_name,
+            error_message=completed_job.error_message,
+        )
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type=(
+                "translation.completed"
+                if completed_job.status is TranslationJobStatus.READY
+                else "translation.finished"
+            ),
+            action=completed_job.status.value,
+            outcome=(
+                ActivityOutcome.SUCCESS
+                if completed_job.status is TranslationJobStatus.READY
+                else ActivityOutcome.FAILURE
+            ),
+            target_type="document",
+            target_id=pending.file_name,
+            job_id=completed_job.id,
+            translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+            metadata={
+                "file_name": pending.file_name,
+                "document_kind": document_kind.value,
+                "source_language": pending.source_language,
+                "target_language": pending.target_language,
+                "result_file_name": completed_job.result_file_name,
+                "status": completed_job.status.value,
+                "error_message": completed_job.error_message,
+            },
+        )
+        return completed_job
 
-    def _should_use_persistent_txt_path(
+    def _start_translation_run_logger(
+        self,
+        *,
+        pending: PendingTranslation,
+        document_kind: DocumentKind,
+        job_id: str,
+        translator: TextTranslator,
+        adapter_version: str | None = None,
+        prompt_version: str | None = None,
+    ) -> TranslationRunLogger | None:
+        if self._translation_run_log_root is None:
+            return None
+        return TranslationRunLogger.start(
+            root=self._translation_run_log_root,
+            metadata=TranslationRunMetadata(
+                job_id=job_id,
+                order_id=None,
+                user_id=f"telegram:{pending.user_telegram_id}",
+                file_name=pending.file_name,
+                document_kind=document_kind.value,
+                source_language=pending.source_language,
+                target_language=pending.target_language,
+                translator_model=_translator_model(translator),
+                prompt_version=prompt_version,
+                adapter_version=adapter_version,
+                detected_source_language=pending.source_language_display,
+                translation_policy=_translation_policy_snapshot_for_pending(
+                    pending=pending,
+                    document_kind=document_kind,
+                    document_sandbox=self._document_sandbox,
+                ),
+            ),
+        )
+
+    def _should_use_persistent_document_path(
         self,
         *,
         document_kind: DocumentKind,
         pending: PendingTranslation,
     ) -> bool:
         return (
-            document_kind is DocumentKind.TXT
+            document_kind in {DocumentKind.TXT, DocumentKind.DOCX, DocumentKind.EPUB}
             and self._file_storage is not None
             and self._persistent_job_store is not None
             and pending.source_object_key is not None
         )
 
-    def _confirm_persistent_txt_translation(
+    def _confirm_persistent_translation(
         self,
         *,
+        document_kind: DocumentKind,
         pending: PendingTranslation,
         translator: TextTranslator,
         progress_callback: Callable[[TranslationProgress], None] | None,
@@ -493,18 +1335,105 @@ class BotTranslationService:
         assert self._persistent_job_store is not None
         assert pending.source_object_key is not None
 
-        plan = self._create_persistent_txt_job_plan(pending)
+        plan = _create_persistent_job_plan(
+            document_kind=document_kind,
+            store=self._persistent_job_store,
+            storage=self._file_storage,
+            pending=pending,
+            max_fragment_chars=self._max_fragment_chars,
+        )
         total_fragments = len(plan.work_units)
+        self._mark_active_translation_job(
+            user_telegram_id=pending.user_telegram_id,
+            job_id=plan.job.id,
+            total_fragments=total_fragments,
+        )
+        run_logger = self._start_translation_run_logger(
+            pending=pending,
+            document_kind=document_kind,
+            job_id=plan.job.id,
+            translator=translator,
+            adapter_version=plan.job.adapter_version,
+            prompt_version=plan.job.prompt_version,
+        )
+        if run_logger is not None:
+            run_logger.record_event(
+                "job_created",
+                {
+                    "job_id": plan.job.id,
+                    "fragment_count": total_fragments,
+                    "source_object_key": plan.job.source_object_key,
+                },
+            )
+        self._record_activity_for_user(
+            user_telegram_id=pending.user_telegram_id,
+            event_type="translation.started",
+            action="started",
+            target_type="document",
+            target_id=pending.file_name,
+            job_id=plan.job.id,
+            translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+            metadata={
+                "file_name": pending.file_name,
+                "document_kind": document_kind.value,
+                "source_language": pending.source_language,
+                "target_language": pending.target_language,
+                "fragment_count": total_fragments,
+                "persistent": True,
+            },
+        )
+        security_limiter = SecurityEventLimiter(self._security_threshold_policy)
+        progress_with_logging = _progress_callback_with_run_logging(
+            run_logger=run_logger,
+            progress_callback=progress_callback,
+            translator=translator,
+            security_limiter=security_limiter,
+        )
+
+        if self._use_scheduler_runner:
+            return self._run_scheduler_backed_persistent_translation(
+                document_kind=document_kind,
+                pending=pending,
+                translator=translator,
+                progress_callback=progress_with_logging,
+                cancellation_token=cancellation_token,
+                job_id=plan.job.id,
+                total_fragments=total_fragments,
+                run_logger=run_logger,
+                security_limiter=security_limiter,
+            )
+
+        if self._max_parallel_work_units > 1:
+            return self._run_parallel_persistent_translation(
+                document_kind=document_kind,
+                pending=pending,
+                translator=translator,
+                progress_callback=progress_with_logging,
+                cancellation_token=cancellation_token,
+                job_id=plan.job.id,
+                total_fragments=total_fragments,
+                run_logger=run_logger,
+                security_limiter=security_limiter,
+            )
 
         while True:
             if cancellation_token.is_cancelled:
                 self._persistent_job_store.cancel_job(plan.job.id)
-                return self._build_persistent_txt_result_job(
+                cancelled_job = self._build_persistent_result_job_or_fail(
+                    document_kind=document_kind,
                     pending=pending,
                     job_id=plan.job.id,
                     partial=True,
                     status=TranslationJobStatus.CANCELLED,
+                    run_logger=run_logger,
                 )
+                _finish_run_logger(
+                    run_logger,
+                    status=cancelled_job.status.value,
+                    result_file_name=cancelled_job.result_file_name,
+                    error_message=cancelled_job.error_message,
+                )
+                return cancelled_job
 
             started_at = time.monotonic()
             completed_unit = run_next_stored_text_work_unit(
@@ -518,82 +1447,381 @@ class BotTranslationService:
                 break
             elapsed_seconds = time.monotonic() - started_at
             if completed_unit.status is PersistentWorkUnitStatus.FAILED:
-                return _failed_translation_job(
+                _record_translator_security_events(
+                    run_logger,
+                    translator,
+                    security_limiter=security_limiter,
+                    phase="work_unit_failure",
+                    work_unit_id=completed_unit.id,
+                )
+                failed_job = _failed_translation_job(
                     pending=pending,
-                    document_kind=DocumentKind.TXT,
+                    document_kind=document_kind,
                     error_message=completed_unit.last_error or "Translation failed",
                     job_id=plan.job.id,
                 )
-
-            if progress_callback is not None:
-                progress_callback(
-                    TranslationProgress(
-                        completed_fragments=_completed_persistent_units(
-                            self._persistent_job_store,
-                            plan.job.id,
-                        ),
-                        total_fragments=total_fragments,
-                        source_text=_persistent_unit_source_text(
-                            storage=self._file_storage,
-                            source_object_key=completed_unit.source_object_key,
-                        ),
-                        translated_text=completed_unit.translated_text or "",
-                        elapsed_seconds=elapsed_seconds,
-                        prompt_tokens=completed_unit.prompt_tokens,
-                        completion_tokens=completed_unit.completion_tokens,
-                        total_tokens=(
-                            completed_unit.prompt_tokens
-                            + completed_unit.completion_tokens
-                        ),
-                        prompt_cache_hit_tokens=completed_unit.cache_hit_tokens,
-                        prompt_cache_miss_tokens=completed_unit.cache_miss_tokens,
-                    )
+                _finish_run_logger(
+                    run_logger,
+                    status=failed_job.status.value,
+                    result_file_name=failed_job.result_file_name,
+                    error_message=failed_job.error_message,
                 )
+                return failed_job
 
-        return self._build_persistent_txt_result_job(
+            if progress_with_logging is not None:
+                try:
+                    progress_with_logging(
+                        TranslationProgress(
+                            completed_fragments=_completed_persistent_units(
+                                self._persistent_job_store,
+                                plan.job.id,
+                            ),
+                            total_fragments=total_fragments,
+                            source_text=_persistent_unit_source_text(
+                                storage=self._file_storage,
+                                source_object_key=completed_unit.source_object_key,
+                            ),
+                            translated_text=completed_unit.translated_text or "",
+                            elapsed_seconds=elapsed_seconds,
+                            prompt_tokens=completed_unit.prompt_tokens,
+                            completion_tokens=completed_unit.completion_tokens,
+                            total_tokens=(
+                                completed_unit.prompt_tokens
+                                + completed_unit.completion_tokens
+                            ),
+                            prompt_cache_hit_tokens=completed_unit.cache_hit_tokens,
+                            prompt_cache_miss_tokens=completed_unit.cache_miss_tokens,
+                        )
+                    )
+                except SecurityThresholdExceeded as error:
+                    return self._fail_persistent_translation_after_security_threshold(
+                        document_kind=document_kind,
+                        pending=pending,
+                        job_id=plan.job.id,
+                        run_logger=run_logger,
+                        error=error,
+                    )
+
+        has_unassembled_units = (
+            count_unassembled_work_units(
+                self._persistent_job_store.list_work_units(plan.job.id)
+            )
+            > 0
+        )
+        result_job = self._build_persistent_result_job_or_fail(
+            document_kind=document_kind,
             pending=pending,
             job_id=plan.job.id,
-            partial=False,
-            status=TranslationJobStatus.READY,
+            partial=has_unassembled_units,
+            status=(
+                TranslationJobStatus.PARTIAL
+                if has_unassembled_units
+                else TranslationJobStatus.READY
+            ),
+            run_logger=run_logger,
         )
+        _finish_run_logger(
+            run_logger,
+            status=result_job.status.value,
+            result_file_name=result_job.result_file_name,
+            error_message=result_job.error_message,
+        )
+        return result_job
 
-    def _queue_persistent_txt_translation(
+    def _run_scheduler_backed_persistent_translation(
         self,
         *,
+        document_kind: DocumentKind,
         pending: PendingTranslation,
+        translator: TextTranslator,
+        progress_callback: Callable[[TranslationProgress], None] | None,
+        cancellation_token: CancellationToken,
+        job_id: str,
+        total_fragments: int,
+        run_logger: TranslationRunLogger | None,
+        security_limiter: SecurityEventLimiter,
     ) -> TranslationJob:
-        plan = self._create_persistent_txt_job_plan(pending)
-        return TranslationJob(
-            id=plan.job.id,
-            document_kind=DocumentKind.TXT,
-            user_telegram_id=pending.user_telegram_id,
-            file_name=pending.file_name,
-            content=pending.content,
-            source_language=pending.source_language,
-            target_language=pending.target_language,
-            status=TranslationJobStatus.QUEUED,
-        )
-
-    def _create_persistent_txt_job_plan(self, pending: PendingTranslation):
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
-        assert pending.source_object_key is not None
+        from translator_service.scheduler import SchedulerLimits
+        from translator_service.scheduler_runner import run_scheduler_once
 
-        return create_persistent_txt_job_plan(
-            store=self._persistent_job_store,
-            storage=self._file_storage,
-            order_id=f"prototype-order-{pending.user_telegram_id}-{int(time.time())}",
-            user_id=_persistent_user_id(pending.user_telegram_id),
-            source_object_key=pending.source_object_key,
-            file_name=pending.file_name,
-            source_language=pending.source_language,
-            target_language=pending.target_language,
-            max_fragment_chars=self._max_fragment_chars,
+        while True:
+            if cancellation_token.is_cancelled:
+                self._persistent_job_store.cancel_job(job_id)
+                break
+            summary = run_scheduler_once(
+                store=self._persistent_job_store,
+                storage=self._file_storage,
+                worker_id=f"telegram:{pending.user_telegram_id}",
+                translator=translator,
+                limits=SchedulerLimits(
+                    max_active_units_per_job=self._max_parallel_work_units,
+                ),
+                lease_seconds=300,
+            )
+            try:
+                _record_translator_security_events(
+                    run_logger,
+                    translator,
+                    security_limiter=security_limiter,
+                    phase="scheduler",
+                    completed_units=summary.completed_units,
+                    total_units=total_fragments,
+                )
+            except SecurityThresholdExceeded as error:
+                return self._fail_persistent_translation_after_security_threshold(
+                    document_kind=document_kind,
+                    pending=pending,
+                    job_id=job_id,
+                    run_logger=run_logger,
+                    error=error,
+                )
+            if summary.completed_units == 0 and summary.failed_units == 0:
+                break
+
+        persisted = self._persistent_job_store.get_job(job_id)
+        if persisted is None:
+            raise ValueError(f"Persistent translation job does not exist: {job_id}")
+
+        partial = persisted.status is not PersistentTranslationJobStatus.READY
+        if cancellation_token.is_cancelled:
+            result_status = TranslationJobStatus.CANCELLED
+        elif partial:
+            result_status = TranslationJobStatus.PARTIAL
+        else:
+            result_status = TranslationJobStatus.READY
+
+        result_job = self._build_persistent_result_job_or_fail(
+            document_kind=document_kind,
+            pending=pending,
+            job_id=job_id,
+            partial=partial,
+            status=result_status,
+            run_logger=run_logger,
         )
+        _finish_run_logger(
+            run_logger,
+            status=result_job.status.value,
+            result_file_name=result_job.result_file_name,
+            error_message=result_job.error_message,
+        )
+        return result_job
 
-    def _build_persistent_txt_result_job(
+    def _run_parallel_persistent_translation(
         self,
         *,
+        document_kind: DocumentKind,
+        pending: PendingTranslation,
+        translator: TextTranslator,
+        progress_callback: Callable[[TranslationProgress], None] | None,
+        cancellation_token: CancellationToken,
+        job_id: str,
+        total_fragments: int,
+        run_logger: TranslationRunLogger | None,
+        security_limiter: SecurityEventLimiter,
+    ) -> TranslationJob:
+        assert self._file_storage is not None
+        assert self._persistent_job_store is not None
+
+        def report_progress(progress) -> None:
+            completed_unit = progress.completed_work_unit
+            if progress_callback is None:
+                return
+            progress_callback(
+                TranslationProgress(
+                    completed_fragments=progress.completed_units,
+                    total_fragments=progress.total_units,
+                    source_text=_persistent_unit_source_text(
+                        storage=self._file_storage,
+                        source_object_key=completed_unit.source_object_key,
+                    ),
+                    translated_text=completed_unit.translated_text or "",
+                    elapsed_seconds=progress.elapsed_seconds,
+                    prompt_tokens=completed_unit.prompt_tokens,
+                    completion_tokens=completed_unit.completion_tokens,
+                    total_tokens=(
+                        completed_unit.prompt_tokens
+                        + completed_unit.completion_tokens
+                    ),
+                    prompt_cache_hit_tokens=completed_unit.cache_hit_tokens,
+                    prompt_cache_miss_tokens=completed_unit.cache_miss_tokens,
+                )
+            )
+
+        try:
+            summary = run_stored_text_job_parallel_until_idle(
+                store=self._persistent_job_store,
+                storage=self._file_storage,
+                job_id=job_id,
+                worker_id=f"telegram:{pending.user_telegram_id}",
+                translator=translator,
+                max_parallel_units=self._max_parallel_work_units,
+                progress_callback=report_progress,
+                should_stop=lambda: cancellation_token.is_cancelled,
+            )
+        except SecurityThresholdExceeded as error:
+            return self._fail_persistent_translation_after_security_threshold(
+                document_kind=document_kind,
+                pending=pending,
+                job_id=job_id,
+                run_logger=run_logger,
+                error=error,
+            )
+
+        if cancellation_token.is_cancelled:
+            self._persistent_job_store.cancel_job(job_id)
+            cancelled_job = self._build_persistent_result_job_or_fail(
+                document_kind=document_kind,
+                pending=pending,
+                job_id=job_id,
+                partial=True,
+                status=TranslationJobStatus.CANCELLED,
+                run_logger=run_logger,
+            )
+            _finish_run_logger(
+                run_logger,
+                status=cancelled_job.status.value,
+                result_file_name=cancelled_job.result_file_name,
+                error_message=cancelled_job.error_message,
+            )
+            return cancelled_job
+
+        if summary.failed_work_unit_id is not None:
+            _record_translator_security_events(
+                run_logger,
+                translator,
+                security_limiter=security_limiter,
+                phase="work_unit_failure",
+                work_unit_id=summary.failed_work_unit_id,
+            )
+            failed_unit = next(
+                (
+                    unit
+                    for unit in self._persistent_job_store.list_work_units(job_id)
+                    if unit.id == summary.failed_work_unit_id
+                ),
+                None,
+            )
+            failed_job = _failed_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                error_message=(
+                    failed_unit.last_error
+                    if failed_unit is not None and failed_unit.last_error
+                    else "Translation failed"
+                ),
+                job_id=job_id,
+            )
+            _finish_run_logger(
+                run_logger,
+                status=failed_job.status.value,
+                result_file_name=failed_job.result_file_name,
+                error_message=failed_job.error_message,
+            )
+            return failed_job
+
+        has_unassembled_units = (
+            count_unassembled_work_units(
+                self._persistent_job_store.list_work_units(job_id)
+            )
+            > 0
+        )
+        result_job = self._build_persistent_result_job_or_fail(
+            document_kind=document_kind,
+            pending=pending,
+            job_id=job_id,
+            partial=has_unassembled_units,
+            status=(
+                TranslationJobStatus.PARTIAL
+                if has_unassembled_units
+                else TranslationJobStatus.READY
+            ),
+            run_logger=run_logger,
+        )
+        _finish_run_logger(
+            run_logger,
+            status=result_job.status.value,
+            result_file_name=result_job.result_file_name,
+            error_message=result_job.error_message,
+        )
+        return result_job
+
+    def _fail_persistent_translation_after_security_threshold(
+        self,
+        *,
+        document_kind: DocumentKind,
+        pending: PendingTranslation,
+        job_id: str,
+        run_logger: TranslationRunLogger | None,
+        error: SecurityThresholdExceeded,
+    ) -> TranslationJob:
+        assert self._persistent_job_store is not None
+        self._record_security_threshold_for_user(
+            user_telegram_id=pending.user_telegram_id,
+            run_logger=run_logger,
+        )
+        self._persistent_job_store.mark_job_interrupted(job_id)
+        failed_job = _failed_translation_job(
+            pending=pending,
+            document_kind=document_kind,
+            error_message=str(error),
+            job_id=job_id,
+        )
+        _finish_run_logger(
+            run_logger,
+            status=failed_job.status.value,
+            result_file_name=failed_job.result_file_name,
+            error_message=failed_job.error_message,
+        )
+        return failed_job
+
+    def _build_persistent_result_job_or_fail(
+        self,
+        *,
+        document_kind: DocumentKind,
+        pending: PendingTranslation,
+        job_id: str,
+        partial: bool,
+        status: TranslationJobStatus,
+        run_logger: TranslationRunLogger | None = None,
+    ) -> TranslationJob:
+        assert self._persistent_job_store is not None
+        try:
+            return self._build_persistent_result_job(
+                document_kind=document_kind,
+                pending=pending,
+                job_id=job_id,
+                partial=partial,
+                status=status,
+            )
+        except TextExtractionError as error:
+            if run_logger is not None:
+                run_logger.record_security_event(
+                    "document_assembly_failed",
+                    {
+                        "document_format": document_kind.value,
+                        "phase": "assembly",
+                        "error_type": error.__class__.__name__,
+                    },
+                )
+            logger.exception(
+                "Persistent document assembly failed: job_id=%s file_name=%s",
+                job_id,
+                pending.file_name,
+            )
+            self._persistent_job_store.mark_job_interrupted(job_id)
+            return _failed_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                error_message=f"Document assembly failed: {error}",
+                job_id=job_id,
+            )
+
+    def _build_persistent_result_job(
+        self,
+        *,
+        document_kind: DocumentKind,
         pending: PendingTranslation,
         job_id: str,
         partial: bool,
@@ -605,19 +1833,21 @@ class BotTranslationService:
         result_file_name = _translated_file_name(
             pending.file_name,
             pending.target_language,
-            extension="txt",
+            extension=document_kind.value,
             is_partial=partial,
         )
-        stored = assemble_translated_text_result(
+        stored = _assemble_persistent_result(
+            document_kind=document_kind,
             store=self._persistent_job_store,
             storage=self._file_storage,
             job_id=job_id,
             file_name=result_file_name,
             partial=partial,
+            document_sandbox=self._document_sandbox,
         )
         return TranslationJob(
             id=job_id,
-            document_kind=DocumentKind.TXT,
+            document_kind=document_kind,
             user_telegram_id=pending.user_telegram_id,
             file_name=pending.file_name,
             content=pending.content,
@@ -627,6 +1857,271 @@ class BotTranslationService:
             result_file_name=result_file_name,
             result_content=self._file_storage.get_bytes(stored.object_key),
         )
+
+
+def _create_persistent_job_plan(
+    *,
+    document_kind: DocumentKind,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    pending: PendingTranslation,
+    max_fragment_chars: int,
+):
+    common = {
+        "store": store,
+        "storage": storage,
+        "order_id": f"prototype-order-{pending.user_telegram_id}-{int(time.time())}",
+        "user_id": f"telegram:{pending.user_telegram_id}",
+        "source_object_key": pending.source_object_key,
+        "file_name": pending.file_name,
+        "source_language": pending.source_language,
+        "target_language": pending.target_language,
+        "max_fragment_chars": max_fragment_chars,
+    }
+    if document_kind is DocumentKind.TXT:
+        return create_persistent_txt_job_plan(**common)
+    if document_kind is DocumentKind.DOCX:
+        return create_persistent_docx_job_plan(**common)
+    if document_kind is DocumentKind.EPUB:
+        return create_persistent_epub_job_plan(**common)
+    raise ValueError(f"Unsupported persistent document kind: {document_kind}")
+
+
+def _progress_callback_with_run_logging(
+    *,
+    run_logger: TranslationRunLogger | None,
+    progress_callback: Callable[[TranslationProgress], None] | None,
+    translator: TextTranslator | None = None,
+    security_limiter: SecurityEventLimiter | None = None,
+) -> Callable[[TranslationProgress], None] | None:
+    if run_logger is None and progress_callback is None and security_limiter is None:
+        return progress_callback
+
+    def report(progress: TranslationProgress) -> None:
+        if run_logger is not None:
+            run_logger.record_fragment(_fragment_log_from_progress(progress))
+        if translator is not None:
+            _record_translator_security_events(
+                run_logger,
+                translator,
+                security_limiter=security_limiter,
+                phase="translation",
+                fragment_sequence=progress.completed_fragments,
+                total_units=progress.total_fragments,
+            )
+        if progress_callback is not None:
+            progress_callback(progress)
+
+    return report
+
+
+def _print_translation_cancel_requested(active: _ActiveTranslationCancellation) -> None:
+    total = active.total_fragments if active.total_fragments > 0 else "?"
+    message = (
+        "CANCEL REQUESTED "
+        f"user={active.user_id} "
+        f"job={active.job_id or '-'} "
+        f"completed={active.completed_fragments}/{total} "
+        "stopping=active_requests"
+    )
+    logger.info(message)
+    print(message, flush=True)
+
+
+def _record_translator_security_events(
+    run_logger: TranslationRunLogger | None,
+    translator: TextTranslator,
+    security_limiter: SecurityEventLimiter | None = None,
+    **context,
+) -> None:
+    events = _consume_translator_security_events(translator)
+    if run_logger is None and security_limiter is None:
+        return
+    for event in events:
+        payload = {
+            **context,
+            **event["payload"],
+        }
+        if run_logger is not None:
+            run_logger.record_security_event(event["event_type"], payload)
+        if security_limiter is None:
+            continue
+        try:
+            security_limiter.observe(
+                {"event_type": event["event_type"], "payload": payload}
+            )
+        except SecurityThresholdExceeded as error:
+            _record_security_threshold_exceeded(run_logger, error)
+            raise
+
+
+def _record_security_threshold_exceeded(
+    run_logger: TranslationRunLogger | None,
+    error: SecurityThresholdExceeded,
+) -> None:
+    if run_logger is None:
+        return
+    run_logger.record_security_event(
+        "security_threshold_exceeded",
+        {
+            "blocked_security_event_type": error.event_type,
+            "reason": error.reason,
+            "count": error.count,
+            "limit": error.limit,
+        },
+    )
+
+
+def _consume_translator_security_events(
+    translator: TextTranslator,
+) -> tuple[dict, ...]:
+    consume = getattr(translator, "consume_security_events", None)
+    if callable(consume):
+        raw_events = consume()
+    else:
+        raw_events = getattr(translator, "last_security_events", ())
+        if hasattr(translator, "_last_security_events"):
+            try:
+                translator._last_security_events.value = ()
+            except Exception:
+                pass
+    events = []
+    for raw_event in raw_events or ():
+        event = normalize_security_event(raw_event)
+        if event is not None:
+            events.append(event)
+    return tuple(events)
+
+
+def _fragment_log_from_progress(progress: TranslationProgress) -> TranslationFragmentLog:
+    return TranslationFragmentLog(
+        sequence=progress.completed_fragments,
+        source_text=progress.source_text,
+        translated_text=progress.translated_text,
+        status="translated" if progress.success else "failed",
+        elapsed_seconds=progress.elapsed_seconds,
+        prompt_tokens=progress.prompt_tokens,
+        completion_tokens=progress.completion_tokens,
+        total_tokens=progress.total_tokens,
+        prompt_cache_hit_tokens=progress.prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=progress.prompt_cache_miss_tokens,
+    )
+
+
+def _translation_policy_snapshot_for_pending(
+    *,
+    pending: PendingTranslation,
+    document_kind: DocumentKind,
+    document_sandbox: DocumentSandbox | None = None,
+) -> str | None:
+    try:
+        source_text = _extract_policy_source_text(
+            content=pending.content,
+            document_kind=document_kind,
+            document_sandbox=document_sandbox,
+        )
+    except TextExtractionError as error:
+        logger.warning(
+            "Could not build translation policy snapshot: file_name=%s reason=%s",
+            pending.file_name,
+            error,
+        )
+        return None
+
+    policy = build_translation_policy(
+        text=source_text,
+        source_language=pending.source_language,
+        target_language=pending.target_language,
+    )
+    return translation_policy_signature(policy)
+
+
+def _extract_policy_source_text(
+    *,
+    content: bytes,
+    document_kind: DocumentKind,
+    document_sandbox: DocumentSandbox | None = None,
+) -> str:
+    if document_sandbox is not None:
+        document_format = _document_format_from_kind(document_kind)
+        if document_format is not None:
+            return document_sandbox.extract_text(
+                document_format=document_format,
+                content=content,
+            )
+
+    if document_kind is DocumentKind.TXT:
+        return extract_text_from_txt(content)
+    if document_kind is DocumentKind.DOCX:
+        return extract_text_from_docx(content)
+    if document_kind is DocumentKind.EPUB:
+        return extract_text_from_epub(content)
+    raise TextExtractionError(f"Unsupported document kind: {document_kind}")
+
+
+def _finish_run_logger(
+    run_logger: TranslationRunLogger | None,
+    *,
+    status: str,
+    result_file_name: str | None,
+    error_message: str | None,
+) -> None:
+    if run_logger is None:
+        return
+    run_logger.finish(
+        status=status,
+        result_file_name=result_file_name,
+        error_message=error_message,
+    )
+
+
+def _translator_model(translator: TextTranslator) -> str | None:
+    model = getattr(translator, "_model", None)
+    if isinstance(model, str) and model:
+        return model
+    public_model = getattr(translator, "model", None)
+    if isinstance(public_model, str) and public_model:
+        return public_model
+    return translator.__class__.__name__
+
+
+def _assemble_persistent_result(
+    *,
+    document_kind: DocumentKind,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    job_id: str,
+    file_name: str,
+    partial: bool,
+    document_sandbox: DocumentSandbox | None = None,
+):
+    if document_kind is DocumentKind.TXT:
+        return assemble_persistent_txt_result(
+            store=store,
+            storage=storage,
+            job_id=job_id,
+            file_name=file_name,
+            partial=partial,
+        )
+    if document_kind is DocumentKind.DOCX:
+        return assemble_persistent_docx_result(
+            store=store,
+            storage=storage,
+            job_id=job_id,
+            file_name=file_name,
+            partial=partial,
+            document_sandbox=document_sandbox,
+        )
+    if document_kind is DocumentKind.EPUB:
+        return assemble_persistent_epub_result(
+            store=store,
+            storage=storage,
+            job_id=job_id,
+            file_name=file_name,
+            partial=partial,
+            document_sandbox=document_sandbox,
+        )
+    raise ValueError(f"Unsupported persistent document kind: {document_kind}")
 
 
 def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind | None:
@@ -659,12 +2154,16 @@ def _failed_translation_job(
     )
 
 
-def _persistent_user_id(user_telegram_id: int) -> str:
+def _is_security_threshold_error(error_message: str | None) -> bool:
+    return bool(error_message and error_message.startswith("Security threshold exceeded:"))
+
+
+def _security_user_id(user_telegram_id: int) -> str:
     return f"telegram:{user_telegram_id}"
 
 
 def _completed_persistent_units(
-    store: TranslationJobStore,
+    store: SQLiteTranslationJobStore,
     job_id: str,
 ) -> int:
     return sum(
@@ -708,31 +2207,30 @@ def _content_type_for_format(document_format: DocumentFormat) -> str:
     return "application/octet-stream"
 
 
-def _content_type_for_document_kind(document_kind: str) -> str:
-    if document_kind == DocumentKind.TXT.value:
-        return "text/plain; charset=utf-8"
-    if document_kind == DocumentKind.DOCX.value:
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if document_kind == DocumentKind.EPUB.value:
-        return "application/epub+zip"
-    return "application/octet-stream"
-
-
-def _result_extension_for_document_kind(document_kind: str) -> str:
-    if document_kind == DocumentKind.TXT.value:
-        return "txt"
-    if document_kind == DocumentKind.DOCX.value:
-        return "docx"
-    if document_kind == DocumentKind.EPUB.value:
-        return "epub"
-    return PurePath(document_kind).suffix.lstrip(".") or document_kind
-
-
-def estimate_translation_seconds(fragment_count: int) -> int:
+def estimate_translation_seconds(
+    fragment_count: int,
+    *,
+    max_parallel_work_units: int = 1,
+    provider_parallel_capacity: int = 1,
+) -> int:
     if fragment_count <= 0:
         return 0
 
-    return max(20, fragment_count * 12)
+    effective_parallelism = min(
+        fragment_count,
+        max(1, max_parallel_work_units),
+        max(1, provider_parallel_capacity),
+    )
+    return max(20, math.ceil(fragment_count * 12 / effective_parallelism))
+
+
+def _can_resume_persistent_job(status: str) -> bool:
+    return status in {
+        "cancelled",
+        "interrupted",
+        "failed",
+        "partial",
+    }
 
 
 def _source_language_display(
@@ -740,14 +2238,17 @@ def _source_language_display(
     document_format: DocumentFormat,
     content: bytes,
     source_language: str,
+    document_sandbox: DocumentSandbox | None = None,
 ) -> str:
     text = _extract_text_for_language_detection(
         document_format=document_format,
         content=content,
+        document_sandbox=document_sandbox,
     )
     return format_detected_source_languages(
         requested_source_language=source_language,
         detected_languages=detect_languages_from_text(text),
+        primary_language=detect_language_from_text(text),
     )
 
 
@@ -755,7 +2256,14 @@ def _extract_text_for_language_detection(
     *,
     document_format: DocumentFormat,
     content: bytes,
+    document_sandbox: DocumentSandbox | None = None,
 ) -> str:
+    if document_sandbox is not None:
+        return document_sandbox.extract_text(
+            document_format=document_format,
+            content=content,
+        )
+
     if document_format is DocumentFormat.TXT:
         return extract_text_from_txt(content)
     if document_format is DocumentFormat.DOCX:
@@ -763,3 +2271,13 @@ def _extract_text_for_language_detection(
     if document_format is DocumentFormat.EPUB:
         return extract_text_from_epub(content)
     return ""
+
+
+def _document_format_from_kind(document_kind: DocumentKind) -> DocumentFormat | None:
+    if document_kind is DocumentKind.TXT:
+        return DocumentFormat.TXT
+    if document_kind is DocumentKind.DOCX:
+        return DocumentFormat.DOCX
+    if document_kind is DocumentKind.EPUB:
+        return DocumentFormat.EPUB
+    return None

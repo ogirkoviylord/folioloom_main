@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from translator_service.documents import DocumentFormat, validate_document_upload
+from translator_service.document_sandbox import DocumentSandbox
 from translator_service.order_estimates import (
     DocumentEstimationNotReadyError,
     estimate_epub_order,
@@ -37,7 +38,7 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.file_name, "notes.txt")
         self.assertEqual(estimate.document_format, DocumentFormat.TXT)
         self.assertEqual(estimate.character_count, 36)
-        self.assertEqual(estimate.estimated_input_tokens, 9)
+        self.assertEqual(estimate.estimated_input_tokens, 70)
         self.assertEqual(estimate.fragment_count, 2)
         self.assertEqual(estimate.price_usd, 0.10)
 
@@ -84,6 +85,36 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         self.assertEqual(estimate.file_name, "notes.txt")
         self.assertEqual(estimate.document_format, DocumentFormat.TXT)
+
+    def test_estimate_order_can_use_sandboxed_adapter_plan(self):
+        upload = validate_document_upload(
+            file_name="notes.txt",
+            size_bytes=9,
+            max_upload_mb=50,
+        )
+        sandbox = RecordingPlanSandbox()
+
+        estimate = estimate_order(
+            upload=upload,
+            content=b"Some text",
+            pricing_rules=PricingRules(
+                deepseek_input_usd_per_million_tokens=0.28,
+                expected_output_multiplier=1.2,
+                service_markup_multiplier=3.0,
+                minimum_price_usd=0.10,
+            ),
+            max_fragment_chars=100,
+            document_sandbox=sandbox,
+        )
+
+        self.assertEqual(
+            sandbox.calls,
+            [(DocumentFormat.TXT, b"Some text", 100)],
+        )
+        self.assertEqual(estimate.file_name, "notes.txt")
+        self.assertEqual(estimate.document_format, DocumentFormat.TXT)
+        self.assertEqual(estimate.character_count, 9)
+        self.assertEqual(estimate.fragment_count, 1)
 
     def test_estimate_order_reports_formats_that_are_not_ready_yet(self):
         upload = validate_document_upload(
@@ -233,7 +264,7 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         self.assertEqual(estimate.document_format, DocumentFormat.DOCX)
         self.assertGreater(estimate.character_count, 1_000)
-        self.assertEqual(estimate.fragment_count, 7)
+        self.assertEqual(estimate.fragment_count, 10)
         self.assertGreater(estimate.estimated_input_tokens, 700)
 
     def test_estimate_order_dispatches_epub_uploads(self):
@@ -304,7 +335,7 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         self.assertEqual(estimate.fragment_count, 2)
 
-    def test_epub_estimate_ignores_navigation_and_noise_blocks(self):
+    def test_epub_estimate_counts_auxiliary_navigation_but_not_noise_blocks(self):
         upload = validate_document_upload(
             file_name="book.epub",
             size_bytes=500,
@@ -344,8 +375,8 @@ class TxtOrderEstimateTest(unittest.TestCase):
             max_fragment_chars=60,
         )
 
-        self.assertEqual(estimate.character_count, 44)
-        self.assertEqual(estimate.fragment_count, 1)
+        self.assertEqual(estimate.character_count, 76)
+        self.assertEqual(estimate.fragment_count, 4)
 
     def test_epub_estimate_counts_structural_table_unit_separately(self):
         upload = validate_document_upload(
@@ -390,9 +421,10 @@ class TxtOrderEstimateTest(unittest.TestCase):
             max_upload_mb=50,
         )
 
+        content = path.read_bytes()
         estimate = estimate_order(
             upload=upload,
-            content=path.read_bytes(),
+            content=content,
             pricing_rules=PricingRules(
                 deepseek_input_usd_per_million_tokens=0.28,
                 expected_output_multiplier=1.2,
@@ -401,10 +433,16 @@ class TxtOrderEstimateTest(unittest.TestCase):
             ),
             max_fragment_chars=300,
         )
+        from translator_service.format_adapters import plan_epub_translation
+
+        expected_plan = plan_epub_translation(
+            content=content,
+            max_fragment_chars=300,
+        )
 
         self.assertEqual(estimate.document_format, DocumentFormat.EPUB)
         self.assertGreater(estimate.character_count, 1_000)
-        self.assertEqual(estimate.fragment_count, 5)
+        self.assertEqual(estimate.fragment_count, expected_plan.fragment_count)
         self.assertGreater(estimate.estimated_input_tokens, 400)
 
     def test_rejects_non_epub_upload_for_epub_estimator(self):
@@ -465,3 +503,23 @@ def _make_epub(xhtml_items: dict[str, str]) -> bytes:
         for file_name, content in xhtml_items.items():
             epub.writestr(file_name, content)
     return archive.getvalue()
+
+
+class RecordingPlanSandbox(DocumentSandbox):
+    def __init__(self) -> None:
+        self.calls: list[tuple[DocumentFormat, bytes, int]] = []
+
+    def plan_translation(
+        self,
+        *,
+        document_format: DocumentFormat,
+        content: bytes,
+        max_fragment_chars: int,
+    ):
+        self.calls.append((document_format, content, max_fragment_chars))
+        from translator_service.format_adapters import plan_txt_translation
+
+        return plan_txt_translation(
+            content=content,
+            max_fragment_chars=max_fragment_chars,
+        )

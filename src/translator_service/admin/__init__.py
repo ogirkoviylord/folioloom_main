@@ -1,1 +1,1 @@
-"""Administrative operation helpers for FolioLoom."""
+"""Admin console support for FolioLoom."""

@@ -1,4 +1,5 @@
 import unittest
+import warnings
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -7,6 +8,10 @@ from translator_service.extractors import (
     TextExtractionError,
     MAX_ARCHIVE_ENTRY_COUNT,
     MAX_ARCHIVE_UNCOMPRESSED_BYTES,
+    MAX_EPUB_TEXT_BLOCKS,
+    MAX_XML_BYTES,
+    MAX_XML_DEPTH,
+    MAX_XML_ELEMENT_COUNT,
     extract_text_from_docx,
     extract_text_from_epub,
     extract_text_from_txt,
@@ -127,6 +132,51 @@ class DocxExtractionTest(unittest.TestCase):
         with self.assertRaises(TextExtractionError):
             extract_text_from_docx(archive.getvalue())
 
+    def test_rejects_docx_xml_part_above_xml_limit(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as docx:
+            docx.writestr(
+                "word/document.xml",
+                b"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                + b" " * MAX_XML_BYTES
+                + b"</w:document>",
+            )
+
+        with self.assertRaisesRegex(TextExtractionError, "XML part is too large"):
+            extract_text_from_docx(archive.getvalue())
+
+    def test_rejects_docx_xml_with_excessive_depth(self):
+        content = _make_docx(_deep_docx_xml(MAX_XML_DEPTH + 1))
+
+        with self.assertRaisesRegex(TextExtractionError, "XML nesting is too deep"):
+            extract_text_from_docx(content)
+
+    def test_rejects_docx_xml_entities_before_parsing(self):
+        content = _make_docx(
+            """
+            <!DOCTYPE document [<!ENTITY injected "boom">]>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p><w:r><w:t>&injected;</w:t></w:r></w:p></w:body>
+            </w:document>
+            """
+        )
+
+        with self.assertRaisesRegex(TextExtractionError, "XML entities are not supported"):
+            extract_text_from_docx(content)
+
+    def test_rejects_docx_xml_with_too_many_elements(self):
+        repeated_runs = "<w:r><w:t>x</w:t></w:r>" * (MAX_XML_ELEMENT_COUNT // 2)
+        content = _make_docx(
+            f"""
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p>{repeated_runs}</w:p></w:body>
+            </w:document>
+            """
+        )
+
+        with self.assertRaisesRegex(TextExtractionError, "too many elements"):
+            extract_text_from_docx(content)
+
     def test_extracts_russian_profile_regression_docx_sample(self):
         content = (TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.docx").read_bytes()
 
@@ -189,6 +239,23 @@ class EpubExtractionTest(unittest.TestCase):
 
         self.assertEqual(text, "First chapter.\n\nSecond chapter.")
 
+    def test_extracts_legacy_epub_xhtml_with_doctype_and_html_entities(self):
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+                  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>First&nbsp;&mdash;&nbsp;second.</p></body>
+                </html>
+                """
+            }
+        )
+
+        text = extract_text_from_epub(content)
+
+        self.assertEqual(text, "First — second.")
+
     def test_rejects_epub_without_translatable_text(self):
         content = _make_epub(
             {
@@ -207,6 +274,80 @@ class EpubExtractionTest(unittest.TestCase):
         with self.assertRaises(TextExtractionError):
             extract_text_from_epub(b"not a zip")
 
+    def test_rejects_epub_with_malformed_container_xml(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w") as epub:
+            epub.writestr("mimetype", "application/epub+zip")
+            epub.writestr("META-INF/container.xml", "<container")
+            epub.writestr(
+                "OPS/chapter.xhtml",
+                """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Chapter text.</p></body>
+                </html>
+                """,
+            )
+
+        with self.assertRaisesRegex(
+            TextExtractionError,
+            "EPUB container XML is not readable",
+        ):
+            extract_text_from_epub(archive.getvalue())
+
+    def test_rejects_epub_with_malformed_opf_xml(self):
+        archive = BytesIO()
+        with ZipFile(archive, "w") as epub:
+            epub.writestr("mimetype", "application/epub+zip")
+            epub.writestr(
+                "META-INF/container.xml",
+                """
+                <container>
+                  <rootfiles>
+                    <rootfile full-path="OPS/content.opf" />
+                  </rootfiles>
+                </container>
+                """,
+            )
+            epub.writestr("OPS/content.opf", "<package")
+            epub.writestr(
+                "OPS/chapter.xhtml",
+                """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Chapter text.</p></body>
+                </html>
+                """,
+            )
+
+        with self.assertRaisesRegex(
+            TextExtractionError,
+            "EPUB package XML is not readable",
+        ):
+            extract_text_from_epub(archive.getvalue())
+
+    def test_rejects_epub_with_duplicate_archive_member_names(self):
+        archive = BytesIO()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with ZipFile(archive, "w") as epub:
+                epub.writestr("mimetype", "application/epub+zip")
+                epub.writestr("META-INF/container.xml", "<container />")
+                epub.writestr("OPS/toc.ncx", "<ncx><text>One</text></ncx>")
+                epub.writestr("OPS/toc.ncx", "<ncx><text>Two</text></ncx>")
+                epub.writestr(
+                    "OPS/chapter.xhtml",
+                    """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Chapter text.</p></body>
+                    </html>
+                    """,
+                )
+
+        with self.assertRaisesRegex(
+            TextExtractionError,
+            "Document archive contains duplicate file names",
+        ):
+            extract_text_from_epub(archive.getvalue())
+
     def test_rejects_epub_with_excessive_uncompressed_size(self):
         archive = BytesIO()
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as epub:
@@ -214,6 +355,23 @@ class EpubExtractionTest(unittest.TestCase):
 
         with self.assertRaises(TextExtractionError):
             extract_text_from_epub(archive.getvalue())
+
+    def test_rejects_epub_with_too_many_text_blocks(self):
+        paragraphs = "".join(
+            f"<p>Paragraph {index}</p>" for index in range(MAX_EPUB_TEXT_BLOCKS + 1)
+        )
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": (
+                    '<html xmlns="http://www.w3.org/1999/xhtml">'
+                    f"<body>{paragraphs}</body>"
+                    "</html>"
+                )
+            }
+        )
+
+        with self.assertRaisesRegex(TextExtractionError, "too many text blocks"):
+            extract_text_from_epub(content)
 
     def test_extracts_russian_profile_regression_epub_sample_in_spine_order(self):
         content = (TEST_SAMPLES_DIR / "russian_profile_regression.en-ru.epub").read_bytes()
@@ -245,6 +403,17 @@ def _docx_part_xml(text: str) -> str:
     return f"""
     <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
       <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+    </w:document>
+    """
+
+
+def _deep_docx_xml(nesting_depth: int) -> str:
+    wrappers = "".join("<w:proofErr />" for _ in range(1))
+    open_tags = "<w:sdt>" * nesting_depth
+    close_tags = "</w:sdt>" * nesting_depth
+    return f"""
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>{wrappers}{open_tags}<w:p><w:r><w:t>Deep text</w:t></w:r></w:p>{close_tags}</w:body>
     </w:document>
     """
 

@@ -1,14 +1,25 @@
 from pathlib import Path
+from hashlib import sha256
+import json
 from tempfile import TemporaryDirectory
 import unittest
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.format_adapters import (
+    DOCX_ADAPTER_VERSION,
+    EPUB_ADAPTER_VERSION,
+    TXT_ADAPTER_VERSION,
+)
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
-from translator_service.persistent_planner import create_persistent_txt_job_plan
+from translator_service.persistent_planner import (
+    create_persistent_docx_job_plan,
+    create_persistent_epub_job_plan,
+    create_persistent_txt_job_plan,
+)
 
 
 class PersistentPlannerTest(unittest.TestCase):
@@ -44,6 +55,7 @@ class PersistentPlannerTest(unittest.TestCase):
             )
             self.assertEqual(persisted_job.source_object_key, original.object_key)
             self.assertEqual(persisted_job.document_kind, "txt")
+            self.assertEqual(persisted_job.adapter_version, TXT_ADAPTER_VERSION)
             self.assertEqual(len(persisted_units), 2)
             self.assertEqual(
                 [unit.status for unit in persisted_units],
@@ -54,11 +66,306 @@ class PersistentPlannerTest(unittest.TestCase):
                 "One.",
             )
             self.assertEqual(
+                persisted_units[0].source_block_ids,
+                ("txt:segment:1",),
+            )
+            self.assertEqual(persisted_units[0].prompt_tier, "plain")
+            self.assertEqual(
                 storage.get_bytes(persisted_units[1].source_object_key).decode("utf-8"),
                 "Two.",
+            )
+            self.assertEqual(plan.work_units, persisted_units)
+
+    def test_creates_txt_job_with_translation_policy_snapshot(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="api-notes.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Set the API endpoint and pass the placeholder token.",
+            )
+
+            plan = create_persistent_txt_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="api-notes.txt",
+                source_language="en",
+                target_language="ru",
+                max_fragment_chars=1_000,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+
+            self.assertEqual(
+                translation_policy["target_language_policy"],
+                "target-profile:ru:russian-v2",
+            )
+            self.assertEqual(
+                translation_policy["russian_quality_track"],
+                "russian-quality:precision-v1",
+            )
+            self.assertEqual(translation_policy["text_type"], "technical")
+            self.assertEqual(translation_policy["target_language"], "ru")
+
+    def test_creates_docx_job_and_stored_work_units_from_adapter_plan(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Intro paragraph.</w:t></w:r></w:p>
+                        <w:tbl>
+                          <w:tr>
+                            <w:tc><w:p><w:r><w:t>Source</w:t></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>Target</w:t></w:r></w:p></w:tc>
+                          </w:tr>
+                        </w:tbl>
+                        <w:p><w:r><w:t>Outro paragraph.</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+            )
+
+            plan = create_persistent_docx_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-2",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="book.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            persisted_units = store.list_work_units(plan.job.id)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.QUEUED,
+            )
+            self.assertEqual(persisted_job.source_object_key, original.object_key)
+            self.assertEqual(persisted_job.document_kind, "docx")
+            self.assertEqual(persisted_job.adapter_version, DOCX_ADAPTER_VERSION)
+            self.assertEqual(len(persisted_units), 3)
+            self.assertEqual(
+                [unit.status for unit in persisted_units],
+                [
+                    PersistentWorkUnitStatus.PENDING,
+                    PersistentWorkUnitStatus.PENDING,
+                    PersistentWorkUnitStatus.PENDING,
+                ],
+            )
+            self.assertEqual(
+                [
+                    storage.get_bytes(unit.source_object_key).decode("utf-8")
+                    for unit in persisted_units
+                ],
+                ["Intro paragraph.", "Source\n\nTarget", "Outro paragraph."],
+            )
+            self.assertEqual(
+                persisted_units[1].source_block_ids,
+                ("docx:word/document.xml:1", "docx:word/document.xml:2"),
+            )
+            self.assertEqual(persisted_units[1].prompt_tier, "strict")
+            self.assertEqual(
+                persisted_units[1].source_text_hash,
+                sha256("Source\n\nTarget".encode("utf-8")).hexdigest(),
+            )
+            self.assertEqual(plan.work_units, persisted_units)
+
+    def test_creates_epub_job_and_stored_work_units_from_adapter_plan(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.epub",
+                content_type="application/epub+zip",
+                content=_make_epub(
+                    {
+                        "OPS/front.xhtml": """
+                        <html xmlns="http://www.w3.org/1999/xhtml">
+                          <body>
+                            <h1>Contents</h1>
+                            <p>Chapter 1</p>
+                            <p>Chapter 2</p>
+                          </body>
+                        </html>
+                        """,
+                        "OPS/chapter.xhtml": """
+                        <html xmlns="http://www.w3.org/1999/xhtml">
+                          <head><title>Chapter Metadata Title</title></head>
+                          <body>
+                            <p>Intro paragraph.</p>
+                            <table>
+                              <tr><td>Source</td><td>Target</td></tr>
+                            </table>
+                            <p>Outro paragraph.</p>
+                          </body>
+                        </html>
+                        """,
+                    },
+                    opf_content="""
+                    <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+                      <metadata>
+                        <dc:title>Book Metadata Title</dc:title>
+                        <dc:description>Book description.</dc:description>
+                        <dc:language>en</dc:language>
+                      </metadata>
+                    </package>
+                    """,
+                    ncx_content="""
+                    <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+                      <docTitle><text>NCX Book Title</text></docTitle>
+                      <navMap>
+                        <navPoint><navLabel><text>NCX Chapter One</text></navLabel></navPoint>
+                      </navMap>
+                    </ncx>
+                    """,
+                ),
+            )
+
+            plan = create_persistent_epub_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-3",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="book.epub",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            persisted_units = store.list_work_units(plan.job.id)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.QUEUED,
+            )
+            self.assertEqual(persisted_job.source_object_key, original.object_key)
+            self.assertEqual(persisted_job.document_kind, "epub")
+            self.assertEqual(persisted_job.adapter_version, EPUB_ADAPTER_VERSION)
+            translation_policy = json.loads(persisted_job.translation_policy)
+            self.assertIn("translation_context_memory", translation_policy)
+            self.assertEqual(len(persisted_units), 11)
+            self.assertEqual(
+                [
+                    storage.get_bytes(unit.source_object_key).decode("utf-8")
+                    for unit in persisted_units
+                ],
+                [
+                    "Intro paragraph.",
+                    "Source\n\nTarget",
+                    "Outro paragraph.",
+                    "Book Metadata Title",
+                    "Book description.",
+                    "NCX Book Title",
+                    "NCX Chapter One",
+                    "Contents",
+                    "Chapter 1",
+                    "Chapter 2",
+                    "Chapter Metadata Title",
+                ],
+            )
+            self.assertEqual(
+                [unit.source_block_ids for unit in persisted_units],
+                [
+                    ("epub:OPS/chapter.xhtml:0",),
+                    ("epub:OPS/chapter.xhtml:1", "epub:OPS/chapter.xhtml:2"),
+                    ("epub:OPS/chapter.xhtml:3",),
+                    ("epub:aux:opf:OPS/content.opf:title:0",),
+                    ("epub:aux:opf:OPS/content.opf:description:0",),
+                    ("epub:aux:ncx:OPS/toc.ncx:text:0",),
+                    ("epub:aux:ncx:OPS/toc.ncx:text:1",),
+                    ("epub:aux:xhtml-navigation:OPS/front.xhtml:h1:0",),
+                    ("epub:aux:xhtml-navigation:OPS/front.xhtml:p:0",),
+                    ("epub:aux:xhtml-navigation:OPS/front.xhtml:p:1",),
+                    ("epub:aux:xhtml-title:OPS/chapter.xhtml:title:0",),
+                ],
+            )
+            self.assertEqual(
+                persisted_units[1].source_block_ids,
+                ("epub:OPS/chapter.xhtml:1", "epub:OPS/chapter.xhtml:2"),
+            )
+            self.assertEqual(persisted_units[1].prompt_tier, "strict")
+            self.assertEqual(
+                persisted_units[1].source_text_hash,
+                sha256("Source\n\nTarget".encode("utf-8")).hexdigest(),
+            )
+            self.assertTrue(
+                all(
+                    "OPS/front.xhtml" not in block_id
+                    for unit in persisted_units
+                    for block_id in unit.source_block_ids
+                    if not block_id.startswith("epub:aux:")
+                )
             )
             self.assertEqual(plan.work_units, persisted_units)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _make_docx(document_xml: str) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+    return archive.getvalue()
+
+
+def _make_epub(
+    xhtml_items: dict[str, str],
+    *,
+    opf_content: str | None = None,
+    ncx_content: str | None = None,
+) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        if opf_content is None:
+            epub.writestr("META-INF/container.xml", "<container />")
+        else:
+            epub.writestr(
+                "META-INF/container.xml",
+                """
+                <container>
+                  <rootfiles>
+                    <rootfile full-path="OPS/content.opf" />
+                  </rootfiles>
+                </container>
+                """,
+            )
+            epub.writestr("OPS/content.opf", opf_content)
+        if ncx_content is not None:
+            epub.writestr("OPS/toc.ncx", ncx_content)
+        for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
+    return archive.getvalue()
