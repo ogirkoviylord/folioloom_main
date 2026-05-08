@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 
+from translator_service.job_store import TranslationJobStore
 from translator_service.persistent_jobs import (
     JobUsageSummary,
     PersistentTranslationJobStatus,
@@ -10,6 +11,28 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
+
+
+class JobStoreProtocolTests(unittest.TestCase):
+    def test_sqlite_store_satisfies_translation_job_store_protocol(self):
+        store: TranslationJobStore = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+
+        job = store.create_job(
+            order_id="order-1",
+            user_id="user-1",
+            file_id="file-1",
+            file_name="book.txt",
+            document_kind="txt",
+            source_language="en",
+            target_language="uk",
+            adapter_version="txt-v1",
+            prompt_version="prompt-v1",
+            pricing_snapshot_id="price-v1",
+            source_object_key="original/file-1.txt",
+        )
+
+        self.assertEqual(store.get_job(job.id).id, job.id)
 
 
 class SQLiteTranslationJobStoreTest(unittest.TestCase):
