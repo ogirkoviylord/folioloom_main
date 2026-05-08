@@ -1,10 +1,10 @@
-from dataclasses import dataclass
 import asyncio
 import hashlib
 import inspect
 import logging
 import os
 import time
+from dataclasses import dataclass
 
 from translator_service.bot.messages import (
     build_back_to_menu_message,
@@ -13,21 +13,22 @@ from translator_service.bot.messages import (
     build_how_it_works_message,
     build_language_selected_message,
     build_language_selection_message,
-    build_nothing_to_cancel_message,
+    build_main_menu,
     build_no_pending_translation_message,
+    build_nothing_to_cancel_message,
     build_pending_translation_message,
     build_settings_message,
     build_start_message,
+    build_translation_job_status_message,
     build_translation_language_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
     build_upload_error_message,
     build_upload_prompt_message,
-    build_translation_job_status_message,
-    get_main_menu_button_text,
     get_back_text,
     get_cancel_text,
     get_confirm_translation_text,
+    get_main_menu_button_text,
     get_toggle_progress_preview_text,
     is_back_text,
     is_cancel_text,
@@ -37,9 +38,8 @@ from translator_service.bot.messages import (
     is_language_menu_text,
     is_main_menu_text,
     is_settings_text,
-    is_translate_book_text,
     is_toggle_progress_preview_text,
-    build_main_menu,
+    is_translate_book_text,
 )
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
@@ -48,15 +48,14 @@ from translator_service.documents import FileTooLargeError, UnsupportedDocumentE
 from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import InMemoryTranslationJobRepository
+from translator_service.job_store_factory import create_translation_job_store
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     find_language_by_button_text,
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
-from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.pricing import PricingRules
 from translator_service.translation_jobs import TranslationProgress
-
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +78,8 @@ class BotRuntimeConfig:
     max_upload_mb: int = 50
     object_storage_root: str = "var/object-storage"
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
+    job_store_backend: str = "sqlite"
+    postgres_dsn: str = "postgresql://translator:translator@localhost:5432/translator"
 
 
 def build_default_pricing_rules() -> PricingRules:
@@ -101,9 +102,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_upload_mb=config.max_upload_mb,
         max_fragment_chars=config.max_fragment_chars,
         file_storage=LocalObjectStorage(config.object_storage_root),
-        persistent_job_store=SQLiteTranslationJobStore(
-            config.persistent_jobs_db_path,
-        ),
+        persistent_job_store=create_translation_job_store(config),
     )
 
 
@@ -937,6 +936,8 @@ async def run_bot() -> None:
         max_upload_mb=settings.max_upload_mb,
         object_storage_root=settings.object_storage_root,
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
+        job_store_backend=settings.job_store_backend,
+        postgres_dsn=settings.postgres_dsn,
     )
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)
