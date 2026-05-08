@@ -1,8 +1,8 @@
-from dataclasses import dataclass
 import logging
+import time
+from dataclasses import dataclass
 from pathlib import PurePath
 from threading import RLock
-import time
 from typing import Callable
 
 from translator_service.documents import DocumentFormat, validate_document_upload
@@ -19,6 +19,7 @@ from translator_service.job_runner import (
     TranslationJobStatus,
     run_translation_job,
 )
+from translator_service.job_store import TranslationJobStore
 from translator_service.language_detection import (
     detect_languages_from_text,
     format_detected_source_languages,
@@ -26,11 +27,13 @@ from translator_service.language_detection import (
 from translator_service.order_estimates import estimate_order
 from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
-    SQLiteTranslationJobStore,
 )
 from translator_service.persistent_planner import create_persistent_txt_job_plan
 from translator_service.pricing import PricingRules
-from translator_service.translation_cache import MemoryTranslationCache, TranslationCache
+from translator_service.translation_cache import (
+    MemoryTranslationCache,
+    TranslationCache,
+)
 from translator_service.translation_jobs import (
     CancellationToken,
     TextTranslator,
@@ -40,7 +43,6 @@ from translator_service.worker import (
     assemble_translated_text_result,
     run_next_stored_text_work_unit,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ class BotTranslationService:
         max_fragment_chars: int,
         translation_cache: TranslationCache | None = None,
         file_storage: LocalObjectStorage | None = None,
-        persistent_job_store: SQLiteTranslationJobStore | None = None,
+        persistent_job_store: TranslationJobStore | None = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -530,7 +532,7 @@ def _failed_translation_job(
 
 
 def _completed_persistent_units(
-    store: SQLiteTranslationJobStore,
+    store: TranslationJobStore,
     job_id: str,
 ) -> int:
     return sum(
