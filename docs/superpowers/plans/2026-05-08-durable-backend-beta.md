@@ -1039,7 +1039,7 @@ git commit -m "feat: reclaim stale translation work leases"
 - Test: `tests/test_bot_translation_service.py`
 - Test: `tests/test_bot_runtime.py`
 
-- [ ] **Step 1: Write resume service test**
+- [x] **Step 1: Write resume service test**
 
 Add:
 
@@ -1062,7 +1062,7 @@ def test_resume_persistent_job_requeues_failed_and_translating_units(self):
     self.assertEqual(store.list_work_units(job.id)[0].status.value, "pending")
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -1072,7 +1072,7 @@ PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service.BotTransla
 
 Expected: failure because service resume is not backed by worker-mode persistent state.
 
-- [ ] **Step 3: Implement resume ownership check**
+- [x] **Step 3: Implement resume ownership check**
 
 Add service method:
 
@@ -1092,7 +1092,7 @@ def resume_persistent_translation(
     return self._persistent_job_store.resume_job(job_id)
 ```
 
-- [ ] **Step 4: Add bot callbacks**
+- [x] **Step 4: Add bot callbacks**
 
 In runtime, add callbacks for:
 
@@ -1102,7 +1102,7 @@ In runtime, add callbacks for:
 
 Each callback must verify ownership through the service method, not through button text.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run:
 

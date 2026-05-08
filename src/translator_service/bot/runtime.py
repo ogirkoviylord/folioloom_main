@@ -342,6 +342,29 @@ def create_router(
             show_alert=True,
         )
 
+    @router.callback_query(F.data.func(_is_resume_callback_data))
+    async def resume_persistent_callback(callback: CallbackQuery) -> None:
+        await _handle_resume_persistent_translation_callback(
+            callback=callback,
+            service=service,
+        )
+
+    @router.callback_query(F.data.func(_is_download_partial_callback_data))
+    async def download_partial_persistent_callback(callback: CallbackQuery) -> None:
+        await _download_persistent_translation_callback(
+            callback=callback,
+            service=service,
+            partial=True,
+        )
+
+    @router.callback_query(F.data.func(_is_download_final_callback_data))
+    async def download_final_persistent_callback(callback: CallbackQuery) -> None:
+        await _download_persistent_translation_callback(
+            callback=callback,
+            service=service,
+            partial=False,
+        )
+
     @router.message(F.text.func(is_back_text))
     async def back_text(message: Message) -> None:
         interface_language = service.get_interface_language(message.from_user.id)
@@ -727,6 +750,75 @@ async def _cancel_active_translation(*, message, service: BotTranslationService)
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+async def _handle_resume_persistent_translation_callback(
+    *,
+    callback,
+    service: BotTranslationService,
+) -> None:
+    try:
+        job_id = _callback_job_id(callback.data, prefix="resume:")
+        service.resume_persistent_translation(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+    except (PermissionError, RuntimeError, ValueError) as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+
+    await callback.answer("Translation resumed.")
+
+
+async def _download_persistent_translation_callback(
+    *,
+    callback,
+    service: BotTranslationService,
+    partial: bool,
+) -> None:
+    prefix = "download_partial:" if partial else "download_final:"
+    try:
+        job_id = _callback_job_id(callback.data, prefix=prefix)
+        download = service.get_persistent_translation_download(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+            partial=partial,
+        )
+    except (PermissionError, RuntimeError, ValueError) as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+
+    from aiogram.types import BufferedInputFile
+
+    if callback.message is None:
+        await callback.answer("Cannot send file here.", show_alert=True)
+        return
+
+    await callback.message.answer_document(
+        BufferedInputFile(download.content, filename=download.file_name)
+    )
+    await callback.answer()
+
+
+def _callback_job_id(data: str | None, *, prefix: str) -> str:
+    if data is None or not data.startswith(prefix):
+        raise ValueError("Invalid translation action")
+    job_id = data.removeprefix(prefix).strip()
+    if not job_id:
+        raise ValueError("Translation job id is missing")
+    return job_id
+
+
+def _is_resume_callback_data(data: str | None) -> bool:
+    return bool(data and data.startswith("resume:"))
+
+
+def _is_download_partial_callback_data(data: str | None) -> bool:
+    return bool(data and data.startswith("download_partial:"))
+
+
+def _is_download_final_callback_data(data: str | None) -> bool:
+    return bool(data and data.startswith("download_final:"))
 
 
 async def _run_translation_progress_heartbeat(

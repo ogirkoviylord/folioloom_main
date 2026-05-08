@@ -12,6 +12,8 @@ from translator_service.bot.runtime import (
     _choose_heartbeat_pattern_name,
     _confirm_pending_translation,
     _document_exceeds_upload_limit,
+    _download_persistent_translation_callback,
+    _handle_resume_persistent_translation_callback,
     _include_progress_preview,
     _is_language_button_text,
     _main_menu_keyboard,
@@ -26,6 +28,11 @@ from translator_service.bot.runtime import (
     build_translation_service,
 )
 from translator_service.config import Settings
+from translator_service.persistent_jobs import (
+    PersistentTranslationJobStatus,
+    SQLiteTranslationJobStore,
+    WorkUnitPlan,
+)
 from translator_service.job_runner import TranslationJobStatus
 from translator_service.translation_jobs import TranslationProgress
 
@@ -92,6 +99,29 @@ class AnswerRecordingMessage:
 
     async def answer_document(self, document) -> None:
         self.documents.append(document)
+
+
+class CallbackRecordingMessage:
+    def __init__(self) -> None:
+        self.answers: list[str] = []
+        self.documents: list[object] = []
+
+    async def answer(self, text: str, **kwargs):
+        self.answers.append(text)
+
+    async def answer_document(self, document) -> None:
+        self.documents.append(document)
+
+
+class RecordingCallback:
+    def __init__(self, *, data: str, user_id: int = 42) -> None:
+        self.data = data
+        self.from_user = type("FromUser", (), {"id": user_id})()
+        self.message = CallbackRecordingMessage()
+        self.answers: list[tuple[str | None, bool]] = []
+
+    async def answer(self, text: str | None = None, show_alert: bool = False) -> None:
+        self.answers.append((text, show_alert))
 
 
 class _RuntimeRecordingTranslator:
@@ -244,6 +274,105 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("notes.txt", message.answers[-1])
             self.assertEqual(message.documents, [])
             self.assertEqual(translator.calls, [])
+
+    async def test_resume_persistent_translation_callback_requeues_job(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    job_store_backend="sqlite",
+                    translation_execution_mode="worker",
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            store = service._persistent_job_store
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+            callback = RecordingCallback(data=f"resume:{job.id}")
+
+            await _handle_resume_persistent_translation_callback(
+                callback=callback,
+                service=service,
+            )
+
+            self.assertEqual(
+                store.get_job(job.id).status,
+                PersistentTranslationJobStatus.QUEUED,
+            )
+            self.assertEqual(callback.answers[-1], ("Translation resumed.", False))
+
+    async def test_download_persistent_translation_callback_sends_partial_file(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    job_store_backend="sqlite",
+                    translation_execution_mode="worker",
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            store = service._persistent_job_store
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+            first = store.list_work_units(job.id)[0]
+            store.complete_work_unit(
+                first.id,
+                translated_text="[uk] One",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cache_hit_tokens=0,
+                cache_miss_tokens=1,
+            )
+            callback = RecordingCallback(data=f"download_partial:{job.id}")
+
+            await _download_persistent_translation_callback(
+                callback=callback,
+                service=service,
+                partial=True,
+            )
+
+            self.assertEqual(callback.answers[-1], (None, False))
+            self.assertEqual(len(callback.message.documents), 1)
+            self.assertEqual(
+                callback.message.documents[0].filename,
+                "notes.uk.partial.txt",
+            )
+
+    async def test_download_persistent_translation_callback_handles_missing_message(self):
+        with TemporaryDirectory() as temp_dir:
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(Path(temp_dir) / "objects"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                    job_store_backend="sqlite",
+                    translation_execution_mode="worker",
+                    max_fragment_chars=5,
+                )
+            )
+            self.addCleanup(service.close)
+            store = service._persistent_job_store
+            job = _persistent_job_with_failed_unit(store, user_id="telegram:42")
+            first = store.list_work_units(job.id)[0]
+            store.complete_work_unit(
+                first.id,
+                translated_text="[uk] One",
+                prompt_tokens=1,
+                completion_tokens=1,
+                cache_hit_tokens=0,
+                cache_miss_tokens=1,
+            )
+            callback = RecordingCallback(data=f"download_partial:{job.id}")
+            callback.message = None
+
+            await _download_persistent_translation_callback(
+                callback=callback,
+                service=service,
+                partial=True,
+            )
+
+            self.assertEqual(callback.answers[-1], ("Cannot send file here.", True))
 
     def test_worker_mode_translator_does_not_require_deepseek_key(self):
         settings = Settings(translation_execution_mode="worker")
@@ -466,6 +595,59 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("\033[92m", text)
         self.assertIn("TRANSLATION FINISHED", text)
         self.assertIn("status=failed", text)
+
+
+def _persistent_job_with_failed_unit(
+    store: SQLiteTranslationJobStore,
+    *,
+    user_id: str,
+):
+    job = store.create_job(
+        order_id="order-1",
+        user_id=user_id,
+        file_id="file-1",
+        file_name="notes.txt",
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        adapter_version="txt-v1",
+        prompt_version="prompt-v1",
+        pricing_snapshot_id="pricing-v1",
+        source_object_key="original/file-1.txt",
+    )
+    store.add_work_units(
+        job.id,
+        [
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("block-1",),
+                source_text_hash="hash-1",
+                prompt_tier="default",
+                source_language="en",
+                target_language="uk",
+                source_object_key="intermediate/unit-1.txt",
+            ),
+            WorkUnitPlan(
+                sequence=2,
+                source_block_ids=("block-2",),
+                source_text_hash="hash-2",
+                prompt_tier="default",
+                source_language="en",
+                target_language="uk",
+                source_object_key="intermediate/unit-2.txt",
+            ),
+        ],
+    )
+    first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+    store.fail_work_unit(
+        first.id,
+        error_message="provider timeout",
+        retry_count=1,
+        worker_id="worker-a",
+    )
+    second = store.claim_next_work_unit(job.id, worker_id="worker-a")
+    assert second is not None
+    return job
 
 
 if __name__ == "__main__":
