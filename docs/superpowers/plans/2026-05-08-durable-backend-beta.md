@@ -1466,7 +1466,7 @@ git commit -m "docs: add server beta deployment runbook"
 **Files:**
 - No code files unless earlier tasks fail verification.
 
-- [ ] **Step 1: Run unit tests**
+- [x] **Step 1: Run unit tests**
 
 Run:
 
@@ -1476,7 +1476,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 Expected: all tests pass. PostgreSQL integration tests skip unless `TEST_POSTGRES_DSN` is set.
 
-- [ ] **Step 2: Run compile check**
+- [x] **Step 2: Run compile check**
 
 Run:
 
@@ -1486,7 +1486,7 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache PYTHONPATH=src python3 -m compile
 
 Expected: all files compile.
 
-- [ ] **Step 3: Run whitespace check**
+- [x] **Step 3: Run whitespace check**
 
 Run:
 
@@ -1496,7 +1496,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 4: Run Compose config check**
+- [x] **Step 4: Run Compose config check**
 
 Run:
 
@@ -1526,7 +1526,10 @@ Expected:
 
 and readiness returns `status=ready`.
 
-- [ ] **Step 6: Final commit**
+Status: skipped for this pass; the stack was not started because beta secrets are
+not configured in the local `.env`. `docker compose config` passed.
+
+- [x] **Step 6: Final commit**
 
 ```bash
 git status --short
