@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from translator_service.admin.bootstrap_config import AdminBootstrapConfig
@@ -14,6 +15,7 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
+from translator_service.admin.provider_balance import ProviderBalanceSnapshot
 
 _REQUIRED_INTEGRATION_IDS = frozenset({"telegram"})
 _RUNTIME_DEGRADED_STATUSES = frozenset({"degraded", "error", "failed", "missing_keys"})
@@ -48,6 +50,10 @@ def build_action_center(
     bootstrap_config: AdminBootstrapConfig | None = None,
     runtime_statuses: Sequence[AIProviderRuntimeStatus] | None = None,
     runtime_reload_states: Sequence[AIProviderRuntimeReloadRequest] | None = None,
+    deepseek_balance_snapshot: ProviderBalanceSnapshot | None = None,
+    deepseek_low_balance_threshold: Decimal | None = None,
+    deepseek_low_balance_currency: str = "USD",
+    deepseek_balance_stale_seconds: int = 300,
     now: datetime | None = None,
 ) -> ActionCenter:
     items: list[ActionItem] = []
@@ -139,6 +145,16 @@ def build_action_center(
             )
         )
 
+    items.extend(
+        _deepseek_balance_action_items(
+            snapshot=deepseek_balance_snapshot,
+            threshold=deepseek_low_balance_threshold,
+            currency=deepseek_low_balance_currency,
+            stale_seconds=deepseek_balance_stale_seconds,
+            now=current_time,
+        )
+    )
+
     return ActionCenter(items=tuple(items))
 
 
@@ -211,6 +227,78 @@ def _runtime_action_items(
                 )
             )
 
+    return tuple(items)
+
+
+def _deepseek_balance_action_items(
+    *,
+    snapshot: ProviderBalanceSnapshot | None,
+    threshold: Decimal | None,
+    currency: str,
+    stale_seconds: int,
+    now: datetime,
+) -> tuple[ActionItem, ...]:
+    if snapshot is None:
+        return ()
+    items: list[ActionItem] = []
+    href = "/admin/ai-providers"
+    if snapshot.status == "not_configured":
+        items.append(
+            ActionItem(
+                key="deepseek_balance_not_configured",
+                severity="warning",
+                title="DeepSeek balance is not configured",
+                detail="Add an active DeepSeek key before relying on balance checks.",
+                href=href,
+            )
+        )
+    if snapshot.status == "failed":
+        items.append(
+            ActionItem(
+                key="deepseek_balance_fetch_failed",
+                severity="warning",
+                title="DeepSeek balance check failed",
+                detail=snapshot.error_message or "The latest balance refresh failed.",
+                href=href,
+            )
+        )
+    if snapshot.is_available is False:
+        items.append(
+            ActionItem(
+                key="deepseek_balance_unavailable",
+                severity="critical",
+                title="DeepSeek account is unavailable",
+                detail="DeepSeek reports this account is not available for API use.",
+                href=href,
+            )
+        )
+    age_seconds = (now - snapshot.last_checked_at.astimezone(UTC)).total_seconds()
+    if age_seconds > max(1, stale_seconds):
+        items.append(
+            ActionItem(
+                key="deepseek_balance_stale",
+                severity="warning",
+                title="DeepSeek balance is stale",
+                detail="Refresh the provider account balance before beta use.",
+                href=href,
+            )
+        )
+    if threshold is not None:
+        wanted = currency.strip().upper()
+        amount = next(
+            (row for row in snapshot.balances if row.currency == wanted),
+            None,
+        )
+        if amount is not None and amount.total_balance < threshold:
+            items.append(
+                ActionItem(
+                    key="deepseek_balance_low",
+                    severity="warning",
+                    title="DeepSeek balance is low",
+                    detail=f"{wanted} balance is {amount.total_balance}.",
+                    href=href,
+                )
+            )
     return tuple(items)
 
 

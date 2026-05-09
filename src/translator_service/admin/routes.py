@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -1454,7 +1455,20 @@ def _overview_action_center(settings: Settings):
         bootstrap_config=bootstrap_config,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
         runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+        deepseek_balance_snapshot=_deepseek_balance_snapshot(settings),
+        deepseek_low_balance_threshold=_decimal_setting(
+            settings.admin_deepseek_low_balance_threshold
+        ),
+        deepseek_low_balance_currency=settings.admin_deepseek_low_balance_currency,
+        deepseek_balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
     )
+
+
+def _decimal_setting(value: str) -> Decimal | None:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _secret_safety_report(settings: Settings):
