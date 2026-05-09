@@ -37,6 +37,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/specs/2026-05-08-folioloom-admin-console-design.md` -
   active reference, partially implemented. Immediate gaps: Alerts MVP and
   Backups visibility.
+- `docs/superpowers/specs/2026-05-09-deepseek-balance-admin-design.md` -
+  active reference for admin-visible DeepSeek account balance, safe refresh,
+  alerts and key-source behavior.
+- `docs/superpowers/plans/2026-05-09-deepseek-balance-admin.md` -
+  implemented plan for DeepSeek balance display and admin/env key coexistence.
 - `docs/superpowers/plans/2026-05-09-admin-practical-ops-roadmap.md` -
   partially historical. Many slices are implemented; use it only as context for
   Alerts MVP and Backups visibility.

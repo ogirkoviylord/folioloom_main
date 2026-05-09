@@ -34,6 +34,7 @@ from translator_service.bot.messages import (
     build_no_pending_translation_message,
     build_nothing_to_cancel_message,
     build_pending_translation_message,
+    build_rights_confirmation_message,
     build_settings_message,
     build_settings_reset_message,
     build_start_message,
@@ -47,6 +48,7 @@ from translator_service.bot.messages import (
     get_back_to_my_books_text,
     get_cancel_text,
     get_confirm_delete_book_text,
+    get_confirm_rights_text,
     get_confirm_translation_text,
     get_continue_translation_text,
     get_delete_book_text,
@@ -60,6 +62,7 @@ from translator_service.bot.messages import (
     get_toggle_progress_preview_text,
     is_back_text,
     is_cancel_text,
+    is_confirm_rights_text,
     is_confirm_translation_text,
     is_help_text,
     is_how_it_works_text,
@@ -71,7 +74,10 @@ from translator_service.bot.messages import (
     is_toggle_progress_preview_text,
     is_translate_book_text,
 )
-from translator_service.bot_translation_service import BotTranslationService
+from translator_service.bot_translation_service import (
+    BotTranslationService,
+    RightsConfirmationRequired,
+)
 from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
 from translator_service.deepseek_key_pool import (
@@ -1209,11 +1215,23 @@ def create_router(
             except (
                 BetaAccessDenied,
                 DocumentEstimationNotReadyError,
+                RightsConfirmationRequired,
                 SecurityCooldownActive,
                 TextExtractionError,
                 UnsupportedDocumentError,
                 ValueError,
             ) as error:
+                if isinstance(error, RightsConfirmationRequired):
+                    await message.answer(
+                        build_rights_confirmation_message(
+                            pending_upload.file_name,
+                            interface_language=interface_language,
+                        ),
+                        reply_markup=_rights_confirmation_keyboard(
+                            interface_language,
+                        ),
+                    )
+                    return
                 await message.answer(
                     build_upload_error_message(error, interface_language)
                 )
@@ -1281,6 +1299,20 @@ def create_router(
         )
         await _cancel_active_translation(message=message, service=service)
 
+    @router.message(F.text.func(is_confirm_rights_text))
+    async def confirm_rights_text(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="confirm_rights",
+        )
+        await _confirm_pending_upload_rights(
+            message=message,
+            service=service,
+        )
+
     @router.callback_query(F.data == "cancel_translation")
     async def cancel_callback(callback: CallbackQuery) -> None:
         if await _answer_callback_if_spam(callback, callback_spam_guard):
@@ -1340,14 +1372,23 @@ def create_router(
         interface_language = service.get_interface_language(message.from_user.id)
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
-            await message.answer(
-                build_translation_language_selection_message(
-                    pending_upload.file_name,
-                    interface_language=interface_language,
-                    source_language_display=pending_upload.source_language_display,
-                ),
-                reply_markup=_target_language_keyboard(),
-            )
+            if pending_upload.rights_confirmed:
+                await message.answer(
+                    build_translation_language_selection_message(
+                        pending_upload.file_name,
+                        interface_language=interface_language,
+                        source_language_display=pending_upload.source_language_display,
+                    ),
+                    reply_markup=_target_language_keyboard(),
+                )
+            else:
+                await message.answer(
+                    build_rights_confirmation_message(
+                        pending_upload.file_name,
+                        interface_language=interface_language,
+                    ),
+                    reply_markup=_rights_confirmation_keyboard(interface_language),
+                )
             return
 
         pending = service.get_pending(message.from_user.id)
@@ -1420,12 +1461,11 @@ def create_router(
             return
 
         await message.answer(
-            build_translation_language_selection_message(
+            build_rights_confirmation_message(
                 pending_upload.file_name,
                 interface_language=interface_language,
-                source_language_display=pending_upload.source_language_display,
             ),
-            reply_markup=_target_language_keyboard(),
+            reply_markup=_rights_confirmation_keyboard(interface_language),
         )
 
     @router.message(F.text)
@@ -1448,6 +1488,19 @@ def _confirm_keyboard(interface_language: str = "en", *, include_back: bool = Fa
 
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _rights_confirmation_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=get_confirm_rights_text(interface_language))],
+            [KeyboardButton(text=get_back_text(interface_language))],
+        ],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
@@ -1809,7 +1862,26 @@ async def _run_confirm_pending_translation(
     translator: TextTranslator,
 ) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
+    pending_upload = service.get_pending_upload(message.from_user.id)
+    if pending_upload is not None and not pending_upload.rights_confirmed:
+        await message.answer(
+            build_rights_confirmation_message(
+                pending_upload.file_name,
+                interface_language=interface_language,
+            ),
+            reply_markup=_rights_confirmation_keyboard(interface_language),
+        )
+        return
     pending = service.get_pending(message.from_user.id)
+    if pending is not None and not pending.rights_confirmed:
+        await message.answer(
+            build_rights_confirmation_message(
+                pending.file_name,
+                interface_language=interface_language,
+            ),
+            reply_markup=_rights_confirmation_keyboard(interface_language),
+        )
+        return
     total_fragments = pending.fragment_count if pending else 0
     heartbeat_pattern = _choose_heartbeat_pattern_name(
         user_telegram_id=message.from_user.id,
@@ -1923,6 +1995,24 @@ async def _run_confirm_pending_translation(
         await heartbeat_task
         await message.answer(build_upload_error_message(error, interface_language))
         return
+    except RightsConfirmationRequired:
+        stop_heartbeat.set()
+        await heartbeat_task
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        pending = service.get_pending(message.from_user.id)
+        file_name = (
+            pending_upload.file_name
+            if pending_upload is not None
+            else (pending.file_name if pending is not None else "document")
+        )
+        await message.answer(
+            build_rights_confirmation_message(
+                file_name,
+                interface_language=interface_language,
+            ),
+            reply_markup=_rights_confirmation_keyboard(interface_language),
+        )
+        return
     except BetaAccessDenied as error:
         stop_heartbeat.set()
         await heartbeat_task
@@ -1975,8 +2065,50 @@ async def _run_confirm_pending_translation(
         from aiogram.types import BufferedInputFile
 
         await message.answer_document(
-            BufferedInputFile(job.result_content, filename=job.result_file_name)
+        BufferedInputFile(job.result_content, filename=job.result_file_name)
         )
+
+
+async def _confirm_pending_upload_rights(
+    *,
+    message,
+    service: BotTranslationService,
+) -> None:
+    interface_language = service.get_interface_language(message.from_user.id)
+    pending_upload = service.get_pending_upload(message.from_user.id)
+    if pending_upload is None:
+        pending = service.get_pending(message.from_user.id)
+        if pending is not None:
+            await message.answer(
+                build_pending_translation_message(
+                    pending,
+                    interface_language=interface_language,
+                ),
+                reply_markup=_confirm_keyboard(interface_language, include_back=True),
+            )
+            return
+        await message.answer(build_no_pending_translation_message(interface_language))
+        return
+
+    try:
+        confirmed = service.confirm_pending_upload_rights(
+            user_telegram_id=message.from_user.id,
+        )
+    except (BetaAccessDenied, SecurityCooldownActive) as error:
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    await message.answer(
+        build_translation_language_selection_message(
+            confirmed.file_name,
+            interface_language=interface_language,
+            source_language_display=confirmed.source_language_display,
+        ),
+        reply_markup=_target_language_keyboard(),
+    )
 
 
 async def _resume_user_book_translation(
@@ -2228,29 +2360,39 @@ async def _watch_worker_translation_progress(
         if progress is None:
             break
 
+        interface_language = service.get_interface_language(user_telegram_id)
+        progress_stats["job_status"] = current_job.status.value
         progress_stats["completed"] = progress.completed_fragments
         progress_stats["total"] = progress.total_fragments
         progress_stats["estimated_total_seconds"] = None
         progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
-        progress_text = _progress_message_for_current_user_language(
-            service=service,
-            user_telegram_id=user_telegram_id,
-            completed_fragments=progress.completed_fragments,
-            total_fragments=progress.total_fragments,
-            estimated_total_seconds=None,
-            elapsed_seconds=max(1, round(time.monotonic() - started_at)),
-            last_translated_text=None,
-            activity_indicator=_next_heartbeat_frame(
-                str(progress_stats["heartbeat_pattern"]),
-                int(progress_stats["spinner_index"]) - 1,
-            ),
-            activity_phrase_index=int(progress_stats["spinner_index"]),
-        )
+        if current_job.status is TranslationJobStatus.QUEUED:
+            progress_text = build_translation_job_status_message(
+                current_job,
+                interface_language=interface_language,
+            )
+            progress_stats["job_status_message"] = progress_text
+        else:
+            progress_stats["job_status_message"] = None
+            progress_text = _progress_message_for_current_user_language(
+                service=service,
+                user_telegram_id=user_telegram_id,
+                completed_fragments=progress.completed_fragments,
+                total_fragments=progress.total_fragments,
+                estimated_total_seconds=None,
+                elapsed_seconds=max(1, round(time.monotonic() - started_at)),
+                last_translated_text=None,
+                activity_indicator=_next_heartbeat_frame(
+                    str(progress_stats["heartbeat_pattern"]),
+                    int(progress_stats["spinner_index"]) - 1,
+                ),
+                activity_phrase_index=int(progress_stats["spinner_index"]),
+            )
         await _edit_callback_message(
             message,
             progress_text,
             reply_markup=_cancel_inline_keyboard(
-                service.get_interface_language(user_telegram_id),
+                interface_language,
                 job_id=job_id,
             ),
         )
@@ -2300,28 +2442,31 @@ async def _run_translation_progress_heartbeat(
                 / completed_fragments
                 * max(total_fragments, completed_fragments)
             )
-        progress_text = _progress_message_for_current_user_language(
-            service=service,
-            user_telegram_id=user_telegram_id,
-            completed_fragments=completed_fragments,
-            total_fragments=total_fragments,
-            estimated_total_seconds=(
-                int(estimated_total_seconds)
-                if estimated_total_seconds is not None
-                else None
-            ),
-            elapsed_seconds=elapsed_seconds,
-            last_translated_text=(
-                str(progress_stats["last_translated_text"])
-                if progress_stats["last_translated_text"]
-                else None
-            ),
-            activity_indicator=_next_heartbeat_frame(
-                str(progress_stats["heartbeat_pattern"]),
-                int(progress_stats["spinner_index"]) - 1
-            ),
-            activity_phrase_index=int(progress_stats["spinner_index"]),
-        )
+        if progress_stats.get("job_status") == TranslationJobStatus.QUEUED.value:
+            progress_text = str(progress_stats.get("job_status_message") or "")
+        else:
+            progress_text = _progress_message_for_current_user_language(
+                service=service,
+                user_telegram_id=user_telegram_id,
+                completed_fragments=completed_fragments,
+                total_fragments=total_fragments,
+                estimated_total_seconds=(
+                    int(estimated_total_seconds)
+                    if estimated_total_seconds is not None
+                    else None
+                ),
+                elapsed_seconds=elapsed_seconds,
+                last_translated_text=(
+                    str(progress_stats["last_translated_text"])
+                    if progress_stats["last_translated_text"]
+                    else None
+                ),
+                activity_indicator=_next_heartbeat_frame(
+                    str(progress_stats["heartbeat_pattern"]),
+                    int(progress_stats["spinner_index"]) - 1
+                ),
+                activity_phrase_index=int(progress_stats["spinner_index"]),
+            )
         if _should_schedule_progress_edit(progress_stats, now=now):
             job_id = progress_stats.get("job_id")
             _schedule_message_edit(

@@ -52,8 +52,12 @@ ENVIRONMENT=production
 SERVICE_NAME="FolioLoom"
 TELEGRAM_BOT_TOKEN=
 ADMIN_TELEGRAM_IDS=
+BETA_ALLOWLIST_ENABLED=false
+BETA_ALLOWLIST_TELEGRAM_IDS=
 DEEPSEEK_API_KEY=
 DEEPSEEK_API_KEYS=
+DEEPSEEK_MAX_PARALLEL_PER_KEY=1
+TRANSLATION_MAX_PARALLEL_UNITS=2
 SCHEDULER_BACKEND=postgres
 POSTGRES_DB=translator
 POSTGRES_USER=translator
@@ -87,6 +91,22 @@ PY
 Use a long unique `ADMIN_OWNER_PASSWORD`. Keep `ADMIN_SECRET_MASTER_KEY`
 outside the backup bundle, for example in a password manager. Without the same
 key, restored encrypted admin secrets cannot be decrypted. Do not commit `.env`.
+The same master key is required for encrypted admin-managed integration and
+provider keys. If it is missing, the admin UI cannot store new keys.
+
+`DEEPSEEK_API_KEY` and `DEEPSEEK_API_KEYS` remain valid runtime sources even
+after additional DeepSeek keys are added from the admin UI. Admin-added keys and
+env keys are additive: the balance view and runtime provider layer can use both
+sets, and adding one admin key does not disable existing env keys.
+
+`TRANSLATION_MAX_PARALLEL_UNITS` controls worker-side scheduled work-unit
+capacity. Effective provider calls are also capped by DeepSeek channel capacity:
+env/admin key count times each key's `DEEPSEEK_MAX_PARALLEL_PER_KEY` or
+admin-configured max parallel value. Scheduler fairness caps are the final
+layer, keeping one job/user from monopolizing available worker/provider slots.
+For beta, keep `DEEPSEEK_MAX_PARALLEL_PER_KEY=1`; adding multiple healthy keys
+then lets separate documents progress concurrently without sending two active
+calls to the same key.
 
 ## Start Or Update
 
@@ -148,6 +168,36 @@ curl -I http://127.0.0.1:62062/admin/live
 
 Admin pages require login. The tunnel URL should be reachable only from the
 machine that opened the SSH tunnel.
+
+## Closed-Beta Allowlist
+
+The Telegram ID allowlist is managed from:
+
+```text
+http://127.0.0.1:62062/admin/settings
+```
+
+`BETA_ALLOWLIST_ENABLED=false` keeps the bot open while you collect candidate
+Telegram IDs. You can add/remove IDs in admin settings at any time. Press
+`Enable allowlist` only when the cohort is ready; after that, users outside the
+list receive an invite-only message and new upload files are not downloaded.
+
+`BETA_ALLOWLIST_TELEGRAM_IDS` is only a bootstrap/default list for fresh admin
+state. Once admin settings are saved, the live SQLite setting is the source of
+truth.
+
+## DeepSeek Balance
+
+The DeepSeek balance snapshot is available in the SSH-tunneled admin console:
+
+```text
+http://127.0.0.1:62062/admin/ai-providers
+```
+
+Use `Refresh balance` after changing keys or topping up the DeepSeek account.
+The UI shows a safe account-level balance snapshot and never displays real API
+keys. If the page reports that secret storage is unavailable, set
+`ADMIN_SECRET_MASTER_KEY`, restart the stack and try again.
 
 ## Data Persistence
 

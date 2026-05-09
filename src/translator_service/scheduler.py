@@ -41,9 +41,10 @@ class WorkUnitFailureKind(StrEnum):
 class SchedulerLimits:
     max_active_units_per_job: int = 1
     max_active_jobs_per_user: int = 1
-    max_active_units_per_user: int = 2
-    max_active_units_global: int = 8
+    max_active_units_per_user: int = 1
+    max_active_units_global: int = 2
     max_attempts_per_unit: int = 3
+    priority_aging_seconds: int = 1800
 
 
 @dataclass(frozen=True)

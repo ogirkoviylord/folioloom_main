@@ -507,6 +507,11 @@ class SQLiteTranslationJobStore:
         limits: SchedulerLimits,
     ) -> SchedulerClaim | None:
         now = _now()
+        max_active_units_global = max(1, limits.max_active_units_global)
+        max_active_units_per_job = max(1, limits.max_active_units_per_job)
+        max_active_units_per_user = max(1, limits.max_active_units_per_user)
+        max_active_jobs_per_user = max(1, limits.max_active_jobs_per_user)
+        priority_aging_seconds = max(0, limits.priority_aging_seconds)
         active_global = self._connection.execute(
             """
             SELECT COUNT(*) AS count FROM work_units
@@ -514,7 +519,7 @@ class SQLiteTranslationJobStore:
             """,
             (PersistentWorkUnitStatus.TRANSLATING.value,),
         ).fetchone()
-        if active_global["count"] >= limits.max_active_units_global:
+        if active_global["count"] >= max_active_units_global:
             return None
 
         row = self._connection.execute(
@@ -532,13 +537,58 @@ class SQLiteTranslationJobStore:
                   WHERE active.job_id = wu.job_id
                     AND active.status = ?
               ) < ?
+              AND (
+                  SELECT COUNT(*)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.status = ?
+              ) < ?
+              AND (
+                  SELECT COUNT(DISTINCT active.job_id)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.job_id <> wu.job_id
+                    AND active.status = ?
+              ) < ?
               AND NOT EXISTS (
                   SELECT 1 FROM work_units earlier
                   WHERE earlier.job_id = wu.job_id
                     AND earlier.sequence < wu.sequence
                     AND earlier.status IN (?, ?, ?)
               )
-            ORDER BY tj.priority DESC, datetime(tj.created_at), wu.sequence
+            ORDER BY
+              (
+                  SELECT COUNT(*)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.status = ?
+              ) ASC,
+              (
+                  SELECT COUNT(DISTINCT active.job_id)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.status = ?
+              ) ASC,
+              (
+                  SELECT COUNT(*)
+                  FROM work_units active
+                  WHERE active.job_id = wu.job_id
+                    AND active.status = ?
+              ) ASC,
+              CASE
+                WHEN ? > 0 THEN tj.priority + CAST(
+                    ((julianday(?) - julianday(tj.created_at)) * 86400.0 / ?)
+                    AS INTEGER
+                )
+                ELSE tj.priority
+              END DESC,
+              tj.priority DESC,
+              datetime(tj.created_at) ASC,
+              wu.sequence ASC
             LIMIT 1
             """,
             (
@@ -550,10 +600,20 @@ class SQLiteTranslationJobStore:
                 _to_db_time(now),
                 _to_db_time(now),
                 PersistentWorkUnitStatus.TRANSLATING.value,
-                max(1, limits.max_active_units_per_job),
+                max_active_units_per_job,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                max_active_units_per_user,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                max_active_jobs_per_user,
                 PersistentWorkUnitStatus.PENDING.value,
                 PersistentWorkUnitStatus.FAILED.value,
                 PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                priority_aging_seconds,
+                _to_db_time(now),
+                max(1, priority_aging_seconds),
             ),
         ).fetchone()
         if row is None:
@@ -562,7 +622,6 @@ class SQLiteTranslationJobStore:
         claim_token = uuid4().hex
         lease_until = now + timedelta(seconds=max(1, lease_seconds))
         now_text = _to_db_time(now)
-        max_active_units_global = max(1, limits.max_active_units_global)
         with self._connection:
             updated = self._connection.execute(
                 """
@@ -583,6 +642,31 @@ class SQLiteTranslationJobStore:
                       SELECT COUNT(*)
                       FROM work_units active
                       WHERE active.job_id = work_units.job_id
+                        AND active.status = ?
+                  ) < ?
+                  AND (
+                      SELECT COUNT(*)
+                      FROM work_units active
+                      JOIN translation_jobs active_tj
+                        ON active_tj.id = active.job_id
+                      WHERE active_tj.user_id = (
+                          SELECT candidate_tj.user_id
+                          FROM translation_jobs candidate_tj
+                          WHERE candidate_tj.id = work_units.job_id
+                      )
+                        AND active.status = ?
+                  ) < ?
+                  AND (
+                      SELECT COUNT(DISTINCT active.job_id)
+                      FROM work_units active
+                      JOIN translation_jobs active_tj
+                        ON active_tj.id = active.job_id
+                      WHERE active_tj.user_id = (
+                          SELECT candidate_tj.user_id
+                          FROM translation_jobs candidate_tj
+                          WHERE candidate_tj.id = work_units.job_id
+                      )
+                        AND active.job_id <> work_units.job_id
                         AND active.status = ?
                   ) < ?
                   AND EXISTS (
@@ -613,7 +697,11 @@ class SQLiteTranslationJobStore:
                     PersistentWorkUnitStatus.TRANSLATING.value,
                     max_active_units_global,
                     PersistentWorkUnitStatus.TRANSLATING.value,
-                    max(1, limits.max_active_units_per_job),
+                    max_active_units_per_job,
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    max_active_units_per_user,
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                    max_active_jobs_per_user,
                     PersistentTranslationJobStatus.QUEUED.value,
                     PersistentTranslationJobStatus.TRANSLATING.value,
                     PersistentWorkUnitStatus.PENDING.value,

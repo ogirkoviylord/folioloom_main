@@ -123,9 +123,86 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.active_translations, 1)
         self.assertEqual(snapshot.queued_translations, 1)
 
+    def test_operations_overview_reports_queue_depth_and_oldest_pending_age(self):
+        operations = build_operations_overview(
+            jobs=[
+                {"id": "job-queued", "status": "queued"},
+                {"id": "job-running", "status": "translating"},
+            ],
+            work_units_by_job_id={
+                "job-queued": (
+                    {
+                        "status": "pending",
+                        "available_at": datetime(2026, 5, 9, 11, 59, 30, tzinfo=UTC),
+                    },
+                    {
+                        "status": "queued",
+                        "created_at": datetime(2026, 5, 9, 11, 59, 45, tzinfo=UTC),
+                    },
+                ),
+                "job-running": (
+                    {
+                        "status": "translating",
+                        "created_at": datetime(2026, 5, 9, 11, 58, tzinfo=UTC),
+                    },
+                ),
+            },
+            now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+        )
+
+        self.assertEqual(operations.total_queue_depth, 2)
+        self.assertEqual(operations.oldest_pending_age_seconds, 30.0)
+
+    def test_recent_runs_include_running_persistent_jobs_without_run_logs(self):
+        with TemporaryDirectory() as temp_dir:
+            operations = build_operations_overview(
+                jobs=[
+                    {
+                        "id": "job-running-without-log",
+                        "status": "translating",
+                        "order_id": "order-1",
+                        "file_name": "new-upload.epub",
+                        "document_kind": "epub",
+                        "source_language": "en",
+                        "target_language": "uk",
+                        "created_at": datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                        "updated_at": datetime(2026, 5, 9, 12, 1, tzinfo=UTC),
+                    }
+                ],
+                work_units_by_job_id={
+                    "job-running-without-log": (
+                        {"status": "translated", "prompt_tokens": 10},
+                        {"status": "translating", "completion_tokens": 4},
+                        {"status": "pending"},
+                    )
+                },
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                operations=operations,
+                server=collect_local_server_health(
+                    disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(snapshot.active_translations, 1)
+        self.assertEqual(
+            [run.job_id for run in snapshot.recent_runs],
+            ["job-running-without-log"],
+        )
+        self.assertEqual(snapshot.recent_runs[0].status, "translating")
+        self.assertEqual(snapshot.recent_runs[0].file_name, "new-upload.epub")
+        self.assertEqual(snapshot.recent_runs[0].source_language, "en")
+        self.assertEqual(snapshot.recent_runs[0].target_language, "uk")
+        self.assertEqual(snapshot.recent_runs[0].fragment_count, 1)
+        self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 3)
+        self.assertEqual(snapshot.recent_runs[0].total_tokens, 14)
+
     def test_recent_runs_only_include_active_or_transitioning_runs(self):
         with TemporaryDirectory() as temp_dir:
-            running = TranslationRunLogger.start(
+            TranslationRunLogger.start(
                 root=temp_dir,
                 metadata=TranslationRunMetadata(
                     job_id="job-running",

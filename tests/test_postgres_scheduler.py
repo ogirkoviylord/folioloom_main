@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -57,10 +58,16 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
     def tearDown(self):
         self.store.close()
 
-    def _create_txt_job_with_unit(self, *, order_id="order-1", file_id="file-1"):
+    def _create_txt_job_with_unit(
+        self,
+        *,
+        order_id="order-1",
+        file_id="file-1",
+        user_id="telegram:42",
+    ):
         job = self.store.create_job(
             order_id=order_id,
-            user_id="telegram:42",
+            user_id=user_id,
             file_id=file_id,
             file_name="notes.txt",
             document_kind="txt",
@@ -146,6 +153,7 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         job = self._create_txt_job_with_units()
         limits = SchedulerLimits(
             max_active_units_per_job=2,
+            max_active_units_per_user=2,
             max_active_units_global=10,
         )
 
@@ -187,6 +195,127 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
 
         self.assertEqual(first.job_id, first_job.id)
         self.assertIsNone(second)
+
+    def test_user_unit_cap_blocks_second_job_for_same_user(self):
+        first_job = self._create_txt_job_with_unit(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+        )
+        self._create_txt_job_with_unit(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:42",
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=10,
+            max_active_units_per_job=1,
+            max_active_units_per_user=1,
+            max_active_jobs_per_user=2,
+        )
+
+        first = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_job.id)
+        self.assertIsNone(second)
+
+    def test_claim_prefers_user_with_lower_active_load(self):
+        first_user_first_job = self._create_txt_job_with_unit(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+        )
+        self._create_txt_job_with_unit(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:42",
+        )
+        other_user_job = self._create_txt_job_with_unit(
+            order_id="order-3",
+            file_id="file-3",
+            user_id="telegram:100",
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=10,
+            max_active_units_per_job=1,
+            max_active_units_per_user=2,
+            max_active_jobs_per_user=2,
+        )
+
+        first = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_user_first_job.id)
+        self.assertEqual(second.job_id, other_user_job.id)
+
+    def test_claim_priority_aging_prevents_old_job_starvation(self):
+        old_low_priority = self._create_txt_job_with_unit(
+            order_id="order-old",
+            file_id="file-old",
+            user_id="telegram:42",
+        )
+        new_high_priority = self._create_txt_job_with_unit(
+            order_id="order-new",
+            file_id="file-new",
+            user_id="telegram:100",
+        )
+        now = datetime.now(UTC)
+        with self.store.connection.transaction():
+            self.store.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET priority = %(priority)s, created_at = %(created_at)s
+                WHERE id = %(job_id)s
+                """,
+                {
+                    "priority": 0,
+                    "created_at": now - timedelta(minutes=3),
+                    "job_id": old_low_priority.id,
+                },
+            )
+            self.store.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET priority = %(priority)s, created_at = %(created_at)s
+                WHERE id = %(job_id)s
+                """,
+                {
+                    "priority": 1,
+                    "created_at": now,
+                    "job_id": new_high_priority.id,
+                },
+            )
+
+        claimed = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_global=10,
+                max_active_units_per_job=1,
+                max_active_units_per_user=1,
+                max_active_jobs_per_user=1,
+                priority_aging_seconds=60,
+            ),
+        )
+
+        self.assertEqual(claimed.job_id, old_low_priority.id)
 
     def test_legacy_failed_unit_is_retryable_for_claiming(self):
         job = self._create_txt_job_with_unit()

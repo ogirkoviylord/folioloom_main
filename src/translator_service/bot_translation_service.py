@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 import json
 import logging
 import math
@@ -95,6 +96,12 @@ from translator_service.worker import (
 
 
 logger = logging.getLogger(__name__)
+RIGHTS_CONFIRMATION_VERSION = "rights-v1"
+RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
+
+
+class RightsConfirmationRequired(ValueError):
+    """Raised when document rights have not been confirmed for processing."""
 
 
 @dataclass(frozen=True)
@@ -106,6 +113,10 @@ class PendingUpload:
     document_kind: DocumentKind = DocumentKind.TXT
     source_language_display: str | None = None
     source_object_key: str | None = None
+    rights_confirmed: bool = False
+    rights_confirmed_at: str | None = None
+    rights_confirmation_version: str | None = None
+    rights_confirmation_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +131,10 @@ class PendingTranslation:
     source_language_display: str | None = None
     estimated_seconds: int | None = None
     source_object_key: str | None = None
+    rights_confirmed: bool = False
+    rights_confirmed_at: str | None = None
+    rights_confirmation_version: str | None = None
+    rights_confirmation_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -411,6 +426,39 @@ class BotTranslationService:
         with self._state_lock:
             return self._pending_uploads.get(user_telegram_id)
 
+    def confirm_pending_upload_rights(
+        self,
+        *,
+        user_telegram_id: int,
+        source: str = RIGHTS_CONFIRMATION_SOURCE_TELEGRAM,
+    ) -> PendingUpload:
+        self._assert_beta_access_allows(user_telegram_id)
+        self._assert_security_cooldown_allows(user_telegram_id)
+        with self._state_lock:
+            pending_upload = self._pending_uploads.get(user_telegram_id)
+            if pending_upload is None:
+                raise ValueError("No uploaded document is waiting for rights confirmation")
+            if pending_upload.rights_confirmed:
+                return pending_upload
+            confirmed = replace(
+                pending_upload,
+                rights_confirmed=True,
+                rights_confirmed_at=_now_iso(),
+                rights_confirmation_version=RIGHTS_CONFIRMATION_VERSION,
+                rights_confirmation_source=source,
+            )
+            self._pending_uploads[user_telegram_id] = confirmed
+
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="document.rights_confirmed",
+            action="confirmed",
+            target_type="document",
+            target_id=confirmed.file_name,
+            metadata=_rights_confirmation_payload(confirmed),
+        )
+        return confirmed
+
     def prepare_pending_upload(
         self,
         *,
@@ -425,6 +473,10 @@ class BotTranslationService:
                 raise ValueError(
                     "No uploaded document is waiting for translation language"
                 )
+            if not pending_upload.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before choosing translation language"
+                )
 
         pending = self.prepare_document(
             user_telegram_id=user_telegram_id,
@@ -434,6 +486,10 @@ class BotTranslationService:
             target_language=target_language,
             source_language_display=pending_upload.source_language_display,
             source_object_key=pending_upload.source_object_key,
+            rights_confirmed=pending_upload.rights_confirmed,
+            rights_confirmed_at=pending_upload.rights_confirmed_at,
+            rights_confirmation_version=pending_upload.rights_confirmation_version,
+            rights_confirmation_source=pending_upload.rights_confirmation_source,
         )
         with self._state_lock:
             self._pending_uploads.pop(user_telegram_id, None)
@@ -449,6 +505,10 @@ class BotTranslationService:
         target_language: str,
         source_language_display: str | None = None,
         source_object_key: str | None = None,
+        rights_confirmed: bool = True,
+        rights_confirmed_at: str | None = None,
+        rights_confirmation_version: str | None = None,
+        rights_confirmation_source: str | None = None,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -492,6 +552,17 @@ class BotTranslationService:
                 provider_parallel_capacity=self._provider_parallel_capacity,
             ),
             source_object_key=source_object_key,
+            rights_confirmed=rights_confirmed,
+            rights_confirmed_at=rights_confirmed_at
+            or (_now_iso() if rights_confirmed else None),
+            rights_confirmation_version=(
+                rights_confirmation_version
+                or (RIGHTS_CONFIRMATION_VERSION if rights_confirmed else None)
+            ),
+            rights_confirmation_source=(
+                rights_confirmation_source
+                or (RIGHTS_CONFIRMATION_SOURCE_TELEGRAM if rights_confirmed else None)
+            ),
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -1252,9 +1323,14 @@ class BotTranslationService:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         with self._state_lock:
-            pending = self._pending.pop(user_telegram_id, None)
+            pending = self._pending.get(user_telegram_id)
             if pending is None:
                 raise ValueError("No pending translation for this user")
+            if not pending.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before translation starts"
+                )
+            pending = self._pending.pop(user_telegram_id)
 
         upload = validate_document_upload(
             file_name=pending.file_name,
@@ -1278,6 +1354,7 @@ class BotTranslationService:
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
                 "fragment_count": pending.fragment_count,
+                "rights_confirmation": _rights_confirmation_payload(pending),
             },
         )
 
@@ -1874,6 +1951,10 @@ class BotTranslationService:
                     max_active_units_per_job=self._max_parallel_work_units,
                 ),
                 lease_seconds=300,
+                max_parallel_units=min(
+                    self._max_parallel_work_units,
+                    self._provider_parallel_capacity,
+                ),
                 work_unit_started_callback=_work_unit_started_callback(
                     run_logger=run_logger,
                     total_units=total_fragments,
@@ -2200,6 +2281,7 @@ def _create_persistent_job_plan(
         "source_language": pending.source_language,
         "target_language": pending.target_language,
         "max_fragment_chars": max_fragment_chars,
+        "rights_confirmation": _rights_confirmation_payload(pending),
     }
     if document_kind is DocumentKind.TXT:
         return create_persistent_txt_job_plan(**common)
@@ -2378,7 +2460,10 @@ def _translation_policy_snapshot_for_pending(
         source_language=pending.source_language,
         target_language=pending.target_language,
     )
-    return translation_policy_signature(policy)
+    return _translation_policy_with_rights_confirmation(
+        translation_policy_signature(policy),
+        rights_confirmation=_rights_confirmation_payload(pending),
+    )
 
 
 def _translation_stack_snapshot(
@@ -2433,6 +2518,34 @@ def _translation_policy_payload(translation_policy: str | None) -> dict:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _translation_policy_with_rights_confirmation(
+    translation_policy: str | None,
+    *,
+    rights_confirmation: dict,
+) -> str | None:
+    if not translation_policy:
+        return None
+    payload = _translation_policy_payload(translation_policy)
+    if not payload:
+        return translation_policy
+    payload["rights_confirmation"] = rights_confirmation
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _rights_confirmation_payload(
+    pending: PendingUpload | PendingTranslation,
+) -> dict:
+    return {
+        "confirmed": bool(pending.rights_confirmed),
+        "source": pending.rights_confirmation_source,
+        "version": pending.rights_confirmation_version,
+    }
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _policy_value(policy: dict, key: str) -> str | None:

@@ -40,7 +40,7 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 
 - [x] Invite-only allowlist is editable from SSH-tunneled admin and can be
   enabled or disabled with an admin toggle.
-- [ ] Rights confirmation is shown before full processing.
+- [x] Rights confirmation is shown before full processing.
 - [ ] Free preview exists before full translation.
 - [ ] Per-user quotas are enforced.
 - [ ] Global cost cap is enforced.
@@ -51,6 +51,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [ ] Cancel/resume/restart scenarios pass.
 - [ ] Worker restart does not lose accepted jobs.
 - [ ] Bot restart does not make existing jobs invisible.
+- [ ] Scheduler worker capacity is consistent with provider channel capacity:
+  one key at capacity 1 remains serial, and multiple free keys can progress
+  multiple documents without duplicate work-unit claims.
 - [ ] Provider failure creates diagnosable metadata and safe user messaging.
 - [ ] EPUBCheck or equivalent release validation passes for EPUB fixtures.
 - [ ] DOCX openability/visual QA passes for DOCX fixtures.

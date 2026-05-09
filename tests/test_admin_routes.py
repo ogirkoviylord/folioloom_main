@@ -780,8 +780,10 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(page.status_code, 200)
         self.assertIn("Queue depth", page.text)
+        self.assertIn("Oldest pending", page.text)
         self.assertEqual(api.status_code, 200)
         self.assertEqual(api.json()["overview"]["total_queue_depth"], 0)
+        self.assertIsNone(api.json()["overview"]["oldest_pending_age_seconds"])
 
     def test_operations_page_and_api_show_persistent_jobs_and_logs(self):
         with TemporaryDirectory() as temp_dir:
@@ -842,7 +844,15 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Pause", page.text)
             self.assertIn("Cancel", page.text)
             self.assertIn("Delete", page.text)
+            self.assertIn("Queue depth", page.text)
+            self.assertIn("Oldest pending", page.text)
+            self.assertNotIn("source_text", page.text)
+            self.assertNotIn("translated", page.text)
+            self.assertNotIn("sk-live-secret-value", page.text)
             self.assertEqual(api.status_code, 200)
+            self.assertNotIn("translated", api.text)
+            self.assertEqual(api.json()["overview"]["total_queue_depth"], 1)
+            self.assertIsNotNone(api.json()["overview"]["oldest_pending_age_seconds"])
             jobs = api.json()["overview"]["jobs"]
             by_order = {job["order_id"]: job for job in jobs}
             self.assertEqual(

@@ -77,6 +77,12 @@ def build_live_monitor_snapshot(
     active_runs_without_job_id = sum(
         1 for run in runs if run.status in _ACTIVE_STATUSES and not run.job_id
     )
+    recent_runs = _recent_live_runs(
+        live_runs,
+        operations=operations,
+        logged_job_ids=active_run_job_ids,
+        limit=max(1, int(recent_limit)),
+    )
 
     return LiveMonitorSnapshot(
         generated_at=current_time,
@@ -96,8 +102,66 @@ def build_live_monitor_snapshot(
             for run in runs
             if run.started_at is not None and _aware_utc(run.started_at) >= one_hour_ago
         ),
-        recent_runs=live_runs[: max(1, int(recent_limit))],
+        recent_runs=recent_runs,
         server=server if server is not None else collect_local_server_health(),
+    )
+
+
+def _recent_live_runs(
+    live_runs: tuple[TranslationRunSummary, ...],
+    *,
+    operations: OperationsOverview | None,
+    logged_job_ids: set[str],
+    limit: int,
+) -> tuple[TranslationRunSummary, ...]:
+    operation_runs = ()
+    if operations is not None:
+        operation_runs = tuple(
+            _summary_from_operation_job(job)
+            for job in operations.jobs
+            if job.state in _ACTIVE_STATUSES and job.id not in logged_job_ids
+        )
+
+    rows = (*live_runs, *operation_runs)
+    rows = tuple(
+        sorted(
+            rows,
+            key=lambda run: run.last_event_at or run.started_at or datetime.min,
+            reverse=True,
+        )
+    )
+    return rows[:limit]
+
+
+def _summary_from_operation_job(job) -> TranslationRunSummary:
+    total_units = max(0, int(job.total_units))
+    completed_units = max(0, int(job.completed_units))
+    total_tokens = max(0, int(job.total_tokens))
+    started_at = job.started_at or job.created_at
+    status = _status_text(job.raw_status or job.state)
+    return TranslationRunSummary(
+        job_id=job.id,
+        status=status,
+        started_at=started_at,
+        finished_at=job.completed_at,
+        order_id=job.order_id,
+        user_id=None,
+        file_name=job.file_name,
+        document_kind=job.document_kind,
+        source_language=job.source_language,
+        target_language=job.target_language,
+        translator_model=None,
+        result_file_name=None,
+        error_message=job.error_excerpt,
+        fragment_count=completed_units,
+        total_fragment_count=total_units,
+        progress_percent=_operation_progress_percent(completed_units, total_units),
+        eta_seconds=None,
+        current_stage=status,
+        last_event_at=job.updated_at,
+        total_tokens=total_tokens,
+        elapsed_seconds=0.0,
+        run_dir="",
     )
 
 
@@ -181,6 +245,18 @@ def _run_date(value: datetime | None):
     if value is None:
         return None
     return _aware_utc(value).date()
+
+
+def _operation_progress_percent(completed: int, total: int) -> float | None:
+    if total <= 0:
+        return None
+    return round((completed / total) * 100, 1)
+
+
+def _status_text(value: Any) -> str:
+    if hasattr(value, "value"):
+        value = value.value
+    return str(value).strip().lower() or "unknown"
 
 
 def _aware_utc(value: datetime) -> datetime:

@@ -719,6 +719,12 @@ def _format_seconds(value: float) -> str:
     return f"{value:.1f}s"
 
 
+def _format_optional_seconds(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return _format_seconds(value)
+
+
 def _runtime_freshness(runtime: AIProviderRuntimeStatus) -> str:
     age_seconds = (
         datetime.now(UTC) - runtime.last_reloaded_at.astimezone(UTC)
@@ -1126,6 +1132,10 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
         ("Running", overview.job_counts_by_state.get("running", 0)),
         ("Failed", overview.job_counts_by_state.get("failed", 0)),
         ("Queue depth", overview.total_queue_depth),
+        (
+            "Oldest pending",
+            _format_optional_seconds(overview.oldest_pending_age_seconds),
+        ),
     )
     metric_cards = "\n".join(
         f"""

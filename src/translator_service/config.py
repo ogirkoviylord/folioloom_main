@@ -98,6 +98,36 @@ class Settings:
             int(os.getenv("SCHEDULER_RETRY_MAX_DELAY_SECONDS", "600")),
         )
     )
+    scheduler_max_active_units_global: int = field(
+        default_factory=lambda: max(
+            1,
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL", "2")),
+        )
+    )
+    scheduler_max_active_units_per_user: int = field(
+        default_factory=lambda: max(
+            1,
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_USER", "1")),
+        )
+    )
+    scheduler_max_active_jobs_per_user: int = field(
+        default_factory=lambda: max(
+            1,
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_JOBS_PER_USER", "1")),
+        )
+    )
+    scheduler_max_active_units_per_job: int = field(
+        default_factory=lambda: max(
+            1,
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB", "1")),
+        )
+    )
+    scheduler_priority_aging_seconds: int = field(
+        default_factory=lambda: max(
+            0,
+            int(os.getenv("SCHEDULER_PRIORITY_AGING_SECONDS", "1800")),
+        )
+    )
     security_max_events_per_run: int = field(
         default_factory=lambda: max(
             0,
