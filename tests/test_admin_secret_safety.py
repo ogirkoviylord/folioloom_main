@@ -115,8 +115,8 @@ class AdminSecretSafetyTest(unittest.TestCase):
         deepseek = statuses[("deepseek", "API key pool")]
         self.assertEqual(telegram.status, "configured")
         self.assertEqual(deepseek.status, "configured")
-        self.assertIn("env fallback", telegram.detail)
-        self.assertIn("env fallback", deepseek.detail)
+        self.assertIn("server .env", telegram.detail)
+        self.assertIn("server .env", deepseek.detail)
         self.assertIn("2", deepseek.detail)
         self.assertNotIn("sk-raw-secret", str(report))
 

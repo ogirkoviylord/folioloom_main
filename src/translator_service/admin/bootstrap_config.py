@@ -99,11 +99,11 @@ def env_deepseek_key_summary(key_count: int) -> AIProviderKeySummary:
         provider_id=_DEEPSEEK_PROVIDER_ID,
         key_id="env-fallback",
         secret_id=_DEEPSEEK_ENV_SECRET_ID,
-        label="env fallback",
+        label="server .env",
         enabled=True,
         weight=max(1, key_count),
         max_parallel_requests=1,
-        masked_value=f"env fallback ({key_count} {_pluralize_key(key_count)})",
+        masked_value=f"server .env ({key_count} {_pluralize_key(key_count)})",
         fingerprint=None,
         version=None,
         disabled=False,
@@ -117,7 +117,7 @@ def env_telegram_connection_summary() -> IntegrationConnectionSummary:
     return IntegrationConnectionSummary(
         integration_id=_TELEGRAM_INTEGRATION_ID,
         connection_id="env-fallback",
-        label="env fallback",
+        label="server .env",
         enabled=True,
         secret_values=(
             IntegrationSecretSummary(
@@ -127,7 +127,7 @@ def env_telegram_connection_summary() -> IntegrationConnectionSummary:
                 required=True,
                 configured=True,
                 disabled=False,
-                masked_value="env fallback",
+                masked_value="server .env",
             ),
         ),
         created_at=now,
@@ -170,7 +170,7 @@ def _telegram_secret_with_bootstrap(
         secret,
         configured=True,
         disabled=False,
-        masked_value="env fallback",
+        masked_value="server .env",
     )
 
 

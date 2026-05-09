@@ -231,7 +231,7 @@ def _secret_detail(
     if secret.disabled:
         return "Stored secret is disabled."
     if _is_telegram_env_fallback(secret, integration_id, bootstrap_config):
-        return "Configured from env fallback."
+        return "Configured from server .env."
     if not secret.configured:
         if secret.required:
             return "Required secret is not configured."
@@ -245,7 +245,7 @@ def _secret_masked_value(
     bootstrap_config: AdminBootstrapConfig,
 ) -> str | None:
     if _is_telegram_env_fallback(secret, integration_id, bootstrap_config):
-        return "env fallback"
+        return "server .env"
     return secret.masked_value
 
 
@@ -274,9 +274,9 @@ def _deepseek_env_fallback_item(
         label="API key pool",
         kind="api_key",
         status="configured",
-        detail=f"{key_count} DeepSeek {key_label} configured from env fallback.",
+        detail=f"{key_count} DeepSeek {key_label} configured from server .env.",
         href="/admin/ai-providers",
-        masked_value=f"env fallback ({key_count} {key_label})",
+        masked_value=f"server .env ({key_count} {key_label})",
     )
 
 

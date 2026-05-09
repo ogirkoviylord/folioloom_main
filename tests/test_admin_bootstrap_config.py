@@ -46,10 +46,10 @@ class AdminBootstrapConfigTest(unittest.TestCase):
         telegram_connections = groups["telegram"]
         self.assertEqual(len(telegram_connections), 1)
         self.assertEqual(telegram_connections[0].connection_id, "env-fallback")
-        self.assertEqual(telegram_connections[0].label, "env fallback")
+        self.assertEqual(telegram_connections[0].label, "server .env")
         self.assertTrue(telegram_connections[0].enabled)
         self.assertTrue(telegram_connections[0].secret_values[0].configured)
-        self.assertEqual(telegram_connections[0].secret_values[0].masked_value, "env fallback")
+        self.assertEqual(telegram_connections[0].secret_values[0].masked_value, "server .env")
         self.assertNotIn("telegram-raw-secret", str(telegram_connections[0]))
 
 
