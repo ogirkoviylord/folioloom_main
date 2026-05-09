@@ -1,3 +1,4 @@
+import json
 import re
 import sqlite3
 import unittest
@@ -692,6 +693,15 @@ class AdminRoutesTest(unittest.TestCase):
                     translator_model="deepseek",
                     prompt_version="prompt-v1",
                     adapter_version="txt-adapter-v1",
+                    total_fragment_count=1,
+                    translation_policy=json.dumps(
+                        {
+                            "adapter_policy_version": "generic-adapter-v2",
+                            "prompt_policy_version": "prompt-policy-v9",
+                            "source_language": "auto",
+                            "target_language": "ru",
+                        }
+                    ),
                     translation_stack={
                         "adapter": {"name": "txt", "version": "txt-adapter-v1"},
                         "language_profiles": {
@@ -728,6 +738,7 @@ class AdminRoutesTest(unittest.TestCase):
             page = client.get("/admin/logs?status=ready")
             api = client.get("/admin/api/logs?status=ready")
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
             self.assertEqual(page.status_code, 200)
@@ -746,10 +757,17 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("source_text", page.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
+            self.assertIn("Progress", details.text)
+            self.assertIn("ETA", details.text)
+            self.assertIn('class="progress-bar"', details.text)
+            self.assertIn('data-detail-progress-bar="progress"', details.text)
             self.assertIn("job-logs-1", details.text)
             self.assertIn("prompt-v1", details.text)
             self.assertIn("txt-adapter-v1", details.text)
             self.assertIn("ru-profile-v1", details.text)
+            self.assertIn('class="detail-json"', details.text)
+            self.assertIn("adapter_policy_version", details.text)
+            self.assertIn("generic-adapter-v2", details.text)
             self.assertIn("run_started", details.text)
             self.assertIn("block-1", details.text)
             self.assertIn("22", details.text)
@@ -759,6 +777,24 @@ class AdminRoutesTest(unittest.TestCase):
             payload = api.json()
             self.assertEqual(payload["logs"][0]["job_id"], "job-logs-1")
             self.assertEqual(payload["logs"][0]["status"], "ready")
+            self.assertEqual(payload["logs"][0]["fragment_count"], 1)
+            self.assertEqual(payload["logs"][0]["total_fragment_count"], 1)
+            self.assertEqual(payload["logs"][0]["progress_percent"], 100.0)
+            self.assertEqual(payload["logs"][0]["current_stage"], "run_finished")
+            self.assertIn("last_event_at", payload["logs"][0])
+            self.assertEqual(details_api.status_code, 200)
+            self.assertEqual(
+                details_api.json()["details"]["summary"]["job_id"],
+                "job-logs-1",
+            )
+            self.assertEqual(
+                details_api.json()["details"]["summary"]["progress_percent"],
+                100.0,
+            )
+            self.assertEqual(
+                details_api.json()["details"]["summary"]["current_stage"],
+                "run_finished",
+            )
             self.assertEqual(download.status_code, 200)
             self.assertEqual(download.headers["content-type"], "application/zip")
             self.assertIn(
@@ -892,10 +928,17 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Memory", page.text)
             self.assertIn("Disk", page.text)
             self.assertIn("Uptime", page.text)
+            self.assertIn("Progress", page.text)
+            self.assertIn("ETA", page.text)
+            self.assertIn("Stage", page.text)
+            self.assertIn('class="progress-mini"', page.text)
             self.assertEqual(api.status_code, 200)
             payload = api.json()
             self.assertEqual(payload["active_translations"], 0)
             self.assertEqual(payload["recent_runs"][0]["job_id"], "job-live-1")
+            self.assertIn("progress_percent", payload["recent_runs"][0])
+            self.assertIn("eta_seconds", payload["recent_runs"][0])
+            self.assertIn("current_stage", payload["recent_runs"][0])
             self.assertIn("available", payload["server"])
             self.assertIn("cpu_percent", payload["server"])
             self.assertIn("memory_percent", payload["server"])

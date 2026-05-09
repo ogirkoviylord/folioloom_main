@@ -452,6 +452,7 @@ class WorkerTest(unittest.TestCase):
             )
             translator = RecordingTranslator()
             progress_events = []
+            lifecycle_events = []
 
             summary = run_stored_text_job_until_idle(
                 store=store,
@@ -459,6 +460,9 @@ class WorkerTest(unittest.TestCase):
                 job_id=plan.job.id,
                 worker_id="worker-a",
                 translator=translator,
+                work_unit_started_callback=lambda unit: lifecycle_events.append(
+                    ("started", unit.sequence)
+                ),
                 progress_callback=progress_events.append,
             )
 
@@ -468,6 +472,10 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(summary.job_status, PersistentTranslationJobStatus.READY)
             self.assertEqual(summary.total_tokens, 84)
             self.assertEqual(len(progress_events), 3)
+            self.assertEqual(
+                lifecycle_events,
+                [("started", 1), ("started", 2), ("started", 3)],
+            )
             self.assertEqual(
                 [unit.translated_text for unit in persisted_units],
                 [
@@ -822,6 +830,7 @@ class WorkerTest(unittest.TestCase):
                 second_source.object_key,
             )
             translator = BlockingParallelTranslator(expected_parallel_calls=2)
+            started_sequences: list[int] = []
 
             summary = run_stored_text_job_parallel_until_idle(
                 store=store,
@@ -830,12 +839,16 @@ class WorkerTest(unittest.TestCase):
                 worker_id="worker",
                 translator=translator,
                 max_parallel_units=2,
+                work_unit_started_callback=lambda unit: started_sequences.append(
+                    unit.sequence
+                ),
             )
 
             persisted_units = store.list_work_units(job.id)
             self.assertEqual(summary.job_status, PersistentTranslationJobStatus.READY)
             self.assertEqual(summary.translated_units, 2)
             self.assertEqual(translator.max_active_calls, 2)
+            self.assertEqual(sorted(started_sequences), [1, 2])
             self.assertEqual(
                 [unit.translated_text for unit in persisted_units],
                 ["[uk] First paragraph", "[uk] Second paragraph"],
