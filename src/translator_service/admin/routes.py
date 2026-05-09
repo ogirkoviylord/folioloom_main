@@ -39,6 +39,11 @@ from translator_service.admin.integrations import (
 from translator_service.admin.live import build_live_monitor_snapshot
 from translator_service.admin.operations import build_persistent_operations_overview
 from translator_service.admin.provider_health import build_provider_health
+from translator_service.admin.provider_balance import (
+    ProviderBalanceSnapshot,
+    get_cached_deepseek_balance,
+    refresh_deepseek_balance,
+)
 from translator_service.admin.provider_probe import validate_ai_provider_key
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
@@ -455,6 +460,12 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
         return _json({"providers": _ai_provider_runtime_payloads(settings)})
 
+    @router.get("/api/ai-providers/deepseek/balance")
+    async def deepseek_balance_api(request: Request) -> JSONResponse:
+        if _session_or_none(request, session_manager) is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        return _json({"balance": _deepseek_balance_payload(settings)})
+
     @router.get("/api/costs")
     async def costs_api(request: Request) -> JSONResponse:
         if _session_or_none(request, session_manager) is None:
@@ -696,6 +707,40 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     "provider_id": provider_id,
                     "key_id": key.key_id,
                     "fingerprint": key.fingerprint,
+                },
+            )
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/deepseek/balance/refresh")
+    async def refresh_deepseek_balance_route(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        snapshot = refresh_deepseek_balance(settings)
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="ai_provider.balance.refreshed",
+                target_type="ai_provider",
+                target_id="deepseek",
+                outcome=(
+                    AuditOutcome.SUCCESS
+                    if snapshot.status in {"available", "unavailable"}
+                    else AuditOutcome.FAILURE
+                ),
+                metadata={
+                    "provider_id": "deepseek",
+                    "status": snapshot.status,
+                    "is_available": snapshot.is_available,
+                    "currency_count": len(snapshot.balances),
+                    "error_code": snapshot.error_code,
                 },
             )
         return RedirectResponse(
@@ -1353,6 +1398,38 @@ def _ai_provider_runtime_payload(
             if reload_state is not None and reload_state.consumed_at is not None
             else None
         ),
+    }
+
+
+def _deepseek_balance_snapshot(settings: Settings) -> ProviderBalanceSnapshot | None:
+    return get_cached_deepseek_balance(settings)
+
+
+def _deepseek_balance_payload(settings: Settings):
+    snapshot = _deepseek_balance_snapshot(settings)
+    if snapshot is None:
+        return {"provider_id": "deepseek", "status": "not_checked"}
+    return {
+        "provider_id": snapshot.provider_id,
+        "status": snapshot.status,
+        "is_available": snapshot.is_available,
+        "balances": [
+            {
+                "currency": amount.currency,
+                "total_balance": str(amount.total_balance),
+                "granted_balance": str(amount.granted_balance),
+                "topped_up_balance": str(amount.topped_up_balance),
+            }
+            for amount in snapshot.balances
+        ],
+        "last_checked_at": snapshot.last_checked_at.isoformat(),
+        "last_success_at": (
+            snapshot.last_success_at.isoformat()
+            if snapshot.last_success_at is not None
+            else None
+        ),
+        "error_code": snapshot.error_code,
+        "error_message": snapshot.error_message,
     }
 
 

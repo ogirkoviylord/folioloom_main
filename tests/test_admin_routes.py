@@ -145,6 +145,66 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         analytics.assert_not_called()
 
+    def test_admin_balance_api_requires_login(self):
+        with patch(
+            "translator_service.admin.routes._deepseek_balance_snapshot",
+            side_effect=AssertionError("balance snapshot should be lazy"),
+        ) as snapshot:
+            response = self.client.get("/admin/api/ai-providers/deepseek/balance")
+
+        self.assertEqual(response.status_code, 401)
+        snapshot.assert_not_called()
+
+    def test_owner_can_read_cached_deepseek_balance(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        with patch(
+            "translator_service.admin.routes._deepseek_balance_payload",
+            return_value={"provider_id": "deepseek", "status": "not_configured"},
+        ):
+            response = self.client.get("/admin/api/ai-providers/deepseek/balance")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["balance"]["status"], "not_configured")
+
+    def test_refresh_deepseek_balance_requires_csrf(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.post(
+            "/admin/ai-providers/deepseek/balance/refresh",
+            data={"csrf_token": "bad"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_refresh_deepseek_balance(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        page = self.client.get("/admin/ai-providers")
+        csrf = _csrf_token(page.text)
+
+        with patch(
+            "translator_service.admin.routes.refresh_deepseek_balance",
+        ) as refresh:
+            refresh.return_value = SimpleNamespace(
+                provider_id="deepseek",
+                status="available",
+                is_available=True,
+                balances=(SimpleNamespace(currency="USD"),),
+                last_checked_at=datetime(2026, 5, 9, tzinfo=UTC),
+                last_success_at=datetime(2026, 5, 9, tzinfo=UTC),
+                error_code=None,
+                error_message=None,
+            )
+            response = self.client.post(
+                "/admin/ai-providers/deepseek/balance/refresh",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/ai-providers")
+        refresh.assert_called_once()
+
     def test_admin_quality_does_not_build_summary_without_login(self):
         with patch(
             "translator_service.admin.routes._quality_run_summary",
