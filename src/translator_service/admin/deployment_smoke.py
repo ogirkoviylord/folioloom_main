@@ -14,6 +14,7 @@ from translator_service.admin.secrets import (
 )
 from translator_service.ai_provider_runtime import load_ai_provider_runtime_keys
 from translator_service.config import Settings
+from translator_service.persistent_job_store import open_persistent_job_store
 
 
 class AdminDeploymentCheckError(RuntimeError):
@@ -33,6 +34,7 @@ def check_admin_runtime_configuration(
     if str(db_path) != ":memory:":
         db_path.parent.mkdir(parents=True, exist_ok=True)
     _validate_secret_store(db_path, settings.admin_secret_master_key)
+    _validate_scheduler_backend(settings)
 
     active_keys = load_ai_provider_runtime_keys(settings, provider_id="deepseek")
     if require_admin_provider_keys and not active_keys:
@@ -44,6 +46,7 @@ def check_admin_runtime_configuration(
     return {
         "status": "ok",
         "admin_db_path": str(db_path),
+        "scheduler_backend": settings.scheduler_backend,
         "deepseek_active_key_count": len(active_keys),
         "checked_at": datetime.now(UTC).isoformat(),
     }
@@ -76,6 +79,16 @@ def _validate_secret_store(db_path: Path, master_key: str) -> None:
             pass
     except SecretStoreUnavailable as error:
         raise AdminDeploymentCheckError(str(error)) from error
+
+
+def _validate_scheduler_backend(settings: Settings) -> None:
+    try:
+        store = open_persistent_job_store(settings)
+    except Exception as error:
+        raise AdminDeploymentCheckError(
+            f"Scheduler backend is not available: {error}"
+        ) from error
+    store.close()
 
 
 def _record_probe(db_path: Path) -> None:

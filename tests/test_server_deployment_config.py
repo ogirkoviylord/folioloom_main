@@ -10,6 +10,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("./var:/app/var", compose)
+        self.assertIn("./var:/data", compose)
         self.assertNotIn("app-var:/app/var", compose)
         self.assertNotIn("app-var:", compose)
 
@@ -61,9 +62,11 @@ class ServerDeploymentConfigTest(unittest.TestCase):
             "POSTGRES_DSN=postgresql://translator:change-me@postgres:5432/translator",
             "DATABASE_URL=postgresql://translator:change-me@postgres:5432/translator",
             "REDIS_URL=redis://redis:6379/0",
-            "OBJECT_STORAGE_ROOT=var/object-storage",
-            "TRANSLATION_RUN_LOG_ROOT=var/translation-runs",
-            "ADMIN_DB_PATH=var/admin.sqlite3",
+            "OBJECT_STORAGE_ROOT=/data/object-storage",
+            "PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3",
+            "USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3",
+            "TRANSLATION_RUN_LOG_ROOT=/data/run-logs",
+            "ADMIN_DB_PATH=/data/runtime/admin.sqlite3",
             "ADMIN_SESSION_SECRET=",
             "ADMIN_OWNER_PASSWORD=",
             "ADMIN_SECRET_MASTER_KEY=",
@@ -115,7 +118,18 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("POSTGRES_PASSWORD=translator", smoke_content)
         self.assertIn("ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS", smoke_content)
         self.assertIn(
-            "python -m translator_service.admin.deployment_smoke",
+            "docker compose exec -T api python -m "
+            "translator_service.admin.deployment_smoke",
+            smoke_content,
+        )
+        self.assertIn(
+            "docker compose exec -T bot python -m "
+            "translator_service.admin.deployment_smoke",
+            smoke_content,
+        )
+        self.assertIn(
+            "docker compose exec -T worker python -m "
+            "translator_service.admin.deployment_smoke",
             smoke_content,
         )
 
@@ -134,7 +148,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("docker compose down", content)
         self.assertIn("docker compose exec -T postgres psql", content)
         self.assertIn("tar xzf", content)
-        self.assertIn("var/admin.sqlite3", content)
+        self.assertIn("var/runtime/admin.sqlite3", content)
         self.assertIn("--require-admin-provider-keys", content)
 
     def test_vps_runbook_matches_host_var_deploy_model(self):
@@ -145,6 +159,8 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("cp .env.server.example .env", content)
         self.assertIn("ENVIRONMENT=production", content)
         self.assertIn("./var", content)
+        self.assertIn("/data/runtime/admin.sqlite3", content)
+        self.assertIn("/data/run-logs", content)
         self.assertNotIn("app-var", content)
 
     def test_admin_runtime_dependencies_are_production_dependencies(self):

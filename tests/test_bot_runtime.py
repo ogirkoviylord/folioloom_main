@@ -153,6 +153,16 @@ class _RuntimeKeyEchoDeepSeekClient:
         return f"{self.api_key}:{target_language}:{text}"
 
 
+class _FakePostgresStore:
+    connection = object()
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
     def test_default_pricing_rules_match_mvp_tariff(self):
         rules = build_default_pricing_rules()
@@ -171,6 +181,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.max_upload_mb, 50)
         self.assertEqual(config.object_storage_root, "var/object-storage")
         self.assertEqual(config.persistent_jobs_db_path, "var/jobs.sqlite3")
+        self.assertEqual(config.scheduler_backend, "sqlite")
         self.assertEqual(config.max_parallel_work_units, 1)
         self.assertEqual(config.provider_parallel_capacity, 1)
         self.assertEqual(config.security_max_events_per_run, 20)
@@ -183,6 +194,27 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.callback_spam_burst_limit, 20)
         self.assertEqual(config.callback_spam_burst_window_seconds, 10.0)
         self.assertEqual(config.user_action_lock_ttl_seconds, 900.0)
+
+    def test_translation_service_uses_postgres_store_for_postgres_backend(self):
+        fake_store = _FakePostgresStore()
+
+        with patch(
+            "translator_service.postgres_scheduler.PostgresSchedulerStore",
+            return_value=fake_store,
+        ), patch(
+            "translator_service.postgres_scheduler."
+            "initialize_postgres_scheduler_schema"
+        ):
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    scheduler_backend="postgres",
+                    postgres_dsn="postgresql://translator",
+                )
+            )
+
+        self.addCleanup(service.close)
+        self.assertIs(service._persistent_job_store, fake_store)
+        self.assertTrue(service._use_scheduler_runner)
 
     def test_callback_spam_guard_blocks_fast_duplicate_actions(self):
         now = 100.0

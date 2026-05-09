@@ -56,12 +56,23 @@ def build_live_monitor_snapshot(
     today = current_time.date()
     one_hour_ago = current_time - timedelta(hours=1)
     queued = 0
+    running_job_ids: set[str] = set()
     if operations is not None:
         queued = operations.job_counts_by_state.get("queued", 0)
+        running_job_ids = {
+            job.id for job in operations.jobs if job.state in _ACTIVE_STATUSES
+        }
+    active_run_job_ids = {
+        run.job_id for run in runs if run.status in _ACTIVE_STATUSES and run.job_id
+    }
+    active_runs_without_job_id = sum(
+        1 for run in runs if run.status in _ACTIVE_STATUSES and not run.job_id
+    )
 
     return LiveMonitorSnapshot(
         generated_at=current_time,
-        active_translations=sum(1 for run in runs if run.status in _ACTIVE_STATUSES),
+        active_translations=len(active_run_job_ids | running_job_ids)
+        + active_runs_without_job_id,
         queued_translations=queued,
         failed_today=sum(
             1

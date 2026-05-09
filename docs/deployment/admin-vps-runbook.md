@@ -35,11 +35,11 @@ TELEGRAM_BOT_TOKEN=...
 POSTGRES_PASSWORD=...
 DATABASE_URL=postgresql://translator:<same-postgres-password>@postgres:5432/translator
 REDIS_URL=redis://redis:6379/0
-OBJECT_STORAGE_ROOT=var/object-storage
-PERSISTENT_JOBS_DB_PATH=var/jobs.sqlite3
-USER_SETTINGS_DB_PATH=var/user-settings.sqlite3
-TRANSLATION_RUN_LOG_ROOT=var/translation-runs
-ADMIN_DB_PATH=var/admin.sqlite3
+OBJECT_STORAGE_ROOT=/data/object-storage
+PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3
+USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3
+TRANSLATION_RUN_LOG_ROOT=/data/run-logs
+ADMIN_DB_PATH=/data/runtime/admin.sqlite3
 ADMIN_OWNER_PASSWORD=...
 ADMIN_SESSION_SECRET=...
 ADMIN_SECRET_MASTER_KEY=...
@@ -119,15 +119,17 @@ share the same runtime SQLite database after deploy.
 
 ## Data Persistence
 
-Compose persists runtime state in the host `./var` directory mounted into
-`/app/var` for `api`, `bot`, and `worker`. Keep these paths shared:
+Compose persists runtime state in the host `./var` directory mounted into both
+`/app/var` and `/data` for `api`, `bot`, and `worker`. Production env paths
+should use `/data/...` so every container reads and writes the same files:
 
-- `ADMIN_DB_PATH=var/admin.sqlite3`: admin settings, encrypted secrets, audit,
-  activity, runtime reload/status rows;
-- `OBJECT_STORAGE_ROOT=var/object-storage`: source and translated files;
-- `TRANSLATION_RUN_LOG_ROOT=var/translation-runs`: translation logs;
-- `PERSISTENT_JOBS_DB_PATH=var/jobs.sqlite3` and
-  `USER_SETTINGS_DB_PATH=var/user-settings.sqlite3`: local runtime state.
+- `ADMIN_DB_PATH=/data/runtime/admin.sqlite3`: admin settings, encrypted
+  secrets, audit, activity, runtime reload/status rows;
+- `OBJECT_STORAGE_ROOT=/data/object-storage`: source and translated files;
+- `TRANSLATION_RUN_LOG_ROOT=/data/run-logs`: translation logs;
+- `PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3` and
+  `USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3`: local runtime
+  state.
 
 PostgreSQL data lives in the `postgres-data` Docker volume.
 

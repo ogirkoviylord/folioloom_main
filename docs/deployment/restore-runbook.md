@@ -47,9 +47,9 @@ mkdir -p var
 tar xzf ~/folioloom_exports/folioloom-files-YYYYMMDD-HHMMSS.tgz
 ```
 
-The archive should recreate the storage path used by `OBJECT_STORAGE_ROOT`,
-usually `var/object-storage`, and the admin database path used by
-`ADMIN_DB_PATH`, usually `var/admin.sqlite3`.
+The archive should recreate the host `var/` runtime tree. With the production
+`/data/...` container paths, this usually means `var/object-storage` and
+`var/runtime/admin.sqlite3` on the VPS host.
 
 4. Start only the database:
 

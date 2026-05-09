@@ -79,6 +79,17 @@ def storage_archive_name(storage_root: Path) -> str:
     return storage_root.as_posix().rstrip("/")
 
 
+def host_runtime_path(path: Path) -> Path:
+    """Map compose container runtime paths back to the host ./var directory."""
+    path_text = path.as_posix()
+    for container_prefix in ("/data", "/app/var"):
+        if path_text == container_prefix:
+            return Path("var")
+        if path_text.startswith(f"{container_prefix}/"):
+            return Path("var") / path_text[len(container_prefix) + 1 :]
+    return path
+
+
 def count_files(root: Path) -> int:
     if not root.exists():
         return 0
@@ -221,18 +232,20 @@ def archive_runtime_files(
         raise FileNotFoundError(f"Admin database not found: {admin_db_path}")
     storage_root = storage_root.resolve()
     admin_db_path = admin_db_path.resolve()
-    archive_base = _runtime_archive_base(storage_root, admin_db_path)
+    runtime_root = _runtime_archive_root(storage_root, admin_db_path)
+    archive_base = runtime_root.parent
     with tarfile.open(output_path, "w:gz") as archive:
-        archive.add(storage_root, arcname=storage_root.relative_to(archive_base))
-        archive.add(admin_db_path, arcname=admin_db_path.relative_to(archive_base))
+        archive.add(runtime_root, arcname=runtime_root.relative_to(archive_base))
 
 
 def _runtime_archive_base(storage_root: Path, admin_db_path: Path) -> Path:
+    return _runtime_archive_root(storage_root, admin_db_path).parent
+
+
+def _runtime_archive_root(storage_root: Path, admin_db_path: Path) -> Path:
     storage_root = storage_root.resolve()
     admin_db_path = admin_db_path.resolve()
-    if storage_root.parent == admin_db_path.parent:
-        return storage_root.parent.parent
-    return Path(
+    common_root = Path(
         os.path.commonpath(
             [
                 str(storage_root),
@@ -240,6 +253,9 @@ def _runtime_archive_base(storage_root: Path, admin_db_path: Path) -> Path:
             ]
         )
     )
+    if common_root.name == "var":
+        return common_root
+    return common_root
 
 
 def write_manifest(
@@ -250,6 +266,7 @@ def write_manifest(
     compose_file: Path,
     postgres_service: str,
     db_settings: DatabaseSettings,
+    runtime_root: Path,
     storage_root: Path,
     admin_db_path: Path,
     row_counts: dict[str, int],
@@ -264,6 +281,7 @@ def write_manifest(
         "postgres_service": postgres_service,
         "postgres_user": db_settings.user,
         "postgres_database": db_settings.database,
+        "runtime_root": str(runtime_root),
         "object_storage_root": str(storage_root),
         "admin_db_path": str(admin_db_path),
         "row_counts": row_counts,
@@ -396,12 +414,17 @@ def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     compose_file = Path(args.compose_file)
     output_dir = Path(args.output_dir)
     env = parse_env_file(env_file)
-    storage_root = Path(
-        args.storage_root or env.get("OBJECT_STORAGE_ROOT") or "var/object-storage"
+    storage_root = host_runtime_path(
+        Path(
+            args.storage_root
+            or env.get("OBJECT_STORAGE_ROOT")
+            or "var/object-storage"
+        )
     )
-    admin_db_path = Path(
-        args.admin_db_path or env.get("ADMIN_DB_PATH") or "var/admin.sqlite3"
+    admin_db_path = host_runtime_path(
+        Path(args.admin_db_path or env.get("ADMIN_DB_PATH") or "var/admin.sqlite3")
     )
+    runtime_root = _runtime_archive_root(storage_root, admin_db_path)
     db_settings = database_settings_from_env(env)
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
@@ -441,6 +464,7 @@ def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         compose_file=compose_file,
         postgres_service=args.postgres_service,
         db_settings=db_settings,
+        runtime_root=runtime_root,
         storage_root=storage_root,
         admin_db_path=admin_db_path,
         row_counts=row_counts,

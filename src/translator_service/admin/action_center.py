@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from translator_service.admin.bootstrap_config import AdminBootstrapConfig
 from translator_service.admin.integration_connections import (
     IntegrationConnectionSummary,
 )
@@ -44,12 +45,17 @@ def build_action_center(
     disk_percent: float | None,
     deepseek_key_count: int,
     secret_safety_issue_count: int = 0,
+    bootstrap_config: AdminBootstrapConfig | None = None,
     runtime_statuses: Sequence[AIProviderRuntimeStatus] | None = None,
     runtime_reload_states: Sequence[AIProviderRuntimeReloadRequest] | None = None,
     now: datetime | None = None,
 ) -> ActionCenter:
     items: list[ActionItem] = []
     current_time = now or datetime.now(UTC)
+    effective_deepseek_key_count = _effective_deepseek_key_count(
+        deepseek_key_count,
+        bootstrap_config,
+    )
 
     if _has_missing_required_integration(
         integration_summaries,
@@ -98,7 +104,7 @@ def build_action_center(
             )
         )
 
-    if deepseek_key_count == 0:
+    if effective_deepseek_key_count == 0:
         items.append(
             ActionItem(
                 key="ai_provider_missing",
@@ -126,7 +132,7 @@ def build_action_center(
     if runtime_statuses is not None:
         items.extend(
             _runtime_action_items(
-                deepseek_key_count=deepseek_key_count,
+                deepseek_key_count=effective_deepseek_key_count,
                 runtime_statuses=runtime_statuses,
                 runtime_reload_states=runtime_reload_states or (),
                 now=current_time,
@@ -134,6 +140,17 @@ def build_action_center(
         )
 
     return ActionCenter(items=tuple(items))
+
+
+def _effective_deepseek_key_count(
+    deepseek_key_count: int,
+    bootstrap_config: AdminBootstrapConfig | None,
+) -> int:
+    if deepseek_key_count > 0:
+        return deepseek_key_count
+    if bootstrap_config is None:
+        return 0
+    return bootstrap_config.deepseek_key_count
 
 
 def _runtime_action_items(

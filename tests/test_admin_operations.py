@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.admin.operations import (
     JOB_STATE_CANCELLED,
@@ -17,6 +18,11 @@ from translator_service.admin.operations import (
     summarize_worker,
 )
 from translator_service.admin.views import operations_body
+from translator_service.persistent_jobs import SQLiteTranslationJobStore
+from translator_service.translation_run_logs import (
+    TranslationRunLogger,
+    TranslationRunMetadata,
+)
 
 
 class AdminOperationsTest(unittest.TestCase):
@@ -108,6 +114,30 @@ class AdminOperationsTest(unittest.TestCase):
 
             self.assertEqual(overview.jobs, ())
             self.assertEqual(db_path.stat().st_size, 0)
+
+    def test_persistent_overview_reads_postgres_backend_without_sqlite_file(self):
+        fake_store = _FakeOperationsStore()
+
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch(
+                "translator_service.postgres_scheduler.PostgresSchedulerStore",
+                return_value=fake_store,
+            ),
+            patch(
+                "translator_service.postgres_scheduler."
+                "initialize_postgres_scheduler_schema"
+            ),
+        ):
+            overview = build_persistent_operations_overview(
+                Path(temp_dir) / "missing.sqlite3",
+                temp_dir,
+                scheduler_backend="postgres",
+                postgres_dsn="postgresql://translator",
+            )
+
+        self.assertEqual([job.id for job in overview.jobs], ["job-postgres"])
+        self.assertTrue(fake_store.closed)
 
     def test_overview_aggregates_job_counts_and_worker_health(self):
         now = _time(30)
@@ -301,6 +331,54 @@ class AdminOperationsTest(unittest.TestCase):
                 self.assertNotIn(unsafe_href, html)
                 self.assertIn('href="/admin/logs"', html)
 
+    def test_persistent_overview_includes_cancelled_and_expired_jobs(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            store = SQLiteTranslationJobStore(db_path)
+            cancelled = _persistent_job(store, order_id="order-cancelled")
+            expired = _persistent_job(store, order_id="order-expired")
+            store.cancel_job(cancelled.id)
+            store._connection.execute(
+                "UPDATE translation_jobs SET status = ? WHERE id = ?",
+                ("expired", expired.id),
+            )
+            store._connection.commit()
+            store.close()
+
+            overview = build_persistent_operations_overview(db_path, temp_dir)
+
+        by_order = {job.order_id: job for job in overview.jobs}
+        self.assertEqual(by_order["order-cancelled"].state, JOB_STATE_CANCELLED)
+        self.assertEqual(by_order["order-expired"].state, JOB_STATE_FAILED)
+
+    def test_persistent_overview_links_logs_to_specific_run_dir(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            store = SQLiteTranslationJobStore(db_path)
+            job = _persistent_job(store, order_id="order-ready")
+            store.close()
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            logger.finish(status="ready")
+
+            overview = build_persistent_operations_overview(db_path, log_root)
+
+        self.assertEqual(
+            overview.jobs[0].log_href,
+            f"/admin/logs/{logger.run_dir.name}",
+        )
+
     def test_accepts_object_rows_for_jobs_and_workers(self):
         job = _ObjectRow(id="job-3", status="ready", updated_at=_time(2))
         worker = _ObjectRow(
@@ -329,8 +407,41 @@ class _ObjectRow:
     last_heartbeat_at: datetime | None = None
 
 
+class _FakeOperationsStore:
+    connection = object()
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def list_jobs_by_status(self, status, *, limit: int = 50):
+        if str(status) == "queued":
+            return [_ObjectRow(id="job-postgres", status="queued")]
+        return []
+
+    def list_work_units(self, job_id: str):
+        return []
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _time(minutes: int) -> datetime:
     return datetime(2026, 5, 8, 12, minutes, tzinfo=UTC)
+
+
+def _persistent_job(store: SQLiteTranslationJobStore, *, order_id: str):
+    return store.create_job(
+        order_id=order_id,
+        user_id="telegram:42",
+        file_id=f"{order_id}-file",
+        file_name="book.txt",
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        adapter_version="txt-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+    )
 
 
 if __name__ == "__main__":

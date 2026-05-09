@@ -79,6 +79,43 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
+    def test_admin_live_does_not_build_snapshot_without_login(self):
+        with patch(
+            "translator_service.admin.routes._live_snapshot",
+            side_effect=AssertionError("live snapshot should be lazy"),
+        ):
+            response = self.client.get("/admin/live", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_logs_do_not_read_runs_without_login(self):
+        with patch(
+            "translator_service.admin.routes.list_translation_run_summaries",
+            side_effect=AssertionError("translation logs should be lazy"),
+        ):
+            response = self.client.get("/admin/logs", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_activity_users_and_security_do_not_read_activity_without_login(self):
+        for path in (
+            "/admin/activity",
+            "/admin/users",
+            "/admin/users/telegram:42",
+            "/admin/security/events",
+        ):
+            with self.subTest(path=path):
+                with patch(
+                    "translator_service.admin.routes._activity_store",
+                    side_effect=AssertionError("activity store should be lazy"),
+                ):
+                    response = self.client.get(path, follow_redirects=False)
+
+                self.assertEqual(response.status_code, 303)
+                self.assertEqual(response.headers["location"], "/admin/login")
+
     def test_admin_costs_does_not_build_analytics_without_login(self):
         with patch(
             "translator_service.admin.routes._cost_analytics",
@@ -397,6 +434,47 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Test key", page.text)
         self.assertIn("Add key", page.text)
 
+    def test_env_bootstrap_secrets_are_visible_without_raw_secret_values(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with patch.dict(
+                "os.environ",
+                {
+                    "DEEPSEEK_API_KEYS": "sk-env-first, sk-env-second",
+                    "TELEGRAM_BOT_TOKEN": "telegram-env-token",
+                },
+            ):
+                client = TestClient(
+                    create_app(
+                        settings=Settings(
+                            admin_db_path=db_path,
+                            admin_owner_password="owner-pass",
+                            admin_session_secret="session-secret",
+                        )
+                    )
+                )
+                client.post("/admin/login", data={"password": "owner-pass"})
+
+                overview = client.get("/admin/overview")
+                integrations = client.get("/admin/integrations")
+                ai_providers = client.get("/admin/ai-providers")
+                settings = client.get("/admin/settings")
+
+            for response in (overview, integrations, ai_providers, settings):
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("sk-env-first", response.text)
+                self.assertNotIn("sk-env-second", response.text)
+                self.assertNotIn("telegram-env-token", response.text)
+            self.assertNotIn("DeepSeek keys missing", overview.text)
+            self.assertNotIn("Required integrations need setup", overview.text)
+            self.assertIn("env fallback", integrations.text)
+            self.assertIn("1 active connection", integrations.text)
+            self.assertIn("managed by environment", integrations.text)
+            self.assertIn("env fallback (2 keys)", ai_providers.text)
+            self.assertIn("env fallback", settings.text)
+            self.assertIn("<td>DeepSeek</td>", settings.text)
+            self.assertIn("<td>Telegram / env fallback</td>", settings.text)
+
     def test_billing_shell_is_separate_from_integrations(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 
@@ -502,7 +580,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("order-queued", page.text)
             self.assertIn("worker-a", page.text)
             self.assertIn("21", page.text)
-            self.assertIn('href="/admin/logs"', page.text)
+            self.assertIn(f'href="/admin/logs/{logger.run_dir.name}"', page.text)
             self.assertIn("Cancel unavailable", page.text)
             self.assertEqual(api.status_code, 200)
             jobs = api.json()["overview"]["jobs"]
@@ -512,7 +590,44 @@ class AdminRoutesTest(unittest.TestCase):
                 ["worker-a"],
             )
             self.assertEqual(by_order["order-ready"]["total_tokens"], 21)
-            self.assertEqual(by_order["order-ready"]["log_href"], "/admin/logs")
+            self.assertEqual(
+                by_order["order-ready"]["log_href"],
+                f"/admin/logs/{logger.run_dir.name}",
+            )
+
+    def test_operations_page_and_api_include_cancelled_and_expired_jobs(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            store = SQLiteTranslationJobStore(db_path)
+            cancelled = _persistent_job(store, order_id="order-cancelled")
+            expired = _persistent_job(store, order_id="order-expired")
+            store.cancel_job(cancelled.id)
+            store._connection.execute(
+                "UPDATE translation_jobs SET status = ? WHERE id = ?",
+                ("expired", expired.id),
+            )
+            store._connection.commit()
+            store.close()
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        persistent_jobs_db_path=str(db_path),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/operations/jobs")
+            api = client.get("/admin/api/operations/overview")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("order-cancelled", page.text)
+            self.assertIn("order-expired", page.text)
+            by_order = {job["order_id"]: job for job in api.json()["overview"]["jobs"]}
+            self.assertEqual(by_order["order-cancelled"]["state"], "cancelled")
+            self.assertEqual(by_order["order-expired"]["state"], "failed")
 
     def test_translation_logs_page_and_api_filter_runs(self):
         with TemporaryDirectory() as temp_dir:
@@ -573,7 +688,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("book.txt", page.text)
             self.assertIn("ready", page.text)
             self.assertIn(
-                f'/admin/logs/{logger.run_dir.name}/download',
+                f"/admin/logs/{logger.run_dir.name}/download",
                 page.text,
             )
             self.assertIn(
@@ -607,6 +722,18 @@ class AdminRoutesTest(unittest.TestCase):
                 self.assertIn("run.json", names)
                 self.assertIn("summary.md", names)
                 self.assertIn("events.jsonl", names)
+
+    def test_translation_logs_page_passes_safe_limit_filter(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        with patch(
+            "translator_service.admin.routes.list_translation_run_summaries",
+            return_value=(),
+        ) as summaries:
+            self.client.get("/admin/logs?limit=200")
+            self.client.get("/admin/logs?limit=999")
+
+        self.assertEqual(summaries.call_args_list[0].kwargs["limit"], 200)
+        self.assertEqual(summaries.call_args_list[1].kwargs["limit"], 500)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
@@ -759,7 +886,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-live-secret-value", str(response.json()))
             with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as store:
                 self.assertEqual(
-                store.get_secret_value("deepseek.api_key"),
+                    store.get_secret_value("deepseek.api_key"),
                     "sk-live-secret-value",
                 )
 

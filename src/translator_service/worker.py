@@ -973,22 +973,9 @@ def _job_translation_context(
 
 
 def open_scheduler_store(settings):
-    if settings.scheduler_backend == "sqlite":
-        return SQLiteTranslationJobStore(settings.persistent_jobs_db_path)
-    if settings.scheduler_backend == "postgres":
-        from translator_service.postgres_scheduler import (
-            PostgresSchedulerStore,
-            initialize_postgres_scheduler_schema,
-        )
+    from translator_service.persistent_job_store import open_persistent_job_store
 
-        store = PostgresSchedulerStore(settings.postgres_dsn)
-        try:
-            initialize_postgres_scheduler_schema(store.connection)
-        except Exception:
-            store.close()
-            raise
-        return store
-    raise ValueError(f"Unsupported scheduler backend: {settings.scheduler_backend}")
+    return open_persistent_job_store(settings)
 
 
 def main() -> None:

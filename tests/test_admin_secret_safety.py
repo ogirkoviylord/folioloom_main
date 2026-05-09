@@ -4,6 +4,7 @@ import unittest
 from datetime import UTC, datetime
 
 from translator_service.admin.ai_provider_keys import AIProviderKeySummary
+from translator_service.admin.bootstrap_config import AdminBootstrapConfig
 from translator_service.admin.integrations import (
     IntegrationCategory,
     IntegrationSecretSummary,
@@ -93,6 +94,31 @@ class AdminSecretSafetyTest(unittest.TestCase):
         self.assertIn("Use &lt;token&gt;", html)
         self.assertNotIn("<script>", html)
         self.assertNotIn("telegram.bot_token", html)
+
+    def test_report_shows_env_fallback_for_missing_deepseek_and_telegram(self):
+        report = build_secret_safety_report(
+            integration_summaries=(_integration_summary(),),
+            integration_connections={},
+            ai_provider_key_pools={"deepseek": ()},
+            provider_health_summaries=(),
+            bootstrap_config=AdminBootstrapConfig(
+                deepseek_key_count=2,
+                telegram_configured=True,
+            ),
+        )
+
+        self.assertEqual(report.missing_count, 0)
+        self.assertEqual(report.issue_count, 0)
+        self.assertEqual(report.configured_count, 2)
+        statuses = {(item.owner_label, item.label): item for item in report.items}
+        telegram = statuses[("Telegram", "Bot token")]
+        deepseek = statuses[("deepseek", "API key pool")]
+        self.assertEqual(telegram.status, "configured")
+        self.assertEqual(deepseek.status, "configured")
+        self.assertIn("env fallback", telegram.detail)
+        self.assertIn("env fallback", deepseek.detail)
+        self.assertIn("2", deepseek.detail)
+        self.assertNotIn("sk-raw-secret", str(report))
 
 
 def _integration_summary(

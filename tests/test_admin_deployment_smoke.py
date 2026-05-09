@@ -3,6 +3,7 @@ import unittest
 from base64 import urlsafe_b64encode
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
 from translator_service.admin.deployment_smoke import (
@@ -108,6 +109,37 @@ class AdminDeploymentSmokeTest(unittest.TestCase):
                     ),
                     require_existing_admin_db=True,
                 )
+
+    def test_validates_configured_scheduler_backend(self):
+        with TemporaryDirectory() as temp_dir:
+            fake_store = _FakeSchedulerStore()
+            with patch(
+                "translator_service.admin.deployment_smoke.open_persistent_job_store",
+                return_value=fake_store,
+            ) as open_store:
+                result = check_admin_runtime_configuration(
+                    Settings(
+                        environment="production",
+                        scheduler_backend="postgres",
+                        postgres_dsn="postgresql://translator",
+                        admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                        admin_owner_password="long-owner-password",
+                        admin_session_secret="long-session-secret-value",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+
+        open_store.assert_called_once()
+        self.assertTrue(fake_store.closed)
+        self.assertEqual(result["scheduler_backend"], "postgres")
+
+
+class _FakeSchedulerStore:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
 
 if __name__ == "__main__":

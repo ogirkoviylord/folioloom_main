@@ -21,6 +21,12 @@ from translator_service.admin.auth import (
     AdminSession,
     AdminSessionManager,
 )
+from translator_service.admin.bootstrap_config import (
+    apply_ai_provider_key_bootstrap,
+    apply_integration_connection_bootstrap,
+    apply_integration_bootstrap,
+    env_bootstrap_config,
+)
 from translator_service.admin.costs import build_cost_analytics
 from translator_service.admin.integration_connections import (
     SQLiteIntegrationConnectionStore,
@@ -222,7 +228,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Live Monitor",
             active="live",
-            body=live_body(
+            body=lambda session: live_body(
                 _live_snapshot(settings),
                 runtime_statuses=_ai_provider_runtime_statuses(settings),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
@@ -238,7 +244,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Translation Logs",
             active="logs",
-            body=logs_body(
+            body=lambda session: logs_body(
                 list_translation_run_summaries(
                     settings.translation_run_log_root,
                     **filters,
@@ -290,55 +296,46 @@ def create_admin_router(settings: Settings) -> APIRouter:
     @router.get("/activity", response_class=HTMLResponse)
     async def activity(request: Request) -> Response:
         filters = _activity_filters(request)
-        with _activity_store(settings) as store:
-            events = store.list_events(**filters)
         return _protected_page(
             request,
             session_manager=session_manager,
             environment=settings.environment,
             title="Activity",
             active="activity",
-            body=activity_body(events, **filters),
+            body=lambda session: _activity_body(settings, filters),
         )
 
     @router.get("/users", response_class=HTMLResponse)
     async def users(request: Request) -> Response:
-        with _activity_store(settings) as store:
-            profiles = store.list_user_profiles()
         return _protected_page(
             request,
             session_manager=session_manager,
             environment=settings.environment,
             title="Users",
             active="users",
-            body=users_body(profiles),
+            body=lambda session: _users_body(settings),
         )
 
     @router.get("/users/{user_id}", response_class=HTMLResponse)
     async def user_detail(user_id: str, request: Request) -> Response:
-        with _activity_store(settings) as store:
-            profile = store.get_user_profile(user_id)
-            events = store.list_events(actor_id=user_id)
         return _protected_page(
             request,
             session_manager=session_manager,
             environment=settings.environment,
             title=f"User {user_id}",
             active="users",
-            body=user_detail_body(profile, events),
+            body=lambda session: _user_detail_body(settings, user_id),
         )
 
     @router.get("/security/events", response_class=HTMLResponse)
     async def security_events(request: Request) -> Response:
-        with _activity_store(settings) as store:
-            events = store.list_events(surface=ActivitySurface.SECURITY)
         return _protected_page(
             request,
             session_manager=session_manager,
             environment=settings.environment,
             title="Security",
             active="security",
-            body=security_events_body(events),
+            body=lambda session: _security_events_body(settings),
         )
 
     @router.get("/operations/jobs", response_class=HTMLResponse)
@@ -911,9 +908,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     actor_id=session.actor_id,
                 )
 
-        passed = sum(
-            1 for _, status, _ in results if status == "provider_check_passed"
-        )
+        passed = sum(1 for _, status, _ in results if status == "provider_check_passed")
         failed = len(results) - passed
         status = "provider_check_passed" if failed == 0 else "failed"
         with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
@@ -1091,7 +1086,10 @@ def _session_or_none(
 
 
 def _integration_summaries(settings: Settings):
-    return _registry_summaries(DEFAULT_INTEGRATION_REGISTRY, settings)
+    return apply_integration_bootstrap(
+        _registry_summaries(DEFAULT_INTEGRATION_REGISTRY, settings),
+        env_bootstrap_config(),
+    )
 
 
 def _ai_provider_summaries(settings: Settings):
@@ -1099,15 +1097,16 @@ def _ai_provider_summaries(settings: Settings):
 
 
 def _ai_provider_key_pools(settings: Settings):
+    bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
-        return {}
+        return apply_ai_provider_key_bootstrap({}, bootstrap_config)
     try:
         with SQLiteEncryptedSecretStore(
             settings.admin_db_path,
             master_key=settings.admin_secret_master_key,
         ) as secrets:
             with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
-                return {
+                key_pools = {
                     definition.integration_id: keys.list_keys(
                         definition.integration_id,
                         secret_describer=secrets.describe_secret,
@@ -1115,14 +1114,20 @@ def _ai_provider_key_pools(settings: Settings):
                     for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
                 }
     except SecretStoreUnavailable:
-        return {}
+        return apply_ai_provider_key_bootstrap({}, bootstrap_config)
+    return apply_ai_provider_key_bootstrap(key_pools, bootstrap_config)
 
 
 def _ai_provider_health(settings: Settings):
     summaries = _ai_provider_summaries(settings)
     validation_metadata = _ai_provider_validation_metadata(settings)
+    bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
-        return build_provider_health(summaries, {}, validation_metadata)
+        return build_provider_health(
+            summaries,
+            apply_ai_provider_key_bootstrap({}, bootstrap_config),
+            validation_metadata,
+        )
     try:
         with SQLiteEncryptedSecretStore(
             settings.admin_db_path,
@@ -1139,6 +1144,7 @@ def _ai_provider_health(settings: Settings):
                 }
     except SecretStoreUnavailable:
         key_pools = {}
+    key_pools = apply_ai_provider_key_bootstrap(key_pools, bootstrap_config)
     return build_provider_health(summaries, key_pools, validation_metadata)
 
 
@@ -1245,9 +1251,7 @@ def _ai_provider_runtime_payload(
             reload_state.actor_id if reload_state is not None else None
         ),
         "reload_requested_at": (
-            reload_state.requested_at.isoformat()
-            if reload_state is not None
-            else None
+            reload_state.requested_at.isoformat() if reload_state is not None else None
         ),
         "reload_consumed_at": (
             reload_state.consumed_at.isoformat()
@@ -1258,6 +1262,7 @@ def _ai_provider_runtime_payload(
 
 
 def _overview_action_center(settings: Settings):
+    bootstrap_config = env_bootstrap_config()
     integration_summaries = _integration_summaries(settings)
     integration_connections = _integration_connection_groups(settings)
     ai_provider_key_pools = _ai_provider_key_pools(settings)
@@ -1271,30 +1276,34 @@ def _overview_action_center(settings: Settings):
         disk_percent=live_snapshot.server.disk_percent,
         deepseek_key_count=_deepseek_key_count(ai_provider_key_pools),
         secret_safety_issue_count=secret_safety_report.issue_count,
+        bootstrap_config=bootstrap_config,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
         runtime_reload_states=_ai_provider_runtime_reload_states(settings),
     )
 
 
 def _secret_safety_report(settings: Settings):
+    bootstrap_config = env_bootstrap_config()
     return build_secret_safety_report(
         integration_summaries=_integration_summaries(settings),
         integration_connections=_integration_connection_groups(settings),
         ai_provider_key_pools=_ai_provider_all_key_pools(settings),
         provider_health_summaries=_ai_provider_health(settings),
+        bootstrap_config=bootstrap_config,
     )
 
 
 def _ai_provider_all_key_pools(settings: Settings):
+    bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
-        return {}
+        return apply_ai_provider_key_bootstrap({}, bootstrap_config)
     try:
         with SQLiteEncryptedSecretStore(
             settings.admin_db_path,
             master_key=settings.admin_secret_master_key,
         ) as secrets:
             with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
-                return {
+                key_pools = {
                     definition.integration_id: keys.list_keys(
                         definition.integration_id,
                         secret_describer=secrets.describe_secret,
@@ -1303,7 +1312,8 @@ def _ai_provider_all_key_pools(settings: Settings):
                     for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
                 }
     except SecretStoreUnavailable:
-        return {}
+        return apply_ai_provider_key_bootstrap({}, bootstrap_config)
+    return apply_ai_provider_key_bootstrap(key_pools, bootstrap_config)
 
 
 def _deepseek_key_count(ai_provider_key_pools) -> int:
@@ -1325,6 +1335,8 @@ def _operations_overview(settings: Settings):
     return build_persistent_operations_overview(
         settings.persistent_jobs_db_path,
         settings.translation_run_log_root,
+        scheduler_backend=settings.scheduler_backend,
+        postgres_dsn=settings.postgres_dsn,
     )
 
 
@@ -1344,9 +1356,35 @@ def _activity_store(settings: Settings) -> SQLiteUserActivityStore:
     return SQLiteUserActivityStore(settings.admin_db_path)
 
 
+def _activity_body(settings: Settings, filters: dict[str, str | None]) -> str:
+    with _activity_store(settings) as store:
+        events = store.list_events(**filters)
+    return activity_body(events, **filters)
+
+
+def _users_body(settings: Settings) -> str:
+    with _activity_store(settings) as store:
+        profiles = store.list_user_profiles()
+    return users_body(profiles)
+
+
+def _user_detail_body(settings: Settings, user_id: str) -> str:
+    with _activity_store(settings) as store:
+        profile = store.get_user_profile(user_id)
+        events = store.list_events(actor_id=user_id)
+    return user_detail_body(profile, events)
+
+
+def _security_events_body(settings: Settings) -> str:
+    with _activity_store(settings) as store:
+        events = store.list_events(surface=ActivitySurface.SECURITY)
+    return security_events_body(events)
+
+
 def _integration_connection_groups(settings: Settings):
+    bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
-        return {}
+        return apply_integration_connection_bootstrap({}, bootstrap_config)
     try:
         with SQLiteEncryptedSecretStore(
             settings.admin_db_path,
@@ -1355,7 +1393,7 @@ def _integration_connection_groups(settings: Settings):
             with SQLiteIntegrationConnectionStore(
                 settings.admin_db_path
             ) as connections:
-                return {
+                groups = {
                     definition.integration_id: connections.list_connections(
                         definition,
                         secret_describer=secrets.describe_secret,
@@ -1363,7 +1401,8 @@ def _integration_connection_groups(settings: Settings):
                     for definition in DEFAULT_INTEGRATION_REGISTRY.list_definitions()
                 }
     except SecretStoreUnavailable:
-        return {}
+        groups = {}
+    return apply_integration_connection_bootstrap(groups, bootstrap_config)
 
 
 def _registry_summaries(registry: IntegrationRegistry, settings: Settings):
@@ -1469,11 +1508,12 @@ def _safe_admin_next(value: str | None) -> bool:
     return bool(value) and value.startswith("/admin/") and not value.startswith("//")
 
 
-def _log_filters(request: Request) -> dict[str, str | None]:
+def _log_filters(request: Request) -> dict[str, str | int | None]:
     return {
         "status": request.query_params.get("status") or None,
         "date_from": request.query_params.get("date_from") or None,
         "date_to": request.query_params.get("date_to") or None,
+        "limit": _safe_limit(request.query_params.get("limit")),
     }
 
 
@@ -1489,3 +1529,12 @@ def _activity_filters(request: Request) -> dict[str, str | None]:
         "date_from": request.query_params.get("date_from") or None,
         "date_to": request.query_params.get("date_to") or None,
     }
+
+
+def _safe_limit(value: str | None) -> int:
+    if value is None:
+        return 100
+    try:
+        return max(1, min(int(value), 500))
+    except ValueError:
+        return 100
