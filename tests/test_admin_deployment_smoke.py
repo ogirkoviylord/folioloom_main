@@ -61,6 +61,7 @@ class AdminDeploymentSmokeTest(unittest.TestCase):
                 Settings(
                     environment="production",
                     admin_db_path=str(db_path),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
                     admin_owner_password="long-owner-password",
                     admin_session_secret="long-session-secret-value",
                     admin_secret_master_key=MASTER_KEY,
@@ -87,6 +88,7 @@ class AdminDeploymentSmokeTest(unittest.TestCase):
                 Settings(
                     environment="production",
                     admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                    persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
                     admin_owner_password="long-owner-password",
                     admin_session_secret="long-session-secret-value",
                     admin_secret_master_key=MASTER_KEY,
