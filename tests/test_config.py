@@ -102,6 +102,49 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.scheduler_poll_seconds, 2.0)
         self.assertEqual(settings.scheduler_retry_base_delay_seconds, 30)
         self.assertEqual(settings.scheduler_retry_max_delay_seconds, 600)
+        self.assertEqual(settings.scheduler_max_active_units_global, 2)
+        self.assertEqual(settings.scheduler_max_active_units_per_user, 1)
+        self.assertEqual(settings.scheduler_max_active_jobs_per_user, 1)
+        self.assertEqual(settings.scheduler_max_active_units_per_job, 1)
+        self.assertEqual(settings.scheduler_priority_aging_seconds, 1800)
+
+    def test_scheduler_fairness_settings_can_be_configured_from_environment(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL": "5",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_USER": "3",
+                "SCHEDULER_MAX_ACTIVE_JOBS_PER_USER": "2",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB": "4",
+                "SCHEDULER_PRIORITY_AGING_SECONDS": "60",
+            },
+        ):
+            settings = Settings()
+
+        self.assertEqual(settings.scheduler_max_active_units_global, 5)
+        self.assertEqual(settings.scheduler_max_active_units_per_user, 3)
+        self.assertEqual(settings.scheduler_max_active_jobs_per_user, 2)
+        self.assertEqual(settings.scheduler_max_active_units_per_job, 4)
+        self.assertEqual(settings.scheduler_priority_aging_seconds, 60)
+
+    def test_scheduler_fairness_settings_are_clamped_to_safe_minimums(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL": "0",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_USER": "0",
+                "SCHEDULER_MAX_ACTIVE_JOBS_PER_USER": "0",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB": "0",
+                "SCHEDULER_PRIORITY_AGING_SECONDS": "-1",
+            },
+        ):
+            settings = Settings()
+
+        self.assertEqual(settings.scheduler_max_active_units_global, 1)
+        self.assertEqual(settings.scheduler_max_active_units_per_user, 1)
+        self.assertEqual(settings.scheduler_max_active_jobs_per_user, 1)
+        self.assertEqual(settings.scheduler_max_active_units_per_job, 1)
+        self.assertEqual(settings.scheduler_priority_aging_seconds, 0)
 
     def test_admin_settings_can_be_configured_from_environment(self):
         with patch.dict(

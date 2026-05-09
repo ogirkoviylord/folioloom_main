@@ -105,9 +105,10 @@ class SchedulerContractTest(unittest.TestCase):
 
         self.assertEqual(limits.max_active_units_per_job, 1)
         self.assertEqual(limits.max_active_jobs_per_user, 1)
-        self.assertEqual(limits.max_active_units_per_user, 2)
-        self.assertEqual(limits.max_active_units_global, 8)
+        self.assertEqual(limits.max_active_units_per_user, 1)
+        self.assertEqual(limits.max_active_units_global, 2)
         self.assertEqual(limits.max_attempts_per_unit, 3)
+        self.assertEqual(limits.priority_aging_seconds, 1800)
 
     def test_sqlite_store_exposes_scheduler_repository_methods(self):
         self.assertTrue(callable(SQLiteTranslationJobStore.claim_next_scheduled_work_unit))

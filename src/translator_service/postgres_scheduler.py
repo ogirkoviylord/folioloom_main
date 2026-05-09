@@ -263,6 +263,9 @@ class PostgresSchedulerStore:
     ) -> SchedulerClaim | None:
         max_active_units_global = max(1, limits.max_active_units_global)
         max_active_units_per_job = max(1, limits.max_active_units_per_job)
+        max_active_units_per_user = max(1, limits.max_active_units_per_user)
+        max_active_jobs_per_user = max(1, limits.max_active_jobs_per_user)
+        priority_aging_seconds = max(0, limits.priority_aging_seconds)
         with self.connection.transaction():
             claim_token = uuid4().hex
             updated = self.connection.execute(
@@ -293,6 +296,23 @@ class PostgresSchedulerStore:
                           WHERE active.job_id = wu.job_id
                             AND active.status = 'translating'
                       ) < %(max_active_units_per_job)s
+                      AND (
+                          SELECT COUNT(*)
+                          FROM work_units active
+                          JOIN translation_jobs active_tj
+                            ON active_tj.id = active.job_id
+                          WHERE active_tj.user_id = tj.user_id
+                            AND active.status = 'translating'
+                      ) < %(max_active_units_per_user)s
+                      AND (
+                          SELECT COUNT(DISTINCT active.job_id)
+                          FROM work_units active
+                          JOIN translation_jobs active_tj
+                            ON active_tj.id = active.job_id
+                          WHERE active_tj.user_id = tj.user_id
+                            AND active.job_id <> wu.job_id
+                            AND active.status = 'translating'
+                      ) < %(max_active_jobs_per_user)s
                       AND NOT EXISTS (
                           SELECT 1
                           FROM work_units earlier
@@ -304,7 +324,40 @@ class PostgresSchedulerStore:
                                 'failed_retryable'
                             )
                       )
-                    ORDER BY tj.priority DESC, tj.created_at, wu.sequence
+                    ORDER BY
+                      (
+                          SELECT COUNT(*)
+                          FROM work_units active
+                          JOIN translation_jobs active_tj
+                            ON active_tj.id = active.job_id
+                          WHERE active_tj.user_id = tj.user_id
+                            AND active.status = 'translating'
+                      ) ASC,
+                      (
+                          SELECT COUNT(DISTINCT active.job_id)
+                          FROM work_units active
+                          JOIN translation_jobs active_tj
+                            ON active_tj.id = active.job_id
+                          WHERE active_tj.user_id = tj.user_id
+                            AND active.status = 'translating'
+                      ) ASC,
+                      (
+                          SELECT COUNT(*)
+                          FROM work_units active
+                          WHERE active.job_id = wu.job_id
+                            AND active.status = 'translating'
+                      ) ASC,
+                      CASE
+                        WHEN %(priority_aging_seconds)s > 0 THEN
+                          tj.priority + FLOOR(
+                            EXTRACT(EPOCH FROM (now() - tj.created_at))
+                            / GREATEST(%(priority_aging_seconds)s, 1)
+                          )::integer
+                        ELSE tj.priority
+                      END DESC,
+                      tj.priority DESC,
+                      tj.created_at ASC,
+                      wu.sequence ASC
                     FOR UPDATE OF wu SKIP LOCKED
                     LIMIT 1
                 )
@@ -335,6 +388,27 @@ class PostgresSchedulerStore:
                       WHERE active.job_id = work_units.job_id
                         AND active.status = 'translating'
                   ) < %(max_active_units_per_job)s
+                  AND (
+                      SELECT COUNT(*)
+                      FROM work_units active
+                      JOIN translation_jobs active_tj
+                        ON active_tj.id = active.job_id
+                      JOIN translation_jobs candidate_tj
+                        ON candidate_tj.id = work_units.job_id
+                      WHERE active_tj.user_id = candidate_tj.user_id
+                        AND active.status = 'translating'
+                  ) < %(max_active_units_per_user)s
+                  AND (
+                      SELECT COUNT(DISTINCT active.job_id)
+                      FROM work_units active
+                      JOIN translation_jobs active_tj
+                        ON active_tj.id = active.job_id
+                      JOIN translation_jobs candidate_tj
+                        ON candidate_tj.id = work_units.job_id
+                      WHERE active_tj.user_id = candidate_tj.user_id
+                        AND active.job_id <> work_units.job_id
+                        AND active.status = 'translating'
+                  ) < %(max_active_jobs_per_user)s
                   AND EXISTS (
                       SELECT 1
                       FROM translation_jobs tj
@@ -361,6 +435,9 @@ class PostgresSchedulerStore:
                     "lease_seconds": max(1, lease_seconds),
                     "max_active_units_global": max_active_units_global,
                     "max_active_units_per_job": max_active_units_per_job,
+                    "max_active_units_per_user": max_active_units_per_user,
+                    "max_active_jobs_per_user": max_active_jobs_per_user,
+                    "priority_aging_seconds": priority_aging_seconds,
                 },
             ).fetchone()
             if updated is None:

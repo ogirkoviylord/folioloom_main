@@ -21,6 +21,7 @@ from translator_service.bot.runtime import (
     _cancel_inline_keyboard,
     _choose_heartbeat_pattern_name,
     _confirm_pending_translation,
+    _confirm_pending_upload_rights,
     _deepseek_parallel_capacity,
     _deepseek_parallel_capacity_from_env,
     _document_exceeds_upload_limit,
@@ -139,6 +140,9 @@ class RecordingMessage:
 
 
 class _RuntimeRecordingTranslator:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str, str]] = []
+
     def translate(
         self,
         *,
@@ -146,6 +150,7 @@ class _RuntimeRecordingTranslator:
         source_language: str,
         target_language: str,
     ) -> str:
+        self.requests.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
 
 
@@ -386,6 +391,59 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.answers, [])
         self.assertIsNotNone(service.get_pending(42))
 
+    async def test_confirm_before_rights_prompts_without_starting_translation(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+        )
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+        )
+
+        self.assertEqual(translator.requests, [])
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("right to translate this document", message.answers[0][0])
+        self.assertIsNotNone(service.get_pending_upload(42))
+
+    async def test_confirm_rights_prompts_target_language_without_creating_job(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+        )
+        message = RecordingMessage()
+
+        await _confirm_pending_upload_rights(message=message, service=service)
+        await _confirm_pending_upload_rights(message=message, service=service)
+
+        self.assertEqual(len(message.answers), 2)
+        self.assertIn("Choose the target language", message.answers[0][0])
+        self.assertIn("Choose the target language", message.answers[1][0])
+        self.assertTrue(service.get_pending_upload(42).rights_confirmed)
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+
     async def test_resume_translation_sends_progress_message_for_queued_job(self):
         message = RecordingMessage()
         service = _QueuedThenReadyService()
@@ -401,6 +459,15 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreaterEqual(len(message.answers), 1)
         self.assertTrue(message.answer_messages[0].edited_texts)
+        queued_edits = [
+            text
+            for text in message.answer_messages[0].edited_texts
+            if "Your translation is queued" in text
+        ]
+        self.assertTrue(queued_edits)
+        self.assertTrue(
+            all("Translation progress" not in text for text in queued_edits)
+        )
         queued_cancel_markup = message.answer_messages[0].edited_reply_markups[0]
         self.assertEqual(
             queued_cancel_markup.inline_keyboard[0][0].callback_data,
@@ -503,6 +570,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 content=b"One.\n\nTwo.",
                 source_language="en",
             )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",

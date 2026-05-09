@@ -14,6 +14,7 @@ from translator_service.bot.messages import (
     build_nothing_to_cancel_message,
     build_order_estimate_message,
     build_pending_translation_message,
+    build_rights_confirmation_message,
     build_start_message,
     build_settings_message,
     build_my_books_message,
@@ -25,12 +26,14 @@ from translator_service.bot.messages import (
     get_progress_activity_phrase,
     get_back_text,
     get_cancel_text,
+    get_confirm_rights_text,
     get_main_menu_text,
     get_toggle_progress_preview_text,
     is_my_books_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
+    is_confirm_rights_text,
     is_help_text,
     is_how_it_works_text,
     is_language_menu_text,
@@ -395,6 +398,41 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("С языка: Нидерландский", message)
         self.assertIn("На язык: Нидерландский", message)
         self.assertIn("Примерное время: 1 ч 1 мин", message)
+
+    def test_rights_confirmation_message_is_localized(self):
+        expectations = {
+            "en": "right to translate this document",
+            "ru": "есть право переводить этот документ",
+            "uk": "маєте право перекладати цей документ",
+            "fr": "droit de traduire ce document",
+            "es": "derecho a traducir este documento",
+            "nl": "recht hebt om dit document te vertalen",
+        }
+
+        for language_code, expected_text in expectations.items():
+            with self.subTest(language_code=language_code):
+                message = build_rights_confirmation_message(
+                    "book.txt",
+                    language_code,
+                )
+                self.assertIn(expected_text, message)
+                self.assertIn("book.txt", message)
+
+    def test_confirm_rights_text_accepts_localized_buttons(self):
+        expectations = {
+            "en": "✅ I confirm the rights",
+            "ru": "✅ Подтверждаю права",
+            "uk": "✅ Підтверджую права",
+            "fr": "✅ Je confirme les droits",
+            "es": "✅ Confirmo los derechos",
+            "nl": "✅ Ik bevestig de rechten",
+        }
+
+        for language_code, expected_text in expectations.items():
+            with self.subTest(language_code=language_code):
+                self.assertEqual(get_confirm_rights_text(language_code), expected_text)
+                self.assertTrue(is_confirm_rights_text(expected_text))
+        self.assertFalse(is_confirm_rights_text("Start Translation"))
 
     def test_confirm_translation_text_accepts_button_text_and_command(self):
         self.assertTrue(is_confirm_translation_text("Подтвердить"))

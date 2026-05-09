@@ -21,12 +21,14 @@ from translator_service.translation_context import TranslationContextMemory
 from translator_service.worker import (
     ProviderUsage,
     assemble_translated_text_result,
+    effective_worker_parallel_units,
     open_scheduler_store,
     run_next_persistent_work_unit,
     run_next_scheduled_stored_text_work_unit,
     run_next_stored_text_work_unit,
     run_stored_text_job_parallel_until_idle,
     run_stored_text_job_until_idle,
+    scheduler_limits_from_settings,
 )
 
 
@@ -112,6 +114,86 @@ class WorkerTest(unittest.TestCase):
             "Unsupported scheduler backend: memory",
         ):
             open_scheduler_store(settings)
+
+    def test_effective_worker_parallel_units_is_capped_by_provider_capacity(self):
+        from translator_service.config import Settings
+
+        with patch.dict(
+            "os.environ",
+            {
+                "TRANSLATION_MAX_PARALLEL_UNITS": "3",
+                "DEEPSEEK_API_KEYS": "key-a,key-b",
+                "DEEPSEEK_API_KEY": "",
+                "DEEPSEEK_MAX_PARALLEL_PER_KEY": "1",
+                "ADMIN_DB_PATH": ":memory:",
+            },
+        ):
+            settings = Settings()
+            effective_units = effective_worker_parallel_units(settings)
+
+        self.assertEqual(effective_units, 2)
+
+    def test_effective_worker_parallel_units_preserves_single_key_serial_capacity(self):
+        from translator_service.config import Settings
+
+        with patch.dict(
+            "os.environ",
+            {
+                "TRANSLATION_MAX_PARALLEL_UNITS": "3",
+                "DEEPSEEK_API_KEYS": "",
+                "DEEPSEEK_API_KEY": "key-a",
+                "DEEPSEEK_MAX_PARALLEL_PER_KEY": "1",
+                "ADMIN_DB_PATH": ":memory:",
+            },
+        ):
+            settings = Settings()
+            effective_units = effective_worker_parallel_units(settings)
+
+        self.assertEqual(effective_units, 1)
+
+    def test_scheduler_limits_from_settings_uses_fairness_config(self):
+        from translator_service.config import Settings
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL": "6",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_USER": "3",
+                "SCHEDULER_MAX_ACTIVE_JOBS_PER_USER": "2",
+                "SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB": "4",
+                "SCHEDULER_PRIORITY_AGING_SECONDS": "45",
+            },
+        ):
+            settings = Settings()
+
+        limits = scheduler_limits_from_settings(
+            settings,
+            effective_global_capacity=5,
+        )
+
+        self.assertEqual(limits.max_active_units_global, 5)
+        self.assertEqual(limits.max_active_units_per_user, 3)
+        self.assertEqual(limits.max_active_jobs_per_user, 2)
+        self.assertEqual(limits.max_active_units_per_job, 4)
+        self.assertEqual(limits.priority_aging_seconds, 45)
+
+    def test_scheduler_limits_from_settings_preserves_provider_capacity_floor(self):
+        from translator_service.config import Settings
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL": "6",
+            },
+        ):
+            settings = Settings()
+
+        limits = scheduler_limits_from_settings(
+            settings,
+            effective_global_capacity=0,
+        )
+
+        self.assertEqual(limits.max_active_units_global, 1)
 
     def test_translates_next_persistent_work_unit_and_stores_usage(self):
         store = self._store()

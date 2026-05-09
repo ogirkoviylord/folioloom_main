@@ -80,6 +80,10 @@ class AdminJobSummary:
     state: str
     raw_status: str | None = None
     order_id: str | None = None
+    file_name: str = "unknown"
+    document_kind: str = "unknown"
+    source_language: str = "unknown"
+    target_language: str = "unknown"
     created_at: datetime | None = None
     updated_at: datetime | None = None
     started_at: datetime | None = None
@@ -120,6 +124,7 @@ class OperationsOverview:
     worker_counts_by_health: dict[str, int] = field(default_factory=dict)
     queue_depths: dict[str, int] = field(default_factory=dict)
     total_queue_depth: int = 0
+    oldest_pending_age_seconds: float | None = None
 
 
 def normalize_job_state(status: Any) -> str:
@@ -174,6 +179,10 @@ def summarize_job(
         state=state,
         raw_status=raw_status,
         order_id=_optional_string(_read(row, "order_id")),
+        file_name=_optional_string(_read(row, "file_name")) or "unknown",
+        document_kind=_optional_string(_read(row, "document_kind")) or "unknown",
+        source_language=_optional_string(_read(row, "source_language")) or "unknown",
+        target_language=_optional_string(_read(row, "target_language")) or "unknown",
         created_at=_optional_datetime(_read(row, "created_at")),
         updated_at=_optional_datetime(_read(row, "updated_at")),
         started_at=started_at,
@@ -269,6 +278,16 @@ def build_operations_overview(
         )
         for worker in workers
     )
+    pending_units = _pending_work_units(normalized_work_units.values())
+    oldest_pending_age_seconds = _oldest_pending_age_seconds(
+        pending_units,
+        now=now,
+    )
+    total_queue_depth = (
+        sum(normalized_queue_depths.values())
+        if normalized_queue_depths
+        else len(pending_units)
+    )
 
     return OperationsOverview(
         jobs=job_summaries,
@@ -294,7 +313,8 @@ def build_operations_overview(
             ),
         ),
         queue_depths=normalized_queue_depths,
-        total_queue_depth=sum(normalized_queue_depths.values()),
+        total_queue_depth=total_queue_depth,
+        oldest_pending_age_seconds=oldest_pending_age_seconds,
     )
 
 
@@ -390,6 +410,38 @@ def _first_unit_error(units: tuple[Any, ...]) -> Any:
 
 def _sum_unit_ints(units: tuple[Any, ...], field_name: str) -> int:
     return sum(_optional_int(_read(unit, field_name), 0) for unit in units)
+
+
+def _pending_work_units(work_unit_groups: Iterable[Iterable[Any]]) -> tuple[Any, ...]:
+    return tuple(
+        unit
+        for units in work_unit_groups
+        for unit in units
+        if normalize_job_state(_read(unit, "status")) == JOB_STATE_QUEUED
+    )
+
+
+def _oldest_pending_age_seconds(
+    pending_units: tuple[Any, ...],
+    *,
+    now: datetime | None,
+) -> float | None:
+    available_times = [
+        value
+        for value in (
+            _optional_datetime(
+                _first_present(_read(unit, "available_at"), _read(unit, "created_at"))
+            )
+            for unit in pending_units
+        )
+        if value is not None
+    ]
+    if not available_times:
+        return None
+
+    reference = _as_aware_utc(now or datetime.now(UTC))
+    oldest = min(_as_aware_utc(value) for value in available_times)
+    return max(0.0, (reference - oldest).total_seconds())
 
 
 def _first_unit_datetime(units: tuple[Any, ...], field_name: str) -> datetime | None:

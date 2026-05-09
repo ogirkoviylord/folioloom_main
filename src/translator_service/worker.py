@@ -407,7 +407,7 @@ def run_next_scheduled_stored_text_work_unit(
         work_unit_started_callback(work_unit)
 
     try:
-        source_text = _load_work_unit_text(
+        source_text = load_scheduled_work_unit_text(
             storage=storage,
             work_unit=work_unit,
             encoding=encoding,
@@ -433,7 +433,7 @@ def run_next_scheduled_stored_text_work_unit(
 
     try:
         job_context = _job_translation_context(store, claim.job_id)
-        translation_result = _translate_work_unit_text(
+        translation_result = translate_claimed_scheduled_stored_text_work_unit(
             work_unit=work_unit,
             source_text=source_text,
             translator=translator,
@@ -474,6 +474,34 @@ def run_next_scheduled_stored_text_work_unit(
             )
             return None
         raise
+
+
+def translate_claimed_scheduled_stored_text_work_unit(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    translator: PersistentWorkUnitTranslator,
+    job_context: TranslationContextMemory | None = None,
+) -> _WorkUnitTranslationResult:
+    return _translate_work_unit_text(
+        work_unit=work_unit,
+        source_text=source_text,
+        translator=translator,
+        job_context=job_context,
+    )
+
+
+def load_scheduled_work_unit_text(
+    *,
+    storage: LocalObjectStorage,
+    work_unit: PersistentWorkUnit,
+    encoding: str = "utf-8",
+) -> str:
+    return _load_work_unit_text(
+        storage=storage,
+        work_unit=work_unit,
+        encoding=encoding,
+    )
 
 
 def _fail_claimed_work_unit_or_ignore_stale(
@@ -1085,16 +1113,61 @@ def open_scheduler_store(settings):
     return open_persistent_job_store(settings)
 
 
+def effective_worker_parallel_units(settings) -> int:
+    from translator_service.bot.runtime import _deepseek_parallel_capacity
+
+    return max(
+        1,
+        min(
+            settings.translation_max_parallel_units,
+            _deepseek_parallel_capacity(settings),
+        ),
+    )
+
+
+def scheduler_limits_from_settings(
+    settings,
+    *,
+    effective_global_capacity: int,
+) -> SchedulerLimits:
+    return SchedulerLimits(
+        max_active_units_per_job=max(
+            1,
+            int(settings.scheduler_max_active_units_per_job),
+        ),
+        max_active_jobs_per_user=max(
+            1,
+            int(settings.scheduler_max_active_jobs_per_user),
+        ),
+        max_active_units_per_user=max(
+            1,
+            int(settings.scheduler_max_active_units_per_user),
+        ),
+        max_active_units_global=max(
+            1,
+            min(
+                int(settings.scheduler_max_active_units_global),
+                int(effective_global_capacity),
+            ),
+        ),
+        priority_aging_seconds=max(0, int(settings.scheduler_priority_aging_seconds)),
+    )
+
+
 def main() -> None:
     from translator_service.bot.runtime import build_deepseek_translator
     from translator_service.config import Settings
     from translator_service.file_storage import LocalObjectStorage
-    from translator_service.scheduler import SchedulerLimits
     from translator_service.scheduler_runner import run_scheduler_once
 
     settings = Settings()
     storage = LocalObjectStorage(settings.object_storage_root)
     translator = build_deepseek_translator(settings)
+    worker_parallel_units = effective_worker_parallel_units(settings)
+    limits = scheduler_limits_from_settings(
+        settings,
+        effective_global_capacity=worker_parallel_units,
+    )
     store = open_scheduler_store(settings)
     try:
         while True:
@@ -1103,10 +1176,9 @@ def main() -> None:
                 storage=storage,
                 worker_id="worker:local",
                 translator=translator,
-                limits=SchedulerLimits(
-                    max_active_units_per_job=settings.translation_max_parallel_units,
-                ),
+                limits=limits,
                 lease_seconds=settings.scheduler_lease_seconds,
+                max_parallel_units=worker_parallel_units,
                 retry_base_delay_seconds=(
                     settings.scheduler_retry_base_delay_seconds
                 ),

@@ -1,6 +1,6 @@
 # FolioLoom Current Project State
 
-Актуальный источник фактического состояния проекта на 2026-05-09.
+Актуальный источник фактического состояния проекта на 2026-05-10.
 
 ## Коротко
 
@@ -28,7 +28,7 @@ free closed beta после прохождения release gates.
 
 ## Последняя зафиксированная проверка
 
-Во время restart-аудита были пройдены:
+После добавления rights confirmation gate были пройдены:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
@@ -36,7 +36,18 @@ PYTHONPATH=src python3 -m compileall src
 scripts/predeploy_check.sh
 ```
 
-Результат полного unittest suite: `Ran 811 tests`, `OK`, `skipped=10`.
+Результат последнего полного unittest suite: `Ran 856 tests`, `OK`,
+`skipped=10`.
+
+После добавления DeepSeek balance и фикса совместной работы admin/env ключей
+были пройдены targeted checks:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_admin_provider_balance tests.test_admin_bootstrap_config tests.test_deepseek_key_sources tests.test_bot_runtime tests.test_server_deployment_config
+scripts/predeploy_check.sh
+```
+
+Результат targeted suite: `Ran 71 tests`, `OK`.
 
 Важная оговорка: repo-wide `python3 -m ruff check --no-cache src tests scripts`
 пока не является release blocker. Он падает на исторических style/import/line
@@ -50,7 +61,12 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - `/start`, menu/help/language flows.
 - Upload/estimate/confirm/progress/cancel/status/history-oriented flows.
 - Invite-only beta allowlist by Telegram user id, editable from admin settings
-  and controlled by an explicit admin on/off toggle.
+  with per-ID add/remove controls and an explicit admin on/off toggle. The
+  toggle defaults off, so the bot remains open until the owner enables
+  enforcement.
+- Rights confirmation gate after document upload/validation and before target
+  language/estimate/full processing. Confirmation stores safe metadata only:
+  boolean, timestamp, version and source.
 - TXT/DOCX/EPUB upload and translation path.
 - Cooperative cancellation with partial output.
 - My Books/history foundations: ownership checks, download, resume/cancel
@@ -78,6 +94,9 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Scheduler runner and worker loop.
 - Work-unit leases, retries, attempts, usage accounting, worker heartbeats,
   partial/final output keys.
+- Worker-side scheduler execution can run multiple distinct scheduled work
+  units concurrently within configured capacity, while provider calls remain
+  capped by DeepSeek key/channel capacity.
 - Docker Compose stack with `api`, `bot`, `worker`, `postgres`, `redis`.
 - Server env example uses `SCHEDULER_BACKEND=postgres`.
 
@@ -88,6 +107,8 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Key cooldown/failover behavior.
 - Admin-visible provider runtime status and reload request flow.
 - Provider validation/probe surfaces.
+- Admin-visible DeepSeek account balance snapshot/refresh flow.
+- DeepSeek admin keys and `.env` keys are additive for balance/runtime use.
 
 ### Admin console
 
@@ -99,6 +120,7 @@ Implemented owner/admin areas include:
 - encrypted secret storage;
 - integration registry and connection rows;
 - AI provider keys;
+- DeepSeek account balance snapshot/refresh;
 - provider validation/probe/runtime status/reload;
 - overview action center;
 - live monitor;
@@ -111,7 +133,8 @@ Implemented owner/admin areas include:
 - quality run trigger;
 - audit logging;
 - deployment smoke checks.
-- closed-beta allowlist settings and enforcement toggle.
+- closed-beta allowlist settings, per-ID add/remove controls and enforcement
+  toggle.
 
 Admin access is SSH-tunnel-only for closed beta. It is not a public admin
 product yet.
@@ -130,7 +153,6 @@ product yet.
 
 ## Main gaps against closed beta
 
-- Formal rights/permission confirmation flow.
 - Per-user quotas, global cost cap and admin kill switch.
 - Free preview before full translation.
 - Upload hardening/quarantine baseline.

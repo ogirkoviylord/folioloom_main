@@ -52,7 +52,8 @@ and the owner can diagnose runtime/provider/jobs/logs/backups from admin.
 
 ```text
 allowlist check (Telegram ID allowlist, editable in admin settings, enforced
-only when the admin toggle is on)
+only when the admin toggle is on; non-allowlisted users receive an invite-only
+message and upload files are not downloaded)
 -> upload TXT/DOCX/EPUB
 -> validation/quarantine
 -> rights confirmation
@@ -67,6 +68,12 @@ only when the admin toggle is on)
 -> My Books/history/resume/delete
 -> TTL cleanup
 ```
+
+Current implementation note: the bot now shows the rights confirmation after
+TXT/DOCX/EPUB upload validation and before target language selection/estimate.
+Full processing cannot start unless the pending document carries
+`rights_confirmed=true`; persistent job policy metadata carries the safe
+confirmation payload without storing raw confirmation text.
 
 ## Backend Invariants
 
@@ -113,10 +120,15 @@ No PDF, OCR, MOBI, FB2, batch ZIP or arbitrary containers in the next beta.
 
 - Closed-beta admin remains SSH-tunnel-only.
 - No public admin exposure before public-production hardening.
-- Admin may show metadata, provider health, job status, costs and safe run
-  diagnostics.
+- Admin may show metadata, provider health, DeepSeek account balance, job
+  status, costs and safe run diagnostics.
+- Admin settings include closed-beta allowlist ID add/remove controls and a
+  live enforcement toggle. The toggle defaults off so the bot remains open
+  while the owner collects candidate IDs.
 - Admin must not show raw document text by default.
 - Admin must not show real secrets.
+- DeepSeek keys added through admin and DeepSeek keys from `.env` are additive
+  sources for runtime/balance use; admin keys do not disable existing env keys.
 - Immediate admin gaps: Alerts MVP and Backups visibility.
 
 ### Upload safety
@@ -170,7 +182,7 @@ EPUB fixtures plus negative and ops scenarios. See
 
 ### Free closed beta blockers
 
-- [ ] Rights confirmation.
+- [x] Rights confirmation.
 - [x] Beta allowlist.
 - [ ] Per-user quotas.
 - [ ] Global cost cap.

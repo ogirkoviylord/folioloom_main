@@ -17,6 +17,7 @@ UX остаются FolioLoom.
 | Public production | Not ready |
 | Форматы beta | TXT, DOCX, EPUB |
 | Admin access | SSH tunnel only |
+| Beta access control | Telegram ID allowlist, admin toggle defaults off |
 
 Проект уже не является in-memory prototype. В репозитории есть persistent
 jobs/work units, object storage, worker loop, admin console, Docker Compose
@@ -26,6 +27,9 @@ deployment, backup/restore workflow и широкий unittest suite.
 
 - Принимает upload документов в Telegram и ведет пользователя через выбор
   языка, estimate, confirmation, progress, cancel/status/history flows.
+- Поддерживает invite-only beta allowlist по Telegram ID: owner может заранее
+  добавлять/удалять ID в admin settings и включить enforcement отдельной
+  кнопкой, когда список готов.
 - Переводит TXT/DOCX/EPUB через DeepSeek-compatible provider.
 - Хранит accepted documents, jobs, work units, partial/final results и runtime
   metadata в backend/object storage.
@@ -39,6 +43,7 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Supported for beta foundation | Not supported for next beta |
 | --- | --- |
 | Telegram upload/translate flow | Paid public SaaS |
+| Admin-managed beta allowlist toggle | Public self-serve signup |
 | TXT/DOCX/EPUB | PDF/OCR/MOBI/FB2/batch ZIP |
 | DeepSeek-compatible internal providers | User-facing provider/model picker |
 | Persistent jobs/work units | Arbitrary file parser |
@@ -94,12 +99,30 @@ nano .env
 Required values include:
 
 - `TELEGRAM_BOT_TOKEN`
+- `BETA_ALLOWLIST_ENABLED=false` and optional `BETA_ALLOWLIST_TELEGRAM_IDS`
+  for bootstrap; the live allowlist is managed in SSH-tunneled admin settings
 - `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEYS`
+- `TRANSLATION_MAX_PARALLEL_UNITS` for worker-side scheduled work-unit capacity
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DSN` / `DATABASE_URL`
 - `ADMIN_OWNER_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 - `ADMIN_SECRET_MASTER_KEY`
+
+`ADMIN_SECRET_MASTER_KEY` enables encrypted admin-managed secrets. DeepSeek
+keys added in the admin UI are additive with `DEEPSEEK_API_KEY` /
+`DEEPSEEK_API_KEYS`: adding an admin key does not disable env keys. The
+SSH-tunneled `/admin/ai-providers` page can show and refresh the safe DeepSeek
+account balance snapshot without exposing real keys.
+
+Worker parallelism is beta-safe and capacity-bound. The server example uses
+`TRANSLATION_MAX_PARALLEL_UNITS=2`, but concurrency is layered:
+`TRANSLATION_MAX_PARALLEL_UNITS` sets worker-side scheduled work-unit capacity,
+provider capacity caps active DeepSeek calls by env/admin key count times each
+key's `DEEPSEEK_MAX_PARALLEL_PER_KEY` or admin max-parallel setting, and
+scheduler fairness caps keep one job/user from monopolizing available slots.
+With one key at capacity 1, provider calls remain serial; with multiple free
+keys, separate documents can progress concurrently.
 
 Start or update the stack:
 
@@ -145,6 +168,16 @@ Then open:
 ```text
 http://127.0.0.1:62062/admin/live
 ```
+
+Closed-beta allowlist management lives under:
+
+```text
+http://127.0.0.1:62062/admin/settings
+```
+
+The allowlist can be filled ahead of time. Enforcement remains off until the
+owner presses `Enable allowlist`; when enabled, non-allowlisted Telegram users
+receive an invite-only message and new uploads are not downloaded.
 
 After deploy:
 

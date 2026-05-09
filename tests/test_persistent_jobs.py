@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 import unittest
 
 from translator_service.persistent_jobs import (
@@ -256,6 +257,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             lease_seconds=300,
             limits=SchedulerLimits(
                 max_active_units_per_job=2,
+                max_active_units_per_user=2,
                 max_active_units_global=10,
             ),
         )
@@ -264,6 +266,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             lease_seconds=300,
             limits=SchedulerLimits(
                 max_active_units_per_job=2,
+                max_active_units_per_user=2,
                 max_active_units_global=10,
             ),
         )
@@ -272,6 +275,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             lease_seconds=300,
             limits=SchedulerLimits(
                 max_active_units_per_job=2,
+                max_active_units_per_user=2,
                 max_active_units_global=10,
             ),
         )
@@ -299,6 +303,139 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
         self.assertEqual(first.work_unit_id, f"{job.id}:unit-1")
         self.assertIsNone(second)
+
+    def test_scheduled_claim_user_unit_cap_blocks_second_job_for_same_user(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        first_job = _job_with_units(
+            store,
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+        )
+        _job_with_units(
+            store,
+            order_id="order-2",
+            user_id="user-42",
+            file_id="file-2",
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=10,
+            max_active_units_per_job=1,
+            max_active_units_per_user=1,
+            max_active_jobs_per_user=2,
+        )
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_job.id)
+        self.assertIsNone(second)
+
+    def test_scheduled_claim_prefers_user_with_lower_active_load(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        first_user_first_job = _job_with_units(
+            store,
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+        )
+        _job_with_units(
+            store,
+            order_id="order-2",
+            user_id="user-42",
+            file_id="file-2",
+        )
+        other_user_job = _job_with_units(
+            store,
+            order_id="order-3",
+            user_id="user-100",
+            file_id="file-3",
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=10,
+            max_active_units_per_job=1,
+            max_active_units_per_user=2,
+            max_active_jobs_per_user=2,
+        )
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_user_first_job.id)
+        self.assertEqual(second.job_id, other_user_job.id)
+
+    def test_scheduled_claim_priority_aging_prevents_old_job_starvation(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        old_low_priority = _job_with_units(
+            store,
+            order_id="order-old",
+            user_id="user-old",
+            file_id="file-old",
+        )
+        new_high_priority = _job_with_units(
+            store,
+            order_id="order-new",
+            user_id="user-new",
+            file_id="file-new",
+        )
+        now = datetime.now(UTC)
+        with store._connection:
+            store._connection.execute(
+                """
+                UPDATE translation_jobs
+                SET priority = ?, created_at = ?
+                WHERE id = ?
+                """,
+                (
+                    0,
+                    (now - timedelta(minutes=3)).isoformat(),
+                    old_low_priority.id,
+                ),
+            )
+            store._connection.execute(
+                """
+                UPDATE translation_jobs
+                SET priority = ?, created_at = ?
+                WHERE id = ?
+                """,
+                (1, now.isoformat(), new_high_priority.id),
+            )
+
+        claimed = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_global=10,
+                max_active_units_per_job=1,
+                max_active_units_per_user=1,
+                max_active_jobs_per_user=1,
+                priority_aging_seconds=60,
+            ),
+        )
+
+        self.assertEqual(claimed.job_id, old_low_priority.id)
 
     def test_retryable_failure_records_attempt_and_delays_reclaim(self):
         from translator_service.scheduler import (
@@ -671,11 +808,17 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         return store
 
 
-def _job_with_units(store: SQLiteTranslationJobStore):
+def _job_with_units(
+    store: SQLiteTranslationJobStore,
+    *,
+    order_id: str = "order-1",
+    user_id: str = "user-42",
+    file_id: str = "file-1",
+):
     job = store.create_job(
-        order_id="order-1",
-        user_id="user-42",
-        file_id="file-1",
+        order_id=order_id,
+        user_id=user_id,
+        file_id=file_id,
         file_name="book.epub",
         document_kind="epub",
         source_language="auto",

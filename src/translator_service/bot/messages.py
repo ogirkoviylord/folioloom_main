@@ -133,6 +133,14 @@ MESSAGES = {
             "{source_language_line}\n"
             "Choose the target language."
         ),
+        "rights_confirmation_prompt": (
+            "File received.\n\n"
+            "Title: {file_name}\n\n"
+            "Please confirm that you have the right to translate this document: "
+            "you are the author or rights holder, you have permission from the "
+            "rights holder, or the document is public domain / authorized for translation."
+        ),
+        "confirm_rights": "✅ I confirm the rights",
         "original_language": "Source language",
         "source_language_with_admixtures": "{primary}; admixtures: {admixtures}",
         "progress": "Translation progress",
@@ -307,6 +315,14 @@ MESSAGES = {
             "{source_language_line}\n"
             "Теперь выберите язык перевода."
         ),
+        "rights_confirmation_prompt": (
+            "Файл получен.\n\n"
+            "Название: {file_name}\n\n"
+            "Подтвердите, что у вас есть право переводить этот документ: "
+            "вы автор, правообладатель, работаете с разрешения правообладателя, "
+            "или документ находится в public domain / разрешен к переводу."
+        ),
+        "confirm_rights": "✅ Подтверждаю права",
         "original_language": "Язык оригинала",
         "source_language_with_admixtures": "{primary}; примеси: {admixtures}",
         "progress": "Прогресс перевода",
@@ -445,6 +461,14 @@ for _language_code, _fallbacks in {
         "reset_settings": "Скинути налаштування",
         "settings_reset": "Налаштування скинуто. Виберіть мову інтерфейсу знову.",
         "translation_language_prompt": "Файл отримано.\n\nНазва: {file_name}\nФормат: {file_format}\n{source_language_line}\nТепер виберіть мову перекладу.",
+        "rights_confirmation_prompt": (
+            "Файл отримано.\n\n"
+            "Назва: {file_name}\n\n"
+            "Підтвердьте, що ви маєте право перекладати цей документ: "
+            "ви автор, правовласник, працюєте з дозволу правовласника, "
+            "або документ є public domain / дозволений для перекладу."
+        ),
+        "confirm_rights": "✅ Підтверджую права",
         "original_language": "Мова оригіналу",
         "source_language_with_admixtures": "{primary}; домішки: {admixtures}",
         "back": "Назад",
@@ -559,6 +583,15 @@ for _language_code, _fallbacks in {
         "reset_settings": "Réinitialiser les réglages",
         "settings_reset": "Les réglages ont été réinitialisés. Choisissez de nouveau la langue de l’interface.",
         "translation_language_prompt": "Fichier reçu.\n\nTitre : {file_name}\nFormat : {file_format}\n{source_language_line}\nChoisissez maintenant la langue de traduction.",
+        "rights_confirmation_prompt": (
+            "Fichier reçu.\n\n"
+            "Titre : {file_name}\n\n"
+            "Veuillez confirmer que vous avez le droit de traduire ce document : "
+            "vous en êtes l’auteur ou le titulaire des droits, vous avez "
+            "l’autorisation du titulaire des droits, ou le document est dans le "
+            "domaine public / autorisé à la traduction."
+        ),
+        "confirm_rights": "✅ Je confirme les droits",
         "original_language": "Langue source",
         "source_language_with_admixtures": "{primary}; éléments mêlés : {admixtures}",
         "back": "Retour",
@@ -673,6 +706,15 @@ for _language_code, _fallbacks in {
         "reset_settings": "Restablecer ajustes",
         "settings_reset": "Los ajustes se han restablecido. Elige de nuevo el idioma de la interfaz.",
         "translation_language_prompt": "Archivo recibido.\n\nTítulo: {file_name}\nFormato: {file_format}\n{source_language_line}\nAhora elige el idioma de traducción.",
+        "rights_confirmation_prompt": (
+            "Archivo recibido.\n\n"
+            "Título: {file_name}\n\n"
+            "Confirma que tienes derecho a traducir este documento: eres "
+            "el autor o titular de los derechos, tienes permiso del titular "
+            "de los derechos, o el documento está en public domain / autorizado "
+            "para traducción."
+        ),
+        "confirm_rights": "✅ Confirmo los derechos",
         "original_language": "Idioma original",
         "source_language_with_admixtures": "{primary}; mezclas: {admixtures}",
         "back": "Atrás",
@@ -787,6 +829,15 @@ for _language_code, _fallbacks in {
         "reset_settings": "Instellingen resetten",
         "settings_reset": "De instellingen zijn gereset. Kies opnieuw de interfacetaal.",
         "translation_language_prompt": "Bestand ontvangen.\n\nTitel: {file_name}\nFormaat: {file_format}\n{source_language_line}\nKies nu de taal waarnaar je wilt vertalen.",
+        "rights_confirmation_prompt": (
+            "Bestand ontvangen.\n\n"
+            "Titel: {file_name}\n\n"
+            "Bevestig dat je het recht hebt om dit document te vertalen: "
+            "je bent de auteur of rechthebbende, je hebt toestemming van de "
+            "rechthebbende, of het document is public domain / toegestaan voor "
+            "vertaling."
+        ),
+        "confirm_rights": "✅ Ik bevestig de rechten",
         "original_language": "Brontaal",
         "source_language_with_admixtures": "{primary}; bijmenging: {admixtures}",
         "back": "Terug",
@@ -1054,6 +1105,15 @@ def build_translation_language_selection_message(
     )
 
 
+def build_rights_confirmation_message(
+    file_name: str,
+    interface_language: str = "en",
+) -> str:
+    return _messages(interface_language)["rights_confirmation_prompt"].format(
+        file_name=file_name,
+    )
+
+
 def build_order_estimate_message(
     estimate: OrderEstimate,
     interface_language: str = "en",
@@ -1105,6 +1165,14 @@ def is_confirm_translation_text(text: str | None) -> bool:
         "bevestigen",
     }
     return normalized in localized_confirm_texts | legacy_confirm_texts | {"/confirm"}
+
+
+def get_confirm_rights_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["confirm_rights"]
+
+
+def is_confirm_rights_text(text: str | None) -> bool:
+    return _matches_localized_text(text, "confirm_rights")
 
 
 def is_translate_book_text(text: str | None) -> bool:
