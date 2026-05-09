@@ -23,10 +23,12 @@ class DocumentKind(StrEnum):
 class TranslationJobStatus(StrEnum):
     QUEUED = "queued"
     TRANSLATING = "translating"
+    PAUSED = "paused"
     READY = "ready"
     PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    DELETED = "deleted"
 
 
 @dataclass(frozen=True)

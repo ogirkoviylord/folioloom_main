@@ -34,6 +34,7 @@ from translator_service.bot.runtime import (
     _print_translation_progress_update,
     _print_translation_summary,
     _progress_message_for_current_user_language,
+    _resume_user_book_translation,
     _schedule_message_edit,
     _settings_keyboard,
     _should_schedule_progress_edit,
@@ -46,6 +47,11 @@ from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
 from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
+from translator_service.job_runner import (
+    DocumentKind,
+    TranslationJob,
+    TranslationJobStatus,
+)
 from translator_service.translation_jobs import TranslationProgress
 from translator_service.user_activity import SQLiteUserActivityStore
 
@@ -121,10 +127,13 @@ class RecordingMessage:
     def __init__(self) -> None:
         self.from_user = User()
         self.answers: list[tuple[str, object | None]] = []
+        self.answer_messages: list[EditableMessage] = []
 
     async def answer(self, text: str, reply_markup=None, **kwargs):
         self.answers.append((text, reply_markup))
-        return EditableMessage()
+        message = EditableMessage()
+        self.answer_messages.append(message)
+        return message
 
 
 class _RuntimeRecordingTranslator:
@@ -136,6 +145,65 @@ class _RuntimeRecordingTranslator:
         target_language: str,
     ) -> str:
         return f"[{target_language}] {text}"
+
+
+class _QueuedThenReadyService:
+    def __init__(self) -> None:
+        self.progress_calls = 0
+
+    def get_interface_language(self, user_telegram_id: int) -> str:
+        return "en"
+
+    def get_progress_preview_enabled(self, user_telegram_id: int) -> bool:
+        return True
+
+    def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+        return False
+
+    def resume_user_book_translation(self, **kwargs) -> TranslationJob:
+        return _runtime_job(status=TranslationJobStatus.QUEUED)
+
+    def get_user_book_progress(self, **kwargs):
+        self.progress_calls += 1
+        return type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 1,
+                "total_fragments": 2,
+            },
+        )()
+
+    def get_user_book_translation_job(self, **kwargs):
+        if self.progress_calls == 0:
+            return _runtime_job(status=TranslationJobStatus.QUEUED)
+        return _runtime_job(status=TranslationJobStatus.READY)
+
+    def get_user_book_detail(self, **kwargs):
+        return {
+            "job_id": "job-1",
+            "file_name": "book.txt",
+            "document_kind": "txt",
+            "source_language": "en",
+            "target_language": "uk",
+            "status": "ready",
+            "has_result": False,
+            "can_resume": False,
+            "can_cancel": False,
+        }
+
+
+def _runtime_job(*, status: TranslationJobStatus) -> TranslationJob:
+    return TranslationJob(
+        id="job-1",
+        user_telegram_id=42,
+        file_name="book.txt",
+        content=b"",
+        source_language="en",
+        target_language="uk",
+        status=status,
+        document_kind=DocumentKind.TXT,
+    )
 
 
 class _RuntimeKeyEchoDeepSeekClient:
@@ -315,6 +383,32 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(message.answers, [])
         self.assertIsNotNone(service.get_pending(42))
+
+    async def test_resume_translation_sends_progress_message_for_queued_job(self):
+        message = RecordingMessage()
+        service = _QueuedThenReadyService()
+
+        await _resume_user_book_translation(
+            message=message,
+            user_telegram_id=42,
+            job_id="job-1",
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            queued_poll_interval_seconds=0.01,
+        )
+
+        self.assertGreaterEqual(len(message.answers), 1)
+        self.assertTrue(message.answer_messages[0].edited_texts)
+        queued_cancel_markup = message.answer_messages[0].edited_reply_markups[0]
+        self.assertEqual(
+            queued_cancel_markup.inline_keyboard[0][0].callback_data,
+            "cancel_book:job-1",
+        )
+        self.assertIn(
+            "Your translation is ready",
+            message.answer_messages[0].edited_texts[-1],
+        )
+        self.assertEqual(service.progress_calls, 1)
 
     def test_build_translation_service_wires_local_object_storage(self):
         with TemporaryDirectory() as temp_dir:
@@ -887,6 +981,13 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         button = keyboard.inline_keyboard[0][0]
         self.assertEqual(button.text, "Cancel")
         self.assertEqual(button.callback_data, "cancel_translation")
+
+    def test_cancel_inline_keyboard_can_target_specific_book_job(self):
+        keyboard = _cancel_inline_keyboard("en", job_id="job-1")
+
+        button = keyboard.inline_keyboard[0][0]
+        self.assertEqual(button.text, "Cancel")
+        self.assertEqual(button.callback_data, "cancel_book:job-1")
 
     def test_main_menu_keyboard_uses_folioloom_buttons(self):
         keyboard = _main_menu_keyboard("en")

@@ -19,6 +19,7 @@ class PersistentTranslationJobStatus(StrEnum):
     TRANSLATING = "translating"
     ASSEMBLING = "assembling"
     PARTIAL = "partial"
+    PAUSED = "paused"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
@@ -402,6 +403,7 @@ class SQLiteTranslationJobStore:
     ) -> PersistentWorkUnit | None:
         job = self._require_job(job_id)
         if job.status in {
+            PersistentTranslationJobStatus.PAUSED,
             PersistentTranslationJobStatus.CANCELLED,
             PersistentTranslationJobStatus.FAILED,
             PersistentTranslationJobStatus.READY,
@@ -958,6 +960,31 @@ class SQLiteTranslationJobStore:
             self._update_job_status(
                 job_id,
                 PersistentTranslationJobStatus.CANCELLED,
+                now=now,
+            )
+        return self._require_job(job_id)
+
+    def pause_job(self, job_id: str) -> PersistentTranslationJob:
+        self._require_job(job_id)
+        now = _now()
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE work_units
+                SET status = ?, worker_id = NULL, claim_token = NULL,
+                    lease_until = NULL, updated_at = ?
+                WHERE job_id = ? AND status = ?
+                """,
+                (
+                    PersistentWorkUnitStatus.PENDING.value,
+                    _to_db_time(now),
+                    job_id,
+                    PersistentWorkUnitStatus.TRANSLATING.value,
+                ),
+            )
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.PAUSED,
                 now=now,
             )
         return self._require_job(job_id)

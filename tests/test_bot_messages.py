@@ -172,6 +172,36 @@ class BotMessagesTest(unittest.TestCase):
         self.assertTrue(is_my_books_text("📚 My Books"))
         self.assertTrue(is_my_books_text("📚 Мои книги"))
 
+    def test_my_books_message_shows_active_queue_summary(self):
+        message = build_my_books_message(
+            [
+                {
+                    "job_id": "job-1",
+                    "file_name": "queued.epub",
+                    "source_language": "en",
+                    "target_language": "uk",
+                    "status": "queued",
+                    "has_result": False,
+                }
+            ],
+            "en",
+            queue_summary={
+                "total_active": 1,
+                "queued": 1,
+                "translating": 0,
+                "items": [
+                    {
+                        "file_name": "queued.epub",
+                        "status": "queued",
+                    }
+                ],
+            },
+        )
+
+        self.assertIn("Queue", message)
+        self.assertIn("1 active", message)
+        self.assertIn("queued.epub", message)
+
     def test_my_book_detail_message_shows_status_and_available_actions(self):
         message = build_my_book_detail_message(
             {
@@ -295,6 +325,35 @@ class BotMessagesTest(unittest.TestCase):
 
         self.assertIn("cancelled", message.lower())
         self.assertIn("book.uk.partial.epub", message)
+
+    def test_translation_job_status_message_for_admin_paused_and_deleted_jobs(self):
+        paused = build_translation_job_status_message(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=b"book",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.PAUSED,
+            ),
+            interface_language="en",
+        )
+        deleted = build_translation_job_status_message(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=b"book",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.DELETED,
+            ),
+            interface_language="en",
+        )
+
+        self.assertIn("paused by an admin", paused.lower())
+        self.assertIn("deleted by an admin", deleted.lower())
 
     def test_pending_translation_message_shows_confirm_instruction(self):
         message = build_pending_translation_message(

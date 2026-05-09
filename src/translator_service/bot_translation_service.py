@@ -71,6 +71,7 @@ from translator_service.translation_policy import (
     translation_policy_signature,
 )
 from translator_service.translation_run_logs import (
+    finish_running_translation_runs_for_job,
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
@@ -131,6 +132,22 @@ class UserBookSummary:
     can_cancel: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class UserQueueSummary:
+    total_active: int
+    queued: int
+    translating: int
+    items: tuple[UserBookSummary, ...]
+
+
+@dataclass(frozen=True)
+class UserBookProgress:
+    job_id: str
+    status: TranslationJobStatus
+    completed_fragments: int
+    total_fragments: int
 
 
 @dataclass(frozen=True)
@@ -632,6 +649,40 @@ class BotTranslationService:
             )
         ]
 
+    def get_user_queue_summary(
+        self,
+        *,
+        user_telegram_id: int,
+        limit: int = 5,
+    ) -> UserQueueSummary:
+        if self._persistent_job_store is None:
+            return UserQueueSummary(total_active=0, queued=0, translating=0, items=())
+
+        active_statuses = {
+            PersistentTranslationJobStatus.QUEUED,
+            PersistentTranslationJobStatus.TRANSLATING,
+            PersistentTranslationJobStatus.ASSEMBLING,
+            PersistentTranslationJobStatus.CANCEL_REQUESTED,
+        }
+        active_jobs = [
+            job
+            for job in self._persistent_job_store.list_jobs_for_user(
+                f"telegram:{user_telegram_id}",
+                limit=100,
+            )
+            if job.status in active_statuses
+        ]
+        queued = sum(
+            1 for job in active_jobs if job.status is PersistentTranslationJobStatus.QUEUED
+        )
+        translating = len(active_jobs) - queued
+        return UserQueueSummary(
+            total_active=len(active_jobs),
+            queued=queued,
+            translating=translating,
+            items=tuple(self._book_summary_from_job(job) for job in active_jobs[:limit]),
+        )
+
     def get_user_book_detail(
         self,
         *,
@@ -646,6 +697,89 @@ class BotTranslationService:
             return None
 
         return self._book_summary_from_job(job)
+
+    def get_user_book_progress(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> UserBookProgress | None:
+        if self._persistent_job_store is None:
+            return None
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return None
+        work_units = self._persistent_job_store.list_work_units(job_id)
+        return UserBookProgress(
+            job_id=job.id,
+            status=_translation_job_status_from_persistent_status(job.status),
+            completed_fragments=sum(
+                1
+                for unit in work_units
+                if unit.status
+                in {PersistentWorkUnitStatus.TRANSLATED, PersistentWorkUnitStatus.CACHED}
+            ),
+            total_fragments=len(work_units),
+        )
+
+    def get_user_book_translation_job(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> TranslationJob | None:
+        if self._persistent_job_store is None:
+            return None
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None:
+            return self._admin_deleted_translation_job(
+                user_telegram_id=user_telegram_id,
+                job_id=job_id,
+            )
+        if job.user_id != f"telegram:{user_telegram_id}":
+            return None
+        return self._translation_job_from_persistent_job(
+            user_telegram_id=user_telegram_id,
+            job=job,
+        )
+
+    def _admin_deleted_translation_job(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> TranslationJob | None:
+        if self._activity_store is None:
+            return None
+        events = self._activity_store.list_events(job_id=job_id, limit=10)
+        deleted_event = next(
+            (
+                event
+                for event in events
+                if event.event_type == "translation.admin_deleted"
+                and event.channel_user_id == str(user_telegram_id)
+            ),
+            None,
+        )
+        if deleted_event is None:
+            return None
+        metadata = deleted_event.metadata
+        return TranslationJob(
+            id=job_id,
+            document_kind=DocumentKind(str(metadata.get("document_kind") or "txt")),
+            user_telegram_id=user_telegram_id,
+            file_name=str(metadata.get("file_name") or "deleted translation"),
+            content=b"",
+            source_language=str(metadata.get("source_language") or "auto"),
+            target_language=str(metadata.get("target_language") or "unknown"),
+            status=TranslationJobStatus.DELETED,
+            error_message=str(
+                metadata.get("notification_message")
+                or "Translation was deleted by an admin."
+            ),
+        )
 
     def resume_user_book(
         self,
@@ -888,6 +1022,14 @@ class BotTranslationService:
         if not deleted:
             return False
 
+        if self._translation_run_log_root is not None:
+            finish_running_translation_runs_for_job(
+                self._translation_run_log_root,
+                job_id=job_id,
+                status="cancelled",
+                error_message="Book deleted by user.",
+            )
+
         if self._file_storage is not None:
             for object_key in object_keys:
                 self._file_storage.delete(object_key)
@@ -909,6 +1051,13 @@ class BotTranslationService:
             return False
 
         self._persistent_job_store.cancel_job(job_id)
+        if self._translation_run_log_root is not None:
+            finish_running_translation_runs_for_job(
+                self._translation_run_log_root,
+                job_id=job_id,
+                status="cancelled",
+                error_message="Book cancelled by user.",
+            )
         return True
 
     def _book_result_from_object_key(self, job) -> UserBookResult | None:
@@ -925,6 +1074,33 @@ class BotTranslationService:
             file_name=metadata.file_name,
             content=self._file_storage.get_bytes(object_key),
             content_type=metadata.content_type,
+        )
+
+    def _translation_job_from_persistent_job(
+        self,
+        *,
+        user_telegram_id: int,
+        job,
+    ) -> TranslationJob:
+        source_content = b""
+        if (
+            self._file_storage is not None
+            and job.source_object_key
+            and self._file_storage.exists(job.source_object_key)
+        ):
+            source_content = self._file_storage.get_bytes(job.source_object_key)
+        result = self._book_result_from_object_key(job)
+        return TranslationJob(
+            id=job.id,
+            document_kind=DocumentKind(job.document_kind),
+            user_telegram_id=user_telegram_id,
+            file_name=job.file_name,
+            content=source_content,
+            source_language=job.source_language,
+            target_language=job.target_language,
+            status=_translation_job_status_from_persistent_status(job.status),
+            result_file_name=result.file_name if result is not None else None,
+            result_content=result.content if result is not None else None,
         )
 
     def _book_summary_from_job(self, job) -> UserBookSummary:
@@ -2518,6 +2694,7 @@ def estimate_translation_seconds(
 def _can_resume_persistent_job(status: str) -> bool:
     return status in {
         "cancelled",
+        "paused",
         "interrupted",
         "failed",
         "partial",
@@ -2531,6 +2708,28 @@ def _can_cancel_persistent_job(status: str) -> bool:
         "assembling",
         "cancel_requested",
     }
+
+
+def _translation_job_status_from_persistent_status(
+    status: PersistentTranslationJobStatus,
+) -> TranslationJobStatus:
+    if status is PersistentTranslationJobStatus.QUEUED:
+        return TranslationJobStatus.QUEUED
+    if status is PersistentTranslationJobStatus.PAUSED:
+        return TranslationJobStatus.PAUSED
+    if status in {
+        PersistentTranslationJobStatus.TRANSLATING,
+        PersistentTranslationJobStatus.ASSEMBLING,
+        PersistentTranslationJobStatus.CANCEL_REQUESTED,
+    }:
+        return TranslationJobStatus.TRANSLATING
+    if status is PersistentTranslationJobStatus.READY:
+        return TranslationJobStatus.READY
+    if status is PersistentTranslationJobStatus.PARTIAL:
+        return TranslationJobStatus.PARTIAL
+    if status is PersistentTranslationJobStatus.CANCELLED:
+        return TranslationJobStatus.CANCELLED
+    return TranslationJobStatus.FAILED
 
 
 def _source_language_display(

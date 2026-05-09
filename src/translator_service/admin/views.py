@@ -930,7 +930,7 @@ def _format_usd(value: float) -> str:
     return f"${value:.4f}"
 
 
-def operations_body(overview: OperationsOverview) -> str:
+def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> str:
     metrics = (
         ("Queued", overview.job_counts_by_state.get("queued", 0)),
         ("Running", overview.job_counts_by_state.get("running", 0)),
@@ -965,7 +965,7 @@ def operations_body(overview: OperationsOverview) -> str:
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>{_operation_job_rows(overview)}</tbody>
+        <tbody>{_operation_job_rows(overview, csrf_token)}</tbody>
       </table>
     </section>
     <section class="panel">
@@ -975,17 +975,17 @@ def operations_body(overview: OperationsOverview) -> str:
     """
 
 
-def _operation_job_rows(overview: OperationsOverview) -> str:
+def _operation_job_rows(overview: OperationsOverview, csrf_token: str) -> str:
     if not overview.jobs:
         return """
         <tr>
           <td colspan="10" class="empty-cell">No persistent jobs found.</td>
         </tr>
         """
-    return "\n".join(_operation_job_row(job) for job in overview.jobs)
+    return "\n".join(_operation_job_row(job, csrf_token) for job in overview.jobs)
 
 
-def _operation_job_row(job) -> str:
+def _operation_job_row(job, csrf_token: str) -> str:
     fragments = f"{job.completed_units}/{job.total_units}"
     logs = (
         '<a class="table-action" '
@@ -1004,7 +1004,7 @@ def _operation_job_row(job) -> str:
       <td>{escape(_format_workers(job.active_worker_ids))}</td>
       <td>{escape(job.error_excerpt or "")}</td>
       <td>{logs}</td>
-      <td>{_job_actions(job)}</td>
+      <td>{_job_actions(job, csrf_token)}</td>
     </tr>
     """
 
@@ -1018,12 +1018,34 @@ def _operation_job_times(job) -> str:
     """
 
 
-def _job_actions(job) -> str:
+def _job_actions(job, csrf_token: str) -> str:
+    actions = []
+    if getattr(job, "pausable", False):
+        actions.append(_job_action_form(job.id, "pause", "Pause", csrf_token))
+    if job.cancellable:
+        actions.append(_job_action_form(job.id, "cancel", "Cancel", csrf_token))
+    if getattr(job, "deletable", False):
+        actions.append(_job_action_form(job.id, "delete", "Delete", csrf_token))
+    if actions:
+        return '<div class="job-actions">' + "".join(actions) + "</div>"
     if job.retryable:
         return '<button type="button" disabled>Retry unavailable</button>'
-    if job.cancellable:
-        return '<button type="button" disabled>Cancel unavailable</button>'
     return '<button type="button" disabled>No action</button>'
+
+
+def _job_action_form(
+    job_id: str,
+    action: str,
+    label: str,
+    csrf_token: str,
+) -> str:
+    danger = " danger" if action in {"cancel", "delete"} else ""
+    return f"""
+    <form method="post" action="/admin/operations/jobs/{escape(job_id)}/{action}">
+      <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+      <button class="compact-action{danger}" type="submit">{escape(label)}</button>
+    </form>
+    """
 
 
 def _safe_operation_log_href(href: str) -> str:
@@ -2466,6 +2488,19 @@ button.secondary {
 button.danger {
   color: #ffffff;
   background: var(--warn);
+}
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.job-actions form {
+  display: block;
+}
+.compact-action {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.88rem;
 }
 .button-link {
   min-height: 42px;

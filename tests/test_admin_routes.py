@@ -632,7 +632,9 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("worker-a", page.text)
             self.assertIn("21", page.text)
             self.assertIn(f'href="/admin/logs/{logger.run_dir.name}"', page.text)
-            self.assertIn("Cancel unavailable", page.text)
+            self.assertIn("Pause", page.text)
+            self.assertIn("Cancel", page.text)
+            self.assertIn("Delete", page.text)
             self.assertEqual(api.status_code, 200)
             jobs = api.json()["overview"]["jobs"]
             by_order = {job["order_id"]: job for job in jobs}
@@ -679,6 +681,69 @@ class AdminRoutesTest(unittest.TestCase):
             by_order = {job["order_id"]: job for job in api.json()["overview"]["jobs"]}
             self.assertEqual(by_order["order-cancelled"]["state"], "cancelled")
             self.assertEqual(by_order["order-expired"]["state"], "failed")
+
+    def test_admin_can_pause_cancel_and_delete_active_translation_jobs(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            store = SQLiteTranslationJobStore(db_path)
+            paused_job = _persistent_job(store, order_id="order-pause")
+            cancelled_job = _persistent_job(store, order_id="order-cancel")
+            deleted_job = _persistent_job(store, order_id="order-delete")
+            _add_units(store, paused_job.id)
+            _add_units(store, cancelled_job.id)
+            _add_units(store, deleted_job.id)
+            store.claim_next_work_unit(paused_job.id, worker_id="worker-pause")
+            store.claim_next_work_unit(cancelled_job.id, worker_id="worker-cancel")
+            store.claim_next_work_unit(deleted_job.id, worker_id="worker-delete")
+            store.close()
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        persistent_jobs_db_path=str(db_path),
+                        admin_db_path=str(admin_db_path),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/operations/jobs")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+
+            pause = client.post(
+                f"/admin/operations/jobs/{paused_job.id}/pause",
+                data={"csrf_token": csrf.group(1)},
+                follow_redirects=False,
+            )
+            cancel = client.post(
+                f"/admin/operations/jobs/{cancelled_job.id}/cancel",
+                data={"csrf_token": csrf.group(1)},
+                follow_redirects=False,
+            )
+            delete = client.post(
+                f"/admin/operations/jobs/{deleted_job.id}/delete",
+                data={"csrf_token": csrf.group(1)},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(pause.status_code, 303)
+            self.assertEqual(cancel.status_code, 303)
+            self.assertEqual(delete.status_code, 303)
+            reopened = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(reopened.close)
+            self.assertEqual(reopened.get_job(paused_job.id).status.value, "paused")
+            self.assertEqual(
+                reopened.get_job(cancelled_job.id).status.value,
+                "cancelled",
+            )
+            self.assertIsNone(reopened.get_job(deleted_job.id))
+            with SQLiteUserActivityStore(admin_db_path) as activity:
+                events = activity.list_events(channel_user_id="42")
+            event_types = {event.event_type for event in events}
+            self.assertIn("translation.admin_paused", event_types)
+            self.assertIn("translation.admin_cancelled", event_types)
+            self.assertIn("translation.admin_deleted", event_types)
 
     def test_translation_logs_page_and_api_filter_runs(self):
         with TemporaryDirectory() as temp_dir:

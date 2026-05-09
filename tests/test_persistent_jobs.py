@@ -475,6 +475,21 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(work_units[0].translated_text, "Перший абзац.")
         self.assertEqual(work_units[1].status, PersistentWorkUnitStatus.PENDING)
 
+    def test_pause_job_stops_new_claims_and_can_be_resumed(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+
+        paused = store.pause_job(job.id)
+        no_claim = store.claim_next_work_unit(job.id, worker_id="worker-b")
+        resumed = store.resume_job(job.id)
+        next_claim = store.claim_next_work_unit(job.id, worker_id="worker-c")
+
+        self.assertEqual(paused.status, PersistentTranslationJobStatus.PAUSED)
+        self.assertIsNone(no_claim)
+        self.assertEqual(resumed.status, PersistentTranslationJobStatus.QUEUED)
+        self.assertEqual(next_claim.id, claimed.id)
+
     def test_resume_after_reopen_claims_first_pending_unit_after_completed_work(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "jobs.sqlite3"

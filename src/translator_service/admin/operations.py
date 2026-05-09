@@ -18,6 +18,7 @@ from translator_service.persistent_jobs import (
 
 JOB_STATE_QUEUED = "queued"
 JOB_STATE_RUNNING = "running"
+JOB_STATE_PAUSED = "paused"
 JOB_STATE_SUCCEEDED = "succeeded"
 JOB_STATE_FAILED = "failed"
 JOB_STATE_CANCELLED = "cancelled"
@@ -39,6 +40,7 @@ _RUNNING_STATUSES = {
     "started",
     "translating",
 }
+_PAUSED_STATUSES = {"paused"}
 _SUCCEEDED_STATUSES = {
     "cached",
     "complete",
@@ -92,6 +94,8 @@ class AdminJobSummary:
     active_worker_ids: tuple[str, ...] = ()
     retryable: bool = False
     cancellable: bool = False
+    pausable: bool = False
+    deletable: bool = False
     error_excerpt: str | None = None
     log_href: str | None = None
 
@@ -124,6 +128,8 @@ def normalize_job_state(status: Any) -> str:
         return JOB_STATE_QUEUED
     if normalized in _RUNNING_STATUSES:
         return JOB_STATE_RUNNING
+    if normalized in _PAUSED_STATUSES:
+        return JOB_STATE_PAUSED
     if normalized in _SUCCEEDED_STATUSES:
         return JOB_STATE_SUCCEEDED
     if normalized in _FAILED_STATUSES:
@@ -185,6 +191,8 @@ def summarize_job(
         active_worker_ids=active_worker_ids,
         retryable=state == JOB_STATE_FAILED,
         cancellable=state in {JOB_STATE_QUEUED, JOB_STATE_RUNNING},
+        pausable=state in {JOB_STATE_QUEUED, JOB_STATE_RUNNING},
+        deletable=state in {JOB_STATE_QUEUED, JOB_STATE_RUNNING, JOB_STATE_PAUSED},
         error_excerpt=_safe_error_excerpt(
             _first_present(
                 _read(row, "error_excerpt", "last_error", "error_message", "error"),
@@ -336,6 +344,7 @@ _PERSISTENT_OPERATION_STATUSES = (
     PersistentTranslationJobStatus.QUEUED,
     PersistentTranslationJobStatus.TRANSLATING,
     PersistentTranslationJobStatus.ASSEMBLING,
+    PersistentTranslationJobStatus.PAUSED,
     PersistentTranslationJobStatus.CANCEL_REQUESTED,
     PersistentTranslationJobStatus.CANCELLED,
     PersistentTranslationJobStatus.EXPIRED,

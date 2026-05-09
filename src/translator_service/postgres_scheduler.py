@@ -679,6 +679,34 @@ class PostgresSchedulerStore:
             )
         return self._require_job(job_id)
 
+    def pause_job(self, job_id: str) -> PersistentTranslationJob:
+        self._require_job(job_id)
+        now = _now()
+        with self.connection.transaction():
+            self.connection.execute(
+                """
+                UPDATE work_units
+                SET status = %(pending)s,
+                    worker_id = NULL,
+                    claim_token = NULL,
+                    lease_until = NULL,
+                    updated_at = %(now)s
+                WHERE job_id = %(job_id)s AND status = %(translating)s
+                """,
+                {
+                    "pending": PersistentWorkUnitStatus.PENDING.value,
+                    "translating": PersistentWorkUnitStatus.TRANSLATING.value,
+                    "job_id": job_id,
+                    "now": now,
+                },
+            )
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.PAUSED,
+                now=now,
+            )
+        return self._require_job(job_id)
+
     def resume_job(self, job_id: str) -> PersistentTranslationJob:
         job = self._require_job(job_id)
         if job.status is PersistentTranslationJobStatus.READY:

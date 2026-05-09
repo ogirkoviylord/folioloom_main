@@ -81,6 +81,8 @@ MESSAGES = {
         "my_books_title": "My Books",
         "my_books_empty": "No books yet. Send a book or manuscript to start your first translation.",
         "my_books_download_hint": "Open a book below to view status, continue, or download.",
+        "queue_title": "Queue",
+        "queue_summary": "{total} active: {queued} queued, {translating} translating.",
         "last_book": "Last Book",
         "book_button": "Book {index}",
         "back_to_my_books": "Back to My Books",
@@ -109,10 +111,12 @@ MESSAGES = {
         "download_unavailable": "This file is not available for download yet.",
         "status_queued": "Queued",
         "status_translating": "Translating",
+        "status_paused": "Paused",
         "status_assembling": "Assembling",
         "status_partial": "Partial",
         "status_cancel_requested": "Stopping",
         "status_cancelled": "Cancelled",
+        "status_deleted": "Deleted",
         "status_interrupted": "Interrupted",
         "status_failed": "Failed",
         "status_ready": "Ready",
@@ -159,9 +163,11 @@ MESSAGES = {
         "queue_instruction": "Press “{confirm_text}” to queue translation.",
         "queued": "Your translation is queued: {file_name}.",
         "translating": "Your translation is in progress: {file_name}.",
+        "paused": "Translation paused by an admin.\n\nI will not continue it until it is resumed.",
         "ready": "Your translation is ready.\n\nYou can download the translated file below: {result_name}.",
         "partial": "Translation finished with skipped passages.\n\nPartial result: {result_name}.\n\nSome problematic passages were kept in the original language. You can retry them later without uploading the file again.",
         "cancelled": "Translation cancelled.\n\nPartial result: {result_name}.",
+        "deleted": "Translation deleted by an admin.\n\nThe job and stored files are no longer available.",
         "failed": "Something went wrong while translating.\n\nYour file is safe. Please try again, or return to the main menu.",
         "status": "Translation status: {status}",
         "confirm": "Start Translation",
@@ -245,6 +251,8 @@ MESSAGES = {
         "my_books_title": "Мои книги",
         "my_books_empty": "Книг пока нет. Отправьте книгу или рукопись, чтобы начать первый перевод.",
         "my_books_download_hint": "Откройте книгу ниже, чтобы посмотреть статус, продолжить или скачать перевод.",
+        "queue_title": "Очередь",
+        "queue_summary": "Активных переводов: {total}. В очереди: {queued}, переводится: {translating}.",
         "last_book": "Последняя книга",
         "book_button": "Книга {index}",
         "back_to_my_books": "Назад к моим книгам",
@@ -273,10 +281,12 @@ MESSAGES = {
         "download_unavailable": "Этот файл пока нельзя скачать.",
         "status_queued": "В очереди",
         "status_translating": "Переводится",
+        "status_paused": "На паузе",
         "status_assembling": "Собирается",
         "status_partial": "Частичный",
         "status_cancel_requested": "Останавливается",
         "status_cancelled": "Отменен",
+        "status_deleted": "Удален",
         "status_interrupted": "Прерван",
         "status_failed": "Ошибка",
         "status_ready": "Готов",
@@ -323,9 +333,11 @@ MESSAGES = {
         "queue_instruction": "Нажмите «{confirm_text}», чтобы поставить перевод в очередь.",
         "queued": "Перевод в очереди: {file_name}.",
         "translating": "Перевод выполняется: {file_name}.",
+        "paused": "Администратор поставил перевод на паузу.\n\nЯ не продолжу его, пока перевод снова не запустят.",
         "ready": "Перевод готов.\n\nВы можете скачать файл ниже: {result_name}.",
         "partial": "Перевод завершен с пропущенными отрывками.\n\nЧастичный результат: {result_name}.\n\nПроблемные отрывки оставлены в оригинале. Позже их можно будет повторить без новой загрузки файла.",
         "cancelled": "Перевод отменен.\n\nЧастичный результат: {result_name}.",
+        "deleted": "Администратор удалил перевод.\n\nЗадача и сохраненные файлы больше недоступны.",
         "failed": "Во время перевода что-то пошло не так.\n\nФайл не потерян. Попробуйте еще раз или вернитесь в главное меню.",
         "status": "Статус перевода: {status}",
         "confirm": "Начать перевод",
@@ -880,12 +892,19 @@ def build_settings_message(
 def build_my_books_message(
     books,
     interface_language: str = "en",
+    queue_summary=None,
 ) -> str:
     messages = _messages(interface_language)
     if not books:
-        return f"{messages['my_books_title']}\n\n{messages['my_books_empty']}"
+        lines = [messages["my_books_title"]]
+        lines.extend(_queue_summary_lines(queue_summary, interface_language))
+        lines.extend(["", messages["my_books_empty"]])
+        return "\n".join(lines)
 
     lines = [messages["my_books_title"], ""]
+    queue_lines = _queue_summary_lines(queue_summary, interface_language)
+    if queue_lines:
+        lines = [messages["my_books_title"], *queue_lines, ""]
     latest = _book_value(books[0])
     lines.extend(
         [
@@ -908,6 +927,31 @@ def build_my_books_message(
         )
     lines.extend(["", messages["my_books_download_hint"]])
     return "\n".join(lines)
+
+
+def _queue_summary_lines(queue_summary, interface_language: str) -> list[str]:
+    if queue_summary is None:
+        return []
+    value = _book_value(queue_summary)
+    total = int(value.get("total_active") or 0)
+    if total <= 0:
+        return []
+    messages = _messages(interface_language)
+    lines = [
+        messages["queue_title"],
+        messages["queue_summary"].format(
+            total=total,
+            queued=int(value.get("queued") or 0),
+            translating=int(value.get("translating") or 0),
+        ),
+    ]
+    for index, book in enumerate(value.get("items") or (), start=1):
+        book_value = _book_value(book)
+        lines.append(
+            f"{index}. {book_value.get('file_name', '-')}"
+            f" · {_status_label(book_value.get('status', '-'), interface_language)}"
+        )
+    return lines
 
 
 def build_my_book_detail_message(book, interface_language: str = "en") -> str:
@@ -1231,6 +1275,12 @@ def build_translation_job_status_message(
     if job.status is TranslationJobStatus.TRANSLATING:
         return messages["translating"].format(file_name=job.file_name)
 
+    if job.status is TranslationJobStatus.PAUSED:
+        return messages.get(
+            "paused",
+            messages["status"].format(status=job.status.value),
+        )
+
     if job.status is TranslationJobStatus.READY:
         result_name = job.result_file_name or "результат"
         return messages["ready"].format(result_name=result_name)
@@ -1245,6 +1295,12 @@ def build_translation_job_status_message(
     if job.status is TranslationJobStatus.CANCELLED:
         result_name = job.result_file_name or "partial result"
         return messages["cancelled"].format(result_name=result_name)
+
+    if job.status is TranslationJobStatus.DELETED:
+        return messages.get(
+            "deleted",
+            messages["status"].format(status=job.status.value),
+        )
 
     return messages["status"].format(status=job.status.value)
 
@@ -1347,6 +1403,10 @@ def _book_value(book, key: str | None = None):
             "can_cancel": getattr(book, "can_cancel", False),
             "created_at": getattr(book, "created_at", None),
             "updated_at": getattr(book, "updated_at", None),
+            "total_active": getattr(book, "total_active", None),
+            "queued": getattr(book, "queued", None),
+            "translating": getattr(book, "translating", None),
+            "items": getattr(book, "items", ()),
         }
     return getattr(book, key)
 

@@ -213,6 +213,74 @@ class TranslationRunLogger:
         }
 
 
+def finish_running_translation_runs_for_job(
+    root: str | Path,
+    *,
+    job_id: str,
+    status: str = "cancelled",
+    error_message: str | None = None,
+) -> int:
+    root_path = Path(root)
+    if not job_id or not root_path.exists():
+        return 0
+
+    finished = 0
+    for run_json in root_path.glob("*/run.json"):
+        try:
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(snapshot, dict):
+            continue
+        if snapshot.get("job_id") != job_id or snapshot.get("status") != "running":
+            continue
+
+        snapshot["status"] = status
+        snapshot["finished_at"] = _now_iso()
+        snapshot["error_message"] = error_message
+        event_type = {
+            "cancelled": "run_cancelled",
+            "failed": "run_failed",
+        }.get(status, "run_finished")
+        _append_run_event(
+            run_json.parent,
+            event_type,
+            job_id=job_id,
+            payload={
+                "status": status,
+                "result_file_name": snapshot.get("result_file_name"),
+                "error_message": error_message,
+            },
+        )
+        run_json.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (run_json.parent / "summary.md").write_text(
+            _render_summary(snapshot),
+            encoding="utf-8",
+        )
+        finished += 1
+    return finished
+
+
+def _append_run_event(
+    run_dir: Path,
+    event_type: str,
+    *,
+    job_id: str,
+    payload: dict | None = None,
+) -> None:
+    event = {
+        "timestamp": _now_iso(),
+        "event_type": event_type,
+        "job_id": job_id,
+        "payload": payload or {},
+    }
+    with (run_dir / "events.jsonl").open("a", encoding="utf-8") as events:
+        events.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def _fragment_to_dict(fragment: TranslationFragmentLog) -> dict:
     data = asdict(fragment)
     source_text = data.pop("source_text")

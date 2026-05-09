@@ -76,7 +76,16 @@ from translator_service.admin.views import (
     users_body,
 )
 from translator_service.config import Settings
-from translator_service.user_activity import ActivitySurface, SQLiteUserActivityStore
+from translator_service.file_storage import LocalObjectStorage
+from translator_service.persistent_job_store import open_persistent_job_store
+from translator_service.translation_run_logs import finish_running_translation_runs_for_job
+from translator_service.user_activity import (
+    ActivityActorType,
+    ActivityOutcome,
+    ActivitySurface,
+    SQLiteUserActivityStore,
+    UserActivityEventInput,
+)
 
 SESSION_COOKIE = "folioloom_admin_session"
 
@@ -392,7 +401,35 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Operations",
             active="operations",
-            body=lambda session: operations_body(_operations_overview(settings)),
+            body=lambda session: operations_body(
+                _operations_overview(settings),
+                csrf_token=session.csrf_token,
+            ),
+        )
+
+    @router.post("/operations/jobs/{job_id}/{action}")
+    async def operate_job(job_id: str, action: str, request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        if action not in {"pause", "cancel", "delete"}:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+
+        status_code = _apply_admin_job_action(
+            settings,
+            job_id=job_id,
+            action=action,
+            actor_id=session.actor_id,
+            role=session.role,
+        )
+        if status_code != HTTPStatus.SEE_OTHER:
+            return _html("Unable to update job", status_code=status_code)
+        return RedirectResponse(
+            "/admin/operations/jobs",
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.get("/api/integrations")
@@ -1396,6 +1433,143 @@ def _operations_overview(settings: Settings):
         scheduler_backend=settings.scheduler_backend,
         postgres_dsn=settings.postgres_dsn,
     )
+
+
+def _apply_admin_job_action(
+    settings: Settings,
+    *,
+    job_id: str,
+    action: str,
+    actor_id: str,
+    role: str,
+) -> HTTPStatus:
+    store = open_persistent_job_store(settings)
+    object_keys: set[str] = set()
+    try:
+        job = store.get_job(job_id)
+        if job is None:
+            return HTTPStatus.NOT_FOUND
+        if action == "pause":
+            updated = store.pause_job(job_id)
+            status = "paused"
+            message = "Translation paused by admin."
+        elif action == "cancel":
+            updated = store.cancel_job(job_id)
+            status = "cancelled"
+            message = "Translation cancelled by admin."
+        elif action == "delete":
+            updated = job
+            object_keys = _job_object_keys(store, job)
+            if not store.delete_job(job_id):
+                return HTTPStatus.NOT_FOUND
+            status = "deleted"
+            message = "Translation deleted by admin."
+        else:
+            return HTTPStatus.NOT_FOUND
+    finally:
+        store.close()
+
+    finish_running_translation_runs_for_job(
+        settings.translation_run_log_root,
+        job_id=job_id,
+        status="cancelled" if action in {"cancel", "delete"} else "paused",
+        error_message=message,
+    )
+    _record_admin_translation_action(
+        settings,
+        job=updated,
+        action=action,
+        actor_id=actor_id,
+        role=role,
+        status=status,
+        notification_message=message,
+    )
+    if action == "delete":
+        _delete_job_objects(settings, object_keys)
+    return HTTPStatus.SEE_OTHER
+
+
+def _job_object_keys(store, job) -> set[str]:
+    object_keys = {
+        key
+        for key in (
+            job.source_object_key,
+            job.partial_object_key,
+            job.final_object_key,
+        )
+        if key
+    }
+    object_keys.update(
+        unit.source_object_key
+        for unit in store.list_work_units(job.id)
+        if unit.source_object_key
+    )
+    return object_keys
+
+
+def _delete_job_objects(settings: Settings, object_keys: set[str]) -> None:
+    if not object_keys:
+        return
+    storage = LocalObjectStorage(settings.object_storage_root)
+    for object_key in object_keys:
+        storage.delete(object_key)
+
+
+def _record_admin_translation_action(
+    settings: Settings,
+    *,
+    job,
+    action: str,
+    actor_id: str,
+    role: str,
+    status: str,
+    notification_message: str,
+) -> None:
+    channel, channel_user_id = _split_channel_user_id(job.user_id)
+    metadata = {
+        "admin_actor_id": actor_id,
+        "file_name": job.file_name,
+        "document_kind": job.document_kind,
+        "source_language": job.source_language,
+        "target_language": job.target_language,
+        "notification_message": notification_message,
+        "status": status,
+    }
+    with _activity_store(settings) as activity:
+        activity.record_event(
+            UserActivityEventInput(
+                actor_type=ActivityActorType.ADMIN,
+                actor_id=actor_id,
+                surface=ActivitySurface.ADMIN,
+                event_type=f"translation.admin_{status}",
+                action=action,
+                outcome=ActivityOutcome.SUCCESS,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                target_type="translation_job",
+                target_id=job.id,
+                job_id=job.id,
+                order_id=job.order_id,
+                metadata=metadata,
+            )
+        )
+    with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+        audit.record(
+            actor_id=actor_id,
+            role=role,
+            action=f"translation_job.{action}",
+            target_type="translation_job",
+            target_id=job.id,
+            outcome=AuditOutcome.SUCCESS,
+            metadata=metadata,
+        )
+
+
+def _split_channel_user_id(user_id: str) -> tuple[str | None, str | None]:
+    if ":" not in user_id:
+        return None, user_id
+    channel, channel_user_id = user_id.split(":", 1)
+    return channel or None, channel_user_id or None
 
 
 def _cost_analytics(settings: Settings):
