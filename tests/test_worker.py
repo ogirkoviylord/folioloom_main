@@ -299,6 +299,38 @@ class WorkerTest(unittest.TestCase):
             self.assertIsNone(completed.lease_until)
             self.assertEqual(completed.translated_text, "[uk] First paragraph")
 
+    def test_scheduled_worker_ignores_stale_claim_completion(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            translator = StaleCompletionTranslator(store, job.id)
+
+            with self.assertLogs("translator_service.worker", level="WARNING"):
+                completed = run_next_scheduled_stored_text_work_unit(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(),
+                    translator=translator,
+                )
+
+            self.assertIsNone(completed)
+            self.assertEqual(translator.calls, [("First paragraph", "en", "uk")])
+            self.assertEqual(
+                store.get_job(job.id).status,
+                PersistentTranslationJobStatus.ASSEMBLING,
+            )
+
     def test_scheduled_worker_maps_missing_source_key_to_unsupported_contract(self):
         from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
 
@@ -925,6 +957,42 @@ class RecordingTranslator:
                 + ["</translation_batch>"]
             )
         return f"[{target_language}] {text}"
+
+
+class StaleCompletionTranslator(RecordingTranslator):
+    def __init__(self, store: SQLiteTranslationJobStore, job_id: str) -> None:
+        super().__init__()
+        self._store = store
+        self._job_id = job_id
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        result = super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        unit = next(
+            unit
+            for unit in self._store.list_work_units(self._job_id)
+            if unit.status is PersistentWorkUnitStatus.TRANSLATING
+        )
+        assert unit.claim_token is not None
+        self._store.complete_claimed_work_unit(
+            work_unit_id=unit.id,
+            claim_token=unit.claim_token,
+            translated_text=result,
+            prompt_tokens=1,
+            completion_tokens=1,
+            cache_hit_tokens=0,
+            cache_miss_tokens=1,
+        )
+        return result
 
 
 class _SchedulerSettings:

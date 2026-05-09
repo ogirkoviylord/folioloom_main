@@ -1121,7 +1121,14 @@ def build_translation_progress_message(
 ) -> str:
     messages = _messages(interface_language)
     safe_total = max(total_fragments, 1)
-    percent = min(100, round(completed_fragments / safe_total * 100))
+    actual_percent = min(100, round(completed_fragments / safe_total * 100))
+    estimated_percent = 0
+    if estimated_total_seconds and elapsed_seconds is not None:
+        estimated_percent = min(
+            95,
+            round(elapsed_seconds / max(estimated_total_seconds, 1) * 100),
+        )
+    percent = max(actual_percent, estimated_percent)
     filled_cells = min(10, percent // 10)
     bar = "#" * filled_cells + "-" * (10 - filled_cells)
     elapsed_line = ""

@@ -7,6 +7,7 @@ from typing import Any
 
 from translator_service.russian_regression_samples import russian_regression_samples
 from translator_service.translation_metrics import score_reference_translation
+from translator_service.ukrainian_regression_samples import ukrainian_regression_samples
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,18 @@ class QualitySampleScore:
 
 
 @dataclass(frozen=True)
+class QualityLanguageGroup:
+    target_language: str
+    label: str
+    total_reference_samples: int
+    scored_samples: int
+    missing_samples: int
+    average_meteor: float | None
+    average_chrf: float | None
+    rows: tuple[QualitySampleScore, ...]
+
+
+@dataclass(frozen=True)
 class QualityRunSummary:
     candidate_path: str
     found: bool
@@ -32,16 +45,13 @@ class QualityRunSummary:
     malformed_candidates: int
     average_meteor: float | None
     average_chrf: float | None
+    language_groups: tuple[QualityLanguageGroup, ...]
     rows: tuple[QualitySampleScore, ...]
 
 
 def build_quality_run_summary(path: str | Path) -> QualityRunSummary:
     candidate_path = Path(path)
-    reference_samples = tuple(
-        sample
-        for sample in russian_regression_samples()
-        if sample.reference_translation is not None
-    )
+    reference_samples = _reference_samples()
     if not candidate_path.exists():
         return _summary(
             candidate_path=candidate_path,
@@ -113,11 +123,7 @@ class _Candidate:
 
 def _read_candidates(path: Path) -> tuple[dict[str, _Candidate], int, int]:
     candidates: dict[str, _Candidate] = {}
-    reference_ids = {
-        sample.sample_id
-        for sample in russian_regression_samples()
-        if sample.reference_translation is not None
-    }
+    reference_ids = {sample.sample_id for sample in _reference_samples()}
     extra_candidates = 0
     malformed_candidates = 0
     try:
@@ -182,8 +188,60 @@ def _summary(
         malformed_candidates=malformed_candidates,
         average_meteor=_average(row.meteor for row in scored),
         average_chrf=_average(row.chrf for row in scored),
+        language_groups=_language_groups(rows),
         rows=rows,
     )
+
+
+def _reference_samples() -> tuple[Any, ...]:
+    samples = [
+        sample
+        for sample in (*russian_regression_samples(), *ukrainian_regression_samples())
+        if sample.reference_translation is not None
+    ]
+    samples.sort(
+        key=lambda sample: (
+            sample.target_language,
+            sample.source_language,
+            sample.category,
+            sample.sample_id,
+        )
+    )
+    return tuple(samples)
+
+
+def _language_groups(
+    rows: tuple[QualitySampleScore, ...],
+) -> tuple[QualityLanguageGroup, ...]:
+    groups: list[QualityLanguageGroup] = []
+    target_languages = sorted({row.target_language for row in rows})
+    for target_language in target_languages:
+        language_rows = tuple(
+            row for row in rows if row.target_language == target_language
+        )
+        scored = tuple(row for row in language_rows if row.status == "scored")
+        missing = tuple(row for row in language_rows if row.status == "missing")
+        groups.append(
+            QualityLanguageGroup(
+                target_language=target_language,
+                label=_target_language_label(target_language),
+                total_reference_samples=len(language_rows),
+                scored_samples=len(scored),
+                missing_samples=len(missing),
+                average_meteor=_average(row.meteor for row in scored),
+                average_chrf=_average(row.chrf for row in scored),
+                rows=language_rows,
+            )
+        )
+    return tuple(groups)
+
+
+def _target_language_label(language: str) -> str:
+    labels = {
+        "ru": "Russian",
+        "uk": "Ukrainian",
+    }
+    return f"{labels.get(language, language.upper())} ({language})"
 
 
 def _missing_row(sample: Any) -> QualitySampleScore:

@@ -123,6 +123,7 @@ class BotRuntimeConfig:
     translation_run_log_root: str = "var/translation-runs"
     max_parallel_work_units: int = 1
     provider_parallel_capacity: int = 1
+    defer_persistent_jobs_to_worker: bool = False
     security_max_events_per_run: int = 20
     security_max_unsafe_model_outputs_per_run: int = 3
     security_max_repair_failures_per_run: int = 1
@@ -237,6 +238,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_parallel_work_units=config.max_parallel_work_units,
         provider_parallel_capacity=config.provider_parallel_capacity,
         use_scheduler_runner=config.scheduler_backend == "postgres",
+        defer_persistent_jobs_to_worker=config.defer_persistent_jobs_to_worker,
         document_sandbox=DocumentSandbox(
             limits=DocumentSandboxLimits(timeout_seconds=15.0),
         ),
@@ -2340,6 +2342,7 @@ async def run_bot() -> None:
         translation_run_log_root=settings.translation_run_log_root,
         max_parallel_work_units=settings.translation_max_parallel_units,
         provider_parallel_capacity=_deepseek_parallel_capacity(settings),
+        defer_persistent_jobs_to_worker=settings.bot_defer_persistent_jobs_to_worker,
         security_max_events_per_run=settings.security_max_events_per_run,
         security_max_unsafe_model_outputs_per_run=(
             settings.security_max_unsafe_model_outputs_per_run

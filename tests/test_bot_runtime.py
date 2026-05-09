@@ -215,6 +215,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(service.close)
         self.assertIs(service._persistent_job_store, fake_store)
         self.assertTrue(service._use_scheduler_runner)
+        self.assertFalse(service._defer_persistent_jobs_to_worker)
 
     def test_callback_spam_guard_blocks_fast_duplicate_actions(self):
         now = 100.0

@@ -17,6 +17,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.user_settings_db_path, "var/user-settings.sqlite3")
         self.assertEqual(settings.translation_run_log_root, "var/translation-runs")
         self.assertEqual(settings.translation_max_parallel_units, 1)
+        self.assertFalse(settings.bot_defer_persistent_jobs_to_worker)
         self.assertEqual(settings.security_max_events_per_run, 20)
         self.assertEqual(settings.security_max_unsafe_model_outputs_per_run, 3)
         self.assertEqual(settings.security_max_repair_failures_per_run, 1)
@@ -49,6 +50,15 @@ class SettingsTest(unittest.TestCase):
             settings = Settings()
 
         self.assertEqual(settings.translation_max_parallel_units, 3)
+
+    def test_bot_can_defer_persistent_jobs_to_worker_from_environment(self):
+        with patch.dict(
+            "os.environ",
+            {"BOT_DEFER_PERSISTENT_JOBS_TO_WORKER": "true"},
+        ):
+            settings = Settings()
+
+        self.assertTrue(settings.bot_defer_persistent_jobs_to_worker)
 
     def test_security_thresholds_can_be_configured_from_environment(self):
         with patch.dict(

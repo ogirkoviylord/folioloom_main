@@ -28,7 +28,11 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
-from translator_service.admin.quality import QualityRunSummary, QualitySampleScore
+from translator_service.admin.quality import (
+    QualityLanguageGroup,
+    QualityRunSummary,
+    QualitySampleScore,
+)
 from translator_service.admin.secret_safety import SecretSafetyItem, SecretSafetyReport
 from translator_service.admin.translation_logs import (
     TranslationRunDetails,
@@ -774,8 +778,40 @@ def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
     </section>
     <section class="metrics">{metric_cards}</section>
     {empty_state}
+    {_quality_language_sections(summary.language_groups)}
+    """
+
+
+def _quality_metric(label: str, value: str) -> str:
+    return f"""
+    <article class="metric">
+      <span>{escape(label)}</span>
+      <strong>{escape(value)}</strong>
+    </article>
+    """
+
+
+def _quality_language_sections(groups: tuple[QualityLanguageGroup, ...]) -> str:
+    if not groups:
+        return """
+        <section class="panel table-panel">
+          <h3>Reference samples</h3>
+          <p class="empty-state">No reference samples found.</p>
+        </section>
+        """
+    return "\n".join(_quality_language_section(group) for group in groups)
+
+
+def _quality_language_section(group: QualityLanguageGroup) -> str:
+    return f"""
     <section class="panel table-panel">
-      <h3>Reference samples</h3>
+      <h3>{escape(group.label)}</h3>
+      <div class="metric-grid">
+        {_metric("Avg METEOR", _format_optional_score(group.average_meteor))}
+        {_metric("Avg chrF", _format_optional_score(group.average_chrf))}
+        {_metric("Scored", str(group.scored_samples))}
+        {_metric("Missing", str(group.missing_samples))}
+      </div>
       <table class="log-table">
         <thead>
           <tr>
@@ -788,18 +824,9 @@ def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
             <th>Error</th>
           </tr>
         </thead>
-        <tbody>{_quality_rows(summary.rows)}</tbody>
+        <tbody>{_quality_rows(group.rows)}</tbody>
       </table>
     </section>
-    """
-
-
-def _quality_metric(label: str, value: str) -> str:
-    return f"""
-    <article class="metric">
-      <span>{escape(label)}</span>
-      <strong>{escape(value)}</strong>
-    </article>
     """
 
 
