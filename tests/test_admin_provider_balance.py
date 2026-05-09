@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -8,12 +9,16 @@ from tempfile import TemporaryDirectory
 
 import httpx
 
+from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
 from translator_service.admin.provider_balance import (
     ProviderBalanceAmount,
     ProviderBalanceSnapshot,
     SQLiteProviderBalanceStore,
     fetch_deepseek_balance,
+    refresh_deepseek_balance,
 )
+from translator_service.admin.secrets import SQLiteEncryptedSecretStore
+from translator_service.config import Settings
 
 
 class AdminProviderBalanceTest(unittest.TestCase):
@@ -145,6 +150,54 @@ class AdminProviderBalanceTest(unittest.TestCase):
 
         self.assertEqual(loaded.status, "failed")
         self.assertEqual(loaded.last_success_at, success_at)
+
+    def test_refresh_service_uses_first_enabled_key_and_saves_snapshot(self):
+        master_key = urlsafe_b64encode(b"4" * 32).decode("ascii")
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "is_available": True,
+                    "balance_infos": [
+                        {
+                            "currency": "USD",
+                            "total_balance": "8.50",
+                            "granted_balance": "0",
+                            "topped_up_balance": "8.50",
+                        }
+                    ],
+                },
+            )
+
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=master_key,
+                deepseek_base_url="https://deepseek.test",
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=master_key) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="main",
+                        plaintext="sk-main-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+            snapshot = refresh_deepseek_balance(
+                settings,
+                transport=httpx.MockTransport(handler),
+            )
+            with SQLiteProviderBalanceStore(db_path) as store:
+                loaded = store.get_snapshot("deepseek")
+
+        self.assertEqual(snapshot.status, "available")
+        self.assertEqual(loaded.status, "available")
+        self.assertEqual(requests[0].headers["authorization"], "Bearer sk-main-secret")
 
 
 if __name__ == "__main__":

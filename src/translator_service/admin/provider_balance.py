@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -9,6 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
+from translator_service.admin.secrets import (
+    SecretNotFound,
+    SecretStoreUnavailable,
+    SQLiteEncryptedSecretStore,
+)
+from translator_service.config import Settings
 
 
 @dataclass(frozen=True)
@@ -223,6 +232,49 @@ def fetch_deepseek_balance(
     )
 
 
+def refresh_deepseek_balance(
+    settings: Settings,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ProviderBalanceSnapshot:
+    api_key = _resolve_deepseek_api_key(settings)
+    if api_key is None:
+        snapshot = ProviderBalanceSnapshot(
+            provider_id="deepseek",
+            status="not_configured",
+            is_available=None,
+            balances=(),
+            last_checked_at=datetime.now(UTC),
+            error_code="missing_key",
+            error_message="No active DeepSeek key is configured.",
+        )
+    else:
+        result = fetch_deepseek_balance(
+            "deepseek",
+            api_key,
+            base_url=settings.deepseek_base_url,
+            timeout_seconds=settings.admin_provider_probe_timeout_seconds,
+            transport=transport,
+        )
+        snapshot = ProviderBalanceSnapshot(
+            provider_id=result.provider_id,
+            status=_snapshot_status(result),
+            is_available=result.is_available,
+            balances=result.balances,
+            last_checked_at=result.checked_at,
+            last_success_at=result.checked_at if result.status == "ok" else None,
+            error_code=result.error_code,
+            error_message=result.error_message,
+        )
+    with SQLiteProviderBalanceStore(settings.admin_db_path) as store:
+        return store.save_snapshot(snapshot)
+
+
+def get_cached_deepseek_balance(settings: Settings) -> ProviderBalanceSnapshot | None:
+    with SQLiteProviderBalanceStore(settings.admin_db_path) as store:
+        return store.get_snapshot("deepseek")
+
+
 def _balance_amount(item: Any) -> ProviderBalanceAmount:
     if not isinstance(item, dict):
         raise ValueError("balance row must be an object")
@@ -259,6 +311,38 @@ def _snapshot_from_row(row: sqlite3.Row) -> ProviderBalanceSnapshot:
         error_code=row["error_code"],
         error_message=row["error_message"],
     )
+
+
+def _snapshot_status(result: ProviderBalanceFetchResult) -> str:
+    if result.status != "ok":
+        return result.status
+    return "available" if result.is_available else "unavailable"
+
+
+def _resolve_deepseek_api_key(settings: Settings) -> str | None:
+    if settings.admin_secret_master_key:
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    key_summaries = keys.list_keys(
+                        "deepseek",
+                        secret_describer=secrets.describe_secret,
+                    )
+                    for key in key_summaries:
+                        if key.enabled and not key.disabled:
+                            return secrets.get_secret_value(key.secret_id)
+        except (KeyError, SecretNotFound, SecretStoreUnavailable, ValueError):
+            return None
+    for value in os.getenv("DEEPSEEK_API_KEYS", "").split(","):
+        if value.strip():
+            return value.strip()
+    single_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if single_key:
+        return single_key
+    return None
 
 
 def _failed(

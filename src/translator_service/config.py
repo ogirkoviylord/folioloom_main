@@ -136,3 +136,21 @@ class Settings:
             float(os.getenv("ADMIN_PROVIDER_RUNTIME_RELOAD_SECONDS", "30")),
         )
     )
+    admin_deepseek_balance_stale_seconds: int = field(
+        default_factory=lambda: max(
+            1,
+            int(os.getenv("ADMIN_DEEPSEEK_BALANCE_STALE_SECONDS", "300")),
+        )
+    )
+    admin_deepseek_low_balance_threshold: str = field(
+        default_factory=lambda: os.getenv("ADMIN_DEEPSEEK_LOW_BALANCE_THRESHOLD", "5.00")
+    )
+    admin_deepseek_low_balance_currency: str = field(
+        default_factory=lambda: os.getenv("ADMIN_DEEPSEEK_LOW_BALANCE_CURRENCY", "USD")
+    )
+    admin_deepseek_top_up_url: str = field(
+        default_factory=lambda: os.getenv(
+            "ADMIN_DEEPSEEK_TOP_UP_URL",
+            "https://platform.deepseek.com/usage",
+        )
+    )
