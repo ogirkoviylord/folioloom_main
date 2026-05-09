@@ -37,8 +37,8 @@ from translator_service.order_estimates import estimate_order
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
-    SQLiteTranslationJobStore,
 )
+from translator_service.persistent_job_store import PersistentJobStore
 from translator_service.persistent_assembly import (
     assemble_persistent_txt_result,
     assemble_persistent_docx_result,
@@ -160,7 +160,7 @@ class BotTranslationService:
         max_fragment_chars: int,
         translation_cache: TranslationCache | None = None,
         file_storage: LocalObjectStorage | None = None,
-        persistent_job_store: SQLiteTranslationJobStore | None = None,
+        persistent_job_store: PersistentJobStore | None = None,
         translation_run_log_root: str | Path | None = None,
         user_settings_repository: SQLiteUserSettingsRepository | None = None,
         max_parallel_work_units: int = 1,
@@ -1913,7 +1913,7 @@ class BotTranslationService:
 def _create_persistent_job_plan(
     *,
     document_kind: DocumentKind,
-    store: SQLiteTranslationJobStore,
+    store: PersistentJobStore,
     storage: LocalObjectStorage,
     pending: PendingTranslation,
     max_fragment_chars: int,
@@ -2264,7 +2264,7 @@ def _translator_model(translator: TextTranslator) -> str | None:
 def _assemble_persistent_result(
     *,
     document_kind: DocumentKind,
-    store: SQLiteTranslationJobStore,
+    store: PersistentJobStore,
     storage: LocalObjectStorage,
     job_id: str,
     file_name: str,
@@ -2339,7 +2339,7 @@ def _security_user_id(user_telegram_id: int) -> str:
 
 
 def _completed_persistent_units(
-    store: SQLiteTranslationJobStore,
+    store: PersistentJobStore,
     job_id: str,
 ) -> int:
     return sum(

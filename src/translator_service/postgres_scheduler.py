@@ -10,6 +10,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without optiona
     dict_row = None
 
 from translator_service.persistent_jobs import (
+    JobUsageSummary,
     PersistentTranslationJob,
     PersistentTranslationJobStatus,
     PersistentSchedulerEvent,
@@ -609,6 +610,154 @@ class PostgresSchedulerStore:
             {"status": status.value, "limit": max(1, limit)},
         ).fetchall()
         return [_job_from_mapping(row) for row in rows]
+
+    def list_jobs_for_user(
+        self,
+        user_id: str,
+        *,
+        limit: int = 10,
+    ) -> list[PersistentTranslationJob]:
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM translation_jobs
+            WHERE user_id = %(user_id)s
+            ORDER BY updated_at DESC, id DESC
+            LIMIT %(limit)s
+            """,
+            {"user_id": user_id, "limit": max(1, limit)},
+        ).fetchall()
+        return [_job_from_mapping(row) for row in rows]
+
+    def delete_job(self, job_id: str) -> bool:
+        if self.get_job(job_id) is None:
+            return False
+        with self.connection.transaction():
+            self.connection.execute(
+                "DELETE FROM work_unit_attempts WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            )
+            self.connection.execute(
+                "DELETE FROM scheduler_events WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            )
+            self.connection.execute(
+                "DELETE FROM work_units WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            )
+            self.connection.execute(
+                "DELETE FROM translation_jobs WHERE id = %(job_id)s",
+                {"job_id": job_id},
+            )
+        return True
+
+    def cancel_job(self, job_id: str) -> PersistentTranslationJob:
+        self._require_job(job_id)
+        now = _now()
+        with self.connection.transaction():
+            self.connection.execute(
+                """
+                UPDATE work_units
+                SET status = %(pending)s,
+                    worker_id = NULL,
+                    claim_token = NULL,
+                    lease_until = NULL,
+                    updated_at = %(now)s
+                WHERE job_id = %(job_id)s AND status = %(translating)s
+                """,
+                {
+                    "pending": PersistentWorkUnitStatus.PENDING.value,
+                    "translating": PersistentWorkUnitStatus.TRANSLATING.value,
+                    "job_id": job_id,
+                    "now": now,
+                },
+            )
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.CANCELLED,
+                now=now,
+            )
+        return self._require_job(job_id)
+
+    def resume_job(self, job_id: str) -> PersistentTranslationJob:
+        job = self._require_job(job_id)
+        if job.status is PersistentTranslationJobStatus.READY:
+            return job
+        now = _now()
+        with self.connection.transaction():
+            self.connection.execute(
+                """
+                UPDATE work_units
+                SET status = %(pending)s,
+                    worker_id = NULL,
+                    claim_token = NULL,
+                    lease_until = NULL,
+                    updated_at = %(now)s
+                WHERE job_id = %(job_id)s
+                  AND status IN (
+                    %(translating)s,
+                    %(failed)s,
+                    %(failed_retryable)s
+                  )
+                """,
+                {
+                    "pending": PersistentWorkUnitStatus.PENDING.value,
+                    "translating": PersistentWorkUnitStatus.TRANSLATING.value,
+                    "failed": PersistentWorkUnitStatus.FAILED.value,
+                    "failed_retryable": (
+                        PersistentWorkUnitStatus.FAILED_RETRYABLE.value
+                    ),
+                    "job_id": job_id,
+                    "now": now,
+                },
+            )
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.QUEUED,
+                now=now,
+            )
+        return self._require_job(job_id)
+
+    def mark_job_interrupted(self, job_id: str) -> PersistentTranslationJob:
+        with self.connection.transaction():
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.INTERRUPTED,
+                now=_now(),
+            )
+        return self._require_job(job_id)
+
+    def get_usage_summary(self, job_id: str) -> JobUsageSummary:
+        self._require_job(job_id)
+        row = self.connection.execute(
+            """
+            SELECT
+                COUNT(*) AS translated_units,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(cache_hit_tokens), 0) AS cache_hit_tokens,
+                COALESCE(SUM(cache_miss_tokens), 0) AS cache_miss_tokens
+            FROM work_units
+            WHERE job_id = %(job_id)s
+              AND status IN (%(translated)s, %(cached)s)
+            """,
+            {
+                "job_id": job_id,
+                "translated": PersistentWorkUnitStatus.TRANSLATED.value,
+                "cached": PersistentWorkUnitStatus.CACHED.value,
+            },
+        ).fetchone()
+        prompt_tokens = int(row["prompt_tokens"])
+        completion_tokens = int(row["completion_tokens"])
+        return JobUsageSummary(
+            job_id=job_id,
+            translated_units=int(row["translated_units"]),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cache_hit_tokens=int(row["cache_hit_tokens"]),
+            cache_miss_tokens=int(row["cache_miss_tokens"]),
+            total_tokens=prompt_tokens + completion_tokens,
+        )
 
     def mark_job_assembled(
         self,

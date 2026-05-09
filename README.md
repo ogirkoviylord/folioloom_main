@@ -125,6 +125,7 @@ Runtime files are mounted from the host into containers:
 
 ```text
 ./var -> /app/var
+./var -> /data
 ```
 
 This keeps uploaded files, translated files, SQLite fallback files, admin data,

@@ -6,6 +6,7 @@ from translator_service.admin.action_center import (
     ActionItem,
     build_action_center,
 )
+from translator_service.admin.bootstrap_config import AdminBootstrapConfig
 from translator_service.admin.integration_connections import (
     IntegrationConnectionSummary,
 )
@@ -154,6 +155,24 @@ class AdminActionCenterTest(unittest.TestCase):
             ["ai_provider_missing"],
         )
         self.assertEqual(center.items[0].href, "/admin/ai-providers")
+
+    def test_env_deepseek_keys_satisfy_ai_provider_missing_action(self):
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=0,
+            bootstrap_config=AdminBootstrapConfig(
+                deepseek_key_count=2,
+                telegram_configured=False,
+            ),
+        )
+
+        keys = {item.key for item in center.items}
+
+        self.assertNotIn("ai_provider_missing", keys)
 
     def test_secret_safety_issues_create_settings_action(self):
         center = build_action_center(

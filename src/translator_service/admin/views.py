@@ -8,6 +8,7 @@ from pathlib import Path
 from translator_service.admin.action_center import ActionCenter, ActionItem
 from translator_service.admin.ai_provider_keys import AIProviderKeySummary
 from translator_service.admin.auth import AdminSession
+from translator_service.admin.bootstrap_config import is_env_deepseek_key
 from translator_service.admin.costs import (
     CostAnalytics,
     CostRunSummary,
@@ -312,15 +313,9 @@ def ai_providers_body(
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
 ) -> str:
-    health_by_provider = {
-        health.provider_id: health for health in health_summaries
-    }
-    runtime_by_provider = {
-        status.provider_id: status for status in runtime_statuses
-    }
-    reload_by_provider = {
-        state.provider_id: state for state in runtime_reload_states
-    }
+    health_by_provider = {health.provider_id: health for health in health_summaries}
+    runtime_by_provider = {status.provider_id: status for status in runtime_statuses}
+    reload_by_provider = {state.provider_id: state for state in runtime_reload_states}
     cards = "\n".join(
         _ai_provider_card(
             summary,
@@ -356,6 +351,11 @@ def _ai_provider_card(
     reload_state: AIProviderRuntimeReloadRequest | None,
 ) -> str:
     active_key_count = sum(1 for key in keys if key.enabled and not key.disabled)
+    testable_key_count = sum(
+        1
+        for key in keys
+        if key.enabled and not key.disabled and not is_env_deepseek_key(key)
+    )
     rows = "\n".join(_ai_provider_key_row(key, csrf_token) for key in keys)
     if not rows:
         rows = '<p class="empty-state">No keys configured yet. Test key</p>'
@@ -369,7 +369,7 @@ def _ai_provider_card(
     test_all_form = _ai_provider_test_all_keys_form(
         summary.integration_id,
         csrf_token=csrf_token,
-        active_key_count=active_key_count,
+        active_key_count=testable_key_count,
     )
     return f"""
     <article class="integration-card wide-card">
@@ -565,6 +565,18 @@ def _provider_health_panel(health: ProviderHealthSummary | None) -> str:
 
 
 def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
+    if is_env_deepseek_key(key):
+        return f"""
+    <div class="key-row">
+      <div>
+        <strong>{escape(key.label)}</strong>
+        <code>{escape(key.masked_value or "env fallback")}</code>
+        <span>configured from environment</span>
+      </div>
+      <span>source env fallback</span>
+      <span>{key.weight} active keys</span>
+    </div>
+    """
     remove_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/remove"
     test_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/test"
     update_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/update"
@@ -1140,11 +1152,7 @@ def _live_runtime_cards(
         None,
     )
     reload_state = next(
-        (
-            state
-            for state in runtime_reload_states
-            if state.provider_id == "deepseek"
-        ),
+        (state for state in runtime_reload_states if state.provider_id == "deepseek"),
         None,
     )
     source = "not reporting" if status is None else status.source
@@ -1221,6 +1229,7 @@ def logs_body(
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    limit: int = 100,
 ) -> str:
     rows = "\n".join(_log_row(row) for row in logs)
     if not rows:
@@ -1290,9 +1299,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     events = "\n".join(_run_event_row(event) for event in details.events)
     if not events:
         events = '<tr><td colspan="3" class="empty-cell">No events recorded.</td></tr>'
-    fragments = "\n".join(
-        _run_fragment_row(fragment) for fragment in details.fragments
-    )
+    fragments = "\n".join(_run_fragment_row(fragment) for fragment in details.fragments)
     if not fragments:
         fragments = """
         <tr>
@@ -1769,6 +1776,7 @@ def _integration_card(
     )
     if not rows:
         rows = '<p class="empty-state">No connections configured yet.</p>'
+    summary_secret_chips = _integration_summary_secret_chips(summary.secrets)
     fields = "\n".join(_connection_secret_field(secret) for secret in summary.secrets)
     action = f"/admin/integrations/{escape(summary.integration_id)}/connections"
     connection_count = f"{len(connections)} active connection"
@@ -1786,6 +1794,7 @@ def _integration_card(
         <span class="status">{escape(connection_count)}</span>
       </summary>
       <p>{escape(summary.description)}</p>
+      {summary_secret_chips}
       <div class="key-table">{rows}</div>
       <form class="secret-form connection-form" method="post" action="{action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
@@ -1800,22 +1809,48 @@ def _integration_card(
     """
 
 
+def _integration_summary_secret_chips(
+    secrets: tuple[IntegrationSecretSummary, ...],
+) -> str:
+    chips = " ".join(
+        _connection_secret_chip(secret)
+        for secret in secrets
+        if secret.configured and secret.masked_value
+    )
+    if not chips:
+        return ""
+    return f'<div class="key-table">{chips}</div>'
+
+
 def _integration_connection_row(
     connection: IntegrationConnectionSummary,
     csrf_token: str,
 ) -> str:
-    remove_action = (
-        f"/admin/integrations/{escape(connection.integration_id)}/connections/remove"
-    )
     secrets = " ".join(
         _connection_secret_chip(secret) for secret in connection.secret_values
     )
+    remove_control = _integration_connection_remove_control(connection, csrf_token)
     return f"""
     <div class="key-row connection-row">
       <div>
         <strong>{escape(connection.label)}</strong>
         {secrets}
       </div>
+      {remove_control}
+    </div>
+    """
+
+
+def _integration_connection_remove_control(
+    connection: IntegrationConnectionSummary,
+    csrf_token: str,
+) -> str:
+    if connection.connection_id == "env-fallback":
+        return '<span class="status">managed by environment</span>'
+    remove_action = (
+        f"/admin/integrations/{escape(connection.integration_id)}/connections/remove"
+    )
+    return f"""
       <form method="post" action="{remove_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <input
@@ -1825,7 +1860,6 @@ def _integration_connection_row(
         >
         <button class="danger" type="submit">Remove</button>
       </form>
-    </div>
     """
 
 

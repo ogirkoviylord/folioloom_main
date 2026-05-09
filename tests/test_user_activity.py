@@ -1,5 +1,6 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -136,6 +137,39 @@ class UserActivityStoreTest(unittest.TestCase):
 
             self.assertEqual(event.event_type, "translation.confirmed")
             self.assertEqual(len(events), 1)
+
+    def test_date_to_date_only_includes_entire_day(self):
+        with TemporaryDirectory() as temp_dir:
+            with SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3") as store:
+                event = store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.completed",
+                        action="completed",
+                        outcome=ActivityOutcome.SUCCESS,
+                    )
+                )
+                store._connection.execute(
+                    "UPDATE user_activity_events SET created_at = ? WHERE id = ?",
+                    (
+                        datetime(2026, 5, 9, 23, 59, 59, tzinfo=UTC).isoformat(
+                            timespec="microseconds"
+                        ),
+                        event.id,
+                    ),
+                )
+                store._connection.commit()
+
+                events = store.list_events(date_to="2026-05-09")
+
+            self.assertEqual(
+                [event.event_type for event in events],
+                ["translation.completed"],
+            )
 
 
 if __name__ == "__main__":

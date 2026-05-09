@@ -83,7 +83,7 @@ from translator_service.languages import (
     find_language_by_button_text,
 )
 from translator_service.order_estimates import DocumentEstimationNotReadyError
-from translator_service.persistent_jobs import SQLiteTranslationJobStore
+from translator_service.persistent_job_store import open_persistent_job_store
 from translator_service.pricing import PricingRules
 from translator_service.security_telemetry import (
     SecurityCooldownActive,
@@ -116,6 +116,8 @@ class BotRuntimeConfig:
     max_upload_mb: int = 50
     object_storage_root: str = "var/object-storage"
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
+    scheduler_backend: str = "sqlite"
+    postgres_dsn: str = "postgresql://translator:translator@localhost:5432/translator"
     user_settings_db_path: str = "var/user-settings.sqlite3"
     admin_db_path: str = "var/admin.sqlite3"
     translation_run_log_root: str = "var/translation-runs"
@@ -226,9 +228,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_upload_mb=config.max_upload_mb,
         max_fragment_chars=config.max_fragment_chars,
         file_storage=LocalObjectStorage(config.object_storage_root),
-        persistent_job_store=SQLiteTranslationJobStore(
-            config.persistent_jobs_db_path,
-        ),
+        persistent_job_store=open_persistent_job_store(config),
         translation_run_log_root=config.translation_run_log_root,
         user_settings_repository=SQLiteUserSettingsRepository(
             config.user_settings_db_path,
@@ -236,6 +236,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         activity_store=SQLiteUserActivityStore(config.admin_db_path),
         max_parallel_work_units=config.max_parallel_work_units,
         provider_parallel_capacity=config.provider_parallel_capacity,
+        use_scheduler_runner=config.scheduler_backend == "postgres",
         document_sandbox=DocumentSandbox(
             limits=DocumentSandboxLimits(timeout_seconds=15.0),
         ),
@@ -2332,6 +2333,8 @@ async def run_bot() -> None:
         max_upload_mb=settings.max_upload_mb,
         object_storage_root=settings.object_storage_root,
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
+        scheduler_backend=settings.scheduler_backend,
+        postgres_dsn=settings.postgres_dsn,
         user_settings_db_path=settings.user_settings_db_path,
         admin_db_path=settings.admin_db_path,
         translation_run_log_root=settings.translation_run_log_root,

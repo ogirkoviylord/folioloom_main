@@ -46,7 +46,9 @@ admin_smoke_args="--require-existing-admin-db"
 if [ "${ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS:-0}" = "1" ]; then
   admin_smoke_args="$admin_smoke_args --require-admin-provider-keys"
 fi
+docker compose exec -T api python -m translator_service.admin.deployment_smoke
 docker compose exec -T bot python -m translator_service.admin.deployment_smoke $admin_smoke_args
+docker compose exec -T worker python -m translator_service.admin.deployment_smoke $admin_smoke_args
 python3 scripts/backup_server_data.py --help >/dev/null
 
 echo "Server smoke check passed."

@@ -61,6 +61,20 @@ class BackupServerDataTest(unittest.TestCase):
             "data/object-storage",
         )
 
+    def test_container_runtime_paths_map_to_host_var_directory(self):
+        self.assertEqual(
+            backup_server_data.host_runtime_path(Path("/data/object-storage")),
+            Path("var/object-storage"),
+        )
+        self.assertEqual(
+            backup_server_data.host_runtime_path(Path("/data/runtime/admin.sqlite3")),
+            Path("var/runtime/admin.sqlite3"),
+        )
+        self.assertEqual(
+            backup_server_data.host_runtime_path(Path("/app/var/run-logs")),
+            Path("var/run-logs"),
+        )
+
     def test_validate_backup_rejects_files_with_empty_database_by_default(self):
         with self.assertRaisesRegex(RuntimeError, "database dump looks empty"):
             backup_server_data.validate_backup_counts(
@@ -156,6 +170,36 @@ class BackupServerDataTest(unittest.TestCase):
 
         self.assertIn("var/object-storage/book.txt", names)
         self.assertIn("var/admin.sqlite3", names)
+
+    def test_archive_runtime_files_preserves_var_root_for_runtime_subdirectories(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage_root = root / "var" / "object-storage"
+            storage_root.mkdir(parents=True)
+            (storage_root / "book.txt").write_text("translated", encoding="utf-8")
+            run_log = root / "var" / "run-logs" / "run-1" / "run.json"
+            run_log.parent.mkdir(parents=True)
+            run_log.write_text("{}", encoding="utf-8")
+            user_settings = root / "var" / "runtime" / "user-settings.sqlite3"
+            admin_db_path = root / "var" / "runtime" / "admin.sqlite3"
+            admin_db_path.parent.mkdir(parents=True)
+            admin_db_path.write_bytes(b"sqlite")
+            user_settings.write_bytes(b"settings")
+            archive_path = root / "runtime-files.tgz"
+
+            backup_server_data.archive_runtime_files(
+                storage_root=storage_root,
+                admin_db_path=admin_db_path,
+                output_path=archive_path,
+            )
+
+            with tarfile.open(archive_path, "r:gz") as archive:
+                names = set(archive.getnames())
+
+        self.assertIn("var/object-storage/book.txt", names)
+        self.assertIn("var/run-logs/run-1/run.json", names)
+        self.assertIn("var/runtime/admin.sqlite3", names)
+        self.assertIn("var/runtime/user-settings.sqlite3", names)
 
     def test_verify_manifest_rejects_runtime_archive_without_admin_sqlite(self):
         with TemporaryDirectory() as temp_dir:

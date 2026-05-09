@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-import json
 from pathlib import Path
-import sqlite3
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -202,7 +202,7 @@ class SQLiteUserActivityStore:
             params.append(date_from)
         if date_to:
             where.append("created_at <= ?")
-            params.append(date_to)
+            params.append(_inclusive_date_to(date_to))
         predicate = f"WHERE {' AND '.join(where)}" if where else ""
         params.append(max(1, min(limit, 500)))
         with self._lock:
@@ -357,7 +357,9 @@ class SQLiteUserActivityStore:
         last_target_language = (
             existing["last_target_language"] if existing is not None else None
         )
-        security_state = existing["security_state"] if existing is not None else "normal"
+        security_state = (
+            existing["security_state"] if existing is not None else "normal"
+        )
         if event_type == "user.interface_language.changed":
             interface_language = _metadata_string(
                 metadata,
@@ -371,7 +373,10 @@ class SQLiteUserActivityStore:
                 progress_preview_enabled = 1 if bool(metadata.get("new_value")) else 0
         if event_type == "translation.target_language.selected":
             last_target_language = _metadata_string(metadata, "target_language")
-        if surface == ActivitySurface.SECURITY.value and outcome == ActivityOutcome.BLOCKED.value:
+        if (
+            surface == ActivitySurface.SECURITY.value
+            and outcome == ActivityOutcome.BLOCKED.value
+        ):
             security_state = metadata.get("security_state") or "watched"
 
         first_seen_at = (
@@ -469,7 +474,9 @@ def _add_filter(
 
 
 def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    return {str(key): _sanitize_value(str(key), value) for key, value in metadata.items()}
+    return {
+        str(key): _sanitize_value(str(key), value) for key, value in metadata.items()
+    }
 
 
 def _sanitize_value(key: str, value: Any) -> Any:
@@ -526,6 +533,16 @@ def _now() -> datetime:
 
 def _format_datetime(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def _inclusive_date_to(value: str) -> str:
+    if len(value) == 10:
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return value
+        return f"{value}T23:59:59.999999+00:00"
+    return value
 
 
 def _parse_datetime(value: str) -> datetime:

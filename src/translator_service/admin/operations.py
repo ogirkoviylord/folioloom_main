@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from translator_service.admin.translation_logs import list_translation_run_summaries
+from translator_service.persistent_job_store import (
+    open_persistent_job_store,
+    sqlite_store_exists,
+)
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
-    SQLiteTranslationJobStore,
 )
 
 JOB_STATE_QUEUED = "queued"
@@ -49,6 +52,7 @@ _SUCCEEDED_STATUSES = {
 }
 _FAILED_STATUSES = {
     "error",
+    "expired",
     "failed",
     "failed_retryable",
     "failed_terminal",
@@ -291,32 +295,40 @@ def build_persistent_operations_overview(
     log_root: str | Path,
     *,
     limit_per_status: int = 25,
+    scheduler_backend: str = "sqlite",
+    postgres_dsn: str = "postgresql://translator:translator@localhost:5432/translator",
 ) -> OperationsOverview:
-    if str(db_path) != ":memory:":
-        db_file = Path(db_path)
-        if not db_file.exists() or db_file.stat().st_size == 0:
+    if scheduler_backend == "sqlite":
+        if not sqlite_store_exists(db_path):
             return build_operations_overview()
 
-    store = SQLiteTranslationJobStore(db_path)
+    store = open_persistent_job_store(
+        _OperationStoreSettings(
+            scheduler_backend=scheduler_backend,
+            persistent_jobs_db_path=str(db_path),
+            postgres_dsn=postgres_dsn,
+        )
+    )
     try:
         jobs = []
         work_units_by_job_id: dict[str, tuple[Any, ...]] = {}
         for status in _PERSISTENT_OPERATION_STATUSES:
             for job in store.list_jobs_by_status(status, limit=limit_per_status):
                 jobs.append(job)
-                work_units_by_job_id[job.id] = tuple(store.list_work_units(job.id))
+                job_id = _job_mapping_key(job)
+                work_units_by_job_id[job_id] = tuple(store.list_work_units(job_id))
     finally:
         store.close()
 
-    job_ids_with_logs = {
-        summary.job_id
+    job_log_hrefs = {
+        summary.job_id: f"/admin/logs/{Path(summary.run_dir).name}"
         for summary in list_translation_run_summaries(log_root, limit=500)
         if summary.job_id
     }
     return build_operations_overview(
         jobs=jobs,
         work_units_by_job_id=work_units_by_job_id,
-        job_log_hrefs={job_id: "/admin/logs" for job_id in job_ids_with_logs},
+        job_log_hrefs=job_log_hrefs,
     )
 
 
@@ -325,11 +337,20 @@ _PERSISTENT_OPERATION_STATUSES = (
     PersistentTranslationJobStatus.TRANSLATING,
     PersistentTranslationJobStatus.ASSEMBLING,
     PersistentTranslationJobStatus.CANCEL_REQUESTED,
+    PersistentTranslationJobStatus.CANCELLED,
+    PersistentTranslationJobStatus.EXPIRED,
     PersistentTranslationJobStatus.INTERRUPTED,
     PersistentTranslationJobStatus.FAILED,
     PersistentTranslationJobStatus.READY,
     PersistentTranslationJobStatus.PARTIAL,
 )
+
+
+@dataclass(frozen=True)
+class _OperationStoreSettings:
+    scheduler_backend: str
+    persistent_jobs_db_path: str
+    postgres_dsn: str
 
 
 def _count_units(units: tuple[Any, ...], state: str) -> int:

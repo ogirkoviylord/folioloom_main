@@ -9,6 +9,7 @@ from translator_service.admin.live import (
     build_live_monitor_snapshot,
     collect_local_server_health,
 )
+from translator_service.admin.operations import build_operations_overview
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -89,6 +90,27 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertFalse(snapshot.available)
         self.assertIsNone(snapshot.cpu_percent)
         self.assertIsNone(snapshot.memory_percent)
+
+    def test_active_translations_include_running_persistent_jobs_without_run_logs(self):
+        with TemporaryDirectory() as temp_dir:
+            operations = build_operations_overview(
+                jobs=[
+                    {"id": "job-running-without-log", "status": "translating"},
+                    {"id": "job-queued", "status": "queued"},
+                ],
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                operations=operations,
+                server=collect_local_server_health(
+                    disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(snapshot.active_translations, 1)
+        self.assertEqual(snapshot.queued_translations, 1)
 
 
 _DiskUsage = namedtuple("_DiskUsage", ("total", "used", "free"))
