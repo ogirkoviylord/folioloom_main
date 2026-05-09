@@ -99,10 +99,13 @@ def run_next_persistent_work_unit(
     worker_id: str,
     source_loader: Callable[[PersistentWorkUnit], str],
     translator: PersistentWorkUnitTranslator,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
 ) -> PersistentWorkUnit | None:
     work_unit = store.claim_next_work_unit(job_id, worker_id=worker_id)
     if work_unit is None:
         return None
+    if work_unit_started_callback is not None:
+        work_unit_started_callback(work_unit)
 
     try:
         job_context = _job_translation_context(store, job_id)
@@ -143,6 +146,7 @@ def run_stored_text_job_until_idle(
     worker_id: str,
     translator: PersistentWorkUnitTranslator,
     progress_callback: Callable[[PersistentJobExecutionProgress], None] | None = None,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     total_units = len(store.list_work_units(job_id))
@@ -155,6 +159,7 @@ def run_stored_text_job_until_idle(
             job_id=job_id,
             worker_id=worker_id,
             translator=translator,
+            work_unit_started_callback=work_unit_started_callback,
             encoding=encoding,
         )
         if completed is None:
@@ -190,6 +195,7 @@ def run_stored_text_job_parallel_until_idle(
     translator: PersistentWorkUnitTranslator,
     max_parallel_units: int,
     progress_callback: Callable[[PersistentJobExecutionProgress], None] | None = None,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
@@ -201,6 +207,7 @@ def run_stored_text_job_parallel_until_idle(
             worker_id=worker_id,
             translator=translator,
             progress_callback=progress_callback,
+            work_unit_started_callback=work_unit_started_callback,
             encoding=encoding,
         )
 
@@ -225,6 +232,8 @@ def run_stored_text_job_parallel_until_idle(
                 )
                 if claimed is None:
                     break
+                if work_unit_started_callback is not None:
+                    work_unit_started_callback(claimed)
                 future = executor.submit(
                     _translate_stored_text_work_unit,
                     storage=storage,
@@ -301,6 +310,7 @@ def run_next_stored_text_work_unit(
     job_id: str,
     worker_id: str,
     translator: PersistentWorkUnitTranslator,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     return run_next_persistent_work_unit(
@@ -313,6 +323,7 @@ def run_next_stored_text_work_unit(
             encoding=encoding,
         ),
         translator=translator,
+        work_unit_started_callback=work_unit_started_callback,
     )
 
 
@@ -326,6 +337,7 @@ def run_next_scheduled_stored_text_work_unit(
     translator: PersistentWorkUnitTranslator,
     retry_base_delay_seconds: int = 30,
     retry_max_delay_seconds: int = 600,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     claim = store.claim_next_scheduled_work_unit(
@@ -339,6 +351,8 @@ def run_next_scheduled_stored_text_work_unit(
     work_unit = store.get_work_unit(claim.work_unit_id)
     if work_unit is None:
         raise ValueError(f"Claimed work unit does not exist: {claim.work_unit_id}")
+    if work_unit_started_callback is not None:
+        work_unit_started_callback(work_unit)
 
     try:
         source_text = _load_work_unit_text(

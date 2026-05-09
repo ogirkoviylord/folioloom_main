@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from translator_service.file_storage import LocalObjectStorage
@@ -10,6 +11,7 @@ from translator_service.persistent_assembly import (
 )
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
+    PersistentWorkUnit,
     SQLiteTranslationJobStore,
 )
 from translator_service.scheduler import SchedulerLimits
@@ -36,6 +38,7 @@ def run_scheduler_once(
     lease_seconds: int,
     retry_base_delay_seconds: int = 30,
     retry_max_delay_seconds: int = 600,
+    work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
 ) -> SchedulerRunOnceSummary:
     completed_units = 0
     failed_units = 0
@@ -48,6 +51,7 @@ def run_scheduler_once(
         translator=translator,
         retry_base_delay_seconds=retry_base_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
+        work_unit_started_callback=work_unit_started_callback,
     )
     if completed is not None:
         if completed.status.value in {"translated", "cached"}:

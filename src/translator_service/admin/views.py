@@ -1076,6 +1076,9 @@ def live_body(
             <th>Job</th>
             <th>File</th>
             <th>Direction</th>
+            <th>Stage</th>
+            <th>Progress</th>
+            <th>ETA</th>
             <th>Tokens</th>
           </tr>
         </thead>
@@ -1108,9 +1111,38 @@ def live_body(
             ->
             ${{escapeHtml(run.target_language || "?")}}
           </td>
+          <td>${{escapeHtml(stageLabel(run))}}</td>
+          <td>${{progressCell(run)}}</td>
+          <td>${{escapeHtml(etaLabel(run))}}</td>
           <td>${{escapeHtml(run.total_tokens || 0)}}</td>
         </tr>
       `).join("");
+      const stageLabel = (run) => run.current_stage || run.status || "unknown";
+      const progressLabel = (run) => {{
+        const done = run.fragment_count ?? 0;
+        const total = run.total_fragment_count ?? 0;
+        const percent = run.progress_percent;
+        if (total > 0 && percent != null) return `${{done}}/${{total}} · ${{percent}}%`;
+        if (total > 0) return `${{done}}/${{total}}`;
+        return `${{done}}/?`;
+      }};
+      const progressPercent = (run) => Math.max(
+        0,
+        Math.min(100, Number(run.progress_percent ?? 0))
+      );
+      const progressCell = (run) => `
+        <div class="progress-mini">
+          <span>${{escapeHtml(progressLabel(run))}}</span>
+          <b><i style="width: ${{progressPercent(run)}}%"></i></b>
+        </div>
+      `;
+      const etaLabel = (run) => {{
+        if (run.eta_seconds == null) return "n/a";
+        if (run.eta_seconds <= 0) return "0m";
+        const minutes = Math.ceil(run.eta_seconds / 60);
+        if (minutes >= 60) return `${{Math.floor(minutes / 60)}}h ${{minutes % 60}}m`;
+        return `${{minutes}}m`;
+      }};
       async function refreshLiveMonitor() {{
         const response = await fetch("/admin/api/live", {{ cache: "no-store" }});
         if (!response.ok) return;
@@ -1210,9 +1242,56 @@ def _live_run_row(run: TranslationRunSummary) -> str:
       <td><code>{escape(run.job_id)}</code></td>
       <td><strong>{escape(run.file_name)}</strong></td>
       <td>{escape(direction)}</td>
+      <td>{escape(_stage_label(run))}</td>
+      <td>{_progress_mini(run)}</td>
+      <td>{escape(_eta_label(run))}</td>
       <td>{run.total_tokens}</td>
     </tr>
     """
+
+
+def _stage_label(run: TranslationRunSummary) -> str:
+    return run.current_stage or run.status
+
+
+def _progress_mini(run: TranslationRunSummary) -> str:
+    return f"""
+    <div class="progress-mini">
+      <span>{escape(_progress_label(run))}</span>
+      <b><i style="width: {_progress_width(run)}%"></i></b>
+    </div>
+    """
+
+
+def _progress_bar(run: TranslationRunSummary) -> str:
+    return f"""
+    <div class="progress-bar" data-detail-progress-bar="progress">
+      <i style="width: {_progress_width(run)}%"></i>
+    </div>
+    """
+
+
+def _progress_width(run: TranslationRunSummary) -> str:
+    if run.progress_percent is None:
+        return "0"
+    return str(max(0.0, min(100.0, run.progress_percent)))
+
+
+def _progress_label(run: TranslationRunSummary) -> str:
+    if run.total_fragment_count > 0 and run.progress_percent is not None:
+        return (
+            f"{run.fragment_count}/{run.total_fragment_count} · "
+            f"{run.progress_percent}%"
+        )
+    if run.total_fragment_count > 0:
+        return f"{run.fragment_count}/{run.total_fragment_count}"
+    return f"{run.fragment_count}/?"
+
+
+def _eta_label(run: TranslationRunSummary) -> str:
+    if run.eta_seconds is None:
+        return "n/a"
+    return _duration(run.eta_seconds)
 
 
 def _percent(value: float | None) -> str:
@@ -1330,13 +1409,17 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     </section>
     <section class="panel">
       <div class="metric-grid">
-        {_metric("Job", summary.job_id)}
-        {_metric("Status", summary.status)}
-        {_metric("Started", _format_datetime(summary.started_at))}
-        {_metric("Finished", _format_datetime(summary.finished_at))}
-        {_metric("Fragments", str(summary.fragment_count))}
-        {_metric("Tokens", str(summary.total_tokens))}
+        {_metric("Job", summary.job_id, field="job_id")}
+        {_metric("Status", summary.status, field="status")}
+        {_metric("Stage", _stage_label(summary), field="stage")}
+        {_metric("Progress", _progress_label(summary), field="progress")}
+        {_metric("ETA", _eta_label(summary), field="eta")}
+        {_metric("Started", _format_datetime(summary.started_at), field="started_at")}
+        {_metric("Finished", _format_datetime(summary.finished_at), field="finished_at")}
+        {_metric("Fragments", str(summary.fragment_count), field="fragments")}
+        {_metric("Tokens", str(summary.total_tokens), field="tokens")}
       </div>
+      {_progress_bar(summary)}
     </section>
     <section class="panel detail-grid">
       <div>
@@ -1372,7 +1455,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
             <th>Error / warnings</th>
           </tr>
         </thead>
-        <tbody>{fragments}</tbody>
+        <tbody data-detail-fragments>{fragments}</tbody>
       </table>
     </section>
     <section class="panel table-panel">
@@ -1385,9 +1468,106 @@ def log_detail_body(details: TranslationRunDetails) -> str:
             <th>Payload</th>
           </tr>
         </thead>
-        <tbody>{events}</tbody>
+        <tbody data-detail-events>{events}</tbody>
       </table>
     </section>
+    <script>
+      (() => {{
+        const runId = {json.dumps(run_id, ensure_ascii=False)};
+        const escapeHtml = (value) => String(value ?? "").replace(
+          /[&<>"']/g,
+          (char) => ({{
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;"
+          }})[char]
+        );
+        const setField = (name, value) => {{
+          const node = document.querySelector(`[data-detail-field="${{name}}"]`);
+          if (node) node.textContent = String(value ?? "n/a");
+        }};
+        const progressPercent = (summary) => Math.max(
+          0,
+          Math.min(100, Number(summary.progress_percent ?? 0))
+        );
+        const setProgressBar = (summary) => {{
+          const bar = document.querySelector('[data-detail-progress-bar="progress"] i');
+          if (bar) bar.style.width = `${{progressPercent(summary)}}%`;
+        }};
+        const durationLabel = (seconds) => {{
+          if (seconds == null) return "n/a";
+          if (seconds <= 0) return "0m";
+          const minutes = Math.ceil(seconds / 60);
+          if (minutes >= 60) return `${{Math.floor(minutes / 60)}}h ${{minutes % 60}}m`;
+          return `${{minutes}}m`;
+        }};
+        const progressLabel = (summary) => {{
+          const done = summary.fragment_count ?? 0;
+          const total = summary.total_fragment_count ?? 0;
+          const percent = summary.progress_percent;
+          if (total > 0 && percent != null) return `${{done}}/${{total}} · ${{percent}}%`;
+          if (total > 0) return `${{done}}/${{total}}`;
+          return `${{done}}/?`;
+        }};
+        const eventRows = (events) => (events || []).map((event) => `
+          <tr>
+            <td>${{escapeHtml(event.timestamp || "n/a")}}</td>
+            <td><strong>${{escapeHtml(event.event_type || "unknown")}}</strong></td>
+            <td><code>${{escapeHtml(JSON.stringify(event.payload || {{}}))}}</code></td>
+          </tr>
+        `).join("");
+        const fragmentRows = (fragments) => (fragments || []).map((fragment) => {{
+          const blocks = (fragment.source_block_ids || []).join(", ") || "n/a";
+          const chars = `${{fragment.source_text_chars || 0}} -> ${{fragment.translated_text_chars || 0}}`;
+          const tokens = `${{fragment.prompt_tokens || 0}} + ${{fragment.completion_tokens || 0}} = ${{fragment.total_tokens || 0}}`;
+          const notes = [
+            fragment.error_message,
+            ...(fragment.warnings || [])
+          ].filter(Boolean).join(", ") || "n/a";
+          return `
+            <tr>
+              <td>${{escapeHtml(fragment.sequence || 0)}}</td>
+              <td><span class="status">${{escapeHtml(fragment.status || "unknown")}}</span></td>
+              <td>${{escapeHtml(blocks)}}</td>
+              <td>${{escapeHtml(fragment.prompt_tier || "n/a")}}</td>
+              <td>${{escapeHtml(chars)}}</td>
+              <td>${{escapeHtml(tokens)}}</td>
+              <td>${{escapeHtml(fragment.retry_count || 0)}}</td>
+              <td>${{escapeHtml(Number(fragment.elapsed_seconds || 0).toFixed(2))}}s</td>
+              <td>${{escapeHtml(notes)}}</td>
+            </tr>
+          `;
+        }}).join("");
+        async function refreshTranslationDetails() {{
+          const response = await fetch(`/admin/api/logs/${{encodeURIComponent(runId)}}`, {{
+            cache: "no-store"
+          }});
+          if (!response.ok) return;
+          const data = await response.json();
+          const details = data.details || {{}};
+          const summary = details.summary || {{}};
+          setField("status", summary.status || "unknown");
+          setField("stage", summary.current_stage || summary.status || "unknown");
+          setField("progress", progressLabel(summary));
+          setField("eta", durationLabel(summary.eta_seconds));
+          setField("finished_at", summary.finished_at || "n/a");
+          setField("fragments", summary.fragment_count ?? 0);
+          setField("tokens", summary.total_tokens ?? 0);
+          setProgressBar(summary);
+          const fragmentBody = document.querySelector("[data-detail-fragments]");
+          if (fragmentBody && details.fragments) {{
+            fragmentBody.innerHTML = fragmentRows(details.fragments);
+          }}
+          const eventBody = document.querySelector("[data-detail-events]");
+          if (eventBody && details.events) {{
+            eventBody.innerHTML = eventRows(details.events);
+          }}
+        }}
+        setInterval(refreshTranslationDetails, 3000);
+      }})();
+    </script>
     """
 
 
@@ -1643,11 +1823,16 @@ def _bool_label(value: bool | None) -> str:
     return "enabled" if value else "disabled"
 
 
-def _metric(label: str, value: str) -> str:
+def _metric(label: str, value: str, *, field: str | None = None) -> str:
+    field_attribute = (
+        f' data-detail-field="{escape(field)}"'
+        if field is not None
+        else ""
+    )
     return f"""
     <div class="metric-card">
       <span>{escape(label)}</span>
-      <strong>{escape(value)}</strong>
+      <strong{field_attribute}>{escape(value)}</strong>
     </div>
     """
 
@@ -1725,18 +1910,22 @@ def _run_event_row(event: TranslationRunEvent) -> str:
 
 def _definition_table(values: dict) -> str:
     rows = "\n".join(
-        f"""
-        <tr>
-          <th>{escape(str(key))}</th>
-          <td>{escape(_detail_value(value))}</td>
-        </tr>
-        """
+        _definition_row(key, value)
         for key, value in sorted(values.items())
         if value not in (None, "", {}, ())
     )
     if not rows:
         rows = '<tr><td colspan="2" class="empty-cell">No data recorded.</td></tr>'
     return f'<table class="definition-table"><tbody>{rows}</tbody></table>'
+
+
+def _definition_row(key: object, value: object) -> str:
+    return f"""
+        <tr>
+          <th>{escape(str(key))}</th>
+          <td>{_detail_value_html(value)}</td>
+        </tr>
+        """
 
 
 def _flatten_detail_dict(values: dict, *, prefix: str = "") -> dict[str, object]:
@@ -1754,6 +1943,42 @@ def _detail_value(value: object) -> str:
     if isinstance(value, (dict, list, tuple)):
         return _compact_json(value)
     return str(value)
+
+
+def _detail_value_html(value: object) -> str:
+    structured = _structured_detail_value(value)
+    if structured is not None:
+        return f'<pre class="detail-json">{escape(structured)}</pre>'
+    return f'<span class="detail-value">{escape(str(value))}</span>'
+
+
+def _structured_detail_value(value: object) -> str | None:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "{[":
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, (dict, list)):
+        return None
+    return json.dumps(
+        parsed,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        default=str,
+    )
 
 
 def _compact_json(value: object) -> str:
@@ -2244,6 +2469,7 @@ button.danger {
 .metric-card {
   display: grid;
   gap: 6px;
+  min-width: 0;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2254,10 +2480,48 @@ button.danger {
   font-size: 0.78rem;
   text-transform: uppercase;
 }
+.metric-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.progress-bar {
+  height: 10px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6ebf1;
+}
+.progress-bar i,
+.progress-mini i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.progress-mini {
+  display: grid;
+  gap: 6px;
+  min-width: 120px;
+}
+.progress-mini span {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.progress-mini b {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6ebf1;
+}
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
   gap: 18px;
+  align-items: start;
+}
+.detail-grid > div {
+  min-width: 0;
 }
 .detail-grid h4,
 .table-panel h4 {
@@ -2266,24 +2530,65 @@ button.danger {
 .definition-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+.definition-table tbody {
+  display: grid;
+}
+.definition-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  border-bottom: 1px solid var(--line);
 }
 .definition-table th,
 .definition-table td {
-  border-bottom: 1px solid var(--line);
   padding: 8px 0;
   text-align: left;
   vertical-align: top;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .definition-table th {
-  width: 42%;
   color: var(--muted);
   font-size: 0.78rem;
   text-transform: uppercase;
+  padding-right: 12px;
+}
+.detail-value {
+  display: block;
+}
+.detail-json {
+  margin: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+@media (max-width: 760px) {
+  .definition-table tr {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 8px 0;
+  }
+  .definition-table th,
+  .definition-table td {
+    padding: 0;
+  }
 }
 .log-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 860px;
+  min-width: 980px;
 }
 .log-table th,
 .log-table td {
@@ -2301,6 +2606,10 @@ button.danger {
   display: block;
   color: var(--muted);
   font-size: 0.85rem;
+}
+.log-table td .progress-mini span {
+  color: var(--ink);
+  font-size: 0.9rem;
 }
 .empty-cell {
   color: var(--muted);

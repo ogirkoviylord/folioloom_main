@@ -30,6 +30,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
                     document_kind="txt",
                     source_language="en",
                     target_language="ru",
+                    total_fragment_count=4,
                 ),
             )
             running.record_fragment(
@@ -43,6 +44,10 @@ class AdminLiveMonitorTest(unittest.TestCase):
                     completion_tokens=40,
                     total_tokens=140,
                 )
+            )
+            running.record_event(
+                "work_unit_started",
+                {"sequence": 2, "total_units": 4},
             )
             failed = TranslationRunLogger.start(
                 root=temp_dir,
@@ -73,6 +78,12 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.tokens_last_hour, 140)
         self.assertEqual(snapshot.recent_runs[0].job_id, "job-failed")
         self.assertEqual(snapshot.recent_runs[1].job_id, "job-running")
+        self.assertEqual(snapshot.recent_runs[1].fragment_count, 1)
+        self.assertEqual(snapshot.recent_runs[1].total_fragment_count, 4)
+        self.assertEqual(snapshot.recent_runs[1].progress_percent, 25.0)
+        self.assertEqual(snapshot.recent_runs[1].eta_seconds, 3.0)
+        self.assertEqual(snapshot.recent_runs[1].current_stage, "work_unit_started")
+        self.assertIsNotNone(snapshot.recent_runs[1].last_event_at)
         self.assertTrue(snapshot.server.available)
         self.assertEqual(snapshot.server.cpu_percent, 12.5)
         self.assertEqual(snapshot.server.memory_percent, 62.5)

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+_ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
+
 
 @dataclass(frozen=True)
 class TranslationRunSummary:
@@ -25,6 +27,11 @@ class TranslationRunSummary:
     result_file_name: str | None
     error_message: str | None
     fragment_count: int
+    total_fragment_count: int
+    progress_percent: float | None
+    eta_seconds: float | None
+    current_stage: str
+    last_event_at: datetime | None
     total_tokens: int
     elapsed_seconds: float
     run_dir: str
@@ -180,9 +187,19 @@ def _read_run_summary(run_json: Path) -> TranslationRunSummary | None:
     totals = data.get("totals")
     if not isinstance(totals, dict):
         totals = {}
+    completed_fragments = _int(data.get("fragment_count"))
+    events_path = run_json.parent / "events.jsonl"
+    total_fragments = _total_fragment_count(
+        data,
+        completed_fragments=completed_fragments,
+        events_path=events_path,
+    )
+    last_event_at, current_stage = _latest_event_state(events_path)
+    elapsed_seconds = _float(totals.get("elapsed_seconds"))
+    status = _string(data.get("status"), fallback="unknown").lower()
     return TranslationRunSummary(
         job_id=_string(data.get("job_id"), fallback=run_json.parent.name),
-        status=_string(data.get("status"), fallback="unknown").lower(),
+        status=status,
         started_at=_parse_datetime(data.get("started_at")),
         finished_at=_parse_datetime(data.get("finished_at")),
         order_id=_optional_string(data.get("order_id")),
@@ -194,9 +211,19 @@ def _read_run_summary(run_json: Path) -> TranslationRunSummary | None:
         translator_model=_optional_string(data.get("translator_model")),
         result_file_name=_optional_string(data.get("result_file_name")),
         error_message=_truncate(_optional_string(data.get("error_message"))),
-        fragment_count=_int(data.get("fragment_count")),
+        fragment_count=completed_fragments,
+        total_fragment_count=total_fragments,
+        progress_percent=_progress_percent(completed_fragments, total_fragments),
+        eta_seconds=_eta_seconds(
+            status=status,
+            completed_fragments=completed_fragments,
+            total_fragments=total_fragments,
+            elapsed_seconds=elapsed_seconds,
+        ),
+        current_stage=current_stage or status,
+        last_event_at=last_event_at,
         total_tokens=_int(totals.get("total_tokens")),
-        elapsed_seconds=_float(totals.get("elapsed_seconds")),
+        elapsed_seconds=elapsed_seconds,
         run_dir=str(run_json.parent),
     )
 
@@ -212,6 +239,7 @@ def _run_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "target_language",
         "detected_source_language",
         "interface_language",
+        "total_fragment_count",
         "translator_model",
         "prompt_version",
         "adapter_version",
@@ -250,6 +278,102 @@ def _read_events(events_path: Path) -> tuple[TranslationRunEvent, ...]:
             )
         )
     return tuple(events)
+
+
+def _total_fragment_count(
+    data: dict[str, Any],
+    *,
+    completed_fragments: int,
+    events_path: Path,
+) -> int:
+    explicit_total = _int(data.get("total_fragment_count"))
+    event_total = _event_fragment_count(events_path)
+    return max(completed_fragments, explicit_total, event_total)
+
+
+def _event_fragment_count(events_path: Path) -> int:
+    if not events_path.exists():
+        return 0
+    total = 0
+    try:
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        total = max(
+            total,
+            _int(payload.get("fragment_count")),
+            _int(payload.get("total_fragments")),
+            _int(payload.get("total_units")),
+        )
+    return total
+
+
+def _latest_event_state(events_path: Path) -> tuple[datetime | None, str | None]:
+    if not events_path.exists():
+        return None, None
+    latest_at: datetime | None = None
+    latest_type: str | None = None
+    try:
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None, None
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        event_at = _parse_datetime(data.get("timestamp"))
+        event_type = _optional_string(data.get("event_type"))
+        if event_type is None:
+            continue
+        if event_at is None or latest_at is None or event_at >= latest_at:
+            latest_at = event_at
+            latest_type = event_type
+    return latest_at, latest_type
+
+
+def _progress_percent(
+    completed_fragments: int,
+    total_fragments: int,
+) -> float | None:
+    if total_fragments <= 0:
+        return None
+    return round(min(100.0, completed_fragments / total_fragments * 100), 1)
+
+
+def _eta_seconds(
+    *,
+    status: str,
+    completed_fragments: int,
+    total_fragments: int,
+    elapsed_seconds: float,
+) -> float | None:
+    if total_fragments <= 0:
+        return None
+    if completed_fragments >= total_fragments:
+        return 0.0
+    if status not in _ACTIVE_STATUSES:
+        return None
+    if completed_fragments <= 0 or elapsed_seconds <= 0:
+        return None
+    average_seconds = elapsed_seconds / completed_fragments
+    return round(average_seconds * (total_fragments - completed_fragments), 1)
 
 
 def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, ...]:

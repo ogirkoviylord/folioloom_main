@@ -36,6 +36,7 @@ from translator_service.language_detection import (
 from translator_service.order_estimates import estimate_order
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
+    PersistentWorkUnit,
     PersistentWorkUnitStatus,
 )
 from translator_service.persistent_job_store import PersistentJobStore
@@ -700,6 +701,7 @@ class BotTranslationService:
             translator=translator,
             adapter_version=resumed.adapter_version,
             prompt_version=resumed.prompt_version,
+            total_fragment_count=total_fragments,
         )
         if run_logger is not None:
             run_logger.record_event(
@@ -1167,6 +1169,7 @@ class BotTranslationService:
             document_kind=document_kind,
             job_id=queued_job.id,
             translator=translator,
+            total_fragment_count=pending.fragment_count,
         )
         if run_logger is not None:
             run_logger.record_event("job_created", {"job_id": queued_job.id})
@@ -1324,6 +1327,7 @@ class BotTranslationService:
         translator: TextTranslator,
         adapter_version: str | None = None,
         prompt_version: str | None = None,
+        total_fragment_count: int | None = None,
     ) -> TranslationRunLogger | None:
         if self._translation_run_log_root is None:
             return None
@@ -1350,6 +1354,7 @@ class BotTranslationService:
                 prompt_version=resolved_prompt_version,
                 adapter_version=resolved_adapter_version,
                 detected_source_language=pending.source_language_display,
+                total_fragment_count=total_fragment_count,
                 translation_policy=translation_policy,
                 translation_stack=_translation_stack_snapshot(
                     translation_policy=translation_policy,
@@ -1406,6 +1411,7 @@ class BotTranslationService:
             translator=translator,
             adapter_version=plan.job.adapter_version,
             prompt_version=plan.job.prompt_version,
+            total_fragment_count=total_fragments,
         )
         if run_logger is not None:
             run_logger.record_event(
@@ -1493,6 +1499,10 @@ class BotTranslationService:
                 job_id=plan.job.id,
                 worker_id=f"telegram:{pending.user_telegram_id}",
                 translator=translator,
+                work_unit_started_callback=_work_unit_started_callback(
+                    run_logger=run_logger,
+                    total_units=total_fragments,
+                ),
             )
             if completed_unit is None:
                 break
@@ -1610,6 +1620,10 @@ class BotTranslationService:
                     max_active_units_per_job=self._max_parallel_work_units,
                 ),
                 lease_seconds=300,
+                work_unit_started_callback=_work_unit_started_callback(
+                    run_logger=run_logger,
+                    total_units=total_fragments,
+                ),
             )
             try:
                 _record_translator_security_events(
@@ -1709,6 +1723,10 @@ class BotTranslationService:
                 translator=translator,
                 max_parallel_units=self._max_parallel_work_units,
                 progress_callback=report_progress,
+                work_unit_started_callback=_work_unit_started_callback(
+                    run_logger=run_logger,
+                    total_units=total_fragments,
+                ),
                 should_stop=lambda: cancellation_token.is_cancelled,
             )
         except SecurityThresholdExceeded as error:
@@ -1964,6 +1982,28 @@ def _progress_callback_with_run_logging(
             progress_callback(progress)
 
     return report
+
+
+def _work_unit_started_callback(
+    *,
+    run_logger: TranslationRunLogger | None,
+    total_units: int,
+) -> Callable[[PersistentWorkUnit], None] | None:
+    if run_logger is None:
+        return None
+
+    def record(work_unit: PersistentWorkUnit) -> None:
+        run_logger.record_event(
+            "work_unit_started",
+            {
+                "sequence": work_unit.sequence,
+                "work_unit_id": work_unit.id,
+                "total_units": total_units,
+                "source_block_ids": list(work_unit.source_block_ids),
+            },
+        )
+
+    return record
 
 
 def _print_translation_cancel_requested(active: _ActiveTranslationCancellation) -> None:

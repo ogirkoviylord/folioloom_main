@@ -25,6 +25,7 @@ class TranslationRunMetadata:
     adapter_version: str | None = None
     interface_language: str | None = None
     detected_source_language: str | None = None
+    total_fragment_count: int | None = None
     translation_policy: str | None = None
     translation_quality_route: str | None = None
     translation_stack: dict | None = None

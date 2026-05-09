@@ -443,6 +443,18 @@ def create_admin_router(settings: Settings) -> APIRouter:
             }
         )
 
+    @router.get("/api/logs/{run_id}")
+    async def log_detail_api(run_id: str, request: Request) -> JSONResponse:
+        if _session_or_none(request, session_manager) is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        details = get_translation_run_details(
+            settings.translation_run_log_root,
+            run_id,
+        )
+        if details is None:
+            return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
+        return _json({"details": details})
+
     @router.get("/api/activity")
     async def activity_api(request: Request) -> JSONResponse:
         if _session_or_none(request, session_manager) is None:
