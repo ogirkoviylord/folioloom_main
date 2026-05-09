@@ -971,7 +971,6 @@ class AdminRoutesTest(unittest.TestCase):
                     target_language="ru",
                 ),
             )
-            logger.finish(status="ready", result_file_name="live-book.ru.txt")
             client = TestClient(
                 create_app(
                     settings=Settings(
@@ -1001,7 +1000,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn('class="progress-mini"', page.text)
             self.assertEqual(api.status_code, 200)
             payload = api.json()
-            self.assertEqual(payload["active_translations"], 0)
+            self.assertEqual(payload["active_translations"], 1)
             self.assertEqual(payload["recent_runs"][0]["job_id"], "job-live-1")
             self.assertIn("progress_percent", payload["recent_runs"][0])
             self.assertIn("eta_seconds", payload["recent_runs"][0])

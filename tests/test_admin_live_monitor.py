@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from collections import namedtuple
 from datetime import UTC, datetime
@@ -76,14 +77,13 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.failed_today, 1)
         self.assertEqual(snapshot.tokens_today, 140)
         self.assertEqual(snapshot.tokens_last_hour, 140)
-        self.assertEqual(snapshot.recent_runs[0].job_id, "job-failed")
-        self.assertEqual(snapshot.recent_runs[1].job_id, "job-running")
-        self.assertEqual(snapshot.recent_runs[1].fragment_count, 1)
-        self.assertEqual(snapshot.recent_runs[1].total_fragment_count, 4)
-        self.assertEqual(snapshot.recent_runs[1].progress_percent, 25.0)
-        self.assertEqual(snapshot.recent_runs[1].eta_seconds, 3.0)
-        self.assertEqual(snapshot.recent_runs[1].current_stage, "work_unit_started")
-        self.assertIsNotNone(snapshot.recent_runs[1].last_event_at)
+        self.assertEqual([run.job_id for run in snapshot.recent_runs], ["job-running"])
+        self.assertEqual(snapshot.recent_runs[0].fragment_count, 1)
+        self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 4)
+        self.assertEqual(snapshot.recent_runs[0].progress_percent, 25.0)
+        self.assertEqual(snapshot.recent_runs[0].eta_seconds, 3.0)
+        self.assertEqual(snapshot.recent_runs[0].current_stage, "work_unit_started")
+        self.assertIsNotNone(snapshot.recent_runs[0].last_event_at)
         self.assertTrue(snapshot.server.available)
         self.assertEqual(snapshot.server.cpu_percent, 12.5)
         self.assertEqual(snapshot.server.memory_percent, 62.5)
@@ -123,6 +123,78 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.active_translations, 1)
         self.assertEqual(snapshot.queued_translations, 1)
 
+    def test_recent_runs_only_include_active_or_transitioning_runs(self):
+        with TemporaryDirectory() as temp_dir:
+            running = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-running",
+                    order_id=None,
+                    user_id=None,
+                    file_name="running.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+            ready = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-ready",
+                    order_id=None,
+                    user_id=None,
+                    file_name="ready.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+            ready.finish(status="ready")
+            cancelled = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-cancelled",
+                    order_id=None,
+                    user_id=None,
+                    file_name="cancelled.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+            cancelled.finish(status="cancelled")
+            cancelling = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-cancel-requested",
+                    order_id=None,
+                    user_id=None,
+                    file_name="cancelling.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+            _set_run_status(cancelling.run_dir, "cancel_requested")
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                recent_limit=2,
+                server=collect_local_server_health(
+                    disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(
+            [run.job_id for run in snapshot.recent_runs],
+            ["job-cancel-requested", "job-running"],
+        )
+        self.assertEqual(
+            {run.status for run in snapshot.recent_runs},
+            {"cancel_requested", "running"},
+        )
+
 
 _DiskUsage = namedtuple("_DiskUsage", ("total", "used", "free"))
 
@@ -150,6 +222,16 @@ class _FakePsutil:
 
     def boot_time(self):
         return datetime(2026, 5, 9, 11, 58, tzinfo=UTC).timestamp()
+
+
+def _set_run_status(run_dir, status: str) -> None:
+    run_json = run_dir / "run.json"
+    snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+    snapshot["status"] = status
+    run_json.write_text(
+        json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
