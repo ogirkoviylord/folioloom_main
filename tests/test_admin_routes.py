@@ -4,6 +4,7 @@ import sqlite3
 import unittest
 from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -204,6 +205,37 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/ai-providers")
         refresh.assert_called_once()
+
+    def test_ai_providers_page_renders_deepseek_balance_panel(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        with patch(
+            "translator_service.admin.routes._deepseek_balance_snapshot",
+        ) as snapshot:
+            snapshot.return_value = SimpleNamespace(
+                provider_id="deepseek",
+                status="available",
+                is_available=True,
+                balances=(
+                    SimpleNamespace(
+                        currency="USD",
+                        total_balance=Decimal("8.50"),
+                        granted_balance=Decimal("0"),
+                        topped_up_balance=Decimal("8.50"),
+                    ),
+                ),
+                last_checked_at=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                last_success_at=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                error_code=None,
+                error_message=None,
+            )
+            response = self.client.get("/admin/ai-providers")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DeepSeek account balance", response.text)
+        self.assertIn("8.50", response.text)
+        self.assertIn("Refresh balance", response.text)
+        self.assertNotIn("sk-", response.text)
 
     def test_admin_quality_does_not_build_summary_without_login(self):
         with patch(

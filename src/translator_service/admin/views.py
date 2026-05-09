@@ -23,6 +23,7 @@ from translator_service.admin.integrations import (
 )
 from translator_service.admin.live import LiveMonitorSnapshot
 from translator_service.admin.operations import OperationsOverview
+from translator_service.admin.provider_balance import ProviderBalanceSnapshot
 from translator_service.admin.provider_health import ProviderHealthSummary
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
@@ -316,6 +317,9 @@ def ai_providers_body(
     health_summaries: tuple[ProviderHealthSummary, ...] = (),
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+    balance_snapshot: ProviderBalanceSnapshot | None = None,
+    balance_stale_seconds: int = 300,
+    top_up_url: str = "https://platform.deepseek.com/usage",
 ) -> str:
     health_by_provider = {health.provider_id: health for health in health_summaries}
     runtime_by_provider = {status.provider_id: status for status in runtime_statuses}
@@ -328,6 +332,9 @@ def ai_providers_body(
             health=health_by_provider.get(summary.integration_id),
             runtime=runtime_by_provider.get(summary.integration_id),
             reload_state=reload_by_provider.get(summary.integration_id),
+            balance_snapshot=balance_snapshot,
+            balance_stale_seconds=balance_stale_seconds,
+            top_up_url=top_up_url,
         )
         for summary in summaries
     )
@@ -353,6 +360,9 @@ def _ai_provider_card(
     health: ProviderHealthSummary | None,
     runtime: AIProviderRuntimeStatus | None,
     reload_state: AIProviderRuntimeReloadRequest | None,
+    balance_snapshot: ProviderBalanceSnapshot | None,
+    balance_stale_seconds: int,
+    top_up_url: str,
 ) -> str:
     active_key_count = sum(1 for key in keys if key.enabled and not key.disabled)
     testable_key_count = sum(
@@ -370,6 +380,14 @@ def _ai_provider_card(
         reload_state,
         csrf_token,
     )
+    balance_panel = ""
+    if summary.integration_id == "deepseek":
+        balance_panel = _provider_balance_panel(
+            balance_snapshot,
+            csrf_token=csrf_token,
+            stale_seconds=balance_stale_seconds,
+            top_up_url=top_up_url,
+        )
     test_all_form = _ai_provider_test_all_keys_form(
         summary.integration_id,
         csrf_token=csrf_token,
@@ -385,6 +403,7 @@ def _ai_provider_card(
       <p>{escape(summary.description)}</p>
       {health_panel}
       {runtime_panel}
+      {balance_panel}
       {test_all_form}
       <div class="key-table">{rows}</div>
       <form class="secret-form key-form" method="post"
@@ -505,6 +524,93 @@ def _provider_runtime_panel(
         </form>
       </div>
     """
+
+
+def _provider_balance_panel(
+    snapshot: ProviderBalanceSnapshot | None,
+    *,
+    csrf_token: str,
+    stale_seconds: int,
+    top_up_url: str,
+) -> str:
+    if snapshot is None:
+        status = "not checked"
+        rows = '<p class="empty-state">No DeepSeek balance snapshot yet.</p>'
+        checked = "n/a"
+        success = "n/a"
+        error = "n/a"
+    else:
+        status = _balance_status(snapshot, stale_seconds)
+        rows = "\n".join(_balance_metric_row(amount) for amount in snapshot.balances)
+        if not rows:
+            rows = '<p class="empty-state">No currency balances reported.</p>'
+        checked = snapshot.last_checked_at.isoformat(timespec="seconds")
+        success = (
+            snapshot.last_success_at.isoformat(timespec="seconds")
+            if snapshot.last_success_at is not None
+            else "n/a"
+        )
+        error = snapshot.error_message or "n/a"
+    safe_top_up = _safe_external_href(top_up_url)
+    return f"""
+      <div class="provider-health">
+        <div>
+          <h4>DeepSeek account balance</h4>
+          <span class="status">{escape(status)}</span>
+        </div>
+        <div class="metric-grid">
+          {rows}
+          <div class="metric-card">
+            <span>Last checked</span>
+            <strong>{escape(checked)}</strong>
+          </div>
+          <div class="metric-card">
+            <span>Last success</span>
+            <strong>{escape(success)}</strong>
+          </div>
+          <div class="metric-card">
+            <span>Error</span>
+            <strong>{escape(error)}</strong>
+          </div>
+        </div>
+        <form class="secret-form" method="post"
+          action="/admin/ai-providers/deepseek/balance/refresh">
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+          <button type="submit">Refresh balance</button>
+          <a class="table-action" href="{escape(safe_top_up)}" rel="noreferrer">
+            Open DeepSeek top-up
+          </a>
+        </form>
+      </div>
+    """
+
+
+def _balance_metric_row(amount) -> str:
+    return f"""
+      <div class="metric-card">
+        <span>{escape(amount.currency)} total</span>
+        <strong>{escape(str(amount.total_balance))}</strong>
+        <span>
+          granted {escape(str(amount.granted_balance))} ·
+          top-up {escape(str(amount.topped_up_balance))}
+        </span>
+      </div>
+    """
+
+
+def _balance_status(snapshot: ProviderBalanceSnapshot, stale_seconds: int) -> str:
+    age_seconds = (
+        datetime.now(UTC) - snapshot.last_checked_at.astimezone(UTC)
+    ).total_seconds()
+    if age_seconds > max(1, stale_seconds):
+        return "stale"
+    return snapshot.status.replace("_", " ")
+
+
+def _safe_external_href(value: str) -> str:
+    if value.startswith("https://"):
+        return value
+    return "https://platform.deepseek.com/usage"
 
 
 def _ai_provider_test_all_keys_form(

@@ -188,6 +188,9 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 health_summaries=_ai_provider_health(settings),
                 runtime_statuses=_ai_provider_runtime_statuses(settings),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+                balance_snapshot=_deepseek_balance_snapshot(settings),
+                balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
+                top_up_url=settings.admin_deepseek_top_up_url,
             ),
         )
 
