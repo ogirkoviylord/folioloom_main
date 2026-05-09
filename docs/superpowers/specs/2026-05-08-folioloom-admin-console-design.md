@@ -23,7 +23,70 @@ The first version optimizes for a practical owner MVP:
 
 ## Current State
 
-The dev branch already has the pieces that make an admin console valuable:
+As of 2026-05-09, the `codex/dev` branch has moved from an admin-console
+concept to a deploy-ready owner-console MVP. The console is still bootstrap
+owner auth, not a full multi-admin product, but it already controls practical
+runtime configuration and exposes service operations from the browser.
+
+The current implemented state includes:
+
+- FastAPI admin console mounted under `/admin`;
+- bootstrap owner login, signed HTTP-only session cookie, CSRF protection for
+  mutating form routes, no-store admin pages, and role-shaped owner session
+  model;
+- service-first navigation: Overview, Integrations, AI Providers, Billing,
+  Costs, Quality, Live, Logs, Activity, Users, Settings, Operations, Security,
+  and Audit;
+- environment badge in the admin shell;
+- Overview action center for owner-visible issues such as missing required
+  integrations, failed translations, high usage/cost signals, disk pressure,
+  DeepSeek key problems, runtime status problems, and secret safety warnings;
+- multi-instance integration connections, including Telegram stable/dev style
+  connection rows and reserved shells for future channels/surfaces;
+- AI Providers page with DeepSeek key-pool rows, add/update/enable/disable/remove
+  flows, masked fingerprints, validation status, health summaries, runtime
+  status, and manual reload requests;
+- encrypted SQLite-backed admin secret store behind a `SecretStore` boundary,
+  using `ADMIN_SECRET_MASTER_KEY` as the deployment-held master key;
+- runtime DeepSeek key loading from admin-managed encrypted secrets, with env
+  fallback for bootstrap and a reloadable translator that can switch from env
+  fallback to admin keys without bot restart;
+- provider runtime status and reload request tables in the shared admin DB;
+- Live monitor page/API for translation and local server metrics, with reserved
+  shape for future VPS/provider metrics;
+- Operations overview wired to persistent jobs/workers where available;
+- Costs and Quality read models from safe translation run metadata;
+- Users, Activity, Security, and Audit pages backed by the admin activity/audit
+  stores;
+- Translation Logs list with filters, JSON API, downloadable run archive, and a
+  per-run Details page;
+- per-translation Details page at `/admin/logs/{run_id}` showing safe inputs,
+  totals, translation stack, profile/adapter/model metadata, security totals,
+  fragment progress metadata, events, result/error state, and archive download;
+- deploy scripts and runbooks for OVH/Ubuntu/Docker deployment;
+- `scripts/predeploy_check.sh` for local predeploy validation;
+- `scripts/server_smoke_check.sh` for server smoke checks, including a strict
+  post-bootstrap mode that proves the bot can see admin-managed provider keys;
+- backup/restore scripts and runbooks that include `admin.sqlite3`,
+  `ADMIN_SECRET_MASTER_KEY` handling, artifact checksums, and SQLite integrity
+  verification for the admin DB inside runtime archives.
+
+The console now has these practical owner workflows:
+
+- add several DeepSeek API keys in the browser;
+- change key labels, weights, and parallel capacity;
+- disable a key without losing its encrypted secret;
+- remove a key and disable its secret;
+- request provider runtime reload from the browser;
+- check whether the bot runtime has reported admin/env provider source and
+  active channels;
+- inspect translation runs and drill into a specific run's safe execution
+  details;
+- run predeploy checks before touching the VPS;
+- run server smoke checks after deploy and after adding provider keys.
+
+The project still also has these non-admin service pieces that make the console
+valuable:
 
 - FastAPI application scaffold with `/health`;
 - Telegram runtime using env-based bootstrap settings;
@@ -35,14 +98,24 @@ The dev branch already has the pieces that make an admin console valuable:
 - order, pricing, billing, user, document, and file-storage domain modules;
 - dev/stable environment separation documented in README.
 
-The current configuration boundary is mostly environment variables. That is
-appropriate for bootstrap secrets and local development, but it is not enough
-for a browser-based operations console because it lacks:
+The configuration boundary is no longer only environment variables. Environment
+variables remain the bootstrap layer for deployment-held secrets and safe
+defaults, while the admin database now holds encrypted provider/integration
+secrets, audit/activity state, runtime reload requests, runtime provider
+status, and translation details read models.
 
-- masked secret replacement and validation;
+Remaining gaps before a full production admin product:
+
 - role-aware access control;
-- audit history for sensitive changes;
-- runtime status snapshots;
+- named admin accounts and login lifecycle;
+- public HTTPS/admin access policy beyond the current SSH-tunnel-first model;
+- rate limiting/lockout for failed admin login;
+- managed secret-store adapter for cloud/Vault/Doppler/1Password style
+  deployments;
+- browser-managed service settings beyond provider/integration secrets;
+- complete job retry/cancel workflows for every scheduler state;
+- payment provider integration and finance dashboard;
+- mobile-first admin console polish;
 - future channel-independent customer and order management.
 
 ## Product Direction
@@ -350,7 +423,7 @@ may affect a paying customer or an in-progress translation.
 The logs page lets the owner review translation runs without opening server log
 files or SSH access.
 
-MVP logs:
+Implemented MVP logs:
 
 - list translation runs from the privacy-safe translation run snapshots;
 - filter by status;
@@ -360,12 +433,19 @@ MVP logs:
   document kind, language direction, status, start/finish timestamps, fragment
   count, token totals, elapsed seconds, result file name, and safe error
   summary;
-- provide a JSON API with the same safe read model.
+- provide a JSON API with the same safe read model;
+- provide a `Details` action for each run;
+- provide a per-run detail page at `/admin/logs/{run_id}`;
+- show safe input metadata, model, prompt version, adapter version,
+  translation policy, language/profile signatures, run totals, security totals,
+  fragment status/timing/token/retry/block metadata, and lifecycle events;
+- provide a per-run downloadable archive containing the underlying run files.
 
 The logs page must never show source text, translated text, prompts, provider
 credentials, or raw provider responses. Fragment-level details can be added
-later, but only through the same privacy-safe hashes and metadata already used
-by translation run logs.
+only through privacy-safe hashes and metadata unless a future explicit
+forensic-text retention mode is designed and enabled. The current implementation
+does not expose raw source or translated document text in the admin UI.
 
 ### Security And Audit
 
