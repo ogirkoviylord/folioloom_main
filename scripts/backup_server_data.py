@@ -79,6 +79,12 @@ def storage_archive_name(storage_root: Path) -> str:
     return storage_root.as_posix().rstrip("/")
 
 
+def runtime_archive_name(runtime_root: Path) -> str:
+    if runtime_root.is_absolute():
+        return runtime_root.name
+    return runtime_root.as_posix().rstrip("/")
+
+
 def host_runtime_path(path: Path) -> Path:
     """Map compose container runtime paths back to the host ./var directory."""
     path_text = path.as_posix()
@@ -225,6 +231,7 @@ def archive_runtime_files(
     storage_root: Path,
     admin_db_path: Path,
     output_path: Path,
+    runtime_root: Path | None = None,
 ) -> None:
     if not storage_root.exists():
         raise FileNotFoundError(f"Object storage root not found: {storage_root}")
@@ -232,7 +239,13 @@ def archive_runtime_files(
         raise FileNotFoundError(f"Admin database not found: {admin_db_path}")
     storage_root = storage_root.resolve()
     admin_db_path = admin_db_path.resolve()
-    runtime_root = _runtime_archive_root(storage_root, admin_db_path)
+    runtime_root = (
+        runtime_root.resolve()
+        if runtime_root is not None
+        else _runtime_archive_root(storage_root, admin_db_path)
+    )
+    if not runtime_root.exists():
+        raise FileNotFoundError(f"Runtime root not found: {runtime_root}")
     archive_base = runtime_root.parent
     with tarfile.open(output_path, "w:gz") as archive:
         archive.add(runtime_root, arcname=runtime_root.relative_to(archive_base))
@@ -286,6 +299,7 @@ def write_manifest(
         "admin_db_path": str(admin_db_path),
         "row_counts": row_counts,
         "storage_file_count": storage_file_count,
+        "runtime_file_count": count_files(runtime_root),
         "database_dump": {
             "path": str(db_dump_path),
             "size_bytes": db_dump_path.stat().st_size,
@@ -378,6 +392,43 @@ def _verify_runtime_archive_contains_admin_db(
                 )
 
 
+def _verify_runtime_archive_contains_runtime_root(
+    *,
+    manifest_path: Path,
+    manifest: dict[str, object],
+) -> None:
+    row_counts = manifest.get("row_counts")
+    if not isinstance(row_counts, dict):
+        return
+    if int(row_counts.get("translation_jobs") or 0) == 0:
+        return
+    raw_runtime_root = manifest.get("runtime_root")
+    if not isinstance(raw_runtime_root, str) or not raw_runtime_root:
+        return
+    artifact = manifest.get("files_archive")
+    if not isinstance(artifact, dict):
+        raise RuntimeError("manifest is missing files_archive")
+    raw_archive_path = artifact.get("path")
+    if not isinstance(raw_archive_path, str) or not raw_archive_path:
+        raise RuntimeError("manifest files_archive path is missing")
+    archive_path = _manifest_artifact_path(manifest_path, raw_archive_path)
+    runtime_member = runtime_archive_name(Path(raw_runtime_root)).strip("/")
+    with tarfile.open(archive_path, "r:gz") as archive:
+        file_members = [
+            member
+            for member in archive.getmembers()
+            if member.isfile()
+            and (
+                member.name == runtime_member
+                or member.name.startswith(f"{runtime_member}/")
+            )
+        ]
+    if not file_members:
+        raise RuntimeError(
+            f"runtime archive does not contain runtime root files: {runtime_member}"
+        )
+
+
 def verify_backup_manifest(
     manifest_path: Path,
     *,
@@ -407,6 +458,10 @@ def verify_backup_manifest(
         manifest_path=manifest_path,
         manifest=manifest,
     )
+    _verify_runtime_archive_contains_runtime_root(
+        manifest_path=manifest_path,
+        manifest=manifest,
+    )
 
 
 def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
@@ -414,6 +469,7 @@ def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     compose_file = Path(args.compose_file)
     output_dir = Path(args.output_dir)
     env = parse_env_file(env_file)
+    explicit_runtime_root = args.runtime_root or env.get("RUNTIME_ROOT") or ""
     storage_root = host_runtime_path(
         Path(
             args.storage_root
@@ -424,7 +480,11 @@ def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     admin_db_path = host_runtime_path(
         Path(args.admin_db_path or env.get("ADMIN_DB_PATH") or "var/admin.sqlite3")
     )
-    runtime_root = _runtime_archive_root(storage_root, admin_db_path)
+    runtime_root = (
+        host_runtime_path(Path(explicit_runtime_root))
+        if explicit_runtime_root
+        else _runtime_archive_root(storage_root, admin_db_path)
+    )
     db_settings = database_settings_from_env(env)
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
@@ -450,6 +510,7 @@ def run_backup(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         storage_root=storage_root,
         admin_db_path=admin_db_path,
         output_path=files_archive_path,
+        runtime_root=runtime_root,
     )
     storage_file_count = count_files(storage_root)
     validate_backup_counts(
@@ -483,6 +544,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--compose-file", default="docker-compose.yml")
     parser.add_argument("--compose-command", default="docker compose")
     parser.add_argument("--postgres-service", default="postgres")
+    parser.add_argument("--runtime-root", default="")
     parser.add_argument("--storage-root", default="")
     parser.add_argument("--admin-db-path", default="")
     parser.add_argument("--output-dir", default="folioloom_exports")
