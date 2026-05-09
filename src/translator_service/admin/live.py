@@ -13,7 +13,15 @@ from translator_service.admin.translation_logs import (
     list_translation_run_summaries,
 )
 
-_ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
+_ACTIVE_STATUSES = {
+    "active",
+    "cancel_requested",
+    "in_progress",
+    "processing",
+    "running",
+    "started",
+    "translating",
+}
 _FAILED_STATUSES = {"failed", "interrupted", "error"}
 _AUTO_PSUTIL = object()
 
@@ -53,6 +61,7 @@ def build_live_monitor_snapshot(
 ) -> LiveMonitorSnapshot:
     current_time = _aware_utc(now or datetime.now(UTC))
     runs = list_translation_run_summaries(translation_run_log_root, limit=200)
+    live_runs = tuple(run for run in runs if run.status in _ACTIVE_STATUSES)
     today = current_time.date()
     one_hour_ago = current_time - timedelta(hours=1)
     queued = 0
@@ -87,7 +96,7 @@ def build_live_monitor_snapshot(
             for run in runs
             if run.started_at is not None and _aware_utc(run.started_at) >= one_hour_ago
         ),
-        recent_runs=tuple(runs[: max(1, int(recent_limit))]),
+        recent_runs=live_runs[: max(1, int(recent_limit))],
         server=server if server is not None else collect_local_server_health(),
     )
 
