@@ -1,0 +1,324 @@
+Ukrainian Translation Regression Sample Pack
+
+Target language: uk
+Purpose: manual and automated QA for many-source translation into Ukrainian.
+
+## uk-ordinary-calque-decision-overview
+Category: ordinary_prose
+Source language: en
+Quality track: precision
+Expected text type: general
+
+Source:
+He made a decision after a high-level overview of the system.
+
+Expected behavior:
+- Avoid зробив рішення.
+- Avoid awkward високорівневим оглядом in general prose.
+
+Banned outputs:
+- зробив рішення
+- високорівневим оглядом
+
+Required preservations:
+- system
+
+Reference translation:
+Він ухвалив рішення після загального огляду системи.
+
+Required prompt terms:
+- standard Ukrainian
+- зробив рішення
+- вирішив
+- ухвалив рішення
+
+## uk-ru-calque-participation-duration
+Category: russian_calque
+Source language: ru
+Quality track: precision
+Expected text type: general
+
+Source:
+Он принял участие в проекте на протяжении месяца. Следующий раздел является обзором.
+
+Expected behavior:
+- Translate Russian meaning into standard Ukrainian, not word replacement.
+- Avoid прийняв участь, на протязі, слідуючий, and являється.
+
+Banned outputs:
+- прийняв участь
+- на протязі
+- слідуючий
+- являється
+
+Required preservations:
+- місяця
+
+Reference translation:
+Він узяв участь у проєкті протягом місяця. Наступний розділ є оглядом.
+
+Required prompt terms:
+- Avoid Russian calques
+- брати участь
+- протягом
+
+## uk-literary-rain-window
+Category: literary
+Source language: en
+Quality track: literary
+Expected text type: literary fiction
+
+Source:
+The room held its breath while the rain traced silver lines across the window.
+
+Expected behavior:
+- Preserve imagery and rhythm.
+- Do not flatten literary prose into neutral explanation.
+
+Banned outputs:
+- Кімната тримала своє дихання
+- дощ простежував
+
+Required preservations:
+- room
+- rain
+- window
+
+Reference translation:
+Кімната ніби затамувала подих, поки дощ креслив срібні лінії на шибці.
+
+Required prompt terms:
+- Literary Ukrainian quality track
+- voice, rhythm
+
+## uk-technical-api-placeholder-callback
+Category: technical
+Source language: en
+Quality track: precision
+Expected text type: technical
+
+Source:
+Set the API endpoint and pass the placeholder token to the callback handler.
+
+Expected behavior:
+- Preserve API and exact technical references.
+- Use stable Ukrainian technical terminology where natural.
+
+Banned outputs:
+- знак-заповнювач
+- контрольний обробник
+
+Required preservations:
+- API
+- endpoint
+- callback
+
+Reference translation:
+Задайте API endpoint і передайте токен-заповнювач обробнику callback.
+
+Required prompt terms:
+- technical documentation
+- preserve code identifiers
+- заповнювач
+- callback
+
+## uk-business-acme-obligation
+Category: business_legal
+Source language: en
+Quality track: precision
+Expected text type: business/legal-like
+
+Source:
+Acme B.V. shall deliver the materials by 15 March 2026 under this agreement.
+
+Expected behavior:
+- Preserve legal company name and date.
+- Preserve obligation without creative paraphrase.
+
+Banned outputs:
+- обіцяє
+- коли-небудь
+
+Required preservations:
+- Acme B.V.
+- 15 March 2026
+
+Required prompt terms:
+- formal Ukrainian
+- obligations
+- legal entity names
+
+## uk-scientific-correlation-hedging
+Category: scientific
+Source language: en
+Quality track: precision
+Expected text type: scientific/academic
+
+Source:
+The results suggest a moderate correlation, but the sample size limits the conclusion.
+
+Expected behavior:
+- Preserve hedging.
+- Do not overstate the conclusion.
+
+Banned outputs:
+- доводять
+- однозначно підтверджують
+
+Required preservations:
+- moderate correlation
+- sample size
+
+Required prompt terms:
+- Preserve claims
+- hedging
+- exact terminology
+
+## uk-journalistic-officials-policy
+Category: journalistic
+Source language: en
+Quality track: precision
+Expected text type: journalistic/publicistic
+
+Source:
+Officials said the policy would be reviewed after public consultations.
+
+Expected behavior:
+- Preserve attribution.
+- Use readable Ukrainian publicistic style.
+
+Banned outputs:
+- без джерела
+- як відомо
+
+Required preservations:
+- Officials said
+- public consultations
+
+Required prompt terms:
+- publicistic
+- facts
+- attribution
+
+## uk-mixed-language-labels
+Category: mixed_language
+Source language: auto
+Quality track: precision
+Expected text type: mixed/unknown
+
+Source:
+English: The endpoint failed. Russian: Пользователь открыл настройки.
+
+Expected behavior:
+- Translate all human-language segments into Ukrainian.
+- Preserve protected technical terms and useful labels.
+
+Banned outputs:
+- The endpoint failed
+- Пользователь открыл настройки
+
+Required preservations:
+- English:
+- Russian:
+- endpoint
+
+Required prompt terms:
+- conservative general Ukrainian
+- technical and named-entity protections
+
+## uk-named-entities-maria-openai
+Category: named_entities
+Source language: en
+Quality track: precision
+Expected text type: general
+
+Source:
+Maria Johnson visited Baker Street and met the OpenAI Research team.
+
+Expected behavior:
+- Transcribe ordinary personal names when appropriate.
+- Preserve brand spelling.
+
+Banned outputs:
+- OpenAI Research команда
+
+Required preservations:
+- Maria Johnson
+- Baker Street
+- OpenAI
+
+Required prompt terms:
+- Transcribe ordinary personal names
+- Preserve brands
+
+## uk-protected-content-token-url-row
+Category: protected_content
+Source language: en
+Quality track: precision
+Expected text type: technical
+
+Source:
+Set ${API_TOKEN}, call https://example.com/v1/items, and keep ROW-001 unchanged.
+
+Expected behavior:
+- Preserve placeholder, URL, and row identifier byte-for-byte.
+- Translate surrounding prose only.
+
+Banned outputs:
+- ${ТОКЕН_API}
+- РЯДОК-001
+
+Required preservations:
+- ${API_TOKEN}
+- https://example.com/v1/items
+- ROW-001
+
+Required prompt terms:
+- Do not add Ukrainian case endings
+- protected markers
+
+## uk-heading-title-case
+Category: heading_title_case
+Source language: en
+Quality track: precision
+Expected text type: general
+
+Source:
+Translation Quality Roadmap
+
+Expected behavior:
+- Use Ukrainian sentence-style capitalization.
+
+Banned outputs:
+- Дорожня Карта Якості Перекладу
+
+Required preservations:
+- Translation Quality Roadmap
+
+Required prompt terms:
+- standard Ukrainian
+
+## uk-typography-german-guillemets
+Category: typography
+Source language: en
+Quality track: literary
+Expected text type: literary fiction
+
+Source:
+She whispered, »The project is alive,« and closed the window.
+
+Expected behavior:
+- Normalize ordinary prose quotations to Ukrainian guillemets.
+- Do not preserve German-oriented guillemet direction in Ukrainian prose.
+
+Banned outputs:
+- »The project is alive,«
+- »Проєкт живий,«
+
+Required preservations:
+- project
+- window
+
+Required prompt terms:
+- Use Ukrainian guillemets
+- «...»

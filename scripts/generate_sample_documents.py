@@ -8,6 +8,10 @@ from translator_service.russian_regression_samples import (
     format_russian_regression_sample_pack,
     russian_regression_samples,
 )
+from translator_service.ukrainian_regression_samples import (
+    format_ukrainian_regression_sample_pack,
+    ukrainian_regression_samples,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,10 +23,13 @@ def main() -> None:
     SAMPLES_DIR.mkdir(exist_ok=True)
     _write_txt()
     _write_russian_regression_txt()
+    _write_ukrainian_regression_txt()
     _write_docx()
     _write_russian_regression_docx()
+    _write_ukrainian_regression_docx()
     _write_epub()
     _write_russian_regression_epub()
+    _write_ukrainian_regression_epub()
     print(f"Sample documents written to {SAMPLES_DIR}")
 
 
@@ -44,6 +51,13 @@ def _write_txt() -> None:
 def _write_russian_regression_txt() -> None:
     (SAMPLES_DIR / "russian_profile_regression.en-ru.txt").write_text(
         format_russian_regression_sample_pack(),
+        encoding="utf-8",
+    )
+
+
+def _write_ukrainian_regression_txt() -> None:
+    (SAMPLES_DIR / "ukrainian_profile_regression.en-uk.txt").write_text(
+        format_ukrainian_regression_sample_pack(),
         encoding="utf-8",
     )
 
@@ -128,11 +142,76 @@ def _write_russian_regression_docx() -> None:
         )
 
 
+def _write_ukrainian_regression_docx() -> None:
+    with ZipFile(SAMPLES_DIR / "ukrainian_profile_regression.en-uk.docx", "w", ZIP_DEFLATED) as docx:
+        _zip_writestr(docx, "[Content_Types].xml", _docx_content_types_xml())
+        _zip_writestr(docx, "_rels/.rels", _docx_relationships_xml())
+        _zip_writestr(docx, "word/document.xml", _ukrainian_regression_docx_document_xml())
+        _zip_writestr(
+            docx,
+            "word/header1.xml",
+            _docx_part_xml("Ukrainian profile regression header"),
+        )
+        _zip_writestr(
+            docx,
+            "word/footer1.xml",
+            _docx_part_xml("Ukrainian profile regression footer"),
+        )
+        _zip_writestr(
+            docx,
+            "word/footnotes.xml",
+            _docx_part_xml("Footnote: preserve API endpoint terminology."),
+        )
+        _zip_writestr(
+            docx,
+            "word/endnotes.xml",
+            _docx_part_xml("Endnote: check Ukrainian calques and protected text."),
+        )
+        _zip_writestr(
+            docx,
+            "word/comments.xml",
+            _docx_part_xml("Comment: check Ukrainian naturalness and source-pair behavior."),
+        )
+
+
 def _russian_regression_docx_document_xml() -> str:
     samples = russian_regression_samples()
     paragraphs = [
         _docx_paragraph("Russian Profile Regression"),
         _docx_paragraph("Manual QA sample for English and mixed-source translation into Russian."),
+    ]
+    for sample in samples[:6]:
+        paragraphs.append(_docx_paragraph(f"{sample.sample_id}: {sample.source_text}"))
+    rows = [
+        ("Category", "Source text"),
+        *[(sample.category, sample.source_text) for sample in samples[6:]],
+    ]
+    table_rows = []
+    for left, right in rows:
+        table_rows.append(
+            "      <w:tr>\n"
+            f"        <w:tc>{_docx_paragraph(left)}</w:tc>\n"
+            f"        <w:tc>{_docx_paragraph(right)}</w:tc>\n"
+            "      </w:tr>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">\n'
+        "  <w:body>\n"
+        + "\n".join(f"    {paragraph}" for paragraph in paragraphs)
+        + "\n    <w:tbl>\n"
+        + "\n".join(table_rows)
+        + "\n    </w:tbl>\n"
+        "  </w:body>\n"
+        "</w:document>\n"
+    )
+
+
+def _ukrainian_regression_docx_document_xml() -> str:
+    samples = ukrainian_regression_samples()
+    paragraphs = [
+        _docx_paragraph("Ukrainian Profile Regression"),
+        _docx_paragraph("Manual QA sample for English, Russian, and mixed-source translation into Ukrainian."),
     ]
     for sample in samples[:6]:
         paragraphs.append(_docx_paragraph(f"{sample.sample_id}: {sample.source_text}"))
@@ -295,6 +374,39 @@ def _write_russian_regression_epub() -> None:
             _zip_writestr(epub, name, content)
 
 
+def _write_ukrainian_regression_epub() -> None:
+    container_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"""
+    content_opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">ukrainian-profile-regression</dc:identifier>
+    <dc:title>Ukrainian Profile Regression</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter1" href="uk-profile-1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter2" href="uk-profile-2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter1"/>
+    <itemref idref="chapter2"/>
+  </spine>
+</package>
+"""
+    with ZipFile(SAMPLES_DIR / "ukrainian_profile_regression.en-uk.epub", "w") as epub:
+        _zip_writestr(epub, "mimetype", "application/epub+zip", compress_type=ZIP_STORED)
+        _zip_writestr(epub, "META-INF/container.xml", container_xml)
+        _zip_writestr(epub, "OPS/content.opf", content_opf)
+        for name, content in _ukrainian_regression_epub_chapters().items():
+            _zip_writestr(epub, name, content)
+
+
 def _russian_regression_epub_chapters() -> dict[str, str]:
     samples = russian_regression_samples()
     chapter_one = _russian_regression_epub_chapter(
@@ -313,7 +425,55 @@ def _russian_regression_epub_chapters() -> dict[str, str]:
     }
 
 
+def _ukrainian_regression_epub_chapters() -> dict[str, str]:
+    samples = ukrainian_regression_samples()
+    chapter_one = _ukrainian_regression_epub_chapter(
+        title="Ukrainian Profile Regression",
+        samples=samples[:5],
+        include_inline=True,
+    )
+    chapter_two = _ukrainian_regression_epub_chapter(
+        title="Calques, Mixed Sources, And Protected Text",
+        samples=samples[5:],
+        include_inline=False,
+    )
+    return {
+        "OPS/uk-profile-1.xhtml": chapter_one,
+        "OPS/uk-profile-2.xhtml": chapter_two,
+    }
+
+
 def _russian_regression_epub_chapter(
+    *,
+    title: str,
+    samples,
+    include_inline: bool,
+) -> str:
+    paragraphs = []
+    for sample in samples:
+        source = escape(sample.source_text)
+        if include_inline and sample.category == "technical":
+            source = source.replace("API endpoint", "<strong>API endpoint</strong>")
+        paragraphs.append(
+            f'      <section id="{escape(sample.sample_id)}">\n'
+            f"        <h2>{escape(sample.category)}</h2>\n"
+            f"        <p>{source}</p>\n"
+            f"        <p><em>{escape(sample.expected_text_type.value)}</em></p>\n"
+            "      </section>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+        f"  <head><title>{escape(title)}</title></head>\n"
+        "  <body>\n"
+        f"    <h1>{escape(title)}</h1>\n"
+        + "\n".join(paragraphs)
+        + "\n  </body>\n"
+        "</html>\n"
+    )
+
+
+def _ukrainian_regression_epub_chapter(
     *,
     title: str,
     samples,

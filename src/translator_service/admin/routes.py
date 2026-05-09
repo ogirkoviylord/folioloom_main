@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from http import HTTPStatus
+from pathlib import Path
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
+from translator_service.admin.action_center import build_action_center
+from translator_service.admin.ai_provider_keys import (
+    AIProviderKeySummary,
+    SQLiteAIProviderKeyStore,
+)
 from translator_service.admin.audit import AuditOutcome, SQLiteAdminAuditLog
 from translator_service.admin.auth import (
     AdminAuthError,
     AdminSession,
     AdminSessionManager,
 )
+from translator_service.admin.costs import build_cost_analytics
 from translator_service.admin.integration_connections import (
     SQLiteIntegrationConnectionStore,
 )
@@ -24,24 +31,40 @@ from translator_service.admin.integrations import (
     IntegrationRegistry,
 )
 from translator_service.admin.live import build_live_monitor_snapshot
-from translator_service.admin.operations import build_operations_overview
+from translator_service.admin.operations import build_persistent_operations_overview
+from translator_service.admin.provider_health import build_provider_health
+from translator_service.admin.provider_probe import validate_ai_provider_key
+from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
+from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
+from translator_service.admin.quality import build_quality_run_summary
+from translator_service.admin.secret_safety import build_secret_safety_report
 from translator_service.admin.secrets import (
+    SecretNotFound,
     SecretStoreUnavailable,
     SQLiteEncryptedSecretStore,
 )
-from translator_service.admin.translation_logs import list_translation_run_summaries
+from translator_service.admin.translation_logs import (
+    build_translation_run_archive,
+    get_translation_run_details,
+    list_translation_run_summaries,
+)
 from translator_service.admin.views import (
-    admin_page,
     activity_body,
+    admin_page,
     ai_providers_body,
     billing_body,
+    costs_body,
     integrations_body,
     live_body,
+    log_detail_body,
     login_page,
     logs_body,
     operations_body,
-    security_events_body,
+    overview_body,
+    quality_body,
     section_body,
+    security_events_body,
+    settings_body,
     user_detail_body,
     users_body,
 )
@@ -84,7 +107,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             SESSION_COOKIE,
             cookie_value,
             httponly=True,
-            secure=False,
+            secure=settings.admin_cookie_secure,
             samesite="lax",
             path="/admin",
         )
@@ -108,6 +131,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Integrations",
             active="integrations",
             body=lambda session: integrations_body(
@@ -117,17 +141,32 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/overview", response_class=HTMLResponse)
+    async def overview(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Overview",
+            active="overview",
+            body=lambda session: overview_body(_overview_action_center(settings)),
+        )
+
     @router.get("/ai-providers", response_class=HTMLResponse)
     async def ai_providers(request: Request) -> Response:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="AI Providers",
             active="ai_providers",
             body=lambda session: ai_providers_body(
                 _ai_provider_summaries(settings),
                 csrf_token=session.csrf_token,
                 key_pools=_ai_provider_key_pools(settings),
+                health_summaries=_ai_provider_health(settings),
+                runtime_statuses=_ai_provider_runtime_statuses(settings),
+                runtime_reload_states=_ai_provider_runtime_reload_states(settings),
             ),
         )
 
@@ -136,9 +175,43 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Billing",
             active="billing",
             body=billing_body(),
+        )
+
+    @router.get("/costs", response_class=HTMLResponse)
+    async def costs(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Costs",
+            active="costs",
+            body=lambda session: costs_body(_cost_analytics(settings)),
+        )
+
+    @router.get("/quality", response_class=HTMLResponse)
+    async def quality(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Quality",
+            active="quality",
+            body=lambda session: quality_body(_quality_run_summary()),
+        )
+
+    @router.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Settings",
+            active="settings",
+            body=lambda session: settings_body(_secret_safety_report(settings)),
         )
 
     @router.get("/live", response_class=HTMLResponse)
@@ -146,9 +219,14 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Live Monitor",
             active="live",
-            body=live_body(_live_snapshot(settings)),
+            body=live_body(
+                _live_snapshot(settings),
+                runtime_statuses=_ai_provider_runtime_statuses(settings),
+                runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+            ),
         )
 
     @router.get("/logs", response_class=HTMLResponse)
@@ -157,6 +235,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Translation Logs",
             active="logs",
             body=logs_body(
@@ -168,6 +247,46 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/logs/{run_id}", response_class=HTMLResponse)
+    async def log_detail(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = get_translation_run_details(
+            settings.translation_run_log_root,
+            run_id,
+        )
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Details",
+            active="logs",
+            body=log_detail_body(details),
+        )
+
+    @router.get("/logs/{run_id}/download")
+    async def download_log(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        archive = build_translation_run_archive(
+            settings.translation_run_log_root,
+            run_id,
+        )
+        if archive is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        return Response(
+            archive.content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{_download_file_name(archive.file_name)}"'
+                ),
+                "Cache-Control": "no-store",
+            },
+        )
+
     @router.get("/activity", response_class=HTMLResponse)
     async def activity(request: Request) -> Response:
         filters = _activity_filters(request)
@@ -176,6 +295,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Activity",
             active="activity",
             body=activity_body(events, **filters),
@@ -188,6 +308,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Users",
             active="users",
             body=users_body(profiles),
@@ -201,6 +322,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title=f"User {user_id}",
             active="users",
             body=user_detail_body(profile, events),
@@ -213,6 +335,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Security",
             active="security",
             body=security_events_body(events),
@@ -223,9 +346,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return _protected_page(
             request,
             session_manager=session_manager,
+            environment=settings.environment,
             title="Operations",
             active="operations",
-            body=operations_body(build_operations_overview()),
+            body=lambda session: operations_body(_operations_overview(settings)),
         )
 
     @router.get("/api/integrations")
@@ -244,6 +368,24 @@ def create_admin_router(settings: Settings) -> APIRouter:
         if _session_or_none(request, session_manager) is None:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
         return _json({"providers": _ai_provider_summaries(settings)})
+
+    @router.get("/api/ai-providers/runtime")
+    async def ai_provider_runtime_api(request: Request) -> JSONResponse:
+        if _session_or_none(request, session_manager) is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        return _json({"providers": _ai_provider_runtime_payloads(settings)})
+
+    @router.get("/api/costs")
+    async def costs_api(request: Request) -> JSONResponse:
+        if _session_or_none(request, session_manager) is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        return _json(_cost_analytics(settings))
+
+    @router.get("/api/quality")
+    async def quality_api(request: Request) -> JSONResponse:
+        if _session_or_none(request, session_manager) is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        return _json({"quality": _quality_run_summary()})
 
     @router.get("/api/logs")
     async def logs_api(request: Request) -> JSONResponse:
@@ -456,7 +598,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 role=session.role,
                 action="ai_provider.key.added",
                 target_type="ai_provider_key",
-                target_id=key.secret_id,
+                target_id=key.key_id,
                 outcome=AuditOutcome.SUCCESS,
                 metadata={
                     "provider_id": provider_id,
@@ -500,9 +642,329 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 role=session.role,
                 action="ai_provider.key.removed",
                 target_type="ai_provider_key",
-                target_id=removed.secret_id,
+                target_id=removed.key_id,
                 outcome=AuditOutcome.SUCCESS,
                 metadata={"provider_id": provider_id, "key_id": removed.key_id},
+            )
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/{provider_id}/keys/update")
+    async def update_ai_provider_key(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    updated = keys.update_key(
+                        provider_id=provider_id,
+                        key_id=form.get("key_id", ""),
+                        label=form.get("label", ""),
+                        weight=int(form.get("weight", "1") or "1"),
+                        max_parallel_requests=int(
+                            form.get("max_parallel_requests", "1") or "1"
+                        ),
+                        actor_id=session.actor_id,
+                        secret_describer=secrets.describe_secret,
+                    )
+        except (KeyError, SecretStoreUnavailable):
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        except ValueError:
+            return _html("Invalid key settings", status_code=HTTPStatus.BAD_REQUEST)
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="ai_provider.key.updated",
+                target_type="ai_provider_key",
+                target_id=updated.key_id,
+                outcome=AuditOutcome.SUCCESS,
+                metadata={
+                    "provider_id": provider_id,
+                    "key_id": updated.key_id,
+                    "label": updated.label,
+                    "weight": updated.weight,
+                    "max_parallel_requests": updated.max_parallel_requests,
+                },
+            )
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/{provider_id}/keys/disable")
+    async def disable_ai_provider_key(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        return await _set_ai_provider_key_enabled(
+            provider_id,
+            request,
+            enabled=False,
+        )
+
+    @router.post("/ai-providers/{provider_id}/keys/enable")
+    async def enable_ai_provider_key(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        return await _set_ai_provider_key_enabled(
+            provider_id,
+            request,
+            enabled=True,
+        )
+
+    async def _set_ai_provider_key_enabled(
+        provider_id: str,
+        request: Request,
+        *,
+        enabled: bool,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    key = keys.set_key_enabled(
+                        provider_id=provider_id,
+                        key_id=form.get("key_id", ""),
+                        enabled=enabled,
+                        actor_id=session.actor_id,
+                        secret_describer=secrets.describe_secret,
+                    )
+        except (KeyError, SecretNotFound, SecretStoreUnavailable):
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        action = "enabled" if enabled else "disabled"
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action=f"ai_provider.key.{action}",
+                target_type="ai_provider_key",
+                target_id=key.key_id,
+                outcome=AuditOutcome.SUCCESS,
+                metadata={"provider_id": provider_id, "key_id": key.key_id},
+            )
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/{provider_id}/keys/test")
+    async def test_ai_provider_key(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        key_id = form.get("key_id", "")
+        audited_key_id: str | None = None
+        status = "failed"
+        error: str | None = None
+        response_status = HTTPStatus.SEE_OTHER
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    key = keys.get_key(
+                        provider_id,
+                        key_id,
+                        secret_describer=secrets.describe_secret,
+                    )
+                    audited_key_id = key.key_id
+                    status, error = _test_ai_provider_key(
+                        provider_id,
+                        key,
+                        secret_store=secrets,
+                        settings=settings,
+                    )
+                    if status != "provider_check_passed":
+                        response_status = HTTPStatus.BAD_REQUEST
+        except KeyError:
+            error = "Key was not found."
+            response_status = HTTPStatus.NOT_FOUND
+        except (SecretNotFound, SecretStoreUnavailable, ValueError):
+            error = "Key secret is unavailable."
+            response_status = HTTPStatus.BAD_REQUEST
+        if audited_key_id is not None:
+            with SQLiteAIProviderValidationStore(settings.admin_db_path) as validations:
+                validations.record_result(
+                    provider_id=provider_id,
+                    key_id=audited_key_id,
+                    status=status,
+                    error=error,
+                    actor_id=session.actor_id,
+                )
+            with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+                audit.record(
+                    actor_id=session.actor_id,
+                    role=session.role,
+                    action="ai_provider.key.tested",
+                    target_type="ai_provider_key",
+                    target_id=audited_key_id,
+                    outcome=(
+                        AuditOutcome.SUCCESS
+                        if status == "provider_check_passed"
+                        else AuditOutcome.FAILURE
+                    ),
+                    metadata={
+                        "provider_id": provider_id,
+                        "key_id": audited_key_id,
+                        "status": status,
+                    },
+                )
+        if response_status != HTTPStatus.SEE_OTHER:
+            return _html(error or "Unable to test key", status_code=response_status)
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/{provider_id}/keys/test-all")
+    async def test_all_ai_provider_keys(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+
+        results: list[tuple[str, str, str | None]] = []
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    key_summaries = keys.list_keys(
+                        provider_id,
+                        secret_describer=secrets.describe_secret,
+                    )
+                    for key in key_summaries:
+                        status, error = _test_ai_provider_key(
+                            provider_id,
+                            key,
+                            secret_store=secrets,
+                            settings=settings,
+                        )
+                        results.append((key.key_id, status, error))
+        except (SecretStoreUnavailable, ValueError):
+            return _html(
+                "Key secret is unavailable.",
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+
+        if not results:
+            return _html("No active keys to test", status_code=HTTPStatus.BAD_REQUEST)
+
+        with SQLiteAIProviderValidationStore(settings.admin_db_path) as validations:
+            for key_id, status, error in results:
+                validations.record_result(
+                    provider_id=provider_id,
+                    key_id=key_id,
+                    status=status,
+                    error=error,
+                    actor_id=session.actor_id,
+                )
+
+        passed = sum(
+            1 for _, status, _ in results if status == "provider_check_passed"
+        )
+        failed = len(results) - passed
+        status = "provider_check_passed" if failed == 0 else "failed"
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="ai_provider.keys.tested",
+                target_type="ai_provider",
+                target_id=provider_id,
+                outcome=AuditOutcome.SUCCESS if failed == 0 else AuditOutcome.FAILURE,
+                metadata={
+                    "provider_id": provider_id,
+                    "status": status,
+                    "passed": passed,
+                    "failed": failed,
+                },
+            )
+        return RedirectResponse(
+            "/admin/ai-providers",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/ai-providers/{provider_id}/runtime/reload")
+    async def request_ai_provider_runtime_reload(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as runtime:
+            runtime.request_reload(
+                provider_id=provider_id,
+                actor_id=session.actor_id,
+            )
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="ai_provider.runtime.reload_requested",
+                target_type="ai_provider",
+                target_id=provider_id,
+                outcome=AuditOutcome.SUCCESS,
+                metadata={"provider_id": provider_id},
             )
         return RedirectResponse(
             "/admin/ai-providers",
@@ -574,7 +1036,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def operations_api(request: Request) -> JSONResponse:
         if _session_or_none(request, session_manager) is None:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
-        return _json({"overview": build_operations_overview()})
+        return _json({"overview": _operations_overview(settings)})
 
     def page(
         path: str,
@@ -587,6 +1049,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return _protected_page(
                 request,
                 session_manager=session_manager,
+                environment=settings.environment,
                 title=title,
                 active=active,
                 body=section_body(title, copy),
@@ -599,24 +1062,6 @@ def create_admin_router(settings: Settings) -> APIRouter:
             response_class=HTMLResponse,
         )
 
-    page(
-        "/overview",
-        title="Overview",
-        active="overview",
-        copy=(
-            "Central service status, revenue signals, integration health, "
-            "and pending actions will live here."
-        ),
-    )
-    page(
-        "/settings",
-        title="Settings",
-        active="settings",
-        copy=(
-            "Configurable service parameters will be edited here with validation, "
-            "audit history, and restart hints."
-        ),
-    )
     page(
         "/audit",
         title="Audit",
@@ -673,11 +1118,226 @@ def _ai_provider_key_pools(settings: Settings):
         return {}
 
 
+def _ai_provider_health(settings: Settings):
+    summaries = _ai_provider_summaries(settings)
+    validation_metadata = _ai_provider_validation_metadata(settings)
+    if not settings.admin_secret_master_key:
+        return build_provider_health(summaries, {}, validation_metadata)
+    try:
+        with SQLiteEncryptedSecretStore(
+            settings.admin_db_path,
+            master_key=settings.admin_secret_master_key,
+        ) as secrets:
+            with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                key_pools = {
+                    definition.integration_id: keys.list_keys(
+                        definition.integration_id,
+                        secret_describer=secrets.describe_secret,
+                        include_removed=True,
+                    )
+                    for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
+                }
+    except SecretStoreUnavailable:
+        key_pools = {}
+    return build_provider_health(summaries, key_pools, validation_metadata)
+
+
+def _ai_provider_validation_metadata(settings: Settings):
+    with SQLiteAIProviderValidationStore(settings.admin_db_path) as validations:
+        return validations.latest_by_provider()
+
+
+def _ai_provider_runtime_statuses(settings: Settings):
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as runtime:
+        return tuple(
+            status
+            for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
+            if (status := runtime.get_status(definition.integration_id)) is not None
+        )
+
+
+def _ai_provider_runtime_reload_states(settings: Settings):
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as runtime:
+        return tuple(
+            state
+            for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
+            if (state := runtime.get_reload_state(definition.integration_id))
+            is not None
+        )
+
+
+def _ai_provider_runtime_payloads(settings: Settings):
+    statuses = {
+        status.provider_id: status for status in _ai_provider_runtime_statuses(settings)
+    }
+    reload_states = {
+        state.provider_id: state
+        for state in _ai_provider_runtime_reload_states(settings)
+    }
+    now = datetime.now(UTC)
+    payloads = []
+    for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions():
+        status = statuses.get(definition.integration_id)
+        reload_state = reload_states.get(definition.integration_id)
+        payloads.append(
+            _ai_provider_runtime_payload(
+                definition.integration_id,
+                status=status,
+                reload_state=reload_state,
+                now=now,
+            )
+        )
+    return payloads
+
+
+def _ai_provider_runtime_payload(
+    provider_id: str,
+    *,
+    status,
+    reload_state,
+    now: datetime,
+):
+    if status is None:
+        return {
+            "provider_id": provider_id,
+            "source": "not_reporting",
+            "status": "not_reporting",
+            "freshness": "not_reporting",
+            "last_reported_at": None,
+            "reload_interval_seconds": None,
+            "active_channels": [],
+            "error": None,
+            "reload_pending": bool(reload_state and reload_state.pending),
+            "reload_requested_by": (
+                reload_state.actor_id if reload_state is not None else None
+            ),
+            "reload_requested_at": (
+                reload_state.requested_at.isoformat()
+                if reload_state is not None
+                else None
+            ),
+            "reload_consumed_at": (
+                reload_state.consumed_at.isoformat()
+                if reload_state is not None and reload_state.consumed_at is not None
+                else None
+            ),
+        }
+    age_seconds = (now - status.last_reloaded_at.astimezone(UTC)).total_seconds()
+    stale_after = max(120.0, status.reload_interval_seconds * 3)
+    return {
+        "provider_id": provider_id,
+        "source": status.source,
+        "status": status.status,
+        "freshness": "stale" if age_seconds > stale_after else "fresh",
+        "last_reported_at": status.last_reloaded_at.isoformat(),
+        "reload_interval_seconds": status.reload_interval_seconds,
+        "active_channels": [
+            {
+                "label": channel.label,
+                "weight": channel.weight,
+                "max_parallel_requests": channel.max_parallel_requests,
+            }
+            for channel in status.active_channels
+        ],
+        "error": status.error,
+        "reload_pending": bool(reload_state and reload_state.pending),
+        "reload_requested_by": (
+            reload_state.actor_id if reload_state is not None else None
+        ),
+        "reload_requested_at": (
+            reload_state.requested_at.isoformat()
+            if reload_state is not None
+            else None
+        ),
+        "reload_consumed_at": (
+            reload_state.consumed_at.isoformat()
+            if reload_state is not None and reload_state.consumed_at is not None
+            else None
+        ),
+    }
+
+
+def _overview_action_center(settings: Settings):
+    integration_summaries = _integration_summaries(settings)
+    integration_connections = _integration_connection_groups(settings)
+    ai_provider_key_pools = _ai_provider_key_pools(settings)
+    live_snapshot = _live_snapshot(settings)
+    secret_safety_report = _secret_safety_report(settings)
+    return build_action_center(
+        integration_summaries=integration_summaries,
+        integration_connections=integration_connections,
+        failed_today=live_snapshot.failed_today,
+        tokens_today=live_snapshot.tokens_today,
+        disk_percent=live_snapshot.server.disk_percent,
+        deepseek_key_count=_deepseek_key_count(ai_provider_key_pools),
+        secret_safety_issue_count=secret_safety_report.issue_count,
+        runtime_statuses=_ai_provider_runtime_statuses(settings),
+        runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+    )
+
+
+def _secret_safety_report(settings: Settings):
+    return build_secret_safety_report(
+        integration_summaries=_integration_summaries(settings),
+        integration_connections=_integration_connection_groups(settings),
+        ai_provider_key_pools=_ai_provider_all_key_pools(settings),
+        provider_health_summaries=_ai_provider_health(settings),
+    )
+
+
+def _ai_provider_all_key_pools(settings: Settings):
+    if not settings.admin_secret_master_key:
+        return {}
+    try:
+        with SQLiteEncryptedSecretStore(
+            settings.admin_db_path,
+            master_key=settings.admin_secret_master_key,
+        ) as secrets:
+            with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                return {
+                    definition.integration_id: keys.list_keys(
+                        definition.integration_id,
+                        secret_describer=secrets.describe_secret,
+                        include_removed=True,
+                    )
+                    for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions()
+                }
+    except SecretStoreUnavailable:
+        return {}
+
+
+def _deepseek_key_count(ai_provider_key_pools) -> int:
+    return sum(
+        1
+        for key in ai_provider_key_pools.get("deepseek", ())
+        if key.enabled and not key.disabled
+    )
+
+
 def _live_snapshot(settings: Settings):
     return build_live_monitor_snapshot(
         settings.translation_run_log_root,
-        operations=build_operations_overview(),
+        operations=_operations_overview(settings),
     )
+
+
+def _operations_overview(settings: Settings):
+    return build_persistent_operations_overview(
+        settings.persistent_jobs_db_path,
+        settings.translation_run_log_root,
+    )
+
+
+def _cost_analytics(settings: Settings):
+    return build_cost_analytics(settings.translation_run_log_root)
+
+
+def _quality_run_summary():
+    return build_quality_run_summary(_quality_run_path())
+
+
+def _quality_run_path() -> Path:
+    return Path("var") / "quality-runs" / "latest.jsonl"
 
 
 def _activity_store(settings: Settings) -> SQLiteUserActivityStore:
@@ -734,10 +1394,36 @@ def _secret_requirement(
     return None
 
 
+def _test_ai_provider_key(
+    provider_id: str,
+    key: AIProviderKeySummary,
+    *,
+    secret_store: SQLiteEncryptedSecretStore,
+    settings: Settings,
+) -> tuple[str, str | None]:
+    if not key.enabled or key.disabled:
+        return "failed", "Key is disabled or unavailable."
+    try:
+        plaintext = secret_store.get_secret_value(key.secret_id)
+    except (SecretNotFound, ValueError):
+        return "failed", "Key secret is unavailable."
+    probe = validate_ai_provider_key(
+        provider_id,
+        plaintext,
+        base_url=settings.deepseek_base_url,
+        timeout_seconds=settings.admin_provider_probe_timeout_seconds,
+    )
+    error = probe.error
+    if probe.status == "failed" and error is None:
+        error = "Key secret is empty."
+    return probe.status, error
+
+
 def _protected_page(
     request: Request,
     *,
     session_manager: AdminSessionManager,
+    environment: str,
     title: str,
     active: str,
     body: str | Callable[[AdminSession], str],
@@ -747,7 +1433,13 @@ def _protected_page(
         return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
     rendered_body = body(session) if callable(body) else body
     return _html(
-        admin_page(title=title, active=active, session=session, body=rendered_body),
+        admin_page(
+            title=title,
+            active=active,
+            session=session,
+            body=rendered_body,
+            environment=environment,
+        ),
         headers={"Cache-Control": "no-store"},
     )
 
@@ -767,6 +1459,10 @@ def _json(
     status_code: int | HTTPStatus = HTTPStatus.OK,
 ) -> JSONResponse:
     return JSONResponse(jsonable_encoder(payload), status_code=int(status_code))
+
+
+def _download_file_name(value: str) -> str:
+    return value.replace("\\", "_").replace("/", "_").replace('"', "_")
 
 
 def _safe_admin_next(value: str | None) -> bool:

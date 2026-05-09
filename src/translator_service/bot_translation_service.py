@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import logging
 import math
 from pathlib import Path, PurePath
@@ -15,6 +16,11 @@ from translator_service.extractors import (
     extract_text_from_txt,
 )
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.format_adapters import (
+    DOCX_ADAPTER_VERSION,
+    EPUB_ADAPTER_VERSION,
+    TXT_ADAPTER_VERSION,
+)
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
@@ -121,6 +127,7 @@ class UserBookSummary:
     has_result: bool
     has_partial_result: bool = False
     can_resume: bool = False
+    can_cancel: bool = False
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -854,6 +861,24 @@ class BotTranslationService:
                 self._file_storage.delete(object_key)
         return True
 
+    def cancel_user_book(
+        self,
+        *,
+        user_telegram_id: int,
+        job_id: str,
+    ) -> bool:
+        if self._persistent_job_store is None:
+            return False
+
+        job = self._persistent_job_store.get_job(job_id)
+        if job is None or job.user_id != f"telegram:{user_telegram_id}":
+            return False
+        if not _can_cancel_persistent_job(job.status.value):
+            return False
+
+        self._persistent_job_store.cancel_job(job_id)
+        return True
+
     def _book_result_from_object_key(self, job) -> UserBookResult | None:
         if self._file_storage is None:
             return None
@@ -881,6 +906,7 @@ class BotTranslationService:
             has_result=bool(job.final_object_key or job.partial_object_key),
             has_partial_result=bool(job.partial_object_key and not job.final_object_key),
             can_resume=_can_resume_persistent_job(job.status.value),
+            can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
             updated_at=job.updated_at.isoformat(timespec="minutes"),
         )
@@ -899,11 +925,25 @@ class BotTranslationService:
                     cancel_requested=True,
                 )
         if active is None:
-            return False
+            return self._cancel_latest_persistent_translation(user_telegram_id)
 
         snapshot.token.cancel()
         _print_translation_cancel_requested(snapshot)
         return True
+
+    def _cancel_latest_persistent_translation(self, user_telegram_id: int) -> bool:
+        if self._persistent_job_store is None:
+            return False
+
+        for job in self._persistent_job_store.list_jobs_for_user(
+            f"telegram:{user_telegram_id}",
+            limit=10,
+        ):
+            if _can_cancel_persistent_job(job.status.value):
+                self._persistent_job_store.cancel_job(job.id)
+                return True
+
+        return False
 
     def is_translation_cancelling(self, user_telegram_id: int) -> bool:
         with self._state_lock:
@@ -1287,6 +1327,15 @@ class BotTranslationService:
     ) -> TranslationRunLogger | None:
         if self._translation_run_log_root is None:
             return None
+        resolved_adapter_version = adapter_version or _adapter_version_for_document_kind(
+            document_kind
+        )
+        resolved_prompt_version = prompt_version or "plain-v1"
+        translation_policy = _translation_policy_snapshot_for_pending(
+            pending=pending,
+            document_kind=document_kind,
+            document_sandbox=self._document_sandbox,
+        )
         return TranslationRunLogger.start(
             root=self._translation_run_log_root,
             metadata=TranslationRunMetadata(
@@ -1298,13 +1347,15 @@ class BotTranslationService:
                 source_language=pending.source_language,
                 target_language=pending.target_language,
                 translator_model=_translator_model(translator),
-                prompt_version=prompt_version,
-                adapter_version=adapter_version,
+                prompt_version=resolved_prompt_version,
+                adapter_version=resolved_adapter_version,
                 detected_source_language=pending.source_language_display,
-                translation_policy=_translation_policy_snapshot_for_pending(
-                    pending=pending,
+                translation_policy=translation_policy,
+                translation_stack=_translation_stack_snapshot(
+                    translation_policy=translation_policy,
                     document_kind=document_kind,
-                    document_sandbox=self._document_sandbox,
+                    adapter_version=resolved_adapter_version,
+                    prompt_version=resolved_prompt_version,
                 ),
             ),
         )
@@ -2036,6 +2087,131 @@ def _translation_policy_snapshot_for_pending(
     return translation_policy_signature(policy)
 
 
+def _translation_stack_snapshot(
+    *,
+    translation_policy: str | None,
+    document_kind: DocumentKind,
+    adapter_version: str,
+    prompt_version: str,
+) -> dict:
+    policy = _translation_policy_payload(translation_policy)
+    target_language_policy = _policy_value(policy, "target_language_policy")
+    source_pair_policy = _policy_value(policy, "source_pair_policy")
+    quality_track = _policy_value(policy, "russian_quality_track")
+    return {
+        "schema_version": "translation-stack-v1",
+        "adapter": {
+            "document_kind": document_kind.value,
+            "name": document_kind.value,
+            "version": adapter_version,
+        },
+        "prompt": {
+            "run_prompt_version": prompt_version,
+            "prompt_policy_version": _policy_value(policy, "prompt_policy_version"),
+            "protection_policy_version": _policy_value(
+                policy,
+                "protection_policy_version",
+            ),
+            "adapter_policy_version": _policy_value(policy, "adapter_policy_version"),
+            "output_contract": _policy_value(policy, "output_contract"),
+        },
+        "language_profiles": {
+            "target_language": _target_language_profile_snapshot(
+                target_language_policy
+            ),
+            "source_pair": _source_pair_profile_snapshot(source_pair_policy),
+            "quality_track": _quality_track_snapshot(quality_track),
+        },
+        "text": {
+            "source_language": _policy_value(policy, "source_language"),
+            "target_language": _policy_value(policy, "target_language"),
+            "text_type": _policy_value(policy, "text_type"),
+            "prompt_tier": _policy_value(policy, "prompt_tier"),
+        },
+    }
+
+
+def _translation_policy_payload(translation_policy: str | None) -> dict:
+    if not translation_policy:
+        return {}
+    try:
+        payload = json.loads(translation_policy)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _policy_value(policy: dict, key: str) -> str | None:
+    value = policy.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _target_language_profile_snapshot(signature: str | None) -> dict:
+    if signature is None:
+        return {"language": None, "signature": None, "version": None}
+    parts = signature.split(":")
+    if len(parts) == 3 and parts[0] == "target-profile":
+        return {
+            "language": parts[1],
+            "signature": signature,
+            "version": parts[2],
+        }
+    return {"language": None, "signature": signature, "version": _last_part(parts)}
+
+
+def _source_pair_profile_snapshot(signature: str | None) -> dict:
+    if signature is None:
+        return {
+            "source_language": None,
+            "target_language": None,
+            "signature": None,
+            "version": None,
+        }
+    parts = signature.split(":")
+    if len(parts) == 3 and parts[0] == "source-pair":
+        source_target = parts[1].split("-", 1)
+        return {
+            "source_language": source_target[0] if source_target else None,
+            "target_language": source_target[1] if len(source_target) > 1 else None,
+            "signature": signature,
+            "version": parts[2],
+        }
+    return {
+        "source_language": None,
+        "target_language": None,
+        "signature": signature,
+        "version": _last_part(parts),
+    }
+
+
+def _quality_track_snapshot(signature: str | None) -> dict:
+    if signature is None:
+        return {"signature": None, "track": None, "version": None}
+    parts = signature.split(":")
+    if len(parts) == 2 and parts[0] == "russian-quality":
+        track_version = parts[1].rsplit("-", 1)
+        return {
+            "signature": signature,
+            "track": track_version[0],
+            "version": track_version[1] if len(track_version) > 1 else None,
+        }
+    return {"signature": signature, "track": None, "version": _last_part(parts)}
+
+
+def _last_part(parts: list[str]) -> str | None:
+    return parts[-1] if parts else None
+
+
+def _adapter_version_for_document_kind(document_kind: DocumentKind) -> str:
+    if document_kind is DocumentKind.TXT:
+        return TXT_ADAPTER_VERSION
+    if document_kind is DocumentKind.DOCX:
+        return DOCX_ADAPTER_VERSION
+    if document_kind is DocumentKind.EPUB:
+        return EPUB_ADAPTER_VERSION
+    return f"{document_kind.value}-adapter-unknown"
+
+
 def _extract_policy_source_text(
     *,
     content: bytes,
@@ -2230,6 +2406,15 @@ def _can_resume_persistent_job(status: str) -> bool:
         "interrupted",
         "failed",
         "partial",
+    }
+
+
+def _can_cancel_persistent_job(status: str) -> bool:
+    return status in {
+        "queued",
+        "translating",
+        "assembling",
+        "cancel_requested",
     }
 
 

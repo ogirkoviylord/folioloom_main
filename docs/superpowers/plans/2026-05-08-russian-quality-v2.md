@@ -300,7 +300,44 @@ Expected: all scoped tests pass.
 
 ---
 
-### Task 7: Risk-Based Second Pass
+### Task 7: Russian QA and Eval Harness
+
+**Files:**
+- Create: `src/translator_service/translation_eval.py`
+- Create: `tests/test_translation_eval.py`
+- Create: `docs/superpowers/specs/russian-mqm-eval-rubric.md`
+
+- [x] **Step 1: Add deterministic MQM eval tests**
+
+Test that literary samples weight style, fluency, and voice more heavily, while precision samples weight accuracy, terminology, and structure more heavily.
+
+- [x] **Step 2: Implement rubric objects**
+
+Create `TranslationEvalCriterion`, `TranslationEvalRubric`, `TranslationEvalIssue`, `TranslationEvalResult`, and `TranslationEvalReport`.
+
+- [x] **Step 3: Connect deterministic QA to MQM categories**
+
+Map deterministic Russian QA issues to categories such as `protected_content`, `accuracy`, `structure`, and `untranslated_text`, then score from 100 with stable penalties.
+
+- [x] **Step 4: Add optional metric guardrails**
+
+Define an external metric adapter protocol and require explicit opt-in before COMET, chrF, BLEU, or LLM-as-judge-style adapters can run.
+
+- [x] **Step 5: Add local rubric documentation**
+
+Document `russian-mqm-rubric-v1` in `docs/superpowers/specs/russian-mqm-eval-rubric.md`.
+
+- [x] **Step 6: Verify eval tests**
+
+Run:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_translation_eval
+```
+
+Expected: all tests pass without network access or optional metric packages.
+
+### Deferred Follow-up: Risk-Based Second Pass
 
 **Files:**
 - Modify: `src/translator_service/translation_jobs.py`
@@ -332,7 +369,7 @@ Run:
 PYTHONPATH=src python3 -m unittest tests.test_translation_jobs tests.test_worker tests.test_translation_runner
 ```
 
-Expected: scoped tests pass except unrelated baseline failures already documented.
+Expected: scoped tests pass.
 
 ---
 

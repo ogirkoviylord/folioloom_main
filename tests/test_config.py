@@ -27,6 +27,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.admin_session_secret, "")
         self.assertEqual(settings.admin_owner_password, "")
         self.assertEqual(settings.admin_secret_master_key, "")
+        self.assertFalse(settings.admin_cookie_secure)
 
     def test_translation_run_log_root_can_be_configured_from_environment(self):
         with patch.dict(
@@ -100,6 +101,7 @@ class SettingsTest(unittest.TestCase):
                 "ADMIN_SESSION_SECRET": "session-secret",
                 "ADMIN_OWNER_PASSWORD": "owner-pass",
                 "ADMIN_SECRET_MASTER_KEY": "secret-master-key",
+                "ADMIN_COOKIE_SECURE": "true",
             },
         ):
             settings = Settings()
@@ -108,6 +110,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.admin_session_secret, "session-secret")
         self.assertEqual(settings.admin_owner_password, "owner-pass")
         self.assertEqual(settings.admin_secret_master_key, "secret-master-key")
+        self.assertTrue(settings.admin_cookie_secure)
 
 
 if __name__ == "__main__":

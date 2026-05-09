@@ -368,6 +368,8 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertIn("Repair retry", repair_prompt)
         self.assertIn("unexpected_attribute", repair_prompt)
         self.assertIn("translation_batch", repair_prompt)
+        self.assertIn("Do not add", repair_prompt)
+        self.assertIn("target_language", repair_prompt)
         events = client.consume_security_events()
         self.assertEqual(
             [event["event_type"] for event in events],
@@ -376,6 +378,84 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(events[0]["payload"]["reason"], "unexpected_attribute")
         self.assertEqual(events[0]["payload"]["expected_count"], 1)
         self.assertNotIn("text", events[0]["payload"])
+
+    def test_translate_rejects_invalid_translation_batch_after_repair(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" target_language="ru">'
+                                    "Привет"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" target_language="ru">'
+                                    "Привет"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 4,
+                        "total_tokens": 17,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        with self.assertRaises(DeepSeekApiError) as error:
+            client.translate(
+                text=(
+                    "<translation_batch>"
+                    '<translation_block id="0">Hello</translation_block>'
+                    "</translation_batch>"
+                ),
+                source_language="en",
+                target_language="ru",
+            )
+
+        self.assertIn("translation batch contract", str(error.exception))
+        self.assertEqual(len(transport.requests), 2)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            [
+                "translation_batch_rejected",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+            ],
+        )
+        self.assertEqual(events[-1]["payload"]["reason"], "unexpected_attribute")
 
     def test_translate_records_repair_failure_security_events(self):
         transport = SequentialTransport(

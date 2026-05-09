@@ -1,62 +1,86 @@
+x-default-logging: &default-logging
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-default-healthcheck: &default-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 20s
+
 services:
   api:
     build: .
     command: uvicorn translator_service.api:create_app --factory --host 0.0.0.0 --port 8000
     env_file: .env
-    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:62062:8000"
     volumes:
-      - object-storage:/data/object-storage
-      - runtime-data:/data/runtime
-      - run-logs:/data/run-logs
+      - ./var:/app/var
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+      - redis
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      <<: *default-healthcheck
+      test:
+        - CMD
+        - python
+        - -c
+        - "import http.client; c=http.client.HTTPConnection('127.0.0.1', 8000, timeout=5); c.request('GET', '/health'); raise SystemExit(0 if c.getresponse().status == 200 else 1)"
 
   bot:
     build: .
     command: python -m translator_service.bot
     env_file: .env
-    restart: unless-stopped
     volumes:
-      - object-storage:/data/object-storage
-      - runtime-data:/data/runtime
-      - run-logs:/data/run-logs
+      - ./var:/app/var
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+      - redis
+    restart: unless-stopped
+    logging: *default-logging
 
   worker:
     build: .
     command: python -m translator_service.worker
     env_file: .env
-    restart: unless-stopped
     volumes:
-      - object-storage:/data/object-storage
-      - runtime-data:/data/runtime
-      - run-logs:/data/run-logs
+      - ./var:/app/var
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+      - redis
+    restart: unless-stopped
+    logging: *default-logging
 
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
     environment:
-      POSTGRES_DB: translator
-      POSTGRES_USER: translator
-      POSTGRES_PASSWORD: translator
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U translator -d translator"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      POSTGRES_DB: ${POSTGRES_DB:-translator}
+      POSTGRES_USER: ${POSTGRES_USER:-translator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-translator}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      <<: *default-healthcheck
+      test:
+        - CMD-SHELL
+        - "pg_isready -U \"$${POSTGRES_USER:-translator}\" -d \"$${POSTGRES_DB:-translator}\""
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      <<: *default-healthcheck
+      test:
+        - CMD
+        - redis-cli
+        - ping
 
 volumes:
   postgres-data:
-  object-storage:
-  runtime-data:
-  run-logs:

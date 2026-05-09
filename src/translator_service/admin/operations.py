@@ -4,7 +4,14 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+
+from translator_service.admin.translation_logs import list_translation_run_summaries
+from translator_service.persistent_jobs import (
+    PersistentTranslationJobStatus,
+    SQLiteTranslationJobStore,
+)
 
 JOB_STATE_QUEUED = "queued"
 JOB_STATE_RUNNING = "running"
@@ -21,6 +28,8 @@ WORKER_HEALTH_UNKNOWN = "unknown"
 _QUEUED_STATUSES = {"new", "pending", "queued", "scheduled"}
 _RUNNING_STATUSES = {
     "active",
+    "assembling",
+    "cancel_requested",
     "in_progress",
     "processing",
     "running",
@@ -31,13 +40,20 @@ _SUCCEEDED_STATUSES = {
     "cached",
     "complete",
     "completed",
+    "partial",
     "ready",
     "skipped",
     "success",
     "succeeded",
     "translated",
 }
-_FAILED_STATUSES = {"error", "failed", "interrupted"}
+_FAILED_STATUSES = {
+    "error",
+    "failed",
+    "failed_retryable",
+    "failed_terminal",
+    "interrupted",
+}
 _CANCELLED_STATUSES = {"canceled", "cancelled"}
 
 _HEALTHY_WORKER_STATUSES = {"active", "idle", "ok", "ready", "running"}
@@ -73,6 +89,7 @@ class AdminJobSummary:
     retryable: bool = False
     cancellable: bool = False
     error_excerpt: str | None = None
+    log_href: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +133,7 @@ def summarize_job(
     row: Any,
     *,
     work_units: Iterable[Any] | None = None,
+    log_href: str | None = None,
     max_error_chars: int = 160,
 ) -> AdminJobSummary:
     raw_status = _optional_string(_read(row, "status", "state"))
@@ -124,6 +142,22 @@ def summarize_job(
     completed_units = _count_units(units, JOB_STATE_SUCCEEDED)
     failed_units = _count_units(units, JOB_STATE_FAILED)
     active_worker_ids = _active_worker_ids(units)
+    prompt_tokens = _optional_int(
+        _read(row, "prompt_tokens"),
+        _sum_unit_ints(units, "prompt_tokens"),
+    )
+    completion_tokens = _optional_int(
+        _read(row, "completion_tokens"),
+        _sum_unit_ints(units, "completion_tokens"),
+    )
+    total_tokens = _optional_int(
+        _read(row, "total_tokens"),
+        prompt_tokens + completion_tokens,
+    )
+    started_at = _optional_datetime(_read(row, "started_at")) or _first_unit_datetime(
+        units,
+        "started_at",
+    )
 
     return AdminJobSummary(
         id=_required_string(row, "id", "job_id"),
@@ -132,7 +166,7 @@ def summarize_job(
         order_id=_optional_string(_read(row, "order_id")),
         created_at=_optional_datetime(_read(row, "created_at")),
         updated_at=_optional_datetime(_read(row, "updated_at")),
-        started_at=_optional_datetime(_read(row, "started_at")),
+        started_at=started_at,
         completed_at=_optional_datetime(_read(row, "completed_at")),
         total_units=_optional_int(_read(row, "total_units", "unit_count"), len(units)),
         completed_units=_optional_int(
@@ -140,9 +174,9 @@ def summarize_job(
             completed_units,
         ),
         failed_units=_optional_int(_read(row, "failed_units"), failed_units),
-        prompt_tokens=_optional_int(_read(row, "prompt_tokens"), 0),
-        completion_tokens=_optional_int(_read(row, "completion_tokens"), 0),
-        total_tokens=_optional_int(_read(row, "total_tokens"), 0),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
         retry_count=_optional_int(_read(row, "retry_count", "retries"), 0),
         active_worker_ids=active_worker_ids,
         retryable=state == JOB_STATE_FAILED,
@@ -154,6 +188,7 @@ def summarize_job(
             ),
             max_chars=max_error_chars,
         ),
+        log_href=log_href,
     )
 
 
@@ -194,6 +229,8 @@ def build_operations_overview(
     jobs: Iterable[Any] = (),
     workers: Iterable[Any] = (),
     queue_depths: Mapping[str, int] | None = None,
+    work_units_by_job_id: Mapping[str, Iterable[Any]] | None = None,
+    job_log_hrefs: Mapping[str, str] | None = None,
     now: datetime | None = None,
     stale_after: timedelta = timedelta(minutes=5),
 ) -> OperationsOverview:
@@ -201,7 +238,16 @@ def build_operations_overview(
         str(queue_name): int(depth)
         for queue_name, depth in (queue_depths or {}).items()
     }
-    job_summaries = tuple(summarize_job(job) for job in jobs)
+    normalized_work_units = work_units_by_job_id or {}
+    normalized_log_hrefs = job_log_hrefs or {}
+    job_summaries = tuple(
+        summarize_job(
+            job,
+            work_units=normalized_work_units.get(_job_mapping_key(job), ()),
+            log_href=normalized_log_hrefs.get(_job_mapping_key(job)),
+        )
+        for job in jobs
+    )
     worker_summaries = tuple(
         summarize_worker(
             worker,
@@ -240,6 +286,52 @@ def build_operations_overview(
     )
 
 
+def build_persistent_operations_overview(
+    db_path: str | Path,
+    log_root: str | Path,
+    *,
+    limit_per_status: int = 25,
+) -> OperationsOverview:
+    if str(db_path) != ":memory:":
+        db_file = Path(db_path)
+        if not db_file.exists() or db_file.stat().st_size == 0:
+            return build_operations_overview()
+
+    store = SQLiteTranslationJobStore(db_path)
+    try:
+        jobs = []
+        work_units_by_job_id: dict[str, tuple[Any, ...]] = {}
+        for status in _PERSISTENT_OPERATION_STATUSES:
+            for job in store.list_jobs_by_status(status, limit=limit_per_status):
+                jobs.append(job)
+                work_units_by_job_id[job.id] = tuple(store.list_work_units(job.id))
+    finally:
+        store.close()
+
+    job_ids_with_logs = {
+        summary.job_id
+        for summary in list_translation_run_summaries(log_root, limit=500)
+        if summary.job_id
+    }
+    return build_operations_overview(
+        jobs=jobs,
+        work_units_by_job_id=work_units_by_job_id,
+        job_log_hrefs={job_id: "/admin/logs" for job_id in job_ids_with_logs},
+    )
+
+
+_PERSISTENT_OPERATION_STATUSES = (
+    PersistentTranslationJobStatus.QUEUED,
+    PersistentTranslationJobStatus.TRANSLATING,
+    PersistentTranslationJobStatus.ASSEMBLING,
+    PersistentTranslationJobStatus.CANCEL_REQUESTED,
+    PersistentTranslationJobStatus.INTERRUPTED,
+    PersistentTranslationJobStatus.FAILED,
+    PersistentTranslationJobStatus.READY,
+    PersistentTranslationJobStatus.PARTIAL,
+)
+
+
 def _count_units(units: tuple[Any, ...], state: str) -> int:
     return sum(
         1 for unit in units if normalize_job_state(_read(unit, "status")) == state
@@ -264,6 +356,23 @@ def _first_unit_error(units: tuple[Any, ...]) -> Any:
             if error:
                 return error
     return None
+
+
+def _sum_unit_ints(units: tuple[Any, ...], field_name: str) -> int:
+    return sum(_optional_int(_read(unit, field_name), 0) for unit in units)
+
+
+def _first_unit_datetime(units: tuple[Any, ...], field_name: str) -> datetime | None:
+    values = [
+        value
+        for value in (_optional_datetime(_read(unit, field_name)) for unit in units)
+        if value is not None
+    ]
+    return min(values) if values else None
+
+
+def _job_mapping_key(job: Any) -> str:
+    return _required_string(job, "id", "job_id")
 
 
 def _safe_error_excerpt(value: Any, *, max_chars: int) -> str | None:

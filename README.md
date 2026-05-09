@@ -94,6 +94,85 @@ Useful settings:
 Redis is not required for scheduler correctness. If a notification layer is
 added, workers must still be able to recover by scanning due PostgreSQL rows.
 
+## Server Deployment
+
+Prepare server settings once:
+
+```bash
+cp .env.server.example .env
+nano .env
+```
+
+Fill at least:
+
+- `TELEGRAM_BOT_TOKEN`
+- `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEYS`
+- admin secrets if the admin console is enabled
+
+Start or update the server:
+
+```bash
+scripts/deploy_server.sh
+```
+
+Before promoting changes to the server branch, run:
+
+```bash
+scripts/predeploy_check.sh
+```
+
+Runtime files are mounted from the host into containers:
+
+```text
+./var -> /app/var
+```
+
+This keeps uploaded files, translated files, SQLite fallback files, admin data,
+and translation logs outside the container image. The `var/` directory is
+ignored by git and should be included in server backups.
+
+Run a quick server check after deployment:
+
+```bash
+scripts/server_smoke_check.sh
+```
+
+Inspect server state during beta testing:
+
+```bash
+scripts/server_status.sh
+```
+
+Restore rehearsal instructions are in `docs/deployment/restore-runbook.md`.
+
+## Server Backups
+
+Run this from the project root on the server:
+
+```bash
+python3 scripts/backup_server_data.py --output-dir ~/folioloom_exports
+```
+
+The script creates three files:
+
+- `folioloom-db-YYYYMMDD-HHMMSS.sql`: PostgreSQL dump.
+- `folioloom-files-YYYYMMDD-HHMMSS.tgz`: uploaded, intermediate, partial, and final files from `OBJECT_STORAGE_ROOT`.
+- `folioloom-backup-YYYYMMDD-HHMMSS.manifest.json`: row counts, file counts, sizes, and SHA-256 hashes.
+
+By default, the script refuses a suspicious backup where object storage contains files but the database has no `translation_jobs` rows. Use `--allow-empty-database` only for a deliberately empty test server.
+
+Verify a downloaded backup manifest:
+
+```bash
+python3 scripts/verify_backup_export.py ~/Downloads/folioloom-backup-YYYYMMDD-HHMMSS.manifest.json
+```
+
+Download the latest backup to the Mac with:
+
+```bash
+scp 'ubuntu@YOUR_VPS_IP:~/folioloom_exports/folioloom-*' ~/Downloads/
+```
+
 ## TXT Translation Probe
 
 ```bash

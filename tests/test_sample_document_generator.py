@@ -6,6 +6,8 @@ from scripts.generate_sample_documents import _zip_writestr
 from scripts.generate_sample_documents import (
     _russian_regression_docx_document_xml,
     _russian_regression_epub_chapters,
+    _ukrainian_regression_docx_document_xml,
+    _ukrainian_regression_epub_chapters,
 )
 
 
@@ -50,6 +52,29 @@ class SampleDocumentGeneratorTest(unittest.TestCase):
         self.assertIn("中文: 请保留变量", combined)
         self.assertIn("العربية: تم توقيع العقد", combined)
         self.assertIn("https://example.com/v1/items", combined)
+        self.assertIn("<strong>API endpoint</strong>", combined)
+
+    def test_ukrainian_regression_docx_xml_contains_profile_cases(self):
+        document_xml = _ukrainian_regression_docx_document_xml()
+
+        self.assertIn("Ukrainian Profile Regression", document_xml)
+        self.assertIn("He made a decision after a high-level overview", document_xml)
+        self.assertIn("Он принял участие в проекте", document_xml)
+        self.assertIn("Set the API endpoint", document_xml)
+        self.assertIn("Maria Johnson visited Baker Street", document_xml)
+        self.assertIn("${API_TOKEN}", document_xml)
+        self.assertIn("<w:tbl>", document_xml)
+
+    def test_ukrainian_regression_epub_chapters_cover_calques_and_protected_cases(self):
+        chapters = _ukrainian_regression_epub_chapters()
+
+        self.assertEqual(set(chapters), {"OPS/uk-profile-1.xhtml", "OPS/uk-profile-2.xhtml"})
+        combined = "\n".join(chapters.values())
+        self.assertIn("Ukrainian Profile Regression", combined)
+        self.assertIn("The room held its breath", combined)
+        self.assertIn("Он принял участие", combined)
+        self.assertIn("English: The endpoint failed", combined)
+        self.assertIn("${API_TOKEN}", combined)
         self.assertIn("<strong>API endpoint</strong>", combined)
 
 

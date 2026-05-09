@@ -104,6 +104,29 @@ class TranslationRunnerTest(unittest.TestCase):
             ],
         )
 
+    def test_translates_ukrainian_profile_regression_txt_sample(self):
+        translator = RecordingTranslator()
+        path = TEST_SAMPLES_DIR / "ukrainian_profile_regression.en-uk.txt"
+
+        result = translate_txt_document(
+            file_name=path.name,
+            content=path.read_bytes(),
+            source_language="en",
+            target_language="uk",
+            max_fragment_chars=1_000,
+            translator=translator,
+        )
+
+        text = result.content.decode("utf-8")
+        self.assertEqual(result.file_name, "ukrainian_profile_regression.en-uk.uk.txt")
+        self.assertEqual(result.fragment_count, 247)
+        self.assertIn("[uk] Ukrainian Translation Regression Sample Pack", text)
+        self.assertIn("[uk] He made a decision after a high-level overview", text)
+        self.assertIn("[uk] Он принял участие в проекте", text)
+        self.assertIn("${API_TOKEN}", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertNotIn("ZXQPROTECTED", text)
+
     def test_translated_txt_file_name_handles_names_without_extension(self):
         translator = RecordingTranslator()
 
@@ -1211,6 +1234,31 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertIn("[ru] Footnote: preserve API endpoint terminology.", text)
         self.assertNotIn("ZXQPROTECTED", text)
 
+    def test_translates_ukrainian_profile_regression_docx_sample(self):
+        translator = RecordingTranslator()
+        path = TEST_SAMPLES_DIR / "ukrainian_profile_regression.en-uk.docx"
+
+        result = translate_docx_document(
+            file_name=path.name,
+            content=path.read_bytes(),
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            max_fragment_chars=300,
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertEqual(result.file_name, "ukrainian_profile_regression.en-uk.uk.docx")
+        self.assertEqual(result.fragment_count, 7)
+        self.assertIn("[uk] Ukrainian Profile Regression", text)
+        self.assertIn("[uk] Set ${API_TOKEN}", text)
+        self.assertIn("Он принял участие в проекте", text)
+        self.assertIn("The endpoint failed", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertIn("ROW-001", text)
+        self.assertIn("[uk] Footnote: preserve API endpoint terminology.", text)
+        self.assertNotIn("ZXQPROTECTED", text)
+
     def test_docx_translation_keeps_table_as_separate_structural_unit(self):
         translator = RecordingTranslator()
         content = _make_docx(
@@ -1698,6 +1746,31 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertIn("Zażółć gęślą jaźń", text)
         self.assertIn("中文: 请保留变量", text)
         self.assertIn("العربية: تم توقيع العقد", text)
+        self.assertIn("${API_TOKEN}", text)
+        self.assertIn("https://example.com/v1/items", text)
+        self.assertIn("ROW-001", text)
+        self.assertNotIn("ZXQPROTECTED", text)
+
+    def test_translates_ukrainian_profile_regression_epub_sample(self):
+        translator = RecordingTranslator()
+        path = TEST_SAMPLES_DIR / "ukrainian_profile_regression.en-uk.epub"
+
+        result = translate_epub_document(
+            file_name=path.name,
+            content=path.read_bytes(),
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            max_fragment_chars=300,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertEqual(result.file_name, "ukrainian_profile_regression.en-uk.uk.epub")
+        self.assertEqual(result.fragment_count, 5)
+        self.assertIn("[uk] Ukrainian Profile Regression", text)
+        self.assertIn("[uk] He made a decision after a high-level overview", text)
+        self.assertIn("[uk] Он принял участие", text)
+        self.assertIn("English: The endpoint failed", text)
         self.assertIn("${API_TOKEN}", text)
         self.assertIn("https://example.com/v1/items", text)
         self.assertIn("ROW-001", text)

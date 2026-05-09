@@ -139,6 +139,8 @@ class TranslationPolicyTest(unittest.TestCase):
         self.assertIn("<translation_batch>", system_prompt)
         self.assertIn("translation_block", system_prompt)
         self.assertIn("source_language", system_prompt)
+        self.assertIn("Do not add", system_prompt)
+        self.assertIn("target_language", system_prompt)
 
     def test_auto_source_prompt_translates_every_human_language(self):
         policy = build_translation_policy(
