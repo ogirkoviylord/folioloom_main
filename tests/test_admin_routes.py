@@ -1,15 +1,33 @@
 import re
+import sqlite3
 import unittest
 from base64 import urlsafe_b64encode
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
+from translator_service.admin.audit import SQLiteAdminAuditLog
+from translator_service.admin.costs import (
+    CostAnalytics,
+    CostRunSummary,
+    CostUserSummary,
+)
+from translator_service.admin.provider_probe import AIProviderProbeResult
+from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeChannel,
+    SQLiteAIProviderRuntimeStore,
+)
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.api import create_app
 from translator_service.config import Settings
+from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
 from translator_service.translation_run_logs import (
+    TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
 )
@@ -38,6 +56,69 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
+    def test_admin_overview_does_not_build_action_center_without_login(self):
+        with patch(
+            "translator_service.admin.routes._overview_action_center",
+            side_effect=AssertionError("overview action center should be lazy"),
+        ):
+            response = self.client.get("/admin/overview", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_operations_does_not_build_overview_without_login(self):
+        with patch(
+            "translator_service.admin.routes._operations_overview",
+            side_effect=AssertionError("operations overview should be lazy"),
+        ):
+            response = self.client.get(
+                "/admin/operations/jobs",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_costs_does_not_build_analytics_without_login(self):
+        with patch(
+            "translator_service.admin.routes._cost_analytics",
+            side_effect=AssertionError("cost analytics should be lazy"),
+        ):
+            response = self.client.get("/admin/costs", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_costs_api_does_not_build_analytics_without_login(self):
+        with patch(
+            "translator_service.admin.routes._cost_analytics",
+            side_effect=AssertionError("cost analytics should be lazy"),
+        ) as analytics:
+            response = self.client.get("/admin/api/costs")
+
+        self.assertEqual(response.status_code, 401)
+        analytics.assert_not_called()
+
+    def test_admin_quality_does_not_build_summary_without_login(self):
+        with patch(
+            "translator_service.admin.routes._quality_run_summary",
+            side_effect=AssertionError("quality summary should be lazy"),
+        ):
+            response = self.client.get("/admin/quality", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_quality_api_does_not_build_summary_without_login(self):
+        with patch(
+            "translator_service.admin.routes._quality_run_summary",
+            side_effect=AssertionError("quality summary should be lazy"),
+        ) as quality:
+            response = self.client.get("/admin/api/quality")
+
+        self.assertEqual(response.status_code, 401)
+        quality.assert_not_called()
+
     def test_owner_can_login_and_open_admin_shell(self):
         login = self.client.post(
             "/admin/login",
@@ -56,9 +137,95 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Integrations", overview.text)
         self.assertIn("AI Providers", overview.text)
         self.assertIn("Billing", overview.text)
+        self.assertIn("Costs", overview.text)
+        self.assertIn("Quality", overview.text)
         self.assertIn("Live", overview.text)
         self.assertIn("Settings", overview.text)
         self.assertEqual(overview.headers["cache-control"], "no-store")
+
+    def test_login_cookie_can_be_marked_secure_for_deployment(self):
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    admin_cookie_secure=True,
+                )
+            )
+        )
+
+        login = client.post(
+            "/admin/login",
+            data={"password": "owner-pass"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(login.status_code, 303)
+        self.assertIn("Secure", login.headers["set-cookie"])
+
+    def test_admin_shell_shows_environment_badge(self):
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    environment="stable",
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                )
+            )
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("stable", response.text)
+        self.assertIn("environment-badge", response.text)
+
+    def test_overview_renders_action_center(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Action Center", response.text)
+        self.assertIn("integrations_missing", response.text)
+        self.assertIn("/admin/integrations", response.text)
+        self.assertNotIn("pending actions will live here", response.text)
+
+    def test_overview_flags_runtime_not_reporting_when_keys_exist(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            add = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-main-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(add.status_code, 303)
+
+            overview = client.get("/admin/overview")
+
+            self.assertIn("DeepSeek runtime is not reporting", overview.text)
+            self.assertNotIn("sk-main-secret", overview.text)
 
     def test_invalid_login_is_rejected(self):
         response = self.client.post("/admin/login", data={"password": "wrong-pass"})
@@ -72,6 +239,8 @@ class AdminRoutesTest(unittest.TestCase):
             ("/admin/integrations", "Integrations"),
             ("/admin/ai-providers", "AI Providers"),
             ("/admin/billing", "Billing"),
+            ("/admin/costs", "Costs"),
+            ("/admin/quality", "Quality"),
             ("/admin/live", "Live Monitor"),
             ("/admin/logs", "Logs"),
             ("/admin/settings", "Settings"),
@@ -84,6 +253,38 @@ class AdminRoutesTest(unittest.TestCase):
 
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(label, response.text)
+
+    def test_quality_page_and_api_show_empty_state_without_run_file(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        page = self.client.get("/admin/quality")
+        api = self.client.get("/admin/api/quality")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Translation Quality", page.text)
+        self.assertIn("No quality run found", page.text)
+        self.assertNotIn("translated_text", page.text)
+        self.assertNotIn("reference_translation", page.text)
+        self.assertEqual(api.status_code, 200)
+        payload = api.json()["quality"]
+        self.assertFalse(payload["found"])
+        self.assertGreaterEqual(payload["total_reference_samples"], 5)
+        self.assertNotIn("translated_text", api.text)
+        self.assertNotIn("reference_translation", api.text)
+
+    def test_settings_page_renders_secret_safety_center(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/settings")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Secret &amp; Config Safety", response.text)
+        self.assertIn("Safety summary", response.text)
+        self.assertIn("Missing", response.text)
+        self.assertIn("Needs check", response.text)
+        self.assertIn("Telegram", response.text)
+        self.assertNotIn("telegram.bot_token", response.text)
+        self.assertNotIn("deepseek.api_keys", response.text)
 
     def test_integrations_page_and_api_show_registry(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
@@ -189,6 +390,11 @@ class AdminRoutesTest(unittest.TestCase):
             'action="/admin/ai-providers/deepseek/keys"',
             page.text,
         )
+        self.assertIn("Provider health", page.text)
+        self.assertIn("Active keys", page.text)
+        self.assertIn("Disabled keys", page.text)
+        self.assertIn("Last validation", page.text)
+        self.assertIn("Test key", page.text)
         self.assertIn("Add key", page.text)
 
     def test_billing_shell_is_separate_from_integrations(self):
@@ -200,6 +406,36 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Billing", response.text)
         self.assertIn("Payment providers", response.text)
 
+    def test_costs_page_and_api_show_token_spend(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        with patch(
+            "translator_service.admin.routes._cost_analytics",
+            return_value=_cost_analytics_fixture(),
+        ):
+            page = self.client.get("/admin/costs")
+            api = self.client.get("/admin/api/costs")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Token Spend", page.text)
+        self.assertIn("Top users (all time)", page.text)
+        self.assertIn("job-costs-1", page.text)
+        self.assertIn("telegram:42", page.text)
+        self.assertIn("$0.0025", page.text)
+        self.assertNotIn("source_text", page.text)
+        self.assertNotIn("https://example.test/logs", page.text)
+        self.assertIn('href="/admin/logs"', page.text)
+        self.assertEqual(api.status_code, 200)
+        payload = api.json()
+        self.assertEqual(payload["tokens_today"], 3000)
+        self.assertEqual(payload["tokens_last_7_days"], 3000)
+        self.assertEqual(payload["tokens_month_to_date"], 3000)
+        self.assertEqual(payload["estimated_cost_today_usd"], 0.00248)
+        self.assertEqual(payload["top_runs"][0]["job_id"], "job-costs-1")
+        self.assertEqual(payload["top_runs"][0]["estimated_cost_usd"], 0.00248)
+        self.assertEqual(payload["top_users"][0]["user_id"], "telegram:42")
+        self.assertEqual(payload["top_users"][0]["estimated_cost_usd"], 0.00248)
+
     def test_operations_page_and_api_show_empty_overview(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 
@@ -210,6 +446,73 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Queue depth", page.text)
         self.assertEqual(api.status_code, 200)
         self.assertEqual(api.json()["overview"]["total_queue_depth"], 0)
+
+    def test_operations_page_and_api_show_persistent_jobs_and_logs(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            store = SQLiteTranslationJobStore(db_path)
+            queued = _persistent_job(store, order_id="order-queued")
+            running = _persistent_job(store, order_id="order-running")
+            ready = _persistent_job(store, order_id="order-ready")
+            _add_units(store, queued.id)
+            _add_units(store, running.id)
+            _add_units(store, ready.id)
+            store.claim_next_work_unit(running.id, worker_id="worker-a")
+            ready_unit = store.claim_next_work_unit(ready.id, worker_id="worker-ready")
+            store.complete_work_unit(
+                ready_unit.id,
+                translated_text="translated",
+                prompt_tokens=12,
+                completion_tokens=9,
+                cache_hit_tokens=0,
+                cache_miss_tokens=0,
+            )
+            store.close()
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=ready.id,
+                    order_id=ready.order_id,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                ),
+            )
+            logger.finish(status="ready", result_file_name="book.uk.txt")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        persistent_jobs_db_path=str(db_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/operations/jobs")
+            api = client.get("/admin/api/operations/overview")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("order-queued", page.text)
+            self.assertIn("worker-a", page.text)
+            self.assertIn("21", page.text)
+            self.assertIn('href="/admin/logs"', page.text)
+            self.assertIn("Cancel unavailable", page.text)
+            self.assertEqual(api.status_code, 200)
+            jobs = api.json()["overview"]["jobs"]
+            by_order = {job["order_id"]: job for job in jobs}
+            self.assertEqual(
+                by_order["order-running"]["active_worker_ids"],
+                ["worker-a"],
+            )
+            self.assertEqual(by_order["order-ready"]["total_tokens"], 21)
+            self.assertEqual(by_order["order-ready"]["log_href"], "/admin/logs")
 
     def test_translation_logs_page_and_api_filter_runs(self):
         with TemporaryDirectory() as temp_dir:
@@ -224,7 +527,28 @@ class AdminRoutesTest(unittest.TestCase):
                     source_language="en",
                     target_language="ru",
                     translator_model="deepseek",
+                    prompt_version="prompt-v1",
+                    adapter_version="txt-adapter-v1",
+                    translation_stack={
+                        "adapter": {"name": "txt", "version": "txt-adapter-v1"},
+                        "language_profiles": {
+                            "target_language": {"signature": "ru-profile-v1"}
+                        },
+                    },
                 ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="Chapter one",
+                    translated_text="Глава первая",
+                    status="ready",
+                    elapsed_seconds=0.5,
+                    prompt_tokens=10,
+                    completion_tokens=12,
+                    total_tokens=22,
+                    source_block_ids=("block-1",),
+                )
             )
             logger.finish(status="ready", result_file_name="book.ru.txt")
             client = TestClient(
@@ -240,17 +564,49 @@ class AdminRoutesTest(unittest.TestCase):
 
             page = client.get("/admin/logs?status=ready")
             api = client.get("/admin/api/logs?status=ready")
+            details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
             self.assertEqual(page.status_code, 200)
             self.assertIn("Translation Logs", page.text)
             self.assertIn("job-logs-1", page.text)
             self.assertIn("book.txt", page.text)
             self.assertIn("ready", page.text)
+            self.assertIn(
+                f'/admin/logs/{logger.run_dir.name}/download',
+                page.text,
+            )
+            self.assertIn(
+                f'/admin/logs/{logger.run_dir.name}"',
+                page.text,
+            )
             self.assertNotIn("source_text", page.text)
+            self.assertEqual(details.status_code, 200)
+            self.assertIn("Translation Details", details.text)
+            self.assertIn("job-logs-1", details.text)
+            self.assertIn("prompt-v1", details.text)
+            self.assertIn("txt-adapter-v1", details.text)
+            self.assertIn("ru-profile-v1", details.text)
+            self.assertIn("run_started", details.text)
+            self.assertIn("block-1", details.text)
+            self.assertIn("22", details.text)
+            self.assertNotIn("Chapter one", details.text)
+            self.assertNotIn("Глава первая", details.text)
             self.assertEqual(api.status_code, 200)
             payload = api.json()
             self.assertEqual(payload["logs"][0]["job_id"], "job-logs-1")
             self.assertEqual(payload["logs"][0]["status"], "ready")
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(download.headers["content-type"], "application/zip")
+            self.assertIn(
+                "attachment;",
+                download.headers["content-disposition"],
+            )
+            with ZipFile(BytesIO(download.content)) as archive:
+                names = set(archive.namelist())
+                self.assertIn("run.json", names)
+                self.assertIn("summary.md", names)
+                self.assertIn("events.jsonl", names)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
@@ -357,11 +713,18 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Active translations", page.text)
             self.assertIn("Tokens today", page.text)
             self.assertIn("Server health", page.text)
+            self.assertIn("CPU", page.text)
+            self.assertIn("Memory", page.text)
+            self.assertIn("Disk", page.text)
+            self.assertIn("Uptime", page.text)
             self.assertEqual(api.status_code, 200)
             payload = api.json()
             self.assertEqual(payload["active_translations"], 0)
             self.assertEqual(payload["recent_runs"][0]["job_id"], "job-live-1")
-            self.assertFalse(payload["server"]["available"])
+            self.assertIn("available", payload["server"])
+            self.assertIn("cpu_percent", payload["server"])
+            self.assertIn("memory_percent", payload["server"])
+            self.assertIn("disk_percent", payload["server"])
 
     def test_owner_can_store_ai_provider_secret_with_csrf(self):
         with TemporaryDirectory() as temp_dir:
@@ -478,6 +841,11 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("<strong>backup</strong>", updated.text)
             self.assertIn("sk-****cret", updated.text)
             self.assertNotIn("sk-main-secret", updated.text)
+            self.assertIn("Provider health", updated.text)
+            self.assertIn("Active keys", updated.text)
+            self.assertIn("Disabled keys", updated.text)
+            self.assertIn("Last validation", updated.text)
+            self.assertIn("Test key", updated.text)
 
             key_ids = re.findall(r'name="key_id" value="([^"]+)"', updated.text)
             self.assertEqual(len(key_ids), 2)
@@ -491,6 +859,443 @@ class AdminRoutesTest(unittest.TestCase):
             after_remove = client.get("/admin/ai-providers")
             self.assertNotIn("<strong>main</strong>", after_remove.text)
             self.assertIn("<strong>backup</strong>", after_remove.text)
+            settings = client.get("/admin/settings")
+            self.assertIn("disabled", settings.text)
+            self.assertNotIn(".api_keys.", settings.text)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                events = audit.list_events(limit=3)
+            serialized_events = "\n".join(
+                f"{event.action} {event.target_id} {event.metadata_json}"
+                for event in events
+            )
+            self.assertNotIn(".api_keys.", serialized_events)
+            self.assertIn(key_ids[0], serialized_events)
+
+    def test_ai_provider_page_handles_missing_backing_secret(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            add = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "orphaned",
+                    "value": "sk-orphaned-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(add.status_code, 303)
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("DELETE FROM admin_secrets")
+                connection.commit()
+            finally:
+                connection.close()
+
+            response = client.get("/admin/ai-providers")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Provider health", response.text)
+            self.assertIn("0 active keys", response.text)
+            self.assertIn("missing keys", response.text)
+            self.assertIn("<code>missing</code>", response.text)
+
+    def test_owner_can_test_ai_provider_key_and_see_health_result(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            add = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-testable-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(add.status_code, 303)
+            updated = client.get("/admin/ai-providers")
+            key_id = re.search(r'name="key_id" value="([^"]+)"', updated.text)
+            self.assertIsNotNone(key_id)
+            self.assertIn("not checked", updated.text)
+            self.assertIn(
+                'action="/admin/ai-providers/deepseek/keys/test"',
+                updated.text,
+            )
+            self.assertIn(
+                'action="/admin/ai-providers/deepseek/keys/test-all"',
+                updated.text,
+            )
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                return_value=AIProviderProbeResult(
+                    status="provider_check_passed",
+                    error=None,
+                ),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test",
+                    data={"csrf_token": csrf.group(1), "key_id": key_id.group(1)},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 303)
+            probe.assert_called_once_with(
+                "deepseek",
+                "sk-testable-secret",
+                base_url="https://api.deepseek.com",
+                timeout_seconds=10.0,
+            )
+            after_test = client.get("/admin/ai-providers")
+            self.assertIn("provider_check_passed", after_test.text)
+            self.assertIn("n/a", after_test.text)
+            self.assertNotIn("sk-testable-secret", after_test.text)
+            self.assertNotIn(".api_keys.", after_test.text)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.key.tested"
+                )
+            self.assertEqual(event.outcome.value, "success")
+            self.assertIn('"status": "provider_check_passed"', event.metadata_json)
+
+    def test_owner_can_test_all_active_ai_provider_keys(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            for label, value in (
+                ("main", "sk-main-secret"),
+                ("backup", "sk-backup-secret"),
+            ):
+                added = client.post(
+                    "/admin/ai-providers/deepseek/keys",
+                    data={
+                        "csrf_token": csrf.group(1),
+                        "label": label,
+                        "value": value,
+                        "weight": "1",
+                        "max_parallel_requests": "1",
+                    },
+                    follow_redirects=False,
+                )
+                self.assertEqual(added.status_code, 303)
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                side_effect=(
+                    AIProviderProbeResult(
+                        status="provider_check_passed",
+                        error=None,
+                    ),
+                    AIProviderProbeResult(
+                        status="failed",
+                        error="Provider health check returned HTTP 401.",
+                    ),
+                ),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test-all",
+                    data={"csrf_token": csrf.group(1)},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 303)
+            self.assertEqual(probe.call_count, 2)
+            self.assertEqual(
+                [call.args[1] for call in probe.call_args_list],
+                ["sk-main-secret", "sk-backup-secret"],
+            )
+            after_test = client.get("/admin/ai-providers")
+            self.assertIn("failed", after_test.text)
+            self.assertIn("HTTP 401", after_test.text)
+            self.assertNotIn("sk-main-secret", after_test.text)
+            self.assertNotIn("sk-backup-secret", after_test.text)
+            self.assertNotIn(".api_keys.", after_test.text)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.keys.tested"
+                )
+            self.assertEqual(event.target_id, "deepseek")
+            self.assertEqual(event.outcome.value, "failure")
+            self.assertIn('"passed": 1', event.metadata_json)
+            self.assertIn('"failed": 1', event.metadata_json)
+            self.assertNotIn("sk-main-secret", event.metadata_json)
+            self.assertNotIn(".api_keys.", event.metadata_json)
+
+    def test_owner_can_update_disable_and_enable_ai_provider_key(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            add = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-editable-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(add.status_code, 303)
+            updated = client.get("/admin/ai-providers")
+            key_id = re.search(r'name="key_id" value="([^"]+)"', updated.text)
+            self.assertIsNotNone(key_id)
+
+            saved = client.post(
+                "/admin/ai-providers/deepseek/keys/update",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "key_id": key_id.group(1),
+                    "label": "primary",
+                    "weight": "4",
+                    "max_parallel_requests": "2",
+                },
+                follow_redirects=False,
+            )
+            disabled = client.post(
+                "/admin/ai-providers/deepseek/keys/disable",
+                data={"csrf_token": csrf.group(1), "key_id": key_id.group(1)},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(saved.status_code, 303)
+            self.assertEqual(disabled.status_code, 303)
+            after_disable = client.get("/admin/ai-providers")
+            self.assertIn("<strong>primary</strong>", after_disable.text)
+            self.assertIn("0 active keys", after_disable.text)
+            self.assertIn("disabled", after_disable.text)
+            self.assertIn("Enable", after_disable.text)
+            self.assertNotIn("sk-editable-secret", after_disable.text)
+            with SQLiteEncryptedSecretStore(
+                db_path,
+                master_key=MASTER_KEY,
+            ) as secrets:
+                self.assertEqual(
+                    secrets.get_secret_value(f"deepseek.api_keys.{key_id.group(1)}"),
+                    "sk-editable-secret",
+                )
+
+            enabled = client.post(
+                "/admin/ai-providers/deepseek/keys/enable",
+                data={"csrf_token": csrf.group(1), "key_id": key_id.group(1)},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(enabled.status_code, 303)
+            after_enable = client.get("/admin/ai-providers")
+            self.assertIn("1 active keys", after_enable.text)
+            self.assertIn("weight 4", after_enable.text)
+            self.assertIn("parallel 2", after_enable.text)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                events = audit.list_events(limit=10)
+            serialized_events = "\n".join(
+                f"{event.action} {event.target_id} {event.metadata_json}"
+                for event in events
+            )
+            self.assertIn("ai_provider.key.updated", serialized_events)
+            self.assertIn("ai_provider.key.disabled", serialized_events)
+            self.assertIn("ai_provider.key.enabled", serialized_events)
+            self.assertNotIn("sk-editable-secret", serialized_events)
+            self.assertNotIn(".api_keys.", serialized_events)
+
+    def test_ai_provider_page_shows_runtime_status_and_requests_reload(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="stable",
+                            weight=3,
+                            max_parallel_requests=2,
+                        ),
+                    ),
+                    error=None,
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+
+            self.assertIn("Runtime status", page.text)
+            self.assertIn("admin_store", page.text)
+            self.assertIn("30s", page.text)
+            self.assertIn("fresh", page.text)
+            self.assertIn("stable", page.text)
+            self.assertIn("weight 3", page.text)
+            self.assertIn("parallel 2", page.text)
+            self.assertIn(
+                'action="/admin/ai-providers/deepseek/runtime/reload"',
+                page.text,
+            )
+            self.assertNotIn(".api_keys.", page.text)
+            reload_response = client.post(
+                "/admin/ai-providers/deepseek/runtime/reload",
+                data={"csrf_token": csrf.group(1)},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(reload_response.status_code, 303)
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                request = runtime.get_reload_state("deepseek")
+            self.assertIsNotNone(request)
+            self.assertTrue(request.pending)
+            pending_page = client.get("/admin/ai-providers")
+            runtime_api = client.get("/admin/api/ai-providers/runtime")
+            live_page = client.get("/admin/live")
+
+            self.assertIn("Reload requested", pending_page.text)
+            self.assertIn("Waiting for runtime", pending_page.text)
+            self.assertEqual(runtime_api.status_code, 200)
+            payload = runtime_api.json()
+            self.assertTrue(payload["providers"][0]["reload_pending"])
+            self.assertEqual(payload["providers"][0]["freshness"], "fresh")
+            self.assertIn("DeepSeek runtime", live_page.text)
+            self.assertIn("admin_store", live_page.text)
+            self.assertIn("Reload pending", live_page.text)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.runtime.reload_requested"
+                )
+            self.assertEqual(event.target_id, "deepseek")
+            self.assertEqual(event.outcome.value, "success")
+            self.assertNotIn(".api_keys.", event.metadata_json)
+
+    def test_failed_ai_provider_key_test_is_recorded_as_audit_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            add = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "disabled",
+                    "value": "sk-disabled-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(add.status_code, 303)
+            updated = client.get("/admin/ai-providers")
+            key_id = re.search(r'name="key_id" value="([^"]+)"', updated.text)
+            self.assertIsNotNone(key_id)
+            remove = client.post(
+                "/admin/ai-providers/deepseek/keys/remove",
+                data={"csrf_token": csrf.group(1), "key_id": key_id.group(1)},
+                follow_redirects=False,
+            )
+            self.assertEqual(remove.status_code, 303)
+
+            tested = client.post(
+                "/admin/ai-providers/deepseek/keys/test",
+                data={"csrf_token": csrf.group(1), "key_id": key_id.group(1)},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(tested.status_code, 400)
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.key.tested"
+                )
+            self.assertEqual(event.action, "ai_provider.key.tested")
+            self.assertEqual(event.target_id, key_id.group(1))
+            self.assertEqual(event.outcome.value, "failure")
+            self.assertIn('"status": "failed"', event.metadata_json)
+            self.assertNotIn("sk-disabled-secret", event.metadata_json)
+            self.assertNotIn(".api_keys.", event.metadata_json)
 
     def test_mutating_actions_require_csrf(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
@@ -511,6 +1316,71 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(logged_out.status_code, 303)
         self.assertEqual(logged_out.headers["location"], "/admin/login")
+
+
+def _persistent_job(store: SQLiteTranslationJobStore, *, order_id: str):
+    return store.create_job(
+        order_id=order_id,
+        user_id="telegram:42",
+        file_id=f"{order_id}-file",
+        file_name="book.txt",
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        adapter_version="txt-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+    )
+
+
+def _add_units(store: SQLiteTranslationJobStore, job_id: str):
+    return store.add_work_units(
+        job_id,
+        [
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("block-1",),
+                source_text_hash=f"{job_id}-hash-1",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+            )
+        ],
+    )
+
+
+def _cost_analytics_fixture() -> CostAnalytics:
+    return CostAnalytics(
+        tokens_today=3000,
+        tokens_last_7_days=3000,
+        tokens_month_to_date=3000,
+        estimated_cost_today_usd=0.00248,
+        estimated_cost_last_7_days_usd=0.00248,
+        estimated_cost_month_to_date_usd=0.00248,
+        top_runs=(
+            CostRunSummary(
+                job_id="job-costs-1",
+                order_id="order-costs-1",
+                user_id="telegram:42",
+                file_name="costs.txt",
+                started_at=datetime(2026, 5, 9, 9, 0, tzinfo=UTC),
+                prompt_tokens=1000,
+                completion_tokens=2000,
+                total_tokens=3000,
+                estimated_cost_usd=0.00248,
+                log_href="https://example.test/logs",
+            ),
+        ),
+        top_users=(
+            CostUserSummary(
+                user_id="telegram:42",
+                prompt_tokens=1000,
+                completion_tokens=2000,
+                total_tokens=3000,
+                estimated_cost_usd=0.00248,
+            ),
+        ),
+    )
 
 
 if __name__ == "__main__":

@@ -600,7 +600,16 @@ Multichannel translation must run through the queue. The user should not directl
 
 The UI should describe multichannel capacity in user-friendly terms such as `processing`, `faster delivery`, or `priority processing`, not as provider channels or worker counts. If the service is busy, the bot should calmly explain that the file is saved in the queue and show status rather than returning a generic failure.
 
-Pricing and premium policy are intentionally unresolved. The architecture must support future priority tiers through fields such as `priority`, `tier`, `max_active_jobs`, `max_pending_jobs`, `max_active_units`, and `priority_weight`, but the initial design must work without paid tiers. A later pricing-policy design should decide whether higher queue priority, higher backlog limits, faster delivery, batch translation, or stronger model routes become paid capabilities.
+Pricing and premium policy now has a first test model in
+`docs/superpowers/specs/2026-05-09-folioloom-pricing-v0.md`. The architecture
+must still support future priority tiers through fields such as `priority`,
+`tier`, `max_active_jobs`, `max_pending_jobs`, `max_active_units`, and
+`priority_weight`, but the initial paid experiment should use the documented
+hybrid model: free preview, pay-per-document, credits balance, Telegram Stars,
+and no unlimited subscription during the first paid month. Future pricing
+iterations should decide whether higher queue priority, higher backlog limits,
+faster delivery, batch translation, or stronger quality routes become paid
+capabilities.
 
 ## My Books and Translation History
 

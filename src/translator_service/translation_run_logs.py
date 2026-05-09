@@ -27,6 +27,7 @@ class TranslationRunMetadata:
     detected_source_language: str | None = None
     translation_policy: str | None = None
     translation_quality_route: str | None = None
+    translation_stack: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,8 @@ def _render_summary(snapshot: dict) -> str:
         f"- Prompt version: `{snapshot.get('prompt_version') or 'n/a'}`",
         f"- Adapter version: `{snapshot.get('adapter_version') or 'n/a'}`",
         "",
+        *_render_translation_stack(snapshot.get("translation_stack")),
+        "",
         "## Totals",
         "",
     ]
@@ -275,6 +278,52 @@ def _render_summary(snapshot: dict) -> str:
             if value:
                 lines.append(f"- {key}: `{value}`")
     return "\n".join(lines) + "\n"
+
+
+def _render_translation_stack(stack: dict | None) -> list[str]:
+    if not isinstance(stack, dict):
+        return []
+    adapter = stack.get("adapter") if isinstance(stack.get("adapter"), dict) else {}
+    prompt = stack.get("prompt") if isinstance(stack.get("prompt"), dict) else {}
+    profiles = (
+        stack.get("language_profiles")
+        if isinstance(stack.get("language_profiles"), dict)
+        else {}
+    )
+    target_profile = (
+        profiles.get("target_language")
+        if isinstance(profiles.get("target_language"), dict)
+        else {}
+    )
+    source_pair = (
+        profiles.get("source_pair")
+        if isinstance(profiles.get("source_pair"), dict)
+        else {}
+    )
+    quality_track = (
+        profiles.get("quality_track")
+        if isinstance(profiles.get("quality_track"), dict)
+        else {}
+    )
+    text = stack.get("text") if isinstance(stack.get("text"), dict) else {}
+    return [
+        "## Translation Stack",
+        "",
+        f"- Stack schema: `{stack.get('schema_version') or 'n/a'}`",
+        f"- Adapter: `{adapter.get('name') or 'n/a'}` (`{adapter.get('version') or 'n/a'}`)",
+        f"- Document kind: `{adapter.get('document_kind') or 'n/a'}`",
+        f"- Run prompt version: `{prompt.get('run_prompt_version') or 'n/a'}`",
+        f"- Prompt policy: `{prompt.get('prompt_policy_version') or 'n/a'}`",
+        f"- Protection policy: `{prompt.get('protection_policy_version') or 'n/a'}`",
+        f"- Generic adapter policy: `{prompt.get('adapter_policy_version') or 'n/a'}`",
+        f"- Output contract: `{prompt.get('output_contract') or 'n/a'}`",
+        f"- Target language profile: `{target_profile.get('signature') or 'n/a'}`",
+        f"- Source-pair profile: `{source_pair.get('signature') or 'n/a'}`",
+        f"- Quality track: `{quality_track.get('signature') or 'n/a'}`",
+        f"- Text type: `{text.get('text_type') or 'n/a'}`",
+        f"- Prompt tier: `{text.get('prompt_tier') or 'n/a'}`",
+        "",
+    ]
 
 
 def _run_dir_name(started_at: datetime, metadata: TranslationRunMetadata) -> str:

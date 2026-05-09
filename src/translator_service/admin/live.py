@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from translator_service.admin.operations import OperationsOverview
 from translator_service.admin.translation_logs import (
@@ -12,6 +15,7 @@ from translator_service.admin.translation_logs import (
 
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
 _FAILED_STATUSES = {"failed", "interrupted", "error"}
+_AUTO_PSUTIL = object()
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,10 @@ class ServerHealthSnapshot:
     cpu_percent: float | None = None
     memory_percent: float | None = None
     memory_used_mb: float | None = None
+    memory_total_mb: float | None = None
+    disk_percent: float | None = None
+    disk_used_gb: float | None = None
+    disk_total_gb: float | None = None
     uptime_seconds: float | None = None
 
 
@@ -41,6 +49,7 @@ def build_live_monitor_snapshot(
     operations: OperationsOverview | None = None,
     now: datetime | None = None,
     recent_limit: int = 8,
+    server: ServerHealthSnapshot | None = None,
 ) -> LiveMonitorSnapshot:
     current_time = _aware_utc(now or datetime.now(UTC))
     runs = list_translation_run_summaries(translation_run_log_root, limit=200)
@@ -68,7 +77,83 @@ def build_live_monitor_snapshot(
             if run.started_at is not None and _aware_utc(run.started_at) >= one_hour_ago
         ),
         recent_runs=tuple(runs[: max(1, int(recent_limit))]),
-        server=ServerHealthSnapshot(),
+        server=server if server is not None else collect_local_server_health(),
+    )
+
+
+def collect_local_server_health(
+    *,
+    disk_path: str | Path = "/",
+    disk_usage: Callable[[str | Path], Any] = shutil.disk_usage,
+    psutil_module: Any = _AUTO_PSUTIL,
+    now: Callable[[], datetime] | None = None,
+) -> ServerHealthSnapshot:
+    psutil = _load_psutil() if psutil_module is _AUTO_PSUTIL else psutil_module
+    cpu_percent = None
+    memory_percent = None
+    memory_used_mb = None
+    memory_total_mb = None
+    uptime_seconds = None
+    disk_percent = None
+    disk_used_gb = None
+    disk_total_gb = None
+
+    if psutil is not None:
+        try:
+            cpu_percent = _round_metric(psutil.cpu_percent(interval=None))
+        except Exception:
+            cpu_percent = None
+        try:
+            memory = psutil.virtual_memory()
+            memory_percent = _round_metric(memory.percent)
+            memory_used_mb = _bytes_to_mb(memory.used)
+            memory_total_mb = _bytes_to_mb(memory.total)
+        except Exception:
+            memory_percent = None
+            memory_used_mb = None
+            memory_total_mb = None
+        try:
+            current_time = now() if now is not None else datetime.now(UTC)
+            boot_time = datetime.fromtimestamp(float(psutil.boot_time()), tz=UTC)
+            uptime_seconds = max(
+                0.0,
+                (_aware_utc(current_time) - boot_time).total_seconds(),
+            )
+        except Exception:
+            uptime_seconds = None
+
+    try:
+        disk = disk_usage(disk_path)
+        disk_percent = _round_metric((float(disk.used) / float(disk.total)) * 100)
+        disk_used_gb = _bytes_to_gb(disk.used)
+        disk_total_gb = _bytes_to_gb(disk.total)
+    except Exception:
+        disk_percent = None
+        disk_used_gb = None
+        disk_total_gb = None
+
+    return ServerHealthSnapshot(
+        available=any(
+            value is not None
+            for value in (
+                cpu_percent,
+                memory_percent,
+                memory_used_mb,
+                memory_total_mb,
+                disk_percent,
+                disk_used_gb,
+                disk_total_gb,
+                uptime_seconds,
+            )
+        ),
+        cpu_percent=cpu_percent,
+        memory_percent=memory_percent,
+        memory_used_mb=memory_used_mb,
+        memory_total_mb=memory_total_mb,
+        disk_percent=disk_percent,
+        disk_used_gb=disk_used_gb,
+        disk_total_gb=disk_total_gb,
+        uptime_seconds=uptime_seconds,
     )
 
 
@@ -82,3 +167,23 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _load_psutil() -> Any:
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return psutil
+
+
+def _round_metric(value: Any) -> float:
+    return round(float(value), 1)
+
+
+def _bytes_to_mb(value: Any) -> float:
+    return round(float(value) / 1024 / 1024, 1)
+
+
+def _bytes_to_gb(value: Any) -> float:
+    return round(float(value) / 1024 / 1024 / 1024, 1)

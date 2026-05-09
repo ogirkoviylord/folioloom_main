@@ -631,6 +631,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             run_dir = next((Path(temp_dir) / "translation-runs").iterdir())
             snapshot = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
             translation_policy = json.loads(snapshot["translation_policy"])
+            summary = (run_dir / "summary.md").read_text(encoding="utf-8")
 
             self.assertEqual(
                 translation_policy["target_language_policy"],
@@ -643,6 +644,53 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(translation_policy["text_type"], "technical")
             self.assertEqual(translation_policy["target_language"], "ru")
             self.assertEqual(translation_policy["source_language"], "en")
+            self.assertEqual(snapshot["adapter_version"], "txt-adapter-v2")
+            self.assertEqual(snapshot["prompt_version"], "plain-v1")
+            self.assertEqual(
+                snapshot["translation_stack"],
+                {
+                    "schema_version": "translation-stack-v1",
+                    "adapter": {
+                        "document_kind": "txt",
+                        "name": "txt",
+                        "version": "txt-adapter-v2",
+                    },
+                    "prompt": {
+                        "run_prompt_version": "plain-v1",
+                        "prompt_policy_version": "prompt-policy-v9",
+                        "protection_policy_version": "protection-policy-v2",
+                        "adapter_policy_version": "generic-adapter-v2",
+                        "output_contract": "plain-text-v1",
+                    },
+                    "language_profiles": {
+                        "target_language": {
+                            "language": "ru",
+                            "signature": "target-profile:ru:russian-v2",
+                            "version": "russian-v2",
+                        },
+                        "source_pair": {
+                            "source_language": "en",
+                            "target_language": "ru",
+                            "signature": "source-pair:en-ru:v1",
+                            "version": "v1",
+                        },
+                        "quality_track": {
+                            "signature": "russian-quality:precision-v1",
+                            "track": "precision",
+                            "version": "v1",
+                        },
+                    },
+                    "text": {
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "text_type": "technical",
+                        "prompt_tier": "plain",
+                    },
+                },
+            )
+            self.assertIn("## Translation Stack", summary)
+            self.assertIn("Target language profile: `target-profile:ru:russian-v2`", summary)
+            self.assertIn("Source-pair profile: `source-pair:en-ru:v1`", summary)
 
     def test_confirmed_translation_run_log_records_security_events(self):
         with TemporaryDirectory() as temp_dir:
@@ -1847,6 +1895,119 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
 
         self.assertFalse(service.cancel_translation(42))
+
+    def test_cancel_translation_falls_back_to_active_persistent_job_after_restart(self):
+        with TemporaryDirectory() as temp_dir:
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/book.txt",
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:0",),
+                        source_text_hash="hash-1",
+                        prompt_tier="default",
+                        source_language="en",
+                        target_language="uk",
+                    )
+                ],
+            )
+            claimed = persistent_store.claim_next_work_unit(
+                job.id,
+                worker_id="worker-before-restart",
+            )
+            restarted_service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(restarted_service.close)
+
+            self.assertTrue(restarted_service.cancel_translation(42))
+
+            cancelled = persistent_store.get_job(job.id)
+            recovered_unit = persistent_store.get_work_unit(claimed.id)
+            self.assertEqual(
+                cancelled.status,
+                PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertEqual(
+                recovered_unit.status,
+                PersistentWorkUnitStatus.PENDING,
+            )
+
+    def test_cancels_specific_persistent_book_for_owner(self):
+        with TemporaryDirectory() as temp_dir:
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(service.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/book.txt",
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:0",),
+                        source_text_hash="hash-1",
+                        prompt_tier="default",
+                        source_language="en",
+                        target_language="uk",
+                    )
+                ],
+            )
+            persistent_store.claim_next_work_unit(
+                job.id,
+                worker_id="worker-before-restart",
+            )
+
+            self.assertFalse(
+                service.cancel_user_book(user_telegram_id=100, job_id=job.id)
+            )
+            self.assertTrue(service.cancel_user_book(user_telegram_id=42, job_id=job.id))
+            detail = service.get_user_book_detail(user_telegram_id=42, job_id=job.id)
+
+            self.assertEqual(detail.status, "cancelled")
+            self.assertTrue(detail.can_resume)
+            self.assertFalse(detail.can_cancel)
 
     def test_discard_pending_translation_clears_unconfirmed_order(self):
         service = BotTranslationService(

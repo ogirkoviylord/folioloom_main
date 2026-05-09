@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from translator_service.admin.secrets import SecretMetadata, SecretStore
+from translator_service.admin.secrets import SecretMetadata, SecretNotFound, SecretStore
 
 
 @dataclass(frozen=True)
@@ -102,10 +102,73 @@ class SQLiteAIProviderKeyStore:
             self._connection.execute(
                 """
                 UPDATE admin_ai_provider_keys
-                SET enabled = 0, updated_at = ?, updated_by = ?
+                SET enabled = 0, removed = 1, updated_at = ?, updated_by = ?
                 WHERE provider_id = ? AND key_id = ?
                 """,
                 (now.isoformat(), actor_id, provider_id, key_id),
+            )
+        return _summary_from_row(self._key_row(provider_id, key_id), secret)
+
+    def update_key(
+        self,
+        *,
+        provider_id: str,
+        key_id: str,
+        label: str,
+        weight: int,
+        max_parallel_requests: int,
+        actor_id: str,
+        secret_describer,
+    ) -> AIProviderKeySummary:
+        row = self._editable_key_row(provider_id, key_id)
+        clean_label = label.strip() or row["label"]
+        now = datetime.now(UTC)
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE admin_ai_provider_keys
+                SET label = ?, weight = ?, max_parallel_requests = ?,
+                    updated_at = ?, updated_by = ?
+                WHERE provider_id = ? AND key_id = ?
+                """,
+                (
+                    clean_label,
+                    max(1, int(weight)),
+                    max(1, int(max_parallel_requests)),
+                    now.isoformat(),
+                    actor_id,
+                    provider_id,
+                    key_id,
+                ),
+            )
+        return self.get_key(
+            provider_id,
+            key_id,
+            secret_describer=secret_describer,
+        )
+
+    def set_key_enabled(
+        self,
+        *,
+        provider_id: str,
+        key_id: str,
+        enabled: bool,
+        actor_id: str,
+        secret_describer,
+    ) -> AIProviderKeySummary:
+        row = self._editable_key_row(provider_id, key_id)
+        secret = _describe_key_secret(secret_describer, row)
+        if enabled and (secret is None or secret.disabled):
+            raise SecretNotFound(row["secret_id"])
+        now = datetime.now(UTC)
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE admin_ai_provider_keys
+                SET enabled = ?, updated_at = ?, updated_by = ?
+                WHERE provider_id = ? AND key_id = ?
+                """,
+                (1 if enabled else 0, now.isoformat(), actor_id, provider_id, key_id),
             )
         return _summary_from_row(self._key_row(provider_id, key_id), secret)
 
@@ -119,7 +182,7 @@ class SQLiteAIProviderKeyStore:
         where = "provider_id = ?"
         parameters: tuple[object, ...] = (provider_id,)
         if not include_removed:
-            where += " AND enabled = 1"
+            where += " AND removed = 0"
         rows = self._connection.execute(
             f"""
             SELECT * FROM admin_ai_provider_keys
@@ -129,8 +192,19 @@ class SQLiteAIProviderKeyStore:
             parameters,
         ).fetchall()
         return tuple(
-            _summary_from_row(row, secret_describer(row["secret_id"])) for row in rows
+            _summary_from_row(row, _describe_key_secret(secret_describer, row))
+            for row in rows
         )
+
+    def get_key(
+        self,
+        provider_id: str,
+        key_id: str,
+        *,
+        secret_describer,
+    ) -> AIProviderKeySummary:
+        row = self._key_row(provider_id, key_id)
+        return _summary_from_row(row, _describe_key_secret(secret_describer, row))
 
     def _key_row(self, provider_id: str, key_id: str) -> sqlite3.Row:
         row = self._connection.execute(
@@ -144,6 +218,12 @@ class SQLiteAIProviderKeyStore:
             raise KeyError(key_id)
         return row
 
+    def _editable_key_row(self, provider_id: str, key_id: str) -> sqlite3.Row:
+        row = self._key_row(provider_id, key_id)
+        if bool(row["removed"]):
+            raise KeyError(key_id)
+        return row
+
     def _create_schema(self) -> None:
         with self._connection:
             self._connection.execute(
@@ -154,6 +234,7 @@ class SQLiteAIProviderKeyStore:
                     secret_id TEXT NOT NULL UNIQUE,
                     label TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    removed INTEGER NOT NULL DEFAULT 0,
                     weight INTEGER NOT NULL DEFAULT 1,
                     max_parallel_requests INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -163,11 +244,31 @@ class SQLiteAIProviderKeyStore:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(admin_ai_provider_keys)"
+                ).fetchall()
+            }
+            if "removed" not in columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE admin_ai_provider_keys
+                    ADD COLUMN removed INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+                self._connection.execute(
+                    """
+                    UPDATE admin_ai_provider_keys
+                    SET removed = 1
+                    WHERE enabled = 0
+                    """
+                )
 
 
 def _summary_from_row(
     row: sqlite3.Row,
-    secret: SecretMetadata,
+    secret: SecretMetadata | None,
 ) -> AIProviderKeySummary:
     return AIProviderKeySummary(
         provider_id=row["provider_id"],
@@ -177,10 +278,17 @@ def _summary_from_row(
         enabled=bool(row["enabled"]),
         weight=int(row["weight"]),
         max_parallel_requests=int(row["max_parallel_requests"]),
-        masked_value=secret.masked_value,
-        fingerprint=secret.fingerprint,
-        version=secret.version,
-        disabled=secret.disabled,
+        masked_value=secret.masked_value if secret else None,
+        fingerprint=secret.fingerprint if secret else None,
+        version=secret.version if secret else None,
+        disabled=secret.disabled if secret else True,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
+
+
+def _describe_key_secret(secret_describer, row: sqlite3.Row) -> SecretMetadata | None:
+    try:
+        return secret_describer(row["secret_id"])
+    except (KeyError, SecretNotFound):
+        return None

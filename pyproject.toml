@@ -7,6 +7,7 @@ dependencies = [
     "aiogram>=3.6",
     "fastapi>=0.111",
     "cryptography>=42",
+    "psutil>=5.9",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
     "redis>=5.0",

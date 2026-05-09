@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import asyncio
 import hashlib
 import inspect
@@ -6,7 +5,13 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
 
+from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeChannel,
+    SQLiteAIProviderRuntimeStore,
+)
+from translator_service.ai_provider_runtime import load_ai_provider_runtime_keys
 from translator_service.bot.messages import (
     build_back_to_menu_message,
     build_book_deleted_message,
@@ -18,36 +23,36 @@ from translator_service.bot.messages import (
     build_how_it_works_message,
     build_language_selected_message,
     build_language_selection_message,
+    build_main_menu,
     build_my_book_detail_message,
     build_my_books_message,
-    build_nothing_to_cancel_message,
     build_no_pending_translation_message,
+    build_nothing_to_cancel_message,
     build_pending_translation_message,
     build_settings_message,
     build_settings_reset_message,
     build_start_message,
+    build_translation_job_status_message,
     build_translation_language_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
     build_upload_error_message,
     build_upload_prompt_message,
-    build_translation_job_status_message,
-    get_main_menu_text,
-    get_main_menu_button_text,
     get_back_text,
+    get_back_to_my_books_text,
     get_cancel_text,
+    get_confirm_delete_book_text,
     get_confirm_translation_text,
-    get_download_book_text,
-    get_last_book_text,
-    get_open_book_text,
-    get_download_translation_text,
     get_continue_translation_text,
     get_delete_book_text,
-    get_confirm_delete_book_text,
+    get_download_translation_text,
     get_keep_book_text,
-    get_back_to_my_books_text,
-    get_toggle_progress_preview_text,
+    get_last_book_text,
+    get_main_menu_button_text,
+    get_main_menu_text,
+    get_open_book_text,
     get_reset_settings_text,
+    get_toggle_progress_preview_text,
     is_back_text,
     is_cancel_text,
     is_confirm_translation_text,
@@ -56,11 +61,10 @@ from translator_service.bot.messages import (
     is_language_menu_text,
     is_main_menu_text,
     is_my_books_text,
-    is_settings_text,
-    is_translate_book_text,
-    is_toggle_progress_preview_text,
     is_reset_settings_text,
-    build_main_menu,
+    is_settings_text,
+    is_toggle_progress_preview_text,
+    is_translate_book_text,
 )
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
@@ -86,11 +90,9 @@ from translator_service.security_telemetry import (
     SecurityCooldownPolicy,
     SecurityThresholdPolicy,
 )
-from translator_service.translation_jobs import TranslationProgress
-from translator_service.translation_jobs import TextTranslator
+from translator_service.translation_jobs import TextTranslator, TranslationProgress
 from translator_service.user_activity import SQLiteUserActivityStore
 from translator_service.users import SQLiteUserSettingsRepository
-
 
 logger = logging.getLogger(__name__)
 
@@ -255,18 +257,138 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
 
 
 def build_deepseek_translator(settings: Settings) -> TextTranslator:
-    api_keys = _deepseek_api_keys_from_env()
-    if not api_keys:
-        raise RuntimeError("DEEPSEEK_API_KEY or DEEPSEEK_API_KEYS is not set")
+    if settings.admin_secret_master_key:
+        return ReloadableDeepSeekTranslator(settings=settings)
 
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    channels = _deepseek_env_channel_configs()
+    if not channels:
+        raise RuntimeError("DEEPSEEK_API_KEY or DEEPSEEK_API_KEYS is not set")
+    return _deepseek_translator_from_channels(settings, channels)
+
+
+class ReloadableDeepSeekTranslator:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        clock=time.monotonic,
+    ) -> None:
+        self._settings = settings
+        self._clock = clock
+        self._reload_interval_seconds = max(
+            0.0,
+            settings.admin_provider_runtime_reload_seconds,
+        )
+        self._lock = threading.RLock()
+        self._last_usage = threading.local()
+        self._signature: tuple[object, ...] | None = None
+        self._translator: TextTranslator | None = None
+        self._channels: list[DeepSeekChannelConfig] = []
+        self._next_reload_at = 0.0
+        with self._lock:
+            self._reload_locked(now=self._clock())
+
+    @property
+    def last_usage(self):
+        return getattr(self._last_usage, "value", None)
+
+    def snapshot(self):
+        with self._lock:
+            now = self._clock()
+            reload_requested = _consume_deepseek_reload_request(self._settings)
+            if reload_requested or now >= self._next_reload_at:
+                self._reload_locked(
+                    now=now,
+                    reload_requested=reload_requested,
+                )
+            translator = self._translator
+            channels = list(self._channels)
+        if translator is None:
+            return []
+        snapshot = getattr(translator, "snapshot", None)
+        if snapshot is None:
+            return channels
+        return snapshot()
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        translator = self._current_translator()
+        translated = translator.translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        self._last_usage.value = getattr(translator, "last_usage", None)
+        return translated
+
+    def _current_translator(self) -> TextTranslator:
+        with self._lock:
+            now = self._clock()
+            reload_requested = _consume_deepseek_reload_request(self._settings)
+            if reload_requested or now >= self._next_reload_at:
+                self._reload_locked(
+                    now=now,
+                    reload_requested=reload_requested,
+                )
+            if self._translator is None:
+                raise RuntimeError("No active DeepSeek admin provider keys are set")
+            return self._translator
+
+    def _reload_locked(
+        self,
+        *,
+        now: float,
+        reload_requested: bool = False,
+    ) -> None:
+        runtime_keys = load_ai_provider_runtime_keys(
+            self._settings,
+            provider_id="deepseek",
+        )
+        source = "admin_store"
+        channels = _deepseek_admin_channel_configs(runtime_keys)
+        status = "ok" if channels else "missing_keys"
+        error = None if channels else "No active DeepSeek admin keys."
+        if not channels:
+            source = "env_fallback"
+            channels = _deepseek_env_channel_configs()
+            status = "ok" if channels else "missing_keys"
+            error = None if channels else "No active DeepSeek admin or env keys."
+        signature = (source, tuple(runtime_keys), tuple(channels))
+        if reload_requested or signature != self._signature:
+            self._translator = (
+                _deepseek_translator_from_channels(self._settings, channels)
+                if channels
+                else None
+            )
+            self._channels = channels
+            self._signature = signature
+            _record_deepseek_runtime_status(
+                self._settings,
+                source=source,
+                status=status,
+                channels=channels,
+                error=error,
+            )
+        self._next_reload_at = now + self._reload_interval_seconds
+
+
+def _deepseek_translator_from_channels(
+    settings: Settings,
+    channels: list[DeepSeekChannelConfig],
+) -> TextTranslator:
+    base_url = os.getenv("DEEPSEEK_BASE_URL", settings.deepseek_base_url)
     timeout_seconds = _env_float("DEEPSEEK_TIMEOUT_SECONDS", 120.0)
     retry_attempts = _env_int("DEEPSEEK_RETRY_ATTEMPTS", 3)
     retry_delay_seconds = _env_float("DEEPSEEK_RETRY_DELAY_SECONDS", 1.0)
 
-    if len(api_keys) == 1:
+    if len(channels) == 1:
         return DeepSeekClient(
-            api_key=api_keys[0],
+            api_key=channels[0].api_key,
             model=settings.deepseek_model,
             base_url=base_url,
             timeout_seconds=timeout_seconds,
@@ -274,23 +396,13 @@ def build_deepseek_translator(settings: Settings) -> TextTranslator:
             retry_delay_seconds=retry_delay_seconds,
         )
 
-    max_parallel_per_key = _env_int("DEEPSEEK_MAX_PARALLEL_PER_KEY", 1)
     cooldown_seconds = _env_float("DEEPSEEK_CHANNEL_COOLDOWN_SECONDS", 30.0)
     max_cooldown_seconds = _env_float(
         "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS",
         max(300.0, cooldown_seconds),
     )
-    channel_weights = _deepseek_channel_weights_from_env(len(api_keys))
     return DeepSeekKeyPoolTranslator(
-        channels=[
-            DeepSeekChannelConfig(
-                api_key=api_key,
-                label=f"deepseek-{index}",
-                max_parallel_requests=max_parallel_per_key,
-                weight=channel_weights[index - 1],
-            )
-            for index, api_key in enumerate(api_keys, start=1)
-        ],
+        channels=channels,
         model=settings.deepseek_model,
         base_url=base_url,
         timeout_seconds=timeout_seconds,
@@ -301,9 +413,45 @@ def build_deepseek_translator(settings: Settings) -> TextTranslator:
     )
 
 
+def _deepseek_channel_configs(settings: Settings) -> list[DeepSeekChannelConfig]:
+    admin_keys = load_ai_provider_runtime_keys(settings, provider_id="deepseek")
+    if admin_keys:
+        return _deepseek_admin_channel_configs(admin_keys)
+    return _deepseek_env_channel_configs()
+
+
+def _deepseek_admin_channel_configs(admin_keys) -> list[DeepSeekChannelConfig]:
+    return [
+        DeepSeekChannelConfig(
+            api_key=key.api_key,
+            label=key.label,
+            max_parallel_requests=key.max_parallel_requests,
+            weight=key.weight,
+        )
+        for key in admin_keys
+    ]
+
+
+def _deepseek_env_channel_configs() -> list[DeepSeekChannelConfig]:
+    api_keys = _deepseek_api_keys_from_env()
+    max_parallel_per_key = _env_int("DEEPSEEK_MAX_PARALLEL_PER_KEY", 1)
+    channel_weights = _deepseek_channel_weights_from_env(len(api_keys))
+    return [
+        DeepSeekChannelConfig(
+            api_key=api_key,
+            label=f"deepseek-{index}",
+            max_parallel_requests=max_parallel_per_key,
+            weight=channel_weights[index - 1],
+        )
+        for index, api_key in enumerate(api_keys, start=1)
+    ]
+
+
 def _deepseek_api_keys_from_env() -> list[str]:
     key_list = os.getenv("DEEPSEEK_API_KEYS", "")
-    candidates = key_list.split(",") if key_list else [os.getenv("DEEPSEEK_API_KEY", "")]
+    candidates = (
+        key_list.split(",") if key_list else [os.getenv("DEEPSEEK_API_KEY", "")]
+    )
     keys: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -320,6 +468,44 @@ def _deepseek_parallel_capacity_from_env() -> int:
         "DEEPSEEK_MAX_PARALLEL_PER_KEY",
         1,
     )
+
+
+def _deepseek_parallel_capacity(settings: Settings) -> int:
+    admin_keys = load_ai_provider_runtime_keys(settings, provider_id="deepseek")
+    if admin_keys:
+        return sum(max(1, key.max_parallel_requests) for key in admin_keys)
+    return _deepseek_parallel_capacity_from_env()
+
+
+def _consume_deepseek_reload_request(settings: Settings) -> bool:
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as store:
+        return store.consume_reload_request("deepseek") is not None
+
+
+def _record_deepseek_runtime_status(
+    settings: Settings,
+    *,
+    source: str = "admin_store",
+    status: str,
+    channels: list[DeepSeekChannelConfig],
+    error: str | None,
+) -> None:
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as store:
+        store.record_status(
+            provider_id="deepseek",
+            source=source,
+            status=status,
+            reload_interval_seconds=settings.admin_provider_runtime_reload_seconds,
+            active_channels=tuple(
+                AIProviderRuntimeChannel(
+                    label=channel.label or "unnamed",
+                    weight=channel.weight,
+                    max_parallel_requests=channel.max_parallel_requests,
+                )
+                for channel in channels
+            ),
+            error=error,
+        )
 
 
 def _deepseek_channel_weights_from_env(channel_count: int) -> list[int]:
@@ -657,6 +843,54 @@ def create_router(
                 action="translation_start",
             )
 
+    @router.callback_query(F.data.startswith("cancel_book:"))
+    async def cancel_book(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        job_id = (callback.data or "").split(":", 1)[1]
+        record_callback_activity(
+            callback,
+            event_type="bot.callback.clicked",
+            action="cancel_requested",
+            target_type="book",
+            target_id=job_id,
+        )
+        if callback.message is None:
+            await callback.answer(
+                build_download_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        if not service.cancel_user_book(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        ):
+            await callback.answer(
+                build_nothing_to_cancel_message(interface_language),
+                show_alert=True,
+            )
+            return
+
+        book = service.get_user_book_detail(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
+        await callback.answer(build_cancel_requested_message(interface_language))
+        if book is not None:
+            await _edit_callback_message(
+                callback.message,
+                build_my_book_detail_message(
+                    book,
+                    interface_language=interface_language,
+                ),
+                reply_markup=_my_book_detail_keyboard(
+                    book,
+                    interface_language=interface_language,
+                ),
+            )
+
     @router.callback_query(F.data.startswith("delete_book:"))
     async def delete_book(callback: CallbackQuery) -> None:
         if await _answer_callback_if_spam(callback, callback_spam_guard):
@@ -900,7 +1134,9 @@ def create_router(
                 UnsupportedDocumentError,
                 ValueError,
             ) as error:
-                await message.answer(build_upload_error_message(error, interface_language))
+                await message.answer(
+                    build_upload_error_message(error, interface_language)
+                )
                 return
 
             await message.answer(
@@ -1036,7 +1272,9 @@ def create_router(
 
         pending = service.get_pending(message.from_user.id)
         if pending is None:
-            await message.answer(build_no_pending_translation_message(interface_language))
+            await message.answer(
+                build_no_pending_translation_message(interface_language)
+            )
             return
 
         await message.answer(
@@ -1245,6 +1483,15 @@ def _my_book_detail_keyboard(book, interface_language: str = "en"):
                 )
             ]
         )
+    if _book_can_cancel(book):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=get_cancel_text(interface_language),
+                    callback_data=f"cancel_book:{job_id}",
+                )
+            ]
+        )
     rows.append(
         [
             InlineKeyboardButton(
@@ -1361,6 +1608,12 @@ def _book_can_resume(book) -> bool:
     if isinstance(book, dict):
         return bool(book.get("can_resume"))
     return bool(getattr(book, "can_resume", False))
+
+
+def _book_can_cancel(book) -> bool:
+    if isinstance(book, dict):
+        return bool(book.get("can_cancel"))
+    return bool(getattr(book, "can_cancel", False))
 
 
 async def _send_user_book_result(message, result) -> None:
@@ -1791,7 +2044,11 @@ async def _resume_user_book_translation(
         )
 
 
-async def _cancel_active_translation(*, message, service: BotTranslationService) -> None:
+async def _cancel_active_translation(
+    *,
+    message,
+    service: BotTranslationService,
+) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
     if service.cancel_translation(message.from_user.id):
         await message.answer(build_cancel_requested_message(interface_language))
@@ -1818,7 +2075,7 @@ async def _run_translation_progress_heartbeat(
                 timeout=TRANSLATION_SPINNER_INTERVAL_SECONDS,
             )
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         now = time.monotonic()
@@ -1914,24 +2171,32 @@ def _log_message_edit_error(future) -> None:
         retry_after = getattr(error, "retry_after", None)
         if retry_after is not None or "retry after" in message.lower():
             logger.warning(
-                "Telegram flood control while editing progress message; retry_after=%s message=%s",
+                "Telegram flood control while editing progress message; "
+                "retry_after=%s message=%s",
                 retry_after if retry_after is not None else "unknown",
                 message,
             )
             return
         if "message can't be edited" in message:
-            logger.warning("Telegram refused to edit translation progress message: %s", message)
+            logger.warning(
+                "Telegram refused to edit translation progress message: %s",
+                message,
+            )
             return
         logger.exception("Failed to edit translation progress message")
 
 
-def _progress_counts(progress: TranslationProgress | tuple[int, int]) -> tuple[int, int]:
+def _progress_counts(
+    progress: TranslationProgress | tuple[int, int],
+) -> tuple[int, int]:
     if isinstance(progress, TranslationProgress):
         return progress.completed_fragments, progress.total_fragments
     return progress
 
 
-def _progress_translated_text(progress: TranslationProgress | tuple[int, int]) -> str | None:
+def _progress_translated_text(
+    progress: TranslationProgress | tuple[int, int],
+) -> str | None:
     if isinstance(progress, TranslationProgress) and progress.translated_text:
         return progress.translated_text
     return None
@@ -1957,7 +2222,7 @@ def _next_spinner_frame(current_index: int) -> str:
 
 def _choose_heartbeat_pattern_name(*, user_telegram_id: int, file_name: str) -> str:
     pattern_names = tuple(HEARTBEAT_PATTERNS)
-    seed = f"{user_telegram_id}:{file_name}".encode("utf-8")
+    seed = f"{user_telegram_id}:{file_name}".encode()
     digest = hashlib.sha256(seed).digest()
     return pattern_names[digest[0] % len(pattern_names)]
 
@@ -2071,7 +2336,7 @@ async def run_bot() -> None:
         admin_db_path=settings.admin_db_path,
         translation_run_log_root=settings.translation_run_log_root,
         max_parallel_work_units=settings.translation_max_parallel_units,
-        provider_parallel_capacity=_deepseek_parallel_capacity_from_env(),
+        provider_parallel_capacity=_deepseek_parallel_capacity(settings),
         security_max_events_per_run=settings.security_max_events_per_run,
         security_max_unsafe_model_outputs_per_run=(
             settings.security_max_unsafe_model_outputs_per_run

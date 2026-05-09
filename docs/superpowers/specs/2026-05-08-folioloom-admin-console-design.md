@@ -306,8 +306,18 @@ MVP live monitor:
 - show total tokens for the last hour;
 - show recent translation runs with safe metadata only;
 - poll a JSON snapshot endpoint every few seconds;
-- reserve a server health area for CPU, memory, disk, uptime, and worker/event
-  loop health.
+- show local server health: CPU, memory, disk, and uptime;
+- reserve future worker/event loop health and VPS provider status cards.
+
+Local server health should be collected through a read-only collector. It may
+use optional host libraries such as `psutil` when available, but it must degrade
+to partial metrics rather than breaking the live endpoint. Each metric should be
+nullable and independently safe to fail.
+
+Future VPS provider metrics should be implemented as read-only provider
+adapters. Provider API tokens must live in encrypted secret storage, provider
+responses must be normalized before reaching the UI, and failed provider reads
+must never break local service metrics.
 
 The first implementation may use polling instead of WebSocket or SSE because it
 is simpler and reliable enough for an owner console. The API shape should still

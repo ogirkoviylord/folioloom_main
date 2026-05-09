@@ -1,24 +1,31 @@
 import asyncio
 import io
 import unittest
+from base64 import urlsafe_b64encode
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
+from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
+from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.bot.runtime import (
-    BotRuntimeConfig,
     HEARTBEAT_PATTERNS,
-    _CallbackSpamGuard,
-    _UserActionInFlightGuard,
+    BotRuntimeConfig,
+    ReloadableDeepSeekTranslator,
     _answer_callback_if_spam,
+    _CallbackSpamGuard,
     _cancel_inline_keyboard,
     _choose_heartbeat_pattern_name,
+    _confirm_pending_translation,
+    _deepseek_parallel_capacity,
     _deepseek_parallel_capacity_from_env,
     _document_exceeds_upload_limit,
     _edit_callback_message,
     _include_progress_preview,
     _is_language_button_text,
+    _log_message_edit_error,
     _main_menu_keyboard,
     _my_books_keyboard,
     _next_heartbeat_frame,
@@ -27,11 +34,10 @@ from translator_service.bot.runtime import (
     _print_translation_progress_update,
     _print_translation_summary,
     _progress_message_for_current_user_language,
-    _confirm_pending_translation,
-    _log_message_edit_error,
     _schedule_message_edit,
-    _should_schedule_progress_edit,
     _settings_keyboard,
+    _should_schedule_progress_edit,
+    _UserActionInFlightGuard,
     build_deepseek_translator,
     build_default_pricing_rules,
     build_translation_service,
@@ -42,6 +48,8 @@ from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
 from translator_service.translation_jobs import TranslationProgress
 from translator_service.user_activity import SQLiteUserActivityStore
+
+MASTER_KEY = urlsafe_b64encode(b"5" * 32).decode("ascii")
 
 
 class TelegramMethodLikeAwaitable:
@@ -120,8 +128,29 @@ class RecordingMessage:
 
 
 class _RuntimeRecordingTranslator:
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
         return f"[{target_language}] {text}"
+
+
+class _RuntimeKeyEchoDeepSeekClient:
+    def __init__(self, *, api_key: str, **kwargs) -> None:
+        self.api_key = api_key
+        self.last_usage = None
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        return f"{self.api_key}:{target_language}:{text}"
 
 
 class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -332,7 +361,10 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(job.id, "job-1")
             self.assertEqual(job.result_file_name, "notes.uk.txt")
-            self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
+            self.assertEqual(
+                job.result_content.decode("utf-8"),
+                "[uk] One.\n\n[uk] Two.",
+            )
 
     def test_build_deepseek_translator_keeps_single_key_client(self):
         with patch.dict(
@@ -368,9 +400,305 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
         snapshot = translator.snapshot()
-        self.assertEqual([channel.label for channel in snapshot], ["deepseek-1", "deepseek-2"])
-        self.assertEqual([channel.max_parallel_requests for channel in snapshot], [2, 2])
+        self.assertEqual(
+            [channel.label for channel in snapshot],
+            ["deepseek-1", "deepseek-2"],
+        )
+        self.assertEqual(
+            [channel.max_parallel_requests for channel in snapshot],
+            [2, 2],
+        )
         self.assertEqual([channel.weight for channel in snapshot], [3, 1])
+
+    def test_build_deepseek_translator_prefers_admin_provider_keys(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-a",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=4,
+                        max_parallel_requests=3,
+                    )
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="dev",
+                        plaintext="admin-key-b",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=1,
+                        max_parallel_requests=2,
+                    )
+            with patch.dict(
+                "os.environ",
+                {
+                    "DEEPSEEK_API_KEYS": "env-key-a, env-key-b",
+                    "DEEPSEEK_BASE_URL": "https://deepseek.test",
+                    "DEEPSEEK_MAX_PARALLEL_PER_KEY": "1",
+                    "DEEPSEEK_CHANNEL_WEIGHTS": "1, 1",
+                },
+                clear=False,
+            ):
+                translator = build_deepseek_translator(
+                    Settings(
+                        admin_db_path=str(db_path),
+                        admin_secret_master_key=MASTER_KEY,
+                        deepseek_model="deepseek-test",
+                    )
+                )
+                capacity = _deepseek_parallel_capacity(
+                    Settings(
+                        admin_db_path=str(db_path),
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+
+        self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
+        snapshot = translator.snapshot()
+        self.assertEqual([channel.label for channel in snapshot], ["stable", "dev"])
+        self.assertEqual(
+            [channel.max_parallel_requests for channel in snapshot],
+            [3, 2],
+        )
+        self.assertEqual([channel.weight for channel in snapshot], [4, 1])
+        self.assertEqual(capacity, 5)
+
+    def test_admin_deepseek_translator_reloads_changed_key_pool(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=0.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    stable = keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-a",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=2,
+                        max_parallel_requests=2,
+                    )
+                    dev = keys.add_key(
+                        provider_id="deepseek",
+                        label="dev",
+                        plaintext="admin-key-b",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=1,
+                        max_parallel_requests=1,
+                    )
+
+            translator = build_deepseek_translator(settings)
+            self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
+            self.assertEqual(
+                [channel.label for channel in translator.snapshot()],
+                ["stable", "dev"],
+            )
+
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.update_key(
+                        provider_id="deepseek",
+                        key_id=stable.key_id,
+                        label="stable-v2",
+                        weight=5,
+                        max_parallel_requests=4,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+                    keys.set_key_enabled(
+                        provider_id="deepseek",
+                        key_id=dev.key_id,
+                        enabled=False,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+
+            snapshot = translator.snapshot()
+
+        self.assertEqual([channel.label for channel in snapshot], ["stable-v2"])
+        self.assertEqual([channel.max_parallel_requests for channel in snapshot], [4])
+        self.assertEqual([channel.weight for channel in snapshot], [5])
+
+    def test_admin_deepseek_translator_honors_manual_reload_request(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    old_key = keys.add_key(
+                        provider_id="deepseek",
+                        label="old",
+                        plaintext="admin-key-old",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+            translator = build_deepseek_translator(settings)
+            self.assertEqual(
+                [channel.label for channel in translator.snapshot()],
+                ["old"],
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="new",
+                        plaintext="admin-key-new",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+                    keys.set_key_enabled(
+                        provider_id="deepseek",
+                        key_id=old_key.key_id,
+                        enabled=False,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.request_reload(
+                    provider_id="deepseek",
+                    actor_id="bootstrap-owner",
+                )
+
+            snapshot = translator.snapshot()
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                status = runtime.get_status("deepseek")
+
+        self.assertEqual([channel.label for channel in snapshot], ["new"])
+        self.assertIsNotNone(status)
+        self.assertEqual(status.source, "admin_store")
+        self.assertEqual(status.status, "ok")
+        self.assertEqual(status.active_channels[0].label, "new")
+
+    def test_admin_deepseek_translator_uses_reloaded_key_for_translation(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=0.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    old_key = keys.add_key(
+                        provider_id="deepseek",
+                        label="old",
+                        plaintext="admin-key-old",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+            with patch(
+                "translator_service.bot.runtime.DeepSeekClient",
+                _RuntimeKeyEchoDeepSeekClient,
+            ):
+                translator = build_deepseek_translator(settings)
+                first = translator.translate(
+                    text="Hello",
+                    source_language="en",
+                    target_language="uk",
+                )
+
+                with SQLiteEncryptedSecretStore(
+                    db_path,
+                    master_key=MASTER_KEY,
+                ) as secrets:
+                    with SQLiteAIProviderKeyStore(db_path) as keys:
+                        keys.add_key(
+                            provider_id="deepseek",
+                            label="new",
+                            plaintext="admin-key-new",
+                            actor_id="bootstrap-owner",
+                            secret_store=secrets,
+                        )
+                        keys.set_key_enabled(
+                            provider_id="deepseek",
+                            key_id=old_key.key_id,
+                            enabled=False,
+                            actor_id="bootstrap-owner",
+                            secret_describer=secrets.describe_secret,
+                        )
+
+                second = translator.translate(
+                    text="Hello",
+                    source_language="en",
+                    target_language="uk",
+                )
+
+        self.assertEqual(first, "admin-key-old:uk:Hello")
+        self.assertEqual(second, "admin-key-new:uk:Hello")
+
+    def test_admin_deepseek_translator_switches_from_env_without_restart(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+
+            with patch.dict(
+                "os.environ",
+                {"DEEPSEEK_API_KEY": "env-key"},
+                clear=False,
+            ):
+                with patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ):
+                    translator = build_deepseek_translator(settings)
+                    first = translator.translate(
+                        text="Hello",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+                    with SQLiteEncryptedSecretStore(
+                        db_path,
+                        master_key=MASTER_KEY,
+                    ) as secrets:
+                        with SQLiteAIProviderKeyStore(db_path) as keys:
+                            keys.add_key(
+                                provider_id="deepseek",
+                                label="stable",
+                                plaintext="admin-key",
+                                actor_id="bootstrap-owner",
+                                secret_store=secrets,
+                            )
+                    with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                        runtime.request_reload(
+                            provider_id="deepseek",
+                            actor_id="bootstrap-owner",
+                        )
+
+                    second = translator.translate(
+                        text="Hello",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+        self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
+        self.assertEqual(first, "env-key:uk:Hello")
+        self.assertEqual(second, "admin-key:uk:Hello")
 
     def test_build_deepseek_translator_deduplicates_multiple_keys(self):
         with patch.dict(
@@ -386,7 +714,10 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
-        self.assertEqual([channel.label for channel in translator.snapshot()], ["deepseek-1", "deepseek-2"])
+        self.assertEqual(
+            [channel.label for channel in translator.snapshot()],
+            ["deepseek-1", "deepseek-2"],
+        )
 
     def test_invalid_deepseek_channel_weights_fall_back_to_one(self):
         with self.assertLogs("translator_service.bot.runtime", level="WARNING") as logs:
@@ -446,7 +777,9 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.wrap_future(future)
         self.assertEqual(message.edited_texts, ["Progress"])
 
-    async def test_schedules_message_edit_through_bot_api_when_message_has_context(self):
+    async def test_schedules_message_edit_through_bot_api_when_message_has_context(
+        self,
+    ):
         message = BotBackedMessage()
         loop = asyncio.get_running_loop()
 
@@ -458,9 +791,14 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
 
         await asyncio.wrap_future(future)
-        self.assertEqual(message.bot.edits, [("Progress 2", 100, 55, "inline-keyboard", "HTML")])
+        self.assertEqual(
+            message.bot.edits,
+            [("Progress 2", 100, 55, "inline-keyboard", "HTML")],
+        )
 
-    async def test_schedules_message_edit_with_html_parse_mode_for_expandable_quotes(self):
+    async def test_schedules_message_edit_with_html_parse_mode_for_expandable_quotes(
+        self,
+    ):
         message = BotBackedMessage()
         loop = asyncio.get_running_loop()
 
@@ -500,7 +838,8 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         class FakeFuture:
             def result(self):
                 raise FakeRetryAfter(
-                    "Telegram server says - Flood control exceeded. Retry in 13 seconds."
+                    "Telegram server says - Flood control exceeded. "
+                    "Retry in 13 seconds."
                 )
 
         with self.assertLogs("translator_service.bot.runtime", level="WARNING") as logs:
@@ -561,6 +900,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "job_id": "job-1",
                 "has_result": True,
                 "can_resume": True,
+                "can_cancel": True,
             },
             interface_language="en",
         )
@@ -573,6 +913,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             [
                 [("Download Translation", "download_book:job-1")],
                 [("Continue Translation", "resume_book:job-1")],
+                [("Cancel", "cancel_book:job-1")],
                 [("Delete Book", "delete_book:job-1")],
                 [("Back to My Books", "my_books")],
             ],
@@ -699,13 +1040,21 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(HEARTBEAT_PATTERNS["calm_dots"], ("·", "•", "●", "•"))
         self.assertEqual(HEARTBEAT_PATTERNS["fleuron"], ("❦", "❧", "❦", "❧"))
         self.assertEqual(HEARTBEAT_PATTERNS["editorial"], ("¶", "§", "¶", "§"))
-        flattened = "".join(symbol for pattern in HEARTBEAT_PATTERNS.values() for symbol in pattern)
+        flattened = "".join(
+            symbol for pattern in HEARTBEAT_PATTERNS.values() for symbol in pattern
+        )
         self.assertNotIn("❤️", flattened)
         self.assertNotIn("💕", flattened)
 
     def test_heartbeat_pattern_choice_is_stable_for_order_seed(self):
-        first = _choose_heartbeat_pattern_name(user_telegram_id=42, file_name="book.epub")
-        second = _choose_heartbeat_pattern_name(user_telegram_id=42, file_name="book.epub")
+        first = _choose_heartbeat_pattern_name(
+            user_telegram_id=42,
+            file_name="book.epub",
+        )
+        second = _choose_heartbeat_pattern_name(
+            user_telegram_id=42,
+            file_name="book.epub",
+        )
 
         self.assertEqual(first, second)
         self.assertIn(first, HEARTBEAT_PATTERNS)

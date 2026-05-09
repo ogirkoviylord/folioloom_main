@@ -222,7 +222,7 @@ class BotMessagesTest(unittest.TestCase):
                 self.assertIn(help_marker, build_help_message(language_code))
                 self.assertIn(how_marker, build_how_it_works_message(language_code))
 
-    def test_order_estimate_message_shows_price_and_volume(self):
+    def test_order_estimate_message_hides_price_from_user_ui(self):
         message = build_order_estimate_message(
             OrderEstimate(
                 file_name="notes.txt",
@@ -239,7 +239,8 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("TXT", message)
         self.assertIn("36", message)
         self.assertNotIn("Fragments", message)
-        self.assertIn("$0.10", message)
+        self.assertNotIn("$0.10", message)
+        self.assertNotIn("Price", message)
         self.assertIn("Start Translation", message)
 
     def test_translation_job_status_message_for_ready_job(self):
@@ -310,7 +311,8 @@ class BotMessagesTest(unittest.TestCase):
         )
 
         self.assertIn("notes.txt", message)
-        self.assertIn("$0.10", message)
+        self.assertNotIn("$0.10", message)
+        self.assertNotIn("Price", message)
         self.assertNotIn("Fragments", message)
         self.assertIn("24 sec", message)
         self.assertIn("Start Translation", message)

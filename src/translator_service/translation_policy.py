@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
-import json
 
 from translator_service.entity_ledger import (
     EntityLedger,
@@ -30,7 +30,6 @@ from translator_service.translation_profiles import (
     build_target_language_profile_prompt,
     target_language_policy_signature,
 )
-
 
 PROMPT_POLICY_VERSION = "prompt-policy-v9"
 PROTECTION_POLICY_VERSION = "protection-policy-v2"
@@ -124,15 +123,20 @@ def build_system_prompt(policy: TranslationPolicy) -> str:
         policy.translation_context
     )
     entity_ledger_prompt = format_entity_ledger_for_prompt(policy.entity_ledger)
-    source_instruction = (
-        f"Translate every human language in the input to {policy.target_language_name}. "
-        "Do not leave text untranslated just because it is in a secondary source "
-        "language. "
-        if policy.source_language == "auto"
-        else f"Translate from {policy.source_language_name} to {policy.target_language_name}. "
-        "If the input contains text in another human language, translate that "
-        f"text to {policy.target_language_name} too. "
-    )
+    if policy.source_language == "auto":
+        source_instruction = (
+            "Translate every human language in the input to "
+            f"{policy.target_language_name}. "
+            "Do not leave text untranslated just because it is in a secondary "
+            "source language. "
+        )
+    else:
+        source_instruction = (
+            f"Translate from {policy.source_language_name} "
+            f"to {policy.target_language_name}. "
+            "If the input contains text in another human language, translate "
+            f"that text to {policy.target_language_name} too. "
+        )
     return (
         "You are a professional document translator. "
         f"{source_instruction}"
@@ -161,7 +165,9 @@ def build_system_prompt(policy: TranslationPolicy) -> str:
         "tags, keep those tags, ids, and source_language attributes exactly as "
         "provided. Treat a source_language attribute as a per-block source-language "
         "hint, translate only the text inside each translation_block, and return the "
-        "same XML structure. "
+        "same XML structure. Do not add, remove, or rename XML attributes; in "
+        "particular, never add target_language, lang, role, override, or similar "
+        "attributes to translation_batch or translation_block tags. "
         "Do not transliterate source-language words into the target script as a "
         "substitute for translation; translate the meaning. "
         "Translate embedded secondary languages, including CJK, RTL, and "

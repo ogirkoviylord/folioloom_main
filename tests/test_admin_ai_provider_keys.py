@@ -86,6 +86,57 @@ class AdminAIProviderKeysTest(unittest.TestCase):
             self.assertFalse(all_keys[0].enabled)
             self.assertTrue(all_keys[0].disabled)
 
+    def test_updates_key_metadata_and_toggles_without_removing_secret(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    saved = keys.add_key(
+                        provider_id="deepseek",
+                        label="main",
+                        plaintext="sk-main-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+                    updated = keys.update_key(
+                        provider_id="deepseek",
+                        key_id=saved.key_id,
+                        label="primary",
+                        weight=4,
+                        max_parallel_requests=2,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+                    disabled = keys.set_key_enabled(
+                        provider_id="deepseek",
+                        key_id=saved.key_id,
+                        enabled=False,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+                    visible = keys.list_keys(
+                        "deepseek",
+                        secret_describer=secrets.describe_secret,
+                    )
+                    plaintext = secrets.get_secret_value(saved.secret_id)
+                    enabled = keys.set_key_enabled(
+                        provider_id="deepseek",
+                        key_id=saved.key_id,
+                        enabled=True,
+                        actor_id="bootstrap-owner",
+                        secret_describer=secrets.describe_secret,
+                    )
+
+            self.assertEqual(updated.label, "primary")
+            self.assertEqual(updated.weight, 4)
+            self.assertEqual(updated.max_parallel_requests, 2)
+            self.assertFalse(disabled.enabled)
+            self.assertEqual(len(visible), 1)
+            self.assertFalse(visible[0].enabled)
+            self.assertEqual(plaintext, "sk-main-secret")
+            self.assertTrue(enabled.enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

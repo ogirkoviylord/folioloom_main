@@ -1,5 +1,12 @@
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -8,6 +15,7 @@ class Settings:
     environment: str = os.getenv("ENVIRONMENT", "development")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     object_storage_root: str = os.getenv("OBJECT_STORAGE_ROOT", "var/object-storage")
     persistent_jobs_db_path: str = os.getenv(
         "PERSISTENT_JOBS_DB_PATH",
@@ -109,4 +117,19 @@ class Settings:
     )
     admin_secret_master_key: str = field(
         default_factory=lambda: os.getenv("ADMIN_SECRET_MASTER_KEY", "")
+    )
+    admin_cookie_secure: bool = field(
+        default_factory=lambda: _env_bool("ADMIN_COOKIE_SECURE", False)
+    )
+    admin_provider_probe_timeout_seconds: float = field(
+        default_factory=lambda: max(
+            0.1,
+            float(os.getenv("ADMIN_PROVIDER_PROBE_TIMEOUT_SECONDS", "10")),
+        )
+    )
+    admin_provider_runtime_reload_seconds: float = field(
+        default_factory=lambda: max(
+            0.0,
+            float(os.getenv("ADMIN_PROVIDER_RUNTIME_RELOAD_SECONDS", "30")),
+        )
     )

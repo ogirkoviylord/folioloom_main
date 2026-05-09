@@ -1008,7 +1008,7 @@ def build_order_estimate_message(
         f"{messages['file']}: {estimate.file_name}\n"
         f"{messages['format']}: {estimate.document_format.value.upper()}\n"
         f"{messages['characters']}: {estimate.character_count}\n"
-        f"{messages['price']}: ${estimate.price_usd:.2f}\n\n"
+        "\n"
         f"{messages['queue_instruction'].format(confirm_text=confirm_text)}"
     )
 
@@ -1025,7 +1025,7 @@ def build_pending_translation_message(
         f"{messages['from']}: {_localized_source_language_display_text(pending.source_language_display, pending.source_language, interface_language)}\n"
         f"{messages['to']}: {localized_language_name_for_code(pending.target_language, interface_language)}\n"
         f"{messages['estimated_time']}: {_format_duration(pending.estimated_seconds or 0, interface_language)}\n"
-        f"{messages['price']}: ${pending.price_usd:.2f}\n\n"
+        "\n"
         f"{messages['preservation_note']}\n\n"
         f"{messages['confirm_instruction'].format(confirm_text=confirm_text)}"
     )
@@ -1337,6 +1337,7 @@ def _book_value(book, key: str | None = None):
             "has_result": getattr(book, "has_result", False),
             "has_partial_result": getattr(book, "has_partial_result", False),
             "can_resume": getattr(book, "can_resume", False),
+            "can_cancel": getattr(book, "can_cancel", False),
             "created_at": getattr(book, "created_at", None),
             "updated_at": getattr(book, "updated_at", None),
         }
