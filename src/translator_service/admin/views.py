@@ -731,7 +731,7 @@ def costs_body(analytics: CostAnalytics) -> str:
     """
 
 
-def quality_body(summary: QualityRunSummary) -> str:
+def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
     metric_cards = "\n".join(
         (
             _quality_metric(
@@ -764,7 +764,13 @@ def quality_body(summary: QualityRunSummary) -> str:
           source, and reference text stay out of the admin UI.
         </p>
       </div>
-      <code>{escape(summary.candidate_path)}</code>
+      <div class="toolbar-actions">
+        <code>{escape(summary.candidate_path)}</code>
+        <form method="post" action="/admin/quality/run">
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+          <button type="submit">Run quality check</button>
+        </form>
+      </div>
     </section>
     <section class="metrics">{metric_cards}</section>
     {empty_state}

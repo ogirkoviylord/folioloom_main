@@ -143,6 +143,13 @@ def _read_candidates(path: Path) -> tuple[dict[str, _Candidate], int, int]:
         if sample_id not in reference_ids:
             extra_candidates += 1
             continue
+        error = _string(payload.get("error"))
+        if error is not None:
+            candidates[sample_id] = _Candidate(
+                translated_text=None,
+                error=error,
+            )
+            continue
         translated_text = payload.get("translated_text")
         if not isinstance(translated_text, str) or not translated_text.strip():
             candidates[sample_id] = _Candidate(

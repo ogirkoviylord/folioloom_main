@@ -4,6 +4,29 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from translator_service.admin.quality import build_quality_run_summary
+from translator_service.admin.quality_runner import write_quality_run
+
+
+class _FakeTranslator:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        return f"[{target_language}] {source_language}: {text}"
+
+
+class _FailingTranslator:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        raise RuntimeError("provider secret sk-raw-secret failed")
 
 
 class AdminQualityTest(unittest.TestCase):
@@ -91,6 +114,40 @@ class AdminQualityTest(unittest.TestCase):
         self.assertIn("translated_text", error_rows[0].error or "")
         self.assertEqual(summary.malformed_candidates, 1)
         self.assertNotIn("{not-json}", repr(summary))
+
+    def test_quality_runner_writes_candidates_without_source_text(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "latest.jsonl"
+
+            result = write_quality_run(path, translator=_FakeTranslator())
+
+            payloads = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+            ]
+        self.assertTrue(result.translated_samples)
+        self.assertEqual(result.failed_samples, 0)
+        self.assertTrue(all("sample_id" in payload for payload in payloads))
+        self.assertTrue(all("translated_text" in payload for payload in payloads))
+        self.assertTrue(all("source_text" not in payload for payload in payloads))
+        self.assertNotIn("source_text", repr(result))
+
+    def test_quality_runner_records_redacted_sample_errors(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "latest.jsonl"
+
+            result = write_quality_run(path, translator=_FailingTranslator())
+            summary = build_quality_run_summary(path)
+
+        self.assertEqual(result.translated_samples, 0)
+        self.assertGreater(result.failed_samples, 0)
+        self.assertEqual(summary.scored_samples, 0)
+        self.assertGreater(
+            len([row for row in summary.rows if row.status == "error"]),
+            0,
+        )
+        self.assertNotIn("sk-raw-secret", repr(result))
+        self.assertNotIn("sk-raw-secret", repr(summary))
 
 
 if __name__ == "__main__":

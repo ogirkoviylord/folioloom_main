@@ -43,6 +43,7 @@ from translator_service.admin.provider_probe import validate_ai_provider_key
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
 from translator_service.admin.quality import build_quality_run_summary
+from translator_service.admin.quality_runner import QualityRunResult, write_quality_run
 from translator_service.admin.secret_safety import build_secret_safety_report
 from translator_service.admin.secrets import (
     SecretNotFound,
@@ -206,8 +207,53 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Quality",
             active="quality",
-            body=lambda session: quality_body(_quality_run_summary()),
+            body=lambda session: quality_body(
+                _quality_run_summary(),
+                csrf_token=session.csrf_token,
+            ),
         )
+
+    @router.post("/quality/run")
+    async def run_quality(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            result = _run_quality_check(settings)
+        except RuntimeError as error:
+            with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+                audit.record(
+                    actor_id=session.actor_id,
+                    role=session.role,
+                    action="quality.run",
+                    target_type="quality_run",
+                    target_id=str(_quality_run_path()),
+                    outcome=AuditOutcome.FAILURE,
+                    metadata={"error": str(error)},
+                )
+            return _html(str(error), status_code=HTTPStatus.BAD_REQUEST)
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="quality.run",
+                target_type="quality_run",
+                target_id=result.candidate_path,
+                outcome=(
+                    AuditOutcome.SUCCESS
+                    if result.failed_samples == 0
+                    else AuditOutcome.FAILURE
+                ),
+                metadata={
+                    "total_samples": result.total_samples,
+                    "translated_samples": result.translated_samples,
+                    "failed_samples": result.failed_samples,
+                },
+            )
+        return RedirectResponse("/admin/quality", status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request) -> Response:
@@ -1350,6 +1396,15 @@ def _quality_run_summary():
 
 def _quality_run_path() -> Path:
     return Path("var") / "quality-runs" / "latest.jsonl"
+
+
+def _run_quality_check(settings: Settings) -> QualityRunResult:
+    from translator_service.bot.runtime import build_deepseek_translator
+
+    return write_quality_run(
+        _quality_run_path(),
+        translator=build_deepseek_translator(settings),
+    )
 
 
 def _activity_store(settings: Settings) -> SQLiteUserActivityStore:

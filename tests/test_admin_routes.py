@@ -5,6 +5,7 @@ from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -38,6 +39,13 @@ from translator_service.user_activity import (
     SQLiteUserActivityStore,
     UserActivityEventInput,
 )
+
+
+def _csrf_token(page_text: str) -> str:
+    csrf = re.search(r'name="csrf_token" value="([^"]+)"', page_text)
+    if csrf is None:
+        raise AssertionError("CSRF token not found")
+    return csrf.group(1)
 
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
@@ -308,6 +316,45 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertGreaterEqual(payload["total_reference_samples"], 5)
         self.assertNotIn("translated_text", api.text)
         self.assertNotIn("reference_translation", api.text)
+
+    def test_quality_page_can_start_quality_run(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        page = self.client.get("/admin/quality")
+        csrf = _csrf_token(page.text)
+
+        with patch(
+            "translator_service.admin.routes._run_quality_check",
+        ) as quality_run:
+            quality_run.return_value = SimpleNamespace(
+                candidate_path="var/quality-runs/latest.jsonl",
+                total_samples=5,
+                translated_samples=5,
+                failed_samples=0,
+            )
+            response = self.client.post(
+                "/admin/quality/run",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/quality")
+        quality_run.assert_called_once()
+
+    def test_quality_run_rejects_invalid_csrf(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        with patch(
+            "translator_service.admin.routes._run_quality_check",
+            side_effect=AssertionError("should not run"),
+        ):
+            response = self.client.post(
+                "/admin/quality/run",
+                data={"csrf_token": "bad"},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_settings_page_renders_secret_safety_center(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
