@@ -1,5 +1,6 @@
 import unittest
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from translator_service.admin.action_center import (
     ActionCenter,
@@ -18,6 +19,10 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
+)
+from translator_service.admin.provider_balance import (
+    ProviderBalanceAmount,
+    ProviderBalanceSnapshot,
 )
 from translator_service.admin.views import overview_body
 
@@ -274,6 +279,65 @@ class AdminActionCenterTest(unittest.TestCase):
         )
 
         self.assertEqual(center.items, ())
+
+    def test_low_deepseek_balance_creates_action(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            deepseek_balance_snapshot=ProviderBalanceSnapshot(
+                provider_id="deepseek",
+                status="available",
+                is_available=True,
+                balances=(
+                    ProviderBalanceAmount(
+                        currency="USD",
+                        total_balance=Decimal("1.25"),
+                        granted_balance=Decimal("0"),
+                        topped_up_balance=Decimal("1.25"),
+                    ),
+                ),
+                last_checked_at=now,
+                last_success_at=now,
+            ),
+            deepseek_low_balance_threshold=Decimal("5.00"),
+            deepseek_low_balance_currency="USD",
+            deepseek_balance_stale_seconds=300,
+            now=now,
+        )
+
+        self.assertIn("deepseek_balance_low", [item.key for item in center.items])
+
+    def test_unavailable_and_stale_deepseek_balance_create_actions(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            deepseek_balance_snapshot=ProviderBalanceSnapshot(
+                provider_id="deepseek",
+                status="unavailable",
+                is_available=False,
+                balances=(),
+                last_checked_at=now - timedelta(minutes=10),
+                last_success_at=now - timedelta(minutes=10),
+            ),
+            deepseek_low_balance_threshold=Decimal("5.00"),
+            deepseek_low_balance_currency="USD",
+            deepseek_balance_stale_seconds=300,
+            now=now,
+        )
+
+        keys = [item.key for item in center.items]
+        self.assertIn("deepseek_balance_unavailable", keys)
+        self.assertIn("deepseek_balance_stale", keys)
 
     def test_overview_body_escapes_action_items(self):
         html = overview_body(
