@@ -1040,6 +1040,53 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "# [uk] Chapter\n\nKEY=value\n- [uk] First item\n[uk] Body text.\n",
             )
 
+    def test_persistent_confirmation_can_defer_work_to_external_worker(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            run_log_root = Path(temp_dir) / "translation-runs"
+            translator = RecordingTranslator()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                defer_persistent_jobs_to_worker=True,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First item\nBody text.\n",
+                source_language="en",
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            persisted_job = persistent_store.get_job(job.id)
+            work_units = persistent_store.list_work_units(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.QUEUED)
+            self.assertTrue(work_units)
+            self.assertTrue(
+                all(unit.status is PersistentWorkUnitStatus.PENDING for unit in work_units)
+            )
+            self.assertEqual(translator.requests, [])
+            self.assertFalse(run_log_root.exists())
+
     def test_persistent_txt_confirmation_can_run_work_units_in_parallel(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")

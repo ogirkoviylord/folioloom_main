@@ -36,6 +36,8 @@ services:
     build: .
     command: python -m translator_service.bot
     env_file: .env
+    environment:
+      BOT_DEFER_PERSISTENT_JOBS_TO_WORKER: "true"
     volumes:
       - ./var:/app/var
       - ./var:/data

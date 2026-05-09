@@ -18,7 +18,11 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
-from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+from translator_service.scheduler import (
+    SchedulerClaim,
+    SchedulerLimits,
+    WorkUnitFailureKind,
+)
 from translator_service.protected_text import ProtectedText, protect_text, restore_protected_text
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.translation_context import (
@@ -42,6 +46,10 @@ from translator_service.translation_postprocess import clean_inline_formatting_a
 
 
 logger = logging.getLogger(__name__)
+
+
+def _is_stale_work_unit_claim(error: ValueError) -> bool:
+    return str(error).startswith("Stale work-unit claim:")
 
 
 class PersistentWorkUnitTranslator(Protocol):
@@ -122,20 +130,42 @@ def run_next_persistent_work_unit(
             job_id,
             work_unit.id,
         )
-        return store.fail_work_unit(
-            work_unit.id,
-            error_message=str(error),
-            retry_count=work_unit.retry_count + 1,
-        )
+        try:
+            return store.fail_work_unit(
+                work_unit.id,
+                error_message=str(error),
+                retry_count=work_unit.retry_count + 1,
+            )
+        except ValueError as stale_error:
+            if _is_stale_work_unit_claim(stale_error):
+                logger.warning(
+                    "Ignoring stale persistent work-unit failure: "
+                    "job_id=%s work_unit_id=%s",
+                    job_id,
+                    work_unit.id,
+                )
+                return None
+            raise
 
-    return store.complete_work_unit(
-        work_unit.id,
-        translated_text=translation_result.translated_text,
-        prompt_tokens=translation_result.usage.prompt_tokens,
-        completion_tokens=translation_result.usage.completion_tokens,
-        cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
-        cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
-    )
+    try:
+        return store.complete_work_unit(
+            work_unit.id,
+            translated_text=translation_result.translated_text,
+            prompt_tokens=translation_result.usage.prompt_tokens,
+            completion_tokens=translation_result.usage.completion_tokens,
+            cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
+            cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
+        )
+    except ValueError as error:
+        if _is_stale_work_unit_claim(error):
+            logger.warning(
+                "Ignoring stale persistent work-unit completion: "
+                "job_id=%s work_unit_id=%s",
+                job_id,
+                work_unit.id,
+            )
+            return None
+        raise
 
 
 def run_stored_text_job_until_idle(
@@ -266,22 +296,44 @@ def run_stored_text_job_parallel_until_idle(
                         job_id,
                         work_unit.id,
                     )
-                    failed = store.fail_work_unit(
-                        work_unit.id,
-                        error_message=str(error),
-                        retry_count=work_unit.retry_count + 1,
-                    )
+                    try:
+                        failed = store.fail_work_unit(
+                            work_unit.id,
+                            error_message=str(error),
+                            retry_count=work_unit.retry_count + 1,
+                        )
+                    except ValueError as stale_error:
+                        if _is_stale_work_unit_claim(stale_error):
+                            logger.warning(
+                                "Ignoring stale persistent work-unit failure: "
+                                "job_id=%s work_unit_id=%s",
+                                job_id,
+                                work_unit.id,
+                            )
+                            continue
+                        raise
                     failed_work_unit_id = failed.id
                     continue
 
-                completed = store.complete_work_unit(
-                    work_unit.id,
-                    translated_text=translation_result.translated_text,
-                    prompt_tokens=translation_result.usage.prompt_tokens,
-                    completion_tokens=translation_result.usage.completion_tokens,
-                    cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
-                    cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
-                )
+                try:
+                    completed = store.complete_work_unit(
+                        work_unit.id,
+                        translated_text=translation_result.translated_text,
+                        prompt_tokens=translation_result.usage.prompt_tokens,
+                        completion_tokens=translation_result.usage.completion_tokens,
+                        cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
+                        cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
+                    )
+                except ValueError as error:
+                    if _is_stale_work_unit_claim(error):
+                        logger.warning(
+                            "Ignoring stale persistent work-unit completion: "
+                            "job_id=%s work_unit_id=%s",
+                            job_id,
+                            work_unit.id,
+                        )
+                        continue
+                    raise
                 if progress_callback is not None:
                     progress_callback(
                         PersistentJobExecutionProgress(
@@ -361,18 +413,18 @@ def run_next_scheduled_stored_text_work_unit(
             encoding=encoding,
         )
     except FileNotFoundError as error:
-        return store.fail_claimed_work_unit(
-            work_unit_id=claim.work_unit_id,
-            claim_token=claim.claim_token,
+        return _fail_claimed_work_unit_or_ignore_stale(
+            store=store,
+            claim=claim,
             failure_kind=WorkUnitFailureKind.MISSING_SOURCE_OBJECT,
             error_message=str(error),
             retry_base_delay_seconds=retry_base_delay_seconds,
             retry_max_delay_seconds=retry_max_delay_seconds,
         )
     except ValueError as error:
-        return store.fail_claimed_work_unit(
-            work_unit_id=claim.work_unit_id,
-            claim_token=claim.claim_token,
+        return _fail_claimed_work_unit_or_ignore_stale(
+            store=store,
+            claim=claim,
             failure_kind=WorkUnitFailureKind.UNSUPPORTED_CONTRACT,
             error_message=str(error),
             retry_base_delay_seconds=retry_base_delay_seconds,
@@ -393,24 +445,65 @@ def run_next_scheduled_stored_text_work_unit(
             claim.job_id,
             claim.work_unit_id,
         )
-        return store.fail_claimed_work_unit(
-            work_unit_id=claim.work_unit_id,
-            claim_token=claim.claim_token,
+        return _fail_claimed_work_unit_or_ignore_stale(
+            store=store,
+            claim=claim,
             failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
             error_message=str(error),
             retry_base_delay_seconds=retry_base_delay_seconds,
             retry_max_delay_seconds=retry_max_delay_seconds,
         )
 
-    return store.complete_claimed_work_unit(
-        work_unit_id=claim.work_unit_id,
-        claim_token=claim.claim_token,
-        translated_text=translation_result.translated_text,
-        prompt_tokens=translation_result.usage.prompt_tokens,
-        completion_tokens=translation_result.usage.completion_tokens,
-        cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
-        cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
-    )
+    try:
+        return store.complete_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            translated_text=translation_result.translated_text,
+            prompt_tokens=translation_result.usage.prompt_tokens,
+            completion_tokens=translation_result.usage.completion_tokens,
+            cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
+            cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
+        )
+    except ValueError as error:
+        if _is_stale_work_unit_claim(error):
+            logger.warning(
+                "Ignoring stale scheduled work-unit completion: "
+                "job_id=%s work_unit_id=%s",
+                claim.job_id,
+                claim.work_unit_id,
+            )
+            return None
+        raise
+
+
+def _fail_claimed_work_unit_or_ignore_stale(
+    *,
+    store: SQLiteTranslationJobStore,
+    claim: SchedulerClaim,
+    failure_kind: WorkUnitFailureKind,
+    error_message: str,
+    retry_base_delay_seconds: int,
+    retry_max_delay_seconds: int,
+) -> PersistentWorkUnit | None:
+    try:
+        return store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=failure_kind,
+            error_message=error_message,
+            retry_base_delay_seconds=retry_base_delay_seconds,
+            retry_max_delay_seconds=retry_max_delay_seconds,
+        )
+    except ValueError as error:
+        if _is_stale_work_unit_claim(error):
+            logger.warning(
+                "Ignoring stale scheduled work-unit failure: "
+                "job_id=%s work_unit_id=%s",
+                claim.job_id,
+                claim.work_unit_id,
+            )
+            return None
+        raise
 
 
 def _translate_stored_text_work_unit(

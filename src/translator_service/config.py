@@ -37,6 +37,9 @@ class Settings:
             int(os.getenv("TRANSLATION_MAX_PARALLEL_UNITS", "1")),
         )
     )
+    bot_defer_persistent_jobs_to_worker: bool = field(
+        default_factory=lambda: _env_bool("BOT_DEFER_PERSISTENT_JOBS_TO_WORKER", False)
+    )
     scheduler_backend: str = field(
         default_factory=lambda: os.getenv("SCHEDULER_BACKEND", "sqlite")
     )

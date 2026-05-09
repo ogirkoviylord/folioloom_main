@@ -309,6 +309,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("Translation Quality", page.text)
         self.assertIn("No quality run found", page.text)
+        self.assertIn("Russian (ru)", page.text)
+        self.assertIn("Ukrainian (uk)", page.text)
         self.assertNotIn("translated_text", page.text)
         self.assertNotIn("reference_translation", page.text)
         self.assertEqual(api.status_code, 200)

@@ -39,6 +39,11 @@ class AdminQualityTest(unittest.TestCase):
         self.assertIsNone(summary.average_meteor)
         self.assertIsNone(summary.average_chrf)
         self.assertTrue(all(row.status == "missing" for row in summary.rows))
+        target_languages = [
+            group.target_language for group in summary.language_groups
+        ]
+        self.assertIn("ru", target_languages)
+        self.assertIn("uk", target_languages)
         self.assertNotIn("translated_text", repr(summary))
         self.assertNotIn("reference_translation", repr(summary))
         self.assertNotIn("source_text", repr(summary))
@@ -75,6 +80,16 @@ class AdminQualityTest(unittest.TestCase):
                             },
                             ensure_ascii=False,
                         ),
+                        json.dumps(
+                            {
+                                "sample_id": "uk-ordinary-calque-decision-overview",
+                                "translated_text": (
+                                    "Він ухвалив рішення після загального огляду "
+                                    "системи."
+                                ),
+                            },
+                            ensure_ascii=False,
+                        ),
                     ]
                 )
                 + "\n",
@@ -84,15 +99,21 @@ class AdminQualityTest(unittest.TestCase):
             summary = build_quality_run_summary(path)
 
         self.assertTrue(summary.found)
-        self.assertEqual(summary.scored_samples, 2)
+        self.assertEqual(summary.scored_samples, 3)
         self.assertEqual(summary.extra_candidates, 1)
         self.assertGreater(summary.missing_samples, 0)
         self.assertEqual(summary.average_meteor, 1.0)
         self.assertEqual(summary.average_chrf, 1.0)
         scored = [row for row in summary.rows if row.status == "scored"]
-        self.assertEqual(len(scored), 2)
+        self.assertEqual(len(scored), 3)
         self.assertTrue(all(row.meteor == 1.0 for row in scored))
         self.assertTrue(all(row.chrf == 1.0 for row in scored))
+        language_counts = {
+            group.target_language: group.total_reference_samples
+            for group in summary.language_groups
+        }
+        self.assertGreaterEqual(language_counts["ru"], 5)
+        self.assertGreaterEqual(language_counts["uk"], 4)
 
     def test_malformed_jsonl_lines_are_reported_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:

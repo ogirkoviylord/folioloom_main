@@ -150,6 +150,10 @@ class _ActiveTranslationCancellation:
     total_fragments: int = 0
     cancel_requested: bool = False
 
+    def cancel(self) -> None:
+        self.cancel_requested = True
+        self.token.cancel()
+
 
 class BotTranslationService:
     def __init__(
@@ -167,6 +171,7 @@ class BotTranslationService:
         max_parallel_work_units: int = 1,
         provider_parallel_capacity: int = 1,
         use_scheduler_runner: bool = False,
+        defer_persistent_jobs_to_worker: bool = False,
         document_sandbox: DocumentSandbox | None = None,
         security_threshold_policy: SecurityThresholdPolicy | None = None,
         security_cooldown_policy: SecurityCooldownPolicy | None = None,
@@ -193,6 +198,7 @@ class BotTranslationService:
         self._max_parallel_work_units = max(1, max_parallel_work_units)
         self._provider_parallel_capacity = max(1, provider_parallel_capacity)
         self._use_scheduler_runner = use_scheduler_runner
+        self._defer_persistent_jobs_to_worker = defer_persistent_jobs_to_worker
         self._document_sandbox = document_sandbox
         self._security_threshold_policy = (
             security_threshold_policy or SecurityThresholdPolicy()
@@ -694,6 +700,30 @@ class BotTranslationService:
         )
         resumed = self._persistent_job_store.resume_job(job_id)
         total_fragments = len(self._persistent_job_store.list_work_units(job_id))
+        if self._defer_persistent_jobs_to_worker:
+            self._record_activity_for_user(
+                user_telegram_id=user_telegram_id,
+                event_type="translation.queued",
+                action="queued",
+                target_type="document",
+                target_id=pending.file_name,
+                job_id=resumed.id,
+                metadata={
+                    "file_name": pending.file_name,
+                    "document_kind": document_kind.value,
+                    "source_language": pending.source_language,
+                    "target_language": pending.target_language,
+                    "fragment_count": total_fragments,
+                    "persistent": True,
+                    "resumed": True,
+                },
+            )
+            return _queued_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                job_id=resumed.id,
+            )
+
         run_logger = self._start_translation_run_logger(
             pending=pending,
             document_kind=document_kind,
@@ -917,7 +947,7 @@ class BotTranslationService:
         with self._state_lock:
             active = self._active_cancellations.get(user_telegram_id)
             if active is not None:
-                active.cancel_requested = True
+                active.cancel()
                 snapshot = _ActiveTranslationCancellation(
                     token=active.token,
                     user_id=active.user_id,
@@ -929,7 +959,6 @@ class BotTranslationService:
         if active is None:
             return self._cancel_latest_persistent_translation(user_telegram_id)
 
-        snapshot.token.cancel()
         _print_translation_cancel_requested(snapshot)
         return True
 
@@ -1128,13 +1157,18 @@ class BotTranslationService:
                     else (
                         "translation.cancelled"
                         if job.status is TranslationJobStatus.CANCELLED
-                        else "translation.failed"
+                        else (
+                            "translation.queued"
+                            if job.status is TranslationJobStatus.QUEUED
+                            else "translation.failed"
+                        )
                     )
                 ),
                 action=job.status.value,
                 outcome=(
                     ActivityOutcome.SUCCESS
-                    if job.status is TranslationJobStatus.READY
+                    if job.status
+                    in {TranslationJobStatus.READY, TranslationJobStatus.QUEUED}
                     else (
                         ActivityOutcome.IGNORED
                         if job.status is TranslationJobStatus.CANCELLED
@@ -1404,6 +1438,29 @@ class BotTranslationService:
             job_id=plan.job.id,
             total_fragments=total_fragments,
         )
+        if self._defer_persistent_jobs_to_worker:
+            self._record_activity_for_user(
+                user_telegram_id=pending.user_telegram_id,
+                event_type="translation.queued",
+                action="queued",
+                target_type="document",
+                target_id=pending.file_name,
+                job_id=plan.job.id,
+                metadata={
+                    "file_name": pending.file_name,
+                    "document_kind": document_kind.value,
+                    "source_language": pending.source_language,
+                    "target_language": pending.target_language,
+                    "fragment_count": total_fragments,
+                    "persistent": True,
+                },
+            )
+            return _queued_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                job_id=plan.job.id,
+            )
+
         run_logger = self._start_translation_run_logger(
             pending=pending,
             document_kind=document_kind,
@@ -2367,6 +2424,24 @@ def _failed_translation_job(
         target_language=pending.target_language,
         status=TranslationJobStatus.FAILED,
         error_message=error_message,
+    )
+
+
+def _queued_translation_job(
+    *,
+    pending: PendingTranslation,
+    document_kind: DocumentKind,
+    job_id: str,
+) -> TranslationJob:
+    return TranslationJob(
+        id=job_id,
+        document_kind=document_kind,
+        user_telegram_id=pending.user_telegram_id,
+        file_name=pending.file_name,
+        content=pending.content,
+        source_language=pending.source_language,
+        target_language=pending.target_language,
+        status=TranslationJobStatus.QUEUED,
     )
 
 
