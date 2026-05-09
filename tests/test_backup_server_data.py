@@ -201,6 +201,43 @@ class BackupServerDataTest(unittest.TestCase):
         self.assertIn("var/runtime/admin.sqlite3", names)
         self.assertIn("var/runtime/user-settings.sqlite3", names)
 
+    def test_write_manifest_records_runtime_file_count(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_root = root / "var"
+            runtime_root.mkdir()
+            (runtime_root / "admin.sqlite3").write_bytes(b"sqlite")
+            (runtime_root / "object.txt").write_text("file", encoding="utf-8")
+            db_dump = root / "folioloom-db.sql"
+            files_archive = root / "folioloom-files.tgz"
+            manifest = root / "manifest.json"
+            db_dump.write_text("sql", encoding="utf-8")
+            files_archive.write_bytes(b"archive")
+
+            backup_server_data.write_manifest(
+                manifest_path=manifest,
+                created_at=backup_server_data.datetime(2026, 1, 2),
+                env_file=Path(".env"),
+                compose_file=Path("docker-compose.yml"),
+                postgres_service="postgres",
+                db_settings=backup_server_data.DatabaseSettings(
+                    user="translator",
+                    database="translator",
+                    password="secret",
+                ),
+                runtime_root=runtime_root,
+                storage_root=runtime_root / "object-storage",
+                admin_db_path=runtime_root / "admin.sqlite3",
+                row_counts={"translation_jobs": 1},
+                storage_file_count=1,
+                db_dump_path=db_dump,
+                files_archive_path=files_archive,
+            )
+
+            values = json.loads(manifest.read_text(encoding="utf-8"))
+
+        self.assertEqual(values["runtime_file_count"], 2)
+
     def test_verify_manifest_rejects_runtime_archive_without_admin_sqlite(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -235,6 +272,81 @@ class BackupServerDataTest(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(RuntimeError, "admin.sqlite3"):
+                backup_server_data.verify_backup_manifest(
+                    manifest,
+                    allow_empty_database=False,
+                )
+
+    def test_verify_manifest_rejects_jobs_with_empty_runtime_archive(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_dump = root / "folioloom-db.sql"
+            files_archive = root / "folioloom-files.tgz"
+            db_dump.write_text("sql", encoding="utf-8")
+            with tarfile.open(files_archive, "w:gz"):
+                pass
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "runtime_root": "var",
+                        "row_counts": {"translation_jobs": 1},
+                        "storage_file_count": 0,
+                        "database_dump": {
+                            "path": "folioloom-db.sql",
+                            "size_bytes": 3,
+                            "sha256": backup_server_data.sha256_file(db_dump),
+                        },
+                        "files_archive": {
+                            "path": "folioloom-files.tgz",
+                            "size_bytes": files_archive.stat().st_size,
+                            "sha256": backup_server_data.sha256_file(files_archive),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "runtime archive"):
+                backup_server_data.verify_backup_manifest(
+                    manifest,
+                    allow_empty_database=False,
+                )
+
+    def test_verify_manifest_rejects_jobs_with_wrong_runtime_archive_root(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_dump = root / "folioloom-db.sql"
+            files_archive = root / "folioloom-files.tgz"
+            db_dump.write_text("sql", encoding="utf-8")
+            object_storage = root / "object-storage"
+            object_storage.mkdir()
+            (object_storage / "book.txt").write_text("translated", encoding="utf-8")
+            with tarfile.open(files_archive, "w:gz") as archive:
+                archive.add(object_storage, arcname="object-storage")
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "runtime_root": "var",
+                        "row_counts": {"translation_jobs": 1},
+                        "storage_file_count": 1,
+                        "database_dump": {
+                            "path": "folioloom-db.sql",
+                            "size_bytes": 3,
+                            "sha256": backup_server_data.sha256_file(db_dump),
+                        },
+                        "files_archive": {
+                            "path": "folioloom-files.tgz",
+                            "size_bytes": files_archive.stat().st_size,
+                            "sha256": backup_server_data.sha256_file(files_archive),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "runtime archive"):
                 backup_server_data.verify_backup_manifest(
                     manifest,
                     allow_empty_database=False,
