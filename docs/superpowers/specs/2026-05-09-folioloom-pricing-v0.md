@@ -1,6 +1,7 @@
 # FolioLoom Pricing Model v0
 
-Status: test pricing model for the first paid Telegram-bot experiments.
+> Status: Paid-beta draft only. Not an immediate launch plan. Paid beta is blocked until Telegram Stars/XTR flow, persistent ledger, idempotency, refunds, `/paysupport`, reconciliation and support policy are implemented.
+
 Effective date: 2026-05-09.
 Owner: product/business.
 
@@ -229,4 +230,3 @@ Do not launch in month 1:
 - full-book translation for unverified users;
 - API access;
 - team seats.
-

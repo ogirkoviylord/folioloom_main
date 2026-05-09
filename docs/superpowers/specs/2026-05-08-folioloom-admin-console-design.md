@@ -1,5 +1,7 @@
 # FolioLoom Admin Console Design
 
+> Status: Active reference, partially implemented. For current roadmap, only Alerts MVP and Backups visibility are immediate admin gaps; public admin hardening is reserved for public production.
+
 ## Goal
 
 Build the first owner-facing admin console for FolioLoom as a service-level

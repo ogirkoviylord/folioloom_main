@@ -1,9 +1,9 @@
 # Admin Console VPS Runbook
 
-This runbook deploys the FolioLoom admin console on the same OVH Ubuntu 24.04
-VPS that runs the bot. The first production-safe access mode is SSH tunnel only:
-the admin HTTP port binds to `127.0.0.1` on the VPS and is not exposed to the
-public internet.
+Актуальный runbook для closed-beta deployment FolioLoom на VPS. Admin console
+работает через FastAPI service `api`, но в closed beta остается доступным
+только через SSH tunnel. Не публикуй `/admin` в интернет до public-production
+hardening.
 
 ## Network Model
 
@@ -14,35 +14,61 @@ Laptop browser -> SSH tunnel -> VPS 127.0.0.1:62062 -> api container:8000
 Postgres and Redis stay inside the Docker Compose network. They are not
 published on the VPS public interface.
 
+## Compose Services
+
+Current `docker-compose.yml` services:
+
+- `api` - FastAPI health/admin app, published as `127.0.0.1:62062:8000`;
+- `bot` - aiogram Telegram runtime;
+- `worker` - background translation worker;
+- `postgres` - PostgreSQL scheduler/job/work-unit state;
+- `redis` - internal service, not the source of scheduler correctness.
+
+The app containers share runtime state through:
+
+```text
+./var -> /app/var
+./var -> /data
+```
+
+Production paths in `.env` should use `/data/...`.
+
 ## One-Time Server Setup
 
-Install Docker and the Compose plugin on Ubuntu 24.04, then clone or update the
-repository on the VPS.
+Install Docker and the Compose plugin on Ubuntu 24.04, then clone/update the
+repo on the VPS.
 
-Create the server env file from the server example:
+Create server env from the current example:
 
 ```bash
 cp .env.server.example .env
+nano .env
 ```
 
-Fill the required values in `.env`:
+Required values:
 
 ```env
 ENVIRONMENT=production
 SERVICE_NAME="FolioLoom"
-DEEPSEEK_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
-POSTGRES_PASSWORD=...
-DATABASE_URL=postgresql://translator:<same-postgres-password>@postgres:5432/translator
+TELEGRAM_BOT_TOKEN=
+ADMIN_TELEGRAM_IDS=
+DEEPSEEK_API_KEY=
+DEEPSEEK_API_KEYS=
+SCHEDULER_BACKEND=postgres
+POSTGRES_DB=translator
+POSTGRES_USER=translator
+POSTGRES_PASSWORD=change-this
+POSTGRES_DSN=postgresql://translator:change-this@postgres:5432/translator
+DATABASE_URL=postgresql://translator:change-this@postgres:5432/translator
 REDIS_URL=redis://redis:6379/0
 OBJECT_STORAGE_ROOT=/data/object-storage
 PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3
 USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3
 TRANSLATION_RUN_LOG_ROOT=/data/run-logs
 ADMIN_DB_PATH=/data/runtime/admin.sqlite3
-ADMIN_OWNER_PASSWORD=...
-ADMIN_SESSION_SECRET=...
-ADMIN_SECRET_MASTER_KEY=...
+ADMIN_OWNER_PASSWORD=
+ADMIN_SESSION_SECRET=
+ADMIN_SECRET_MASTER_KEY=
 ADMIN_COOKIE_SECURE=false
 ADMIN_PROVIDER_RUNTIME_RELOAD_SECONDS=30
 ```
@@ -59,23 +85,41 @@ PY
 ```
 
 Use a long unique `ADMIN_OWNER_PASSWORD`. Keep `ADMIN_SECRET_MASTER_KEY`
-outside the backup bundle too, for example in a password manager. Without that
-same key, restored encrypted admin secrets cannot be decrypted. Do not commit
-`.env`.
+outside the backup bundle, for example in a password manager. Without the same
+key, restored encrypted admin secrets cannot be decrypted. Do not commit `.env`.
 
 ## Start Or Update
+
+Preferred deploy command:
+
+```bash
+scripts/deploy_server.sh
+```
+
+Manual equivalent for diagnostics:
 
 ```bash
 docker compose up -d --build
 docker compose ps
+```
+
+Run smoke checks after every deploy:
+
+```bash
 scripts/server_smoke_check.sh
+scripts/server_status.sh
 ```
 
-The API container listens on the VPS loopback only:
+`scripts/server_smoke_check.sh` verifies:
 
-```text
-127.0.0.1:62062 -> api:8000
-```
+- `.env` exists;
+- `SCHEDULER_BACKEND=postgres`;
+- Postgres credentials are not left at example defaults;
+- compose config is valid;
+- Postgres is reachable;
+- bot source compiles inside container;
+- admin deployment smoke passes from `api`, `bot` and `worker`;
+- backup CLI is available.
 
 ## Open Admin Console
 
@@ -91,59 +135,64 @@ Then open:
 http://127.0.0.1:62062/admin/live
 ```
 
-## Useful Checks
+Useful checks:
 
 ```bash
 docker compose ps
 docker compose logs -f api
 docker compose logs -f bot
 docker compose logs -f worker
-```
-
-Health endpoint through the tunnel:
-
-```bash
 curl http://127.0.0.1:62062/health
-```
-
-Admin pages require login:
-
-```bash
 curl -I http://127.0.0.1:62062/admin/live
 ```
 
-The server smoke check also verifies that the bot container can open
-`ADMIN_DB_PATH`, validate `ADMIN_SECRET_MASTER_KEY`, and write a harmless admin
-deployment probe row. That is the practical proof that the admin console and bot
-share the same runtime SQLite database after deploy.
+Admin pages require login. The tunnel URL should be reachable only from the
+machine that opened the SSH tunnel.
 
 ## Data Persistence
 
-Compose persists runtime state in the host `./var` directory mounted into both
-`/app/var` and `/data` for `api`, `bot`, and `worker`. Production env paths
-should use `/data/...` so every container reads and writes the same files:
+Runtime files are persisted in the host `./var` directory mounted into `api`,
+`bot` and `worker`.
 
-- `ADMIN_DB_PATH=/data/runtime/admin.sqlite3`: admin settings, encrypted
-  secrets, audit, activity, runtime reload/status rows;
-- `OBJECT_STORAGE_ROOT=/data/object-storage`: source and translated files;
-- `TRANSLATION_RUN_LOG_ROOT=/data/run-logs`: translation logs;
+- `ADMIN_DB_PATH=/data/runtime/admin.sqlite3` - admin settings, encrypted
+  secrets, audit, activity and runtime reload/status rows.
+- `OBJECT_STORAGE_ROOT=/data/object-storage` - source, intermediate, partial
+  and final files.
+- `TRANSLATION_RUN_LOG_ROOT=/data/run-logs` - safe translation run metadata.
 - `PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3` and
-  `USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3`: local runtime
-  state.
+  `USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3` - local runtime
+  stores where configured.
 
-PostgreSQL data lives in the `postgres-data` Docker volume.
+PostgreSQL data lives in Docker volume `postgres-data`.
 
 Back up both Postgres and the host `var` runtime directory before risky deploys
 or migrations. The backup script includes `admin.sqlite3`; the master key is
 still your responsibility.
 
+## Backup Commands
+
+Create backup:
+
+```bash
+python3 scripts/backup_server_data.py --output-dir ~/folioloom_exports
+```
+
+Verify backup:
+
+```bash
+python3 scripts/verify_backup_export.py ~/folioloom_exports/folioloom-backup-YYYYMMDD-HHMMSS.manifest.json
+```
+
+Restore rehearsal is documented in `docs/deployment/restore-runbook.md`.
+
 ## Security Notes
 
-- Keep `/admin` behind SSH tunnel until there is a domain, HTTPS, and stronger
-  access control.
+- Keep `/admin` behind SSH tunnel until there is a public-production hardening
+  decision.
 - Do not publish Postgres or Redis ports on the VPS public interface.
-- Do not paste real secrets into chat or tickets.
-- Rotate `ADMIN_OWNER_PASSWORD`, `ADMIN_SESSION_SECRET`, and
+- Do not paste real secrets into chat, docs or tickets.
+- Do not log raw document text in admin/run logs.
+- Rotate `ADMIN_OWNER_PASSWORD`, `ADMIN_SESSION_SECRET` and
   `ADMIN_SECRET_MASTER_KEY` if they are ever exposed.
-- A future public admin setup should add HTTPS, IP allowlist, Cloudflare Access
-  or VPN, MFA, and named admin accounts.
+- Future public admin setup must add HTTPS, stronger access layer, MFA/named
+  admin accounts or equivalent, and explicit incident/runbook coverage.

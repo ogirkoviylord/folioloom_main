@@ -1,5 +1,7 @@
 # Admin Server Diagnostics Fix Implementation Plan
 
+> Status: Historical diagnostic plan. Remaining lesson for current roadmap: api/bot/worker/admin must share one production scheduler/runtime state, and server smoke checks must fail loudly on scheduler mismatch.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the deployed admin console reflect the real bot state after deploy: env-backed integrations, AI keys, live translations, logs, users, operations, and backups must all point at the same runtime data.

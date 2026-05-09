@@ -1,5 +1,7 @@
 # FolioLoom Telegram Bot Design
 
+> Status: Historical / superseded by `docs/restart/folioloom-restart-spec.md` for current roadmap. This document preserves early architecture rationale, but sections describing prototype/in-memory state are outdated.
+
 ## Goal
 
 Build FolioLoom, an independent Telegram service for paid book, chapter, and manuscript translation. The service uses DeepSeek as an internal provider, accepts common text documents first, then expands into ebook, subtitle, office, scanned, and legacy formats. It estimates price before work starts, runs translation in background workers, and returns a translated file to the user.
