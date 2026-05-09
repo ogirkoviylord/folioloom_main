@@ -1,3 +1,4 @@
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -145,6 +146,16 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("ENVIRONMENT=production", content)
         self.assertIn("./var", content)
         self.assertNotIn("app-var", content)
+
+    def test_admin_runtime_dependencies_are_production_dependencies(self):
+        pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = pyproject["project"]["dependencies"]
+
+        self.assertTrue(
+            any(dependency.startswith("httpx") for dependency in dependencies),
+            "admin provider probe imports httpx at API startup, "
+            "so httpx must not be dev-only",
+        )
 
 
 if __name__ == "__main__":
