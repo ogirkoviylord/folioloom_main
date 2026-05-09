@@ -570,10 +570,10 @@ def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
     <div class="key-row">
       <div>
         <strong>{escape(key.label)}</strong>
-        <code>{escape(key.masked_value or "env fallback")}</code>
-        <span>configured from environment</span>
+        <code>{escape(key.masked_value or "server .env")}</code>
+        <span>configured from server environment</span>
       </div>
-      <span>source env fallback</span>
+      <span>read-only</span>
       <span>{key.weight} active keys</span>
     </div>
     """
@@ -1846,7 +1846,7 @@ def _integration_connection_remove_control(
     csrf_token: str,
 ) -> str:
     if connection.connection_id == "env-fallback":
-        return '<span class="status">managed by environment</span>'
+        return '<span class="status">read-only</span>'
     remove_action = (
         f"/admin/integrations/{escape(connection.integration_id)}/connections/remove"
     )
@@ -1991,12 +1991,14 @@ header {
 }
 .grid-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 16px;
+  align-items: start;
 }
 .integration-card {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 .integration-folder {
   padding: 0;
@@ -2005,9 +2007,9 @@ header {
 .integration-folder summary {
   list-style: none;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 18px 20px;
   cursor: pointer;
 }
@@ -2021,6 +2023,11 @@ header {
 .integration-folder summary span:first-child {
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+.integration-folder summary > .status {
+  justify-self: end;
+  max-width: 100%;
 }
 .integration-folder > p,
 .integration-folder > .key-table,
@@ -2056,14 +2063,15 @@ header {
 }
 .key-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 12px;
   align-items: center;
   border-top: 1px solid var(--line);
   padding-top: 10px;
+  min-width: 0;
 }
 .connection-row {
-  grid-template-columns: minmax(160px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 .connection-form {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2073,6 +2081,8 @@ header {
 .integration-card code {
   color: var(--muted);
   font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .empty-state { color: var(--muted); }
 .action-center {
@@ -2115,13 +2125,16 @@ header {
   border-color: rgba(163, 61, 42, 0.35);
 }
 .status {
-  width: max-content;
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px 8px;
   color: var(--accent-strong);
   font-size: 0.8rem;
   font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .environment-badge {
   width: max-content;
