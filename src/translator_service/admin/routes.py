@@ -24,8 +24,8 @@ from translator_service.admin.auth import (
 )
 from translator_service.admin.bootstrap_config import (
     apply_ai_provider_key_bootstrap,
-    apply_integration_connection_bootstrap,
     apply_integration_bootstrap,
+    apply_integration_connection_bootstrap,
     env_bootstrap_config,
 )
 from translator_service.admin.costs import build_cost_analytics
@@ -39,12 +39,12 @@ from translator_service.admin.integrations import (
 )
 from translator_service.admin.live import build_live_monitor_snapshot
 from translator_service.admin.operations import build_persistent_operations_overview
-from translator_service.admin.provider_health import build_provider_health
 from translator_service.admin.provider_balance import (
     ProviderBalanceSnapshot,
     get_cached_deepseek_balance,
     refresh_deepseek_balance,
 )
+from translator_service.admin.provider_health import build_provider_health
 from translator_service.admin.provider_probe import validate_ai_provider_key
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
@@ -56,6 +56,7 @@ from translator_service.admin.secrets import (
     SecretStoreUnavailable,
     SQLiteEncryptedSecretStore,
 )
+from translator_service.admin.settings import SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
     build_translation_run_archive,
     get_translation_run_details,
@@ -81,10 +82,19 @@ from translator_service.admin.views import (
     user_detail_body,
     users_body,
 )
+from translator_service.beta_access import (
+    BETA_ALLOWLIST_ENABLED_SETTING,
+    BETA_ALLOWLIST_SETTING,
+    format_telegram_id_list,
+    load_beta_access_policy,
+    parse_telegram_id_list,
+)
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.persistent_job_store import open_persistent_job_store
-from translator_service.translation_run_logs import finish_running_translation_runs_for_job
+from translator_service.translation_run_logs import (
+    finish_running_translation_runs_for_job,
+)
 from translator_service.user_activity import (
     ActivityActorType,
     ActivityOutcome,
@@ -281,8 +291,108 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Settings",
             active="settings",
-            body=lambda session: settings_body(_secret_safety_report(settings)),
+            body=lambda session: settings_body(
+                _secret_safety_report(settings),
+                beta_allowlist_enabled=_beta_allowlist_policy(settings).enabled,
+                beta_allowlist_ids=_beta_allowlist_ids(settings),
+                csrf_token=session.csrf_token,
+            ),
         )
+
+    @router.post("/settings/beta-allowlist/toggle")
+    async def toggle_beta_allowlist(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        enabled = form.get("enabled") == "true"
+        with SQLiteAdminSettingsStore(settings.admin_db_path) as store:
+            store.set_value(
+                BETA_ALLOWLIST_ENABLED_SETTING,
+                "true" if enabled else "false",
+                changed_by=session.actor_id,
+            )
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="settings.beta_allowlist.enabled_changed",
+                target_type="setting",
+                target_id=BETA_ALLOWLIST_ENABLED_SETTING.key,
+                outcome=AuditOutcome.SUCCESS,
+                metadata={"enabled": enabled},
+            )
+        return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/settings/beta-allowlist/add")
+    async def add_beta_allowlist_id(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            telegram_id = _single_telegram_id(form.get("telegram_id", ""))
+        except ValueError as error:
+            return _html(str(error), status_code=HTTPStatus.BAD_REQUEST)
+
+        ids = sorted({*_beta_allowlist_ids(settings), telegram_id})
+        _save_beta_allowlist_ids(
+            settings,
+            ids,
+            actor_id=session.actor_id,
+            role=session.role,
+            audit_action="settings.beta_allowlist.added",
+        )
+        return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/settings/beta-allowlist/remove")
+    async def remove_beta_allowlist_id(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            telegram_id = _single_telegram_id(form.get("telegram_id", ""))
+        except ValueError as error:
+            return _html(str(error), status_code=HTTPStatus.BAD_REQUEST)
+
+        ids = [
+            user_id
+            for user_id in _beta_allowlist_ids(settings)
+            if user_id != telegram_id
+        ]
+        _save_beta_allowlist_ids(
+            settings,
+            ids,
+            actor_id=session.actor_id,
+            role=session.role,
+            audit_action="settings.beta_allowlist.removed",
+        )
+        return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/settings/beta-allowlist")
+    async def save_beta_allowlist(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        ids = parse_telegram_id_list(form.get("telegram_ids", ""))
+        _save_beta_allowlist_ids(
+            settings,
+            ids,
+            actor_id=session.actor_id,
+            role=session.role,
+            audit_action="settings.beta_allowlist.updated",
+        )
+        return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/live", response_class=HTMLResponse)
     async def live(request: Request) -> Response:
@@ -1668,6 +1778,48 @@ def _split_channel_user_id(user_id: str) -> tuple[str | None, str | None]:
 
 def _cost_analytics(settings: Settings):
     return build_cost_analytics(settings.translation_run_log_root)
+
+
+def _beta_allowlist_ids(settings: Settings) -> tuple[int, ...]:
+    return tuple(sorted(_beta_allowlist_policy(settings).allowed_telegram_ids))
+
+
+def _beta_allowlist_policy(settings: Settings):
+    return load_beta_access_policy(settings)
+
+
+def _single_telegram_id(raw: str) -> int:
+    ids = parse_telegram_id_list(raw)
+    if len(ids) != 1:
+        raise ValueError("Enter exactly one positive numeric Telegram user ID.")
+    return ids[0]
+
+
+def _save_beta_allowlist_ids(
+    settings: Settings,
+    ids,
+    *,
+    actor_id: str,
+    role: str,
+    audit_action: str,
+) -> None:
+    normalized_ids = tuple(ids)
+    with SQLiteAdminSettingsStore(settings.admin_db_path) as store:
+        store.set_value(
+            BETA_ALLOWLIST_SETTING,
+            format_telegram_id_list(normalized_ids),
+            changed_by=actor_id,
+        )
+    with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+        audit.record(
+            actor_id=actor_id,
+            role=role,
+            action=audit_action,
+            target_type="setting",
+            target_id=BETA_ALLOWLIST_SETTING.key,
+            outcome=AuditOutcome.SUCCESS,
+            metadata={"telegram_id_count": len(normalized_ids)},
+        )
 
 
 def _quality_run_summary():

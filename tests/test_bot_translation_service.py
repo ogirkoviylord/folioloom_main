@@ -17,6 +17,7 @@ from translator_service.bot_translation_service import (
     UserBookResult,
     estimate_translation_seconds,
 )
+from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.document_sandbox import (
     DocumentSandbox,
     DocumentSandboxError,
@@ -522,6 +523,56 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(job.result_file_name, "notes.uk.txt")
         self.assertEqual(job.result_content.decode("utf-8"), "[uk] One.\n\n[uk] Two.")
         self.assertIsNone(service.get_pending(42))
+
+    def test_beta_allowlist_blocks_unlisted_uploads_before_pending_state(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+            beta_access_policy=BetaAccessPolicy.from_telegram_ids(
+                (42,),
+                enabled=True,
+            ),
+        )
+
+        with self.assertRaises(BetaAccessDenied):
+            service.store_uploaded_document(
+                user_telegram_id=100,
+                file_name="notes.txt",
+                content=b"One.",
+                source_language="en",
+            )
+
+        self.assertIsNone(service.get_pending_upload(100))
+
+    def test_beta_allowlist_blocks_unlisted_confirmation_and_keeps_pending(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+            beta_access_policy=BetaAccessPolicy.from_telegram_ids(
+                (42,),
+                enabled=True,
+            ),
+        )
+        pending = service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+        service._pending[100] = pending
+
+        with self.assertRaises(BetaAccessDenied):
+            service.confirm_pending_translation(
+                user_telegram_id=100,
+                translator=RecordingTranslator(),
+            )
+
+        self.assertIsNotNone(service.get_pending(100))
 
     def test_translation_lifecycle_writes_user_activity_events(self):
         with TemporaryDirectory() as temp_dir:

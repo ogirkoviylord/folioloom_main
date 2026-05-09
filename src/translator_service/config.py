@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field
 
 
@@ -9,11 +10,35 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_telegram_ids(name: str) -> tuple[int, ...]:
+    raw = os.getenv(name, "")
+    ids: list[int] = []
+    seen: set[int] = set()
+    for part in re.split(r"[\s,;]+", raw):
+        if not part:
+            continue
+        try:
+            user_id = int(part)
+        except ValueError:
+            continue
+        if user_id <= 0 or user_id in seen:
+            continue
+        seen.add(user_id)
+        ids.append(user_id)
+    return tuple(ids)
+
+
 @dataclass(frozen=True)
 class Settings:
     service_name: str = os.getenv("SERVICE_NAME", "DeepSeek Document Translator")
     environment: str = os.getenv("ENVIRONMENT", "development")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+    beta_allowlist_enabled: bool = field(
+        default_factory=lambda: _env_bool("BETA_ALLOWLIST_ENABLED", False)
+    )
+    beta_allowlist_telegram_ids: tuple[int, ...] = field(
+        default_factory=lambda: _env_telegram_ids("BETA_ALLOWLIST_TELEGRAM_IDS")
+    )
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     object_storage_root: str = os.getenv("OBJECT_STORAGE_ROOT", "var/object-storage")

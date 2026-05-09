@@ -38,7 +38,8 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 
 ## Gate B - Free Closed Beta
 
-- [ ] Invite-only allowlist is enforced.
+- [x] Invite-only allowlist is editable from SSH-tunneled admin and can be
+  enabled or disabled with an admin toggle.
 - [ ] Rights confirmation is shown before full processing.
 - [ ] Free preview exists before full translation.
 - [ ] Per-user quotas are enforced.

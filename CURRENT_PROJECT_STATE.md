@@ -49,6 +49,8 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - aiogram runtime.
 - `/start`, menu/help/language flows.
 - Upload/estimate/confirm/progress/cancel/status/history-oriented flows.
+- Invite-only beta allowlist by Telegram user id, editable from admin settings
+  and controlled by an explicit admin on/off toggle.
 - TXT/DOCX/EPUB upload and translation path.
 - Cooperative cancellation with partial output.
 - My Books/history foundations: ownership checks, download, resume/cancel
@@ -109,6 +111,7 @@ Implemented owner/admin areas include:
 - quality run trigger;
 - audit logging;
 - deployment smoke checks.
+- closed-beta allowlist settings and enforcement toggle.
 
 Admin access is SSH-tunnel-only for closed beta. It is not a public admin
 product yet.
@@ -127,7 +130,6 @@ product yet.
 
 ## Main gaps against closed beta
 
-- Beta allowlist.
 - Formal rights/permission confirmation flow.
 - Per-user quotas, global cost cap and admin kill switch.
 - Free preview before full translation.

@@ -30,6 +30,7 @@ class AdminSettingDefinition:
     minimum: int | float | None = None
     maximum: int | float | None = None
     sensitive: bool = False
+    allow_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,21 +63,30 @@ class SQLiteAdminSettingsStore:
         self.close()
 
     def get_value(self, definition: AdminSettingDefinition) -> AdminSettingValue:
+        value = self.get_optional_value(definition)
+        if value is not None:
+            return value
+        return AdminSettingValue(
+            key=definition.key,
+            label=definition.label,
+            value=definition.default_value,
+            value_type=definition.value_type,
+            apply_mode=definition.apply_mode,
+            changed_by=None,
+            changed_at=None,
+            sensitive=definition.sensitive,
+        )
+
+    def get_optional_value(
+        self,
+        definition: AdminSettingDefinition,
+    ) -> AdminSettingValue | None:
         row = self._connection.execute(
             "SELECT * FROM admin_settings WHERE key = ?",
             (definition.key,),
         ).fetchone()
         if row is None:
-            return AdminSettingValue(
-                key=definition.key,
-                label=definition.label,
-                value=definition.default_value,
-                value_type=definition.value_type,
-                apply_mode=definition.apply_mode,
-                changed_by=None,
-                changed_at=None,
-                sensitive=definition.sensitive,
-            )
+            return None
         return AdminSettingValue(
             key=definition.key,
             label=definition.label,
@@ -135,7 +145,7 @@ def _validate_value(definition: AdminSettingDefinition, value: str) -> None:
             raise ValueError(f"Invalid boolean for {definition.key}: {value}")
         return
     else:
-        if not value:
+        if not value and not definition.allow_empty:
             raise ValueError(f"Setting cannot be empty: {definition.key}")
         return
 

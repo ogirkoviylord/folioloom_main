@@ -10,6 +10,8 @@ from unittest.mock import patch
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
+from translator_service.admin.settings import SQLiteAdminSettingsStore
+from translator_service.beta_access import BETA_ALLOWLIST_SETTING
 from translator_service.bot.runtime import (
     HEARTBEAT_PATTERNS,
     BotRuntimeConfig,
@@ -432,6 +434,31 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(upload.source_object_key)
             self.assertTrue((Path(temp_dir) / upload.source_object_key).exists())
 
+    def test_build_translation_service_wires_beta_allowlist(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    admin_db_path=str(admin_db_path),
+                    beta_allowlist_telegram_ids=(42,),
+                    beta_allowlist_enabled=True,
+                )
+            )
+            self.addCleanup(service.close)
+
+            self.assertTrue(service.is_beta_allowed(42))
+            self.assertFalse(service.is_beta_allowed(100))
+
+            with SQLiteAdminSettingsStore(admin_db_path) as store:
+                store.set_value(
+                    BETA_ALLOWLIST_SETTING,
+                    "100",
+                    changed_by="owner",
+                )
+
+            self.assertFalse(service.is_beta_allowed(42))
+            self.assertTrue(service.is_beta_allowed(100))
+
     def test_build_translation_service_wires_user_activity_store(self):
         with TemporaryDirectory() as temp_dir:
             admin_db_path = Path(temp_dir) / "admin.sqlite3"
@@ -537,7 +564,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([channel.weight for channel in snapshot], [3, 1])
 
-    def test_build_deepseek_translator_prefers_admin_provider_keys(self):
+    def test_build_deepseek_translator_combines_admin_and_env_provider_keys(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "admin.sqlite3"
             with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
@@ -586,13 +613,16 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
         snapshot = translator.snapshot()
-        self.assertEqual([channel.label for channel in snapshot], ["stable", "dev"])
+        self.assertEqual(
+            [channel.label for channel in snapshot],
+            ["stable", "dev", "deepseek-1", "deepseek-2"],
+        )
         self.assertEqual(
             [channel.max_parallel_requests for channel in snapshot],
-            [3, 2],
+            [3, 2, 1, 1],
         )
-        self.assertEqual([channel.weight for channel in snapshot], [4, 1])
-        self.assertEqual(capacity, 5)
+        self.assertEqual([channel.weight for channel in snapshot], [4, 1, 1, 1])
+        self.assertEqual(capacity, 7)
 
     def test_admin_deepseek_translator_reloads_changed_key_pool(self):
         with TemporaryDirectory() as temp_dir:
@@ -771,7 +801,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, "admin-key-old:uk:Hello")
         self.assertEqual(second, "admin-key-new:uk:Hello")
 
-    def test_admin_deepseek_translator_switches_from_env_without_restart(
+    def test_admin_deepseek_translator_adds_admin_without_dropping_env(
         self,
     ):
         with TemporaryDirectory() as temp_dir:
@@ -822,10 +852,15 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                         source_language="en",
                         target_language="uk",
                     )
+                    snapshot = translator.snapshot()
 
         self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
         self.assertEqual(first, "env-key:uk:Hello")
-        self.assertEqual(second, "admin-key:uk:Hello")
+        self.assertIn(second, {"admin-key:uk:Hello", "env-key:uk:Hello"})
+        self.assertEqual(
+            [channel.label for channel in snapshot],
+            ["stable", "deepseek-1"],
+        )
 
     def test_build_deepseek_translator_deduplicates_multiple_keys(self):
         with patch.dict(

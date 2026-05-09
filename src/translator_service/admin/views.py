@@ -204,7 +204,13 @@ def _safe_action_severity(severity: str) -> str:
     return "info"
 
 
-def settings_body(report: SecretSafetyReport) -> str:
+def settings_body(
+    report: SecretSafetyReport,
+    *,
+    beta_allowlist_enabled: bool,
+    beta_allowlist_ids: tuple[int, ...],
+    csrf_token: str,
+) -> str:
     rows = "\n".join(_secret_safety_row(item) for item in report.items)
     if not rows:
         rows = """
@@ -221,6 +227,24 @@ def settings_body(report: SecretSafetyReport) -> str:
           items that need a local check.
         </p>
       </div>
+    </section>
+    <section class="panel table-panel">
+      <h3>Closed Beta Allowlist</h3>
+      <p>
+        Add trusted Telegram numeric user IDs now, then enable enforcement when
+        the beta cohort is ready.
+      </p>
+      {_beta_allowlist_toggle(beta_allowlist_enabled, csrf_token)}
+      <form class="secret-form key-form" method="post"
+        action="/admin/settings/beta-allowlist/add">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <label>
+          <span>Telegram user ID</span>
+          <input name="telegram_id" type="number" min="1" step="1" required>
+        </label>
+        <button type="submit">Add ID</button>
+      </form>
+      {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
     </section>
     <section class="metrics">
       <div class="metric">
@@ -260,6 +284,66 @@ def settings_body(report: SecretSafetyReport) -> str:
         <tbody>{rows}</tbody>
       </table>
     </section>
+    """
+
+
+def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
+    status = "on" if enabled else "off"
+    next_enabled = "false" if enabled else "true"
+    label = "Disable allowlist" if enabled else "Enable allowlist"
+    danger = " danger" if enabled else ""
+    detail = (
+        "Only listed Telegram IDs can start new uploads and translations."
+        if enabled
+        else "All Telegram users can use the bot while the list is off."
+    )
+    return f"""
+      <div class="key-row">
+        <div>
+          <strong>Allowlist enforcement: {escape(status)}</strong>
+          <span>{escape(detail)}</span>
+        </div>
+        <form method="post" action="/admin/settings/beta-allowlist/toggle">
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+          <input type="hidden" name="enabled" value="{escape(next_enabled)}">
+          <button class="compact-action{danger}" type="submit">
+            {escape(label)}
+          </button>
+        </form>
+      </div>
+    """
+
+
+def _beta_allowlist_table(ids: tuple[int, ...], csrf_token: str) -> str:
+    if not ids:
+        return '<p class="empty-state">No Telegram IDs are allowlisted.</p>'
+    rows = "\n".join(_beta_allowlist_row(user_id, csrf_token) for user_id in ids)
+    return f"""
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Allowed Telegram IDs</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    """
+
+
+def _beta_allowlist_row(user_id: int, csrf_token: str) -> str:
+    safe_id = escape(str(user_id))
+    return f"""
+      <tr>
+        <td><code>{safe_id}</code></td>
+        <td>
+          <form method="post" action="/admin/settings/beta-allowlist/remove">
+            <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+            <input type="hidden" name="telegram_id" value="{safe_id}">
+            <button class="compact-action danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
     """
 
 

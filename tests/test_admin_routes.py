@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -27,6 +27,10 @@ from translator_service.admin.provider_runtime import (
 )
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.api import create_app
+from translator_service.beta_access import (
+    BETA_ALLOWLIST_ENABLED_SETTING,
+    BETA_ALLOWLIST_SETTING,
+)
 from translator_service.config import Settings
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
 from translator_service.translation_run_logs import (
@@ -48,6 +52,17 @@ def _csrf_token(page_text: str) -> str:
     if csrf is None:
         raise AssertionError("CSRF token not found")
     return csrf.group(1)
+
+
+def _admin_setting_row(db_path: str, key: str):
+    connection = sqlite3.connect(db_path)
+    try:
+        return connection.execute(
+            "SELECT value FROM admin_settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+    finally:
+        connection.close()
 
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
@@ -280,6 +295,106 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Live", overview.text)
         self.assertIn("Settings", overview.text)
         self.assertEqual(overview.headers["cache-control"], "no-store")
+
+    def test_owner_can_add_view_and_remove_beta_allowlist_ids_from_settings(self):
+        with TemporaryDirectory() as temp_dir:
+            settings = Settings(
+                admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/settings")
+            csrf = _csrf_token(page.text)
+
+            add_response = client.post(
+                "/admin/settings/beta-allowlist/add",
+                data={
+                    "csrf_token": csrf,
+                    "telegram_id": "42",
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(add_response.status_code, 303)
+            self.assertEqual(add_response.headers["location"], "/admin/settings")
+            listing = client.get("/admin/settings")
+            self.assertIn("Allowlist enforcement: off", listing.text)
+            self.assertIn("Allowed Telegram IDs", listing.text)
+            self.assertIn("<code>42</code>", listing.text)
+            self.assertNotIn("<textarea", listing.text)
+
+            remove_csrf = _csrf_token(listing.text)
+            remove_response = client.post(
+                "/admin/settings/beta-allowlist/remove",
+                data={
+                    "csrf_token": remove_csrf,
+                    "telegram_id": "42",
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(remove_response.status_code, 303)
+            self.assertEqual(remove_response.headers["location"], "/admin/settings")
+            row = _admin_setting_row(settings.admin_db_path, BETA_ALLOWLIST_SETTING.key)
+
+        self.assertEqual(row[0], "")
+
+    def test_owner_can_toggle_beta_allowlist_enforcement(self):
+        with TemporaryDirectory() as temp_dir:
+            settings = Settings(
+                admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/settings")
+            csrf = _csrf_token(page.text)
+
+            enable = client.post(
+                "/admin/settings/beta-allowlist/toggle",
+                data={"csrf_token": csrf, "enabled": "true"},
+                follow_redirects=False,
+            )
+            enabled_listing = client.get("/admin/settings")
+            disable_csrf = _csrf_token(enabled_listing.text)
+            disable = client.post(
+                "/admin/settings/beta-allowlist/toggle",
+                data={"csrf_token": disable_csrf, "enabled": "false"},
+                follow_redirects=False,
+            )
+            row = _admin_setting_row(
+                settings.admin_db_path,
+                BETA_ALLOWLIST_ENABLED_SETTING.key,
+            )
+
+        self.assertEqual(enable.status_code, 303)
+        self.assertIn("Allowlist enforcement: on", enabled_listing.text)
+        self.assertEqual(disable.status_code, 303)
+        self.assertEqual(row[0], "false")
+
+    def test_owner_cannot_add_invalid_beta_allowlist_id(self):
+        with TemporaryDirectory() as temp_dir:
+            settings = Settings(
+                admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+            csrf = _csrf_token(client.get("/admin/settings").text)
+
+            response = client.post(
+                "/admin/settings/beta-allowlist/add",
+                data={
+                    "csrf_token": csrf,
+                    "telegram_id": "not-a-number",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_login_cookie_can_be_marked_secure_for_deployment(self):
         client = TestClient(

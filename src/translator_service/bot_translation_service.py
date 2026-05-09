@@ -7,6 +7,10 @@ from threading import RLock
 import time
 from typing import Callable
 
+from translator_service.beta_access import (
+    BetaAccessPolicy,
+    SQLiteBackedBetaAccessPolicy,
+)
 from translator_service.document_sandbox import DocumentSandbox
 from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.extractors import (
@@ -193,6 +197,9 @@ class BotTranslationService:
         security_threshold_policy: SecurityThresholdPolicy | None = None,
         security_cooldown_policy: SecurityCooldownPolicy | None = None,
         activity_store: SQLiteUserActivityStore | None = None,
+        beta_access_policy: (
+            BetaAccessPolicy | SQLiteBackedBetaAccessPolicy | None
+        ) = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -224,6 +231,9 @@ class BotTranslationService:
             security_cooldown_policy
         )
         self._activity_store = activity_store
+        self._beta_access_policy = (
+            beta_access_policy or BetaAccessPolicy.from_telegram_ids((), enabled=False)
+        )
         self._state_lock = RLock()
 
     def close(self) -> None:
@@ -306,6 +316,12 @@ class BotTranslationService:
                 user_telegram_id,
             )
 
+    def is_beta_allowed(self, user_telegram_id: int) -> bool:
+        return self._beta_access_policy.is_allowed(user_telegram_id)
+
+    def _assert_beta_access_allows(self, user_telegram_id: int) -> None:
+        self._beta_access_policy.assert_allowed(user_telegram_id)
+
     def _assert_security_cooldown_allows(self, user_telegram_id: int) -> None:
         self._security_cooldown_tracker.assert_allowed(
             _security_user_id(user_telegram_id)
@@ -351,6 +367,7 @@ class BotTranslationService:
         content: bytes,
         source_language: str,
     ) -> PendingUpload:
+        self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         upload = validate_document_upload(
             file_name=file_name,
@@ -400,6 +417,7 @@ class BotTranslationService:
         user_telegram_id: int,
         target_language: str,
     ) -> PendingTranslation:
+        self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         with self._state_lock:
             pending_upload = self._pending_uploads.get(user_telegram_id)
@@ -432,6 +450,7 @@ class BotTranslationService:
         source_language_display: str | None = None,
         source_object_key: str | None = None,
     ) -> PendingTranslation:
+        self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         upload = validate_document_upload(
             file_name=file_name,
@@ -806,6 +825,7 @@ class BotTranslationService:
         translator: TextTranslator,
         progress_callback: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJob | None:
+        self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         if self._persistent_job_store is None or self._file_storage is None:
             return None
@@ -1229,6 +1249,7 @@ class BotTranslationService:
         translator: TextTranslator,
         progress_callback: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJob:
+        self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
         with self._state_lock:
             pending = self._pending.pop(user_telegram_id, None)

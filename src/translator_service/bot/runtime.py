@@ -12,6 +12,11 @@ from translator_service.admin.provider_runtime import (
     SQLiteAIProviderRuntimeStore,
 )
 from translator_service.ai_provider_runtime import load_ai_provider_runtime_keys
+from translator_service.beta_access import (
+    BetaAccessDenied,
+    SQLiteBackedBetaAccessPolicy,
+    load_beta_access_policy,
+)
 from translator_service.bot.messages import (
     build_back_to_menu_message,
     build_book_deleted_message,
@@ -137,6 +142,8 @@ class BotRuntimeConfig:
     callback_spam_burst_limit: int = 20
     callback_spam_burst_window_seconds: float = 10.0
     user_action_lock_ttl_seconds: float = 900.0
+    beta_allowlist_enabled: bool = False
+    beta_allowlist_telegram_ids: tuple[int, ...] = ()
 
 
 class _CallbackSpamGuard:
@@ -259,6 +266,11 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
             window_seconds=config.security_user_cooldown_window_seconds,
             cooldown_seconds=config.security_user_cooldown_seconds,
         ),
+        beta_access_policy=SQLiteBackedBetaAccessPolicy(
+            admin_db_path=config.admin_db_path,
+            fallback_telegram_ids=config.beta_allowlist_telegram_ids,
+            fallback_enabled=config.beta_allowlist_enabled,
+        ),
     )
 
 
@@ -355,15 +367,22 @@ class ReloadableDeepSeekTranslator:
             self._settings,
             provider_id="deepseek",
         )
+        env_channels = _deepseek_env_channel_configs()
         source = "admin_store"
-        channels = _deepseek_admin_channel_configs(runtime_keys)
+        channels = [
+            *_deepseek_admin_channel_configs(runtime_keys),
+            *env_channels,
+        ]
         status = "ok" if channels else "missing_keys"
-        error = None if channels else "No active DeepSeek admin keys."
+        error = None if channels else "No active DeepSeek admin or env keys."
         if not channels:
             source = "env_fallback"
-            channels = _deepseek_env_channel_configs()
             status = "ok" if channels else "missing_keys"
             error = None if channels else "No active DeepSeek admin or env keys."
+        elif runtime_keys and env_channels:
+            source = "admin_store+env"
+        elif env_channels:
+            source = "env_fallback"
         signature = (source, tuple(runtime_keys), tuple(channels))
         if reload_requested or signature != self._signature:
             self._translator = (
@@ -407,8 +426,20 @@ def _deepseek_translator_from_channels(
         "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS",
         max(300.0, cooldown_seconds),
     )
+
+    def client_factory(*, api_key: str):
+        return DeepSeekClient(
+            api_key=api_key,
+            model=settings.deepseek_model,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            retry_attempts=retry_attempts,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+
     return DeepSeekKeyPoolTranslator(
         channels=channels,
+        client_factory=client_factory,
         model=settings.deepseek_model,
         base_url=base_url,
         timeout_seconds=timeout_seconds,
@@ -421,9 +452,10 @@ def _deepseek_translator_from_channels(
 
 def _deepseek_channel_configs(settings: Settings) -> list[DeepSeekChannelConfig]:
     admin_keys = load_ai_provider_runtime_keys(settings, provider_id="deepseek")
-    if admin_keys:
-        return _deepseek_admin_channel_configs(admin_keys)
-    return _deepseek_env_channel_configs()
+    return [
+        *_deepseek_admin_channel_configs(admin_keys),
+        *_deepseek_env_channel_configs(),
+    ]
 
 
 def _deepseek_admin_channel_configs(admin_keys) -> list[DeepSeekChannelConfig]:
@@ -478,9 +510,8 @@ def _deepseek_parallel_capacity_from_env() -> int:
 
 def _deepseek_parallel_capacity(settings: Settings) -> int:
     admin_keys = load_ai_provider_runtime_keys(settings, provider_id="deepseek")
-    if admin_keys:
-        return sum(max(1, key.max_parallel_requests) for key in admin_keys)
-    return _deepseek_parallel_capacity_from_env()
+    admin_capacity = sum(max(1, key.max_parallel_requests) for key in admin_keys)
+    return admin_capacity + _deepseek_parallel_capacity_from_env()
 
 
 def _consume_deepseek_reload_request(settings: Settings) -> bool:
@@ -704,6 +735,14 @@ def create_router(
             target_id="translate_book",
         )
         interface_language = service.get_interface_language(message.from_user.id)
+        if not service.is_beta_allowed(message.from_user.id):
+            await message.answer(
+                build_upload_error_message(
+                    BetaAccessDenied(),
+                    interface_language,
+                )
+            )
+            return
         await message.answer(
             build_upload_prompt_message(interface_language),
             reply_markup=_back_keyboard(interface_language),
@@ -1168,6 +1207,7 @@ def create_router(
                     target_language=language_option.code,
                 )
             except (
+                BetaAccessDenied,
                 DocumentEstimationNotReadyError,
                 SecurityCooldownActive,
                 TextExtractionError,
@@ -1328,6 +1368,15 @@ def create_router(
     @router.message(F.document)
     async def document_upload(message: Message) -> None:
         document = message.document
+        interface_language = service.get_interface_language(message.from_user.id)
+        if not service.is_beta_allowed(message.from_user.id):
+            await message.answer(
+                build_upload_error_message(
+                    BetaAccessDenied(),
+                    interface_language,
+                )
+            )
+            return
         record_message_activity(
             message,
             event_type="document.uploaded",
@@ -1344,7 +1393,6 @@ def create_router(
             error = FileTooLargeError(
                 f"File exceeds the upload limit of {config.max_upload_mb} MB"
             )
-            interface_language = service.get_interface_language(message.from_user.id)
             await message.answer(build_upload_error_message(error, interface_language))
             return
 
@@ -1361,17 +1409,16 @@ def create_router(
                 source_language=config.source_language,
             )
         except (
+            BetaAccessDenied,
             DocumentEstimationNotReadyError,
             SecurityCooldownActive,
             TextExtractionError,
             UnsupportedDocumentError,
             ValueError,
         ) as error:
-            interface_language = service.get_interface_language(message.from_user.id)
             await message.answer(build_upload_error_message(error, interface_language))
             return
 
-        interface_language = service.get_interface_language(message.from_user.id)
         await message.answer(
             build_translation_language_selection_message(
                 pending_upload.file_name,
@@ -1876,6 +1923,11 @@ async def _run_confirm_pending_translation(
         await heartbeat_task
         await message.answer(build_upload_error_message(error, interface_language))
         return
+    except BetaAccessDenied as error:
+        stop_heartbeat.set()
+        await heartbeat_task
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
     except ValueError as error:
         stop_heartbeat.set()
         await heartbeat_task
@@ -2049,6 +2101,11 @@ async def _resume_user_book_translation(
             progress_callback=report_progress,
         )
     except SecurityCooldownActive as error:
+        stop_heartbeat.set()
+        await heartbeat_task
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
+    except BetaAccessDenied as error:
         stop_heartbeat.set()
         await heartbeat_task
         await message.answer(build_upload_error_message(error, interface_language))
@@ -2509,6 +2566,10 @@ async def run_bot() -> None:
             settings.security_user_cooldown_window_seconds
         ),
         security_user_cooldown_seconds=settings.security_user_cooldown_seconds,
+        beta_allowlist_enabled=settings.beta_allowlist_enabled,
+        beta_allowlist_telegram_ids=tuple(
+            sorted(load_beta_access_policy(settings).allowed_telegram_ids)
+        ),
     )
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)

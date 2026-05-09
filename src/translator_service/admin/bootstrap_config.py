@@ -61,7 +61,7 @@ def apply_ai_provider_key_bootstrap(
     if not bootstrap_config.has_deepseek_keys:
         return pools
     deepseek_keys = pools.get(_DEEPSEEK_PROVIDER_ID, ())
-    if any(key.enabled and not key.disabled for key in deepseek_keys):
+    if any(is_env_deepseek_key(key) for key in deepseek_keys):
         return pools
     pools[_DEEPSEEK_PROVIDER_ID] = (
         *deepseek_keys,

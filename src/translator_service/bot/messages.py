@@ -1,6 +1,7 @@
 import html
 from pathlib import PurePath
 
+from translator_service.beta_access import BetaAccessDenied
 from translator_service.bot.activity_phrases import get_activity_phrases
 from translator_service.documents import (
     EmptyDocumentError,
@@ -192,6 +193,10 @@ MESSAGES = {
             "For safety, new translations are temporarily paused for this account.\n\n"
             "Please try again later."
         ),
+        "beta_access_denied": (
+            "FolioLoom is invite-only during the closed beta.\n\n"
+            "Ask the owner to add your Telegram ID to the beta allowlist."
+        ),
         "unknown_text": (
             "Send a book, chapter, or manuscript to begin, or choose an option from the menu."
         ),
@@ -357,6 +362,14 @@ MESSAGES = {
         "translation_failed": (
             "Во время перевода что-то пошло не так.\n\n"
             "Файл не потерян. Попробуйте еще раз или вернитесь в главное меню."
+        ),
+        "security_cooldown": (
+            "В целях безопасности новые переводы временно приостановлены для этого аккаунта.\n\n"
+            "Попробуйте позже."
+        ),
+        "beta_access_denied": (
+            "FolioLoom работает по приглашениям во время закрытой беты.\n\n"
+            "Попросите владельца добавить ваш Telegram ID в beta allowlist."
         ),
         "unknown_text": (
             "Отправьте книгу, главу или рукопись, чтобы начать, или выберите действие в главном меню."
@@ -1367,6 +1380,8 @@ def build_download_unavailable_message(interface_language: str = "en") -> str:
 
 def build_upload_error_message(error: Exception, interface_language: str = "en") -> str:
     messages = _messages(interface_language)
+    if isinstance(error, BetaAccessDenied):
+        return messages.get("beta_access_denied", MESSAGES["en"]["beta_access_denied"])
     if isinstance(error, SecurityCooldownActive):
         return messages.get("security_cooldown", messages["translation_failed"])
     if isinstance(error, UnsupportedDocumentError):
