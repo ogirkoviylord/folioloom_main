@@ -143,7 +143,10 @@ class Settings:
         )
     )
     admin_deepseek_low_balance_threshold: str = field(
-        default_factory=lambda: os.getenv("ADMIN_DEEPSEEK_LOW_BALANCE_THRESHOLD", "5.00")
+        default_factory=lambda: os.getenv(
+            "ADMIN_DEEPSEEK_LOW_BALANCE_THRESHOLD",
+            "5.00",
+        )
     )
     admin_deepseek_low_balance_currency: str = field(
         default_factory=lambda: os.getenv("ADMIN_DEEPSEEK_LOW_BALANCE_CURRENCY", "USD")
