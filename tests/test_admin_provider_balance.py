@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import httpx
 
-from translator_service.admin.provider_balance import fetch_deepseek_balance
+from translator_service.admin.provider_balance import (
+    ProviderBalanceAmount,
+    ProviderBalanceSnapshot,
+    SQLiteProviderBalanceStore,
+    fetch_deepseek_balance,
+)
 
 
 class AdminProviderBalanceTest(unittest.TestCase):
@@ -77,6 +85,66 @@ class AdminProviderBalanceTest(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error_code, "malformed_response")
         self.assertEqual(result.balances, ())
+
+    def test_store_round_trips_balance_snapshot(self):
+        checked_at = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteProviderBalanceStore(db_path) as store:
+                store.save_snapshot(
+                    ProviderBalanceSnapshot(
+                        provider_id="deepseek",
+                        status="ok",
+                        is_available=True,
+                        balances=(
+                            ProviderBalanceAmount(
+                                currency="USD",
+                                total_balance=Decimal("12.34"),
+                                granted_balance=Decimal("2.00"),
+                                topped_up_balance=Decimal("10.34"),
+                            ),
+                        ),
+                        last_checked_at=checked_at,
+                        last_success_at=checked_at,
+                    )
+                )
+                loaded = store.get_snapshot("deepseek")
+
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.status, "ok")
+        self.assertEqual(loaded.balances[0].total_balance, Decimal("12.34"))
+
+    def test_failed_snapshot_preserves_previous_success_time(self):
+        success_at = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        failed_at = datetime(2026, 5, 9, 12, 5, tzinfo=UTC)
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteProviderBalanceStore(db_path) as store:
+                store.save_snapshot(
+                    ProviderBalanceSnapshot(
+                        provider_id="deepseek",
+                        status="ok",
+                        is_available=True,
+                        balances=(),
+                        last_checked_at=success_at,
+                        last_success_at=success_at,
+                    )
+                )
+                store.save_snapshot(
+                    ProviderBalanceSnapshot(
+                        provider_id="deepseek",
+                        status="failed",
+                        is_available=None,
+                        balances=(),
+                        last_checked_at=failed_at,
+                        error_code="timeout",
+                        error_message="Provider balance check timed out.",
+                    )
+                )
+                loaded = store.get_snapshot("deepseek")
+
+        self.assertEqual(loaded.status, "failed")
+        self.assertEqual(loaded.last_success_at, success_at)
 
 
 if __name__ == "__main__":
