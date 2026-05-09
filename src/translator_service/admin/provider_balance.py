@@ -237,8 +237,8 @@ def refresh_deepseek_balance(
     *,
     transport: httpx.BaseTransport | None = None,
 ) -> ProviderBalanceSnapshot:
-    api_key = _resolve_deepseek_api_key(settings)
-    if api_key is None:
+    api_keys = _deepseek_api_key_candidates(settings)
+    if not api_keys:
         snapshot = ProviderBalanceSnapshot(
             provider_id="deepseek",
             status="not_configured",
@@ -249,11 +249,9 @@ def refresh_deepseek_balance(
             error_message="No active DeepSeek key is configured.",
         )
     else:
-        result = fetch_deepseek_balance(
-            "deepseek",
-            api_key,
-            base_url=settings.deepseek_base_url,
-            timeout_seconds=settings.admin_provider_probe_timeout_seconds,
+        result = _fetch_first_available_deepseek_balance(
+            api_keys,
+            settings=settings,
             transport=transport,
         )
         snapshot = ProviderBalanceSnapshot(
@@ -319,7 +317,36 @@ def _snapshot_status(result: ProviderBalanceFetchResult) -> str:
     return "available" if result.is_available else "unavailable"
 
 
-def _resolve_deepseek_api_key(settings: Settings) -> str | None:
+def _fetch_first_available_deepseek_balance(
+    api_keys: tuple[str, ...],
+    *,
+    settings: Settings,
+    transport: httpx.BaseTransport | None,
+) -> ProviderBalanceFetchResult:
+    latest_result: ProviderBalanceFetchResult | None = None
+    for api_key in api_keys:
+        latest_result = fetch_deepseek_balance(
+            "deepseek",
+            api_key,
+            base_url=settings.deepseek_base_url,
+            timeout_seconds=settings.admin_provider_probe_timeout_seconds,
+            transport=transport,
+        )
+        if latest_result.status == "ok":
+            return latest_result
+    if latest_result is None:
+        checked_at = datetime.now(UTC)
+        return _failed(
+            "deepseek",
+            checked_at,
+            "missing_key",
+            "No active DeepSeek key is configured.",
+        )
+    return latest_result
+
+
+def _deepseek_api_key_candidates(settings: Settings) -> tuple[str, ...]:
+    candidates: list[str] = []
     if settings.admin_secret_master_key:
         try:
             with SQLiteEncryptedSecretStore(
@@ -333,16 +360,23 @@ def _resolve_deepseek_api_key(settings: Settings) -> str | None:
                     )
                     for key in key_summaries:
                         if key.enabled and not key.disabled:
-                            return secrets.get_secret_value(key.secret_id)
+                            candidates.append(secrets.get_secret_value(key.secret_id))
         except (KeyError, SecretNotFound, SecretStoreUnavailable, ValueError):
-            return None
+            pass
     for value in os.getenv("DEEPSEEK_API_KEYS", "").split(","):
         if value.strip():
-            return value.strip()
+            candidates.append(value.strip())
     single_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     if single_key:
-        return single_key
-    return None
+        candidates.append(single_key)
+    deduplicated: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduplicated.append(candidate)
+    return tuple(deduplicated)
 
 
 def _failed(

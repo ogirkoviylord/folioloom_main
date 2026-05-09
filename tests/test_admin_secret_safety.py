@@ -87,7 +87,12 @@ class AdminSecretSafetyTest(unittest.TestCase):
             provider_health_summaries=(),
         )
 
-        html = settings_body(report)
+        html = settings_body(
+            report,
+            beta_allowlist_enabled=False,
+            beta_allowlist_ids=(42,),
+            csrf_token="csrf-token",
+        )
 
         self.assertIn("Secret &amp; Config Safety", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)

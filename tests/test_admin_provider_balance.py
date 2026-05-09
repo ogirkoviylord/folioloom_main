@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import httpx
 
@@ -198,6 +199,64 @@ class AdminProviderBalanceTest(unittest.TestCase):
         self.assertEqual(snapshot.status, "available")
         self.assertEqual(loaded.status, "available")
         self.assertEqual(requests[0].headers["authorization"], "Bearer sk-main-secret")
+
+    def test_refresh_service_tries_env_keys_after_failed_admin_key(self):
+        master_key = urlsafe_b64encode(b"5" * 32).decode("ascii")
+        auth_headers: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            auth_headers.append(request.headers["authorization"])
+            if request.headers["authorization"] == "Bearer sk-env-second":
+                return httpx.Response(
+                    200,
+                    json={
+                        "is_available": True,
+                        "balance_infos": [
+                            {
+                                "currency": "USD",
+                                "total_balance": "18.00",
+                                "granted_balance": "0",
+                                "topped_up_balance": "18.00",
+                            }
+                        ],
+                    },
+                )
+            return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=master_key,
+                deepseek_base_url="https://deepseek.test",
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=master_key) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="admin",
+                        plaintext="sk-admin-bad",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+            with patch.dict(
+                "os.environ",
+                {"DEEPSEEK_API_KEYS": "sk-env-first, sk-env-second"},
+            ):
+                snapshot = refresh_deepseek_balance(
+                    settings,
+                    transport=httpx.MockTransport(handler),
+                )
+
+        self.assertEqual(snapshot.status, "available")
+        self.assertEqual(
+            auth_headers,
+            [
+                "Bearer sk-admin-bad",
+                "Bearer sk-env-first",
+                "Bearer sk-env-second",
+            ],
+        )
 
 
 if __name__ == "__main__":

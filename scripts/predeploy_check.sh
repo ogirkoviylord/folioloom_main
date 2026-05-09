@@ -23,7 +23,7 @@ PYTHONPATH=src python3 -m unittest \
   tests.test_admin_deployment_smoke \
   tests.test_admin_translation_logs \
   tests.test_config \
-  tests.test_bot_runtime.BotRuntimeTest.test_admin_deepseek_translator_switches_from_env_without_restart
+  tests.test_bot_runtime.BotRuntimeTest.test_admin_deepseek_translator_adds_admin_without_dropping_env
 
 echo "== Lint =="
 python3 -m ruff check \

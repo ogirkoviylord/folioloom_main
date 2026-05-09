@@ -1,6 +1,9 @@
 import unittest
+from datetime import UTC, datetime
 
+from translator_service.admin.ai_provider_keys import AIProviderKeySummary
 from translator_service.admin.bootstrap_config import (
+    apply_ai_provider_key_bootstrap,
     apply_integration_connection_bootstrap,
     env_bootstrap_config,
 )
@@ -49,8 +52,47 @@ class AdminBootstrapConfigTest(unittest.TestCase):
         self.assertEqual(telegram_connections[0].label, "server .env")
         self.assertTrue(telegram_connections[0].enabled)
         self.assertTrue(telegram_connections[0].secret_values[0].configured)
-        self.assertEqual(telegram_connections[0].secret_values[0].masked_value, "server .env")
+        self.assertEqual(
+            telegram_connections[0].secret_values[0].masked_value,
+            "server .env",
+        )
         self.assertNotIn("telegram-raw-secret", str(telegram_connections[0]))
+
+    def test_env_deepseek_row_remains_visible_with_admin_keys(self):
+        config = env_bootstrap_config(
+            {
+                "DEEPSEEK_API_KEYS": "sk-first-secret, sk-second-secret",
+            }
+        )
+        pools = apply_ai_provider_key_bootstrap(
+            {"deepseek": (_admin_key_summary(),)},
+            config,
+        )
+
+        keys = pools["deepseek"]
+
+        self.assertEqual([key.label for key in keys], ["admin", "server .env"])
+        self.assertEqual(keys[1].masked_value, "server .env (2 keys)")
+        self.assertNotIn("sk-first-secret", str(keys))
+
+
+def _admin_key_summary() -> AIProviderKeySummary:
+    now = datetime(2026, 5, 10, tzinfo=UTC)
+    return AIProviderKeySummary(
+        provider_id="deepseek",
+        key_id="admin-key",
+        secret_id="deepseek.api_keys.admin-key",
+        label="admin",
+        enabled=True,
+        weight=1,
+        max_parallel_requests=1,
+        masked_value="sk-****cret",
+        fingerprint="fingerprint",
+        version=1,
+        disabled=False,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 if __name__ == "__main__":

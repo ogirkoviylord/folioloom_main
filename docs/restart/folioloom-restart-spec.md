@@ -51,7 +51,8 @@ and the owner can diagnose runtime/provider/jobs/logs/backups from admin.
 ## Required Closed-Beta Flow
 
 ```text
-allowlist check
+allowlist check (Telegram ID allowlist, editable in admin settings, enforced
+only when the admin toggle is on)
 -> upload TXT/DOCX/EPUB
 -> validation/quarantine
 -> rights confirmation
@@ -170,7 +171,7 @@ EPUB fixtures plus negative and ops scenarios. See
 ### Free closed beta blockers
 
 - [ ] Rights confirmation.
-- [ ] Beta allowlist.
+- [x] Beta allowlist.
 - [ ] Per-user quotas.
 - [ ] Global cost cap.
 - [ ] Admin kill switch.

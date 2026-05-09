@@ -10,7 +10,7 @@ website or user-facing provider selection in this window.
 | --- | --- | --- | --- |
 | Source-of-truth docs cleanup | Make the repo understandable in 5 minutes | Updated `README.project.md`, `README.md`, `DOCUMENT_INDEX.md`, `CURRENT_PROJECT_STATE.md`, restart docs and status banners | New reader can identify current stage, blockers, gates and historical docs |
 | Deployment consistency smoke | Prove docs match compose/runtime reality | Updated deployment runbooks and `server-beta.md` superseded note | Docs name `api/bot/worker/postgres/redis`, `.env.server.example`, `./var -> /data`, SSH tunnel and current scripts |
-| Beta mode / allowlist | Restrict closed beta to trusted users | Allowlist decision point, user-facing rejection copy, admin/runtime config path | Non-allowlisted user cannot start upload/translation flow |
+| Beta mode / allowlist | Restrict closed beta to trusted users | Implemented: Telegram ID allowlist with user-facing rejection copy, admin add/remove UI and enforcement toggle | Non-allowlisted user cannot start upload/translation flow when enforcement is on |
 | Quotas / cost cap / kill switch | Bound provider cost during free beta | Per-user quota, global cap, admin kill switch behavior | Quota/cap/kill switch stop new full translations safely |
 | Rights confirmation | Make authorization explicit | Rights confirmation screen/copy before full processing | User must confirm they own rights, have permission, or use public-domain/authorized text |
 | Free preview | Let users see quality before full job | Preview work-unit route and UX copy | Full translation cannot start before preview and explicit confirmation |

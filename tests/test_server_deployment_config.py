@@ -104,7 +104,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("tests.test_admin_deployment_smoke", predeploy_content)
         self.assertIn("tests.test_admin_translation_logs", predeploy_content)
         self.assertIn(
-            "test_admin_deepseek_translator_switches_from_env_without_restart",
+            "test_admin_deepseek_translator_adds_admin_without_dropping_env",
             predeploy_content,
         )
         self.assertIn("scripts/verify_backup_export.py --help", predeploy_content)
