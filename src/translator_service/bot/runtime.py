@@ -77,7 +77,10 @@ from translator_service.document_sandbox import DocumentSandbox, DocumentSandbox
 from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
-from translator_service.job_runner import InMemoryTranslationJobRepository
+from translator_service.job_runner import (
+    InMemoryTranslationJobRepository,
+    TranslationJobStatus,
+)
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     find_language_by_button_text,
@@ -732,8 +735,15 @@ def create_router(
         )
         interface_language = service.get_interface_language(message.from_user.id)
         books = service.list_user_books(user_telegram_id=message.from_user.id)
+        queue_summary = service.get_user_queue_summary(
+            user_telegram_id=message.from_user.id
+        )
         await message.answer(
-            build_my_books_message(books, interface_language=interface_language),
+            build_my_books_message(
+                books,
+                interface_language=interface_language,
+                queue_summary=queue_summary,
+            ),
             reply_markup=(
                 _my_books_keyboard(books, interface_language=interface_language)
                 or _menu_detail_keyboard(interface_language)
@@ -756,10 +766,17 @@ def create_router(
             return
         interface_language = service.get_interface_language(callback.from_user.id)
         books = service.list_user_books(user_telegram_id=callback.from_user.id)
+        queue_summary = service.get_user_queue_summary(
+            user_telegram_id=callback.from_user.id
+        )
         await callback.answer()
         await _edit_callback_message(
             callback.message,
-            build_my_books_message(books, interface_language=interface_language),
+            build_my_books_message(
+                books,
+                interface_language=interface_language,
+                queue_summary=queue_summary,
+            ),
             reply_markup=(
                 _my_books_keyboard(books, interface_language=interface_language)
                 or _menu_detail_keyboard(interface_language)
@@ -876,12 +893,32 @@ def create_router(
             )
             return
 
+        job = service.get_user_book_translation_job(
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+        )
         book = service.get_user_book_detail(
             user_telegram_id=callback.from_user.id,
             job_id=job_id,
         )
-        await callback.answer(build_cancel_requested_message(interface_language))
-        if book is not None:
+        await callback.answer()
+        if job is not None:
+            await _edit_callback_message(
+                callback.message,
+                build_translation_job_status_message(
+                    job,
+                    interface_language=interface_language,
+                ),
+                reply_markup=(
+                    _my_book_detail_keyboard(
+                        book,
+                        interface_language=interface_language,
+                    )
+                    if book is not None
+                    else None
+                ),
+            )
+        elif book is not None:
             await _edit_callback_message(
                 callback.message,
                 build_my_book_detail_message(
@@ -1554,15 +1591,16 @@ def _cancel_keyboard(interface_language: str = "en"):
     )
 
 
-def _cancel_inline_keyboard(interface_language: str = "en"):
+def _cancel_inline_keyboard(interface_language: str = "en", job_id: str | None = None):
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+    callback_data = f"cancel_book:{job_id}" if job_id else "cancel_translation"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=get_cancel_text(interface_language),
-                    callback_data="cancel_translation",
+                    callback_data=callback_data,
                 )
             ]
         ]
@@ -1744,6 +1782,7 @@ async def _run_confirm_pending_translation(
         "cache_hit_tokens": 0,
         "cache_miss_tokens": 0,
         "last_edit_scheduled_at": started_at,
+        "job_id": None,
     }
     progress_message = await message.answer(
         _progress_message_for_current_user_language(
@@ -1842,8 +1881,20 @@ async def _run_confirm_pending_translation(
         await heartbeat_task
         await message.answer(str(error))
         return
-    finally:
-        stop_heartbeat.set()
+
+    if job.status in {TranslationJobStatus.QUEUED, TranslationJobStatus.TRANSLATING}:
+        watched_job = await _watch_worker_translation_progress(
+            message=progress_message,
+            service=service,
+            user_telegram_id=message.from_user.id,
+            job_id=job.id,
+            started_at=started_at,
+            progress_stats=progress_stats,
+        )
+        if watched_job is not None:
+            job = watched_job
+
+    stop_heartbeat.set()
 
     await heartbeat_task
 
@@ -1883,6 +1934,9 @@ async def _resume_user_book_translation(
     job_id: str,
     service: BotTranslationService,
     translator: TextTranslator,
+    queued_poll_interval_seconds: float = (
+        TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS
+    ),
 ) -> None:
     interface_language = service.get_interface_language(user_telegram_id)
     heartbeat_pattern = _choose_heartbeat_pattern_name(
@@ -1903,8 +1957,9 @@ async def _resume_user_book_translation(
         "cache_hit_tokens": 0,
         "cache_miss_tokens": 0,
         "last_edit_scheduled_at": started_at,
+        "job_id": job_id,
     }
-    await _edit_callback_message(
+    progress_message = await _send_translation_progress_message(
         message,
         _progress_message_for_current_user_language(
             service=service,
@@ -1917,7 +1972,7 @@ async def _resume_user_book_translation(
             activity_indicator=_next_heartbeat_frame(heartbeat_pattern, -1),
             activity_phrase_index=0,
         ),
-        reply_markup=_cancel_inline_keyboard(interface_language),
+        reply_markup=_cancel_inline_keyboard(interface_language, job_id=job_id),
     )
     loop = asyncio.get_running_loop()
     stop_heartbeat = asyncio.Event()
@@ -1965,10 +2020,11 @@ async def _resume_user_book_translation(
         if _should_schedule_progress_edit(progress_stats, now=now):
             _schedule_message_edit(
                 loop=loop,
-                message=message,
+                message=progress_message,
                 text=progress_text,
                 reply_markup=_cancel_inline_keyboard(
-                    service.get_interface_language(user_telegram_id)
+                    service.get_interface_language(user_telegram_id),
+                    job_id=job_id,
                 ),
             )
 
@@ -1976,7 +2032,7 @@ async def _resume_user_book_translation(
         _run_translation_progress_heartbeat(
             stop_event=stop_heartbeat,
             loop=loop,
-            message=message,
+            message=progress_message,
             interface_language=interface_language,
             service=service,
             user_telegram_id=user_telegram_id,
@@ -1997,8 +2053,24 @@ async def _resume_user_book_translation(
         await heartbeat_task
         await message.answer(build_upload_error_message(error, interface_language))
         return
-    finally:
-        stop_heartbeat.set()
+
+    if job is not None and job.status in {
+        TranslationJobStatus.QUEUED,
+        TranslationJobStatus.TRANSLATING,
+    }:
+        watched_job = await _watch_worker_translation_progress(
+            message=progress_message,
+            service=service,
+            user_telegram_id=user_telegram_id,
+            job_id=job.id,
+            started_at=started_at,
+            progress_stats=progress_stats,
+            poll_interval_seconds=queued_poll_interval_seconds,
+        )
+        if watched_job is not None:
+            job = watched_job
+
+    stop_heartbeat.set()
 
     await heartbeat_task
     if job is None:
@@ -2025,7 +2097,7 @@ async def _resume_user_book_translation(
         job_id=job.id,
     )
     await _edit_callback_message(
-        message,
+        progress_message,
         build_translation_job_status_message(
             job,
             interface_language=service.get_interface_language(user_telegram_id),
@@ -2058,6 +2130,84 @@ async def _cancel_active_translation(
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+async def _send_translation_progress_message(message, text: str, reply_markup=None):
+    answer = getattr(message, "answer", None)
+    if callable(answer):
+        return await answer(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+
+    await _edit_callback_message(message, text, reply_markup=reply_markup)
+    return message
+
+
+async def _watch_worker_translation_progress(
+    *,
+    message,
+    service: BotTranslationService,
+    user_telegram_id: int,
+    job_id: str,
+    started_at: float,
+    progress_stats: dict[str, object],
+    poll_interval_seconds: float = TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS,
+):
+    progress_stats["job_id"] = job_id
+    current_job = service.get_user_book_translation_job(
+        user_telegram_id=user_telegram_id,
+        job_id=job_id,
+    )
+    while current_job is not None and current_job.status in {
+        TranslationJobStatus.QUEUED,
+        TranslationJobStatus.TRANSLATING,
+    }:
+        progress = service.get_user_book_progress(
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
+        )
+        if progress is None:
+            break
+
+        progress_stats["completed"] = progress.completed_fragments
+        progress_stats["total"] = progress.total_fragments
+        progress_stats["estimated_total_seconds"] = None
+        progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
+        progress_text = _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            completed_fragments=progress.completed_fragments,
+            total_fragments=progress.total_fragments,
+            estimated_total_seconds=None,
+            elapsed_seconds=max(1, round(time.monotonic() - started_at)),
+            last_translated_text=None,
+            activity_indicator=_next_heartbeat_frame(
+                str(progress_stats["heartbeat_pattern"]),
+                int(progress_stats["spinner_index"]) - 1,
+            ),
+            activity_phrase_index=int(progress_stats["spinner_index"]),
+        )
+        await _edit_callback_message(
+            message,
+            progress_text,
+            reply_markup=_cancel_inline_keyboard(
+                service.get_interface_language(user_telegram_id),
+                job_id=job_id,
+            ),
+        )
+
+        await asyncio.sleep(max(0.1, poll_interval_seconds))
+        current_job = service.get_user_book_translation_job(
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
+        )
+
+    return current_job or service.get_user_book_translation_job(
+        user_telegram_id=user_telegram_id,
+        job_id=job_id,
+    )
 
 
 async def _run_translation_progress_heartbeat(
@@ -2116,12 +2266,14 @@ async def _run_translation_progress_heartbeat(
             activity_phrase_index=int(progress_stats["spinner_index"]),
         )
         if _should_schedule_progress_edit(progress_stats, now=now):
+            job_id = progress_stats.get("job_id")
             _schedule_message_edit(
                 loop=loop,
                 message=message,
                 text=progress_text,
                 reply_markup=_cancel_inline_keyboard(
-                    service.get_interface_language(user_telegram_id)
+                    service.get_interface_language(user_telegram_id),
+                    job_id=str(job_id) if job_id else None,
                 ),
             )
 

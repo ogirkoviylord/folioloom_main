@@ -8,6 +8,7 @@ from unittest.mock import patch
 from translator_service.admin.operations import (
     JOB_STATE_CANCELLED,
     JOB_STATE_FAILED,
+    JOB_STATE_PAUSED,
     JOB_STATE_QUEUED,
     JOB_STATE_RUNNING,
     JOB_STATE_SUCCEEDED,
@@ -172,7 +173,8 @@ class AdminOperationsTest(unittest.TestCase):
                 JOB_STATE_SUCCEEDED: 1,
                 JOB_STATE_FAILED: 1,
                 JOB_STATE_CANCELLED: 1,
-                "unknown": 1,
+                JOB_STATE_PAUSED: 1,
+                "unknown": 0,
             },
         )
         self.assertEqual(
@@ -306,7 +308,9 @@ class AdminOperationsTest(unittest.TestCase):
         self.assertIn("10", html)
         self.assertIn('href="/admin/logs"', html)
         self.assertIn(">Retry unavailable<", html)
-        self.assertIn(">Cancel unavailable<", html)
+        self.assertIn(">Pause<", html)
+        self.assertIn(">Cancel<", html)
+        self.assertIn(">Delete<", html)
         self.assertIn(">No action<", html)
         self.assertIn("&lt;script&gt;[redacted]&lt;/script&gt;", html)
         self.assertNotIn("<script>", html)

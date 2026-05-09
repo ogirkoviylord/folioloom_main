@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from translator_service.translation_run_logs import (
+    finish_running_translation_runs_for_job,
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
@@ -127,6 +128,36 @@ class TranslationRunLoggerTest(unittest.TestCase):
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("## Security", summary)
             self.assertIn("unsafe_model_outputs", summary)
+
+    def test_can_finish_running_runs_for_deleted_job(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+
+            finished = finish_running_translation_runs_for_job(
+                temp_dir,
+                job_id="job-1",
+                status="cancelled",
+                error_message="Book deleted by user.",
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events = (logger.run_dir / "events.jsonl").read_text()
+            self.assertEqual(finished, 1)
+            self.assertEqual(snapshot["status"], "cancelled")
+            self.assertIsNotNone(snapshot["finished_at"])
+            self.assertEqual(snapshot["error_message"], "Book deleted by user.")
+            self.assertIn("run_cancelled", events)
 
 
 if __name__ == "__main__":

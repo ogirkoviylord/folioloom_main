@@ -39,7 +39,17 @@ from translator_service.security_telemetry import (
     SecurityCooldownPolicy,
     SecurityThresholdPolicy,
 )
-from translator_service.user_activity import SQLiteUserActivityStore
+from translator_service.translation_run_logs import (
+    TranslationRunLogger,
+    TranslationRunMetadata,
+)
+from translator_service.user_activity import (
+    ActivityActorType,
+    ActivityOutcome,
+    ActivitySurface,
+    SQLiteUserActivityStore,
+    UserActivityEventInput,
+)
 from translator_service.users import SQLiteUserSettingsRepository
 
 
@@ -559,6 +569,67 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertNotIn("source_text", completed.metadata)
         self.assertEqual(profile.last_target_language, "uk")
 
+    def test_admin_deleted_activity_becomes_user_visible_deleted_job(self):
+        with TemporaryDirectory() as temp_dir:
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(activity_store.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+            )
+            persistent_store.delete_job(job.id)
+            activity_store.record_event(
+                UserActivityEventInput(
+                    actor_type=ActivityActorType.ADMIN,
+                    actor_id="bootstrap-owner",
+                    surface=ActivitySurface.ADMIN,
+                    event_type="translation.admin_deleted",
+                    action="delete",
+                    outcome=ActivityOutcome.SUCCESS,
+                    channel="telegram",
+                    channel_user_id="42",
+                    target_type="translation_job",
+                    target_id=job.id,
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    metadata={
+                        "file_name": job.file_name,
+                        "document_kind": job.document_kind,
+                        "source_language": job.source_language,
+                        "target_language": job.target_language,
+                    },
+                )
+            )
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                persistent_job_store=persistent_store,
+                activity_store=activity_store,
+            )
+
+            deleted = service.get_user_book_translation_job(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertIsNotNone(deleted)
+            self.assertEqual(deleted.status, TranslationJobStatus.DELETED)
+            self.assertEqual(deleted.file_name, "book.txt")
+
     def test_confirmed_translation_writes_privacy_safe_automatic_run_log(self):
         with TemporaryDirectory() as temp_dir:
             service = BotTranslationService(
@@ -906,6 +977,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=5,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=Path(temp_dir) / "translation-runs",
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -1526,6 +1598,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=20,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=Path(temp_dir) / "translation-runs",
             )
             self.addCleanup(service.close)
             first = persistent_store.create_job(
@@ -1753,6 +1826,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             persistent_store = SQLiteTranslationJobStore(
                 Path(temp_dir) / "jobs.sqlite3"
             )
+            run_log_root = Path(temp_dir) / "translation-runs"
             self.addCleanup(persistent_store.close)
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
@@ -1761,6 +1835,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=5,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
             )
             original = storage.put_bytes(
                 kind=StoredFileKind.ORIGINAL,
@@ -1818,6 +1893,18 @@ class BotTranslationServiceTest(unittest.TestCase):
                 partial_object_key=partial.object_key,
                 final_object_key=final.object_key,
             )
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
 
             self.assertFalse(
                 service.delete_user_book(user_telegram_id=100, job_id=job.id)
@@ -1834,6 +1921,9 @@ class BotTranslationServiceTest(unittest.TestCase):
                 unit_source.object_key,
             ):
                 self.assertFalse(storage.exists(object_key))
+            run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
+            self.assertEqual(run_snapshot["status"], "cancelled")
+            self.assertEqual(run_snapshot["error_message"], "Book deleted by user.")
 
     def test_concurrent_confirm_claims_pending_translation_once(self):
         repository = InMemoryTranslationJobRepository()
@@ -2006,6 +2096,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             persistent_store = SQLiteTranslationJobStore(
                 Path(temp_dir) / "jobs.sqlite3"
             )
+            run_log_root = Path(temp_dir) / "translation-runs"
             self.addCleanup(persistent_store.close)
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
@@ -2013,6 +2104,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_upload_mb=50,
                 max_fragment_chars=5,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
             )
             self.addCleanup(service.close)
             job = persistent_store.create_job(
@@ -2045,6 +2137,18 @@ class BotTranslationServiceTest(unittest.TestCase):
                 job.id,
                 worker_id="worker-before-restart",
             )
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
 
             self.assertFalse(
                 service.cancel_user_book(user_telegram_id=100, job_id=job.id)
@@ -2055,6 +2159,55 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(detail.status, "cancelled")
             self.assertTrue(detail.can_resume)
             self.assertFalse(detail.can_cancel)
+            run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
+            self.assertEqual(run_snapshot["status"], "cancelled")
+            self.assertEqual(run_snapshot["error_message"], "Book cancelled by user.")
+
+    def test_user_queue_summary_counts_active_books(self):
+        with TemporaryDirectory() as temp_dir:
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                persistent_job_store=persistent_store,
+            )
+            queued = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="queued.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+            )
+            ready = persistent_store.create_job(
+                order_id="order-2",
+                user_id="telegram:42",
+                file_id="file-2",
+                file_name="ready.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+            )
+            persistent_store.mark_job_assembled(ready.id, partial=False)
+
+            summary = service.get_user_queue_summary(user_telegram_id=42)
+
+            self.assertEqual(summary.total_active, 1)
+            self.assertEqual(summary.queued, 1)
+            self.assertEqual(summary.translating, 0)
+            self.assertEqual(summary.items[0].job_id, queued.id)
 
     def test_discard_pending_translation_clears_unconfirmed_order(self):
         service = BotTranslationService(
