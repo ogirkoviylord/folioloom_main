@@ -1,13 +1,13 @@
 # FolioLoom Restore Runbook
 
-This runbook rehearses recovery from a FolioLoom backup created by
-`scripts/backup_server_data.py`.
-
-Use it before the first public beta and after any storage or database change.
+Run this rehearsal before free closed beta and after any storage, scheduler or
+admin DB change. The current server model is Docker Compose with services
+`api`, `bot`, `worker`, `postgres`, `redis`, host runtime `./var`, and
+PostgreSQL volume `postgres-data`.
 
 ## Inputs
 
-You need the three files from one backup timestamp:
+You need three files from one backup timestamp:
 
 ```text
 folioloom-db-YYYYMMDD-HHMMSS.sql
@@ -16,9 +16,9 @@ folioloom-backup-YYYYMMDD-HHMMSS.manifest.json
 ```
 
 You also need the same `ADMIN_SECRET_MASTER_KEY` that encrypted the backed-up
-`admin.sqlite3`. Store it separately from the backup archive.
+`admin.sqlite3`. Store that key separately from the backup archive.
 
-Verify the backup before restoring:
+Verify the backup manifest before restore:
 
 ```bash
 python3 scripts/verify_backup_export.py ~/folioloom_exports/folioloom-backup-YYYYMMDD-HHMMSS.manifest.json
@@ -26,7 +26,8 @@ python3 scripts/verify_backup_export.py ~/folioloom_exports/folioloom-backup-YYY
 
 ## Restore Rehearsal On A Fresh Server Copy
 
-Do this on a test server or a disposable copy first.
+Use a test server or disposable copy first. Do not rehearse destructive restore
+on the only live beta host.
 
 1. Stop FolioLoom:
 
@@ -34,37 +35,40 @@ Do this on a test server or a disposable copy first.
 docker compose down
 ```
 
-2. Keep a local copy of the current runtime directory if it exists:
+2. Keep a local copy of current runtime files if they exist:
 
 ```bash
 mv var "var.before-restore-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
 mkdir -p var
 ```
 
-3. Restore object storage and runtime files:
+3. Restore runtime files:
 
 ```bash
 tar xzf ~/folioloom_exports/folioloom-files-YYYYMMDD-HHMMSS.tgz
 ```
 
-The archive should recreate the host `var/` runtime tree. With the production
-`/data/...` container paths, this usually means `var/object-storage` and
-`var/runtime/admin.sqlite3` on the VPS host.
+The archive should recreate the host `var/` runtime tree. With production
+`/data/...` container paths, this usually means `var/object-storage`,
+`var/runtime/admin.sqlite3` and related runtime files on the VPS host.
 
-4. Start only the database:
+4. Start only Postgres:
 
 ```bash
 docker compose up -d postgres
 ```
 
-5. Recreate the database contents:
+5. Recreate database contents:
 
 ```bash
 docker compose exec -T postgres psql -U translator -d translator -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 docker compose exec -T postgres psql -U translator -d translator < ~/folioloom_exports/folioloom-db-YYYYMMDD-HHMMSS.sql
 ```
 
-6. Start the full stack:
+If server credentials differ from the default user/database, use the values
+from `.env`.
+
+6. Start full stack and run checks:
 
 ```bash
 docker compose up -d --build
@@ -73,23 +77,29 @@ ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS=1 scripts/server_smoke_check.sh
 scripts/server_status.sh
 ```
 
-The `ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS=1` mode makes the smoke check run the
-admin deployment probe with `--require-admin-provider-keys`, so a restored admin
-database without active provider keys fails loudly.
+The strict `ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS=1` mode proves that restored
+admin-managed provider keys are visible to `bot` and `worker`; internally the
+smoke check passes `--require-admin-provider-keys` to the admin deployment
+probe for runtime containers.
 
 ## Acceptance Criteria
 
 - `scripts/verify_backup_export.py` passes.
-- `docker compose ps` shows services running, and backend healthchecks become healthy.
+- `docker compose ps` shows services running and healthchecks become healthy.
 - `scripts/server_smoke_check.sh` passes.
-- `scripts/server_status.sh` shows available disk space and no recent bot or worker tracebacks.
-- Existing translated files are available from the bot's “My books” flow.
-- `/admin/ai-providers` shows the restored provider rows and the bot runtime
-  status updates after a manual provider reload.
+- `ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS=1 scripts/server_smoke_check.sh` passes
+  after provider keys are expected to be restored.
+- `scripts/server_status.sh` shows available disk space and no recent bot or
+  worker tracebacks.
+- Existing translated files that are still within retention policy are
+  available from My Books/history.
+- `/admin/ai-providers` shows restored provider rows.
+- Provider runtime status updates after manual provider reload.
+- No restore step requires raw document text in logs/admin.
 
 ## If Restore Fails
 
-Do not delete the failed restore files. Capture:
+Do not delete failed restore files. Capture diagnostics:
 
 ```bash
 docker compose ps

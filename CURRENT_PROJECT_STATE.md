@@ -1,0 +1,155 @@
+# FolioLoom Current Project State
+
+Актуальный источник фактического состояния проекта на 2026-05-09.
+
+## Коротко
+
+FolioLoom - это рабочая foundation для closed beta Telegram-first сервиса
+перевода авторизованных длинных документов. Проект уже вышел за рамки
+in-memory prototype: есть persistent jobs/work units, object storage,
+worker loop, admin console, Docker Compose deployment и backup/restore
+workflow.
+
+FolioLoom пока не является paid public production service. Ближайшая цель -
+free closed beta после прохождения release gates.
+
+## Текущий стек
+
+- Python 3.13.
+- aiogram Telegram runtime.
+- FastAPI API/admin app.
+- Docker Compose services: `api`, `bot`, `worker`, `postgres`, `redis`.
+- PostgreSQL scheduler storage для server runtime.
+- SQLite fallback/runtime stores там, где это явно настроено.
+- Local object storage через host `./var`, смонтированный в containers как
+  `/app/var` и `/data`.
+- DeepSeek-compatible chat completion providers как внутренний provider layer.
+- TXT/DOCX/EPUB planners, adapters и assembly.
+
+## Последняя зафиксированная проверка
+
+Во время restart-аудита были пройдены:
+
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m compileall src
+scripts/predeploy_check.sh
+```
+
+Результат полного unittest suite: `Ran 811 tests`, `OK`, `skipped=10`.
+
+Важная оговорка: repo-wide `python3 -m ruff check --no-cache src tests scripts`
+пока не является release blocker. Он падает на исторических style/import/line
+length issues. Текущий gate - targeted lint внутри `scripts/predeploy_check.sh`.
+
+## Что реализовано
+
+### Bot and user flow
+
+- aiogram runtime.
+- `/start`, menu/help/language flows.
+- Upload/estimate/confirm/progress/cancel/status/history-oriented flows.
+- TXT/DOCX/EPUB upload and translation path.
+- Cooperative cancellation with partial output.
+- My Books/history foundations: ownership checks, download, resume/cancel
+  affordances и delete confirmation.
+- UI localization: Russian, Ukrainian, French, Spanish, English, Dutch.
+
+### Translation core
+
+- TXT, DOCX, EPUB extraction/planning/assembly.
+- Separate format adapters for TXT/DOCX/EPUB.
+- Persistent planners and persistent assembly for final and partial outputs.
+- DOCX support includes tables/pseudo-tables, headers, footers, footnotes,
+  endnotes, comments, hyperlinks, basic run formatting, hidden text,
+  subscript/superscript and protected structured text.
+- EPUB support includes spine order, XHTML text blocks, inline formatting,
+  note/footnote anchors, OPF/NCX auxiliary text and repair helpers.
+- Output contract checks and repair path for unsafe provider outputs.
+- Russian and Ukrainian quality/profile foundations.
+
+### Backend, persistence and worker
+
+- Local object storage for source, intermediate, partial and final files.
+- SQLite persistent job/work-unit store for local/fallback paths.
+- PostgreSQL scheduler store for server runtime.
+- Scheduler runner and worker loop.
+- Work-unit leases, retries, attempts, usage accounting, worker heartbeats,
+  partial/final output keys.
+- Docker Compose stack with `api`, `bot`, `worker`, `postgres`, `redis`.
+- Server env example uses `SCHEDULER_BACKEND=postgres`.
+
+### Provider layer
+
+- DeepSeek-compatible chat completion client.
+- Multiple internal API channel/key support.
+- Key cooldown/failover behavior.
+- Admin-visible provider runtime status and reload request flow.
+- Provider validation/probe surfaces.
+
+### Admin console
+
+Implemented owner/admin areas include:
+
+- owner login/session auth;
+- RBAC-shaped model;
+- settings;
+- encrypted secret storage;
+- integration registry and connection rows;
+- AI provider keys;
+- provider validation/probe/runtime status/reload;
+- overview action center;
+- live monitor;
+- translation run logs and detail/download;
+- user activity;
+- user list/details;
+- security events;
+- operations/jobs;
+- token/cost analytics;
+- quality run trigger;
+- audit logging;
+- deployment smoke checks.
+
+Admin access is SSH-tunnel-only for closed beta. It is not a public admin
+product yet.
+
+### Deployment and operations
+
+- `docker-compose.yml`.
+- `.env.server.example`.
+- `scripts/deploy_server.sh`.
+- `scripts/predeploy_check.sh`.
+- `scripts/server_smoke_check.sh`.
+- `scripts/server_status.sh`.
+- `scripts/backup_server_data.py`.
+- `scripts/verify_backup_export.py`.
+- VPS runbook and restore runbook under `docs/deployment/`.
+
+## Main gaps against closed beta
+
+- Beta allowlist.
+- Formal rights/permission confirmation flow.
+- Per-user quotas, global cost cap and admin kill switch.
+- Free preview before full translation.
+- Upload hardening/quarantine baseline.
+- TTL cleanup/delete verification.
+- Real-file TXT/DOCX/EPUB matrix and release report.
+- EPUBCheck or equivalent release validation.
+- DOCX openability/visual QA.
+- Alerts MVP.
+- Backups visibility page.
+- Scheduler/runtime consistency smoke as a release artifact.
+
+## Paid beta blockers
+
+Paid beta is blocked until Telegram Stars/XTR flow, `pre_checkout_query`,
+`successful_payment`, stored `telegram_payment_charge_id`, idempotency,
+persistent ledger, reservation/capture/refund, `/paysupport`, reconciliation
+and support/refund policy are implemented and tested.
+
+## Recommended restart decision
+
+Run free closed beta first. The engineering foundation is strong enough to test
+with trusted users and real authorized documents, but quality, reliability,
+rights flow, upload safety, TTL, backups visibility and payment readiness still
+need gates before paid/public launch.

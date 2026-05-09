@@ -1,5 +1,7 @@
 # Admin Practical Operations Roadmap Implementation Plan
 
+> Status: Partially historical. Many admin surfaces are already implemented according to `CURRENT_PROJECT_STATE.md`. Immediate active gaps are Alerts MVP and Backups visibility.
+
 
 **Goal:** Turn the admin console from a skeleton into a practical owner/operator console for daily service control.
 

@@ -1,0 +1,121 @@
+# Document Index
+
+Этот индекс отделяет активные источники правды от historical implementation
+plans. Если старый plan содержит unchecked tasks, это не значит, что он остается
+roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs under
+`docs/restart/`.
+
+## Active Source Of Truth
+
+- `CURRENT_PROJECT_STATE.md` - фактическое состояние проекта на restart.
+- `README.project.md` - актуальный project overview.
+- `README.md` - синхронизированный entrypoint для репозитория.
+- `docs/restart/folioloom-restart-spec.md` - canonical restart-ТЗ.
+- `docs/restart/release-gates.md` - stage gates A-D.
+- `docs/restart/two-week-engineering-plan.md` - ближайший 2-week plan.
+- `docs/restart/real-file-test-matrix.md` - real-file corpus/release matrix.
+- `docs/restart/upload-safety-and-retention.md` - upload hardening, quarantine,
+  TTL and retention rules.
+
+## Active Deployment Docs
+
+- `docs/deployment/admin-vps-runbook.md` - current VPS/admin/tunnel deployment
+  model for `api`, `bot`, `worker`, `postgres`, `redis`.
+- `docs/deployment/restore-runbook.md` - backup verification and restore
+  rehearsal.
+- `docs/deployment/server-beta.md` - historical/superseded note only. Use the
+  two runbooks above and `docs/restart/folioloom-restart-spec.md` instead.
+- `.env.server.example` - current server env contract.
+- `docker-compose.yml` - current compose services and runtime mounts.
+- `scripts/predeploy_check.sh` - current local predeploy gate.
+- `scripts/server_smoke_check.sh` - current server smoke gate.
+- `scripts/backup_server_data.py` and `scripts/verify_backup_export.py` -
+  backup and verification tooling.
+
+## Active Admin / Operations References
+
+- `docs/superpowers/specs/2026-05-08-folioloom-admin-console-design.md` -
+  active reference, partially implemented. Immediate gaps: Alerts MVP and
+  Backups visibility.
+- `docs/superpowers/plans/2026-05-09-admin-practical-ops-roadmap.md` -
+  partially historical. Many slices are implemented; use it only as context for
+  Alerts MVP and Backups visibility.
+- `docs/superpowers/plans/2026-05-09-admin-server-diagnostics-fix-plan.md` -
+  historical diagnostic plan. The remaining lesson is shared scheduler/runtime
+  state and loud smoke checks.
+
+## Active Quality / Profile Docs
+
+- `docs/superpowers/specs/translation-language-quality-methodology.md`
+- `docs/superpowers/specs/russian-translation-profile.md`
+- `docs/superpowers/specs/russian-mqm-eval-rubric.md`
+- `docs/superpowers/specs/ukrainian-translation-profile.md`
+- `docs/superpowers/specs/2026-05-08-ukrainian-translation-profile-design.md`
+- `docs/superpowers/specs/2026-05-08-txt-layout-safe-translation-design.md`
+- `docs/restart/real-file-test-matrix.md`
+
+## Active Backend / Safety References
+
+- `docs/superpowers/specs/2026-05-08-production-scheduler-design.md`
+- `docs/superpowers/specs/2026-05-08-api-channel-reliability-design.md`
+- `docs/superpowers/specs/2026-05-08-user-activity-security-logging-design.md`
+- `docs/restart/upload-safety-and-retention.md`
+
+## Paid-Beta Draft Docs
+
+- `docs/superpowers/specs/2026-05-09-folioloom-pricing-v0.md` - paid-beta
+  draft only, not an immediate launch plan. Paid beta is blocked until Telegram
+  Stars/XTR invoice flow, persistent ledger, idempotency, refunds,
+  `/paysupport`, reconciliation and support policy are implemented.
+
+## Historical / Superseded Specs
+
+- `docs/superpowers/specs/2026-05-03-deepseek-document-telegram-bot-design.md`
+  - early architecture rationale. Sections describing prototype/in-memory state,
+  broad channel expansion or paid-first roadmap are outdated.
+
+## Historical / Superseded Implementation Plans
+
+These documents are an implementation history archive. Do not treat them as the
+current roadmap unless a current restart doc explicitly links back to a slice.
+
+Implemented or mostly implemented foundation:
+
+- `docs/superpowers/plans/2026-05-03-deepseek-document-telegram-bot.md`
+- `docs/superpowers/plans/2026-05-06-document-structure-optimizer.md`
+- `docs/superpowers/plans/2026-05-06-epub-quality-fixes.md`
+- `docs/superpowers/plans/2026-05-07-automatic-translation-run-logs.md`
+- `docs/superpowers/plans/2026-05-07-format-adapters-docx.md`
+- `docs/superpowers/plans/2026-05-07-format-adapters-epub.md`
+- `docs/superpowers/plans/2026-05-07-format-adapters-txt.md`
+- `docs/superpowers/plans/2026-05-07-persistent-bot-wiring.md`
+- `docs/superpowers/plans/2026-05-07-persistent-document-assembly.md`
+- `docs/superpowers/plans/2026-05-07-persistent-docx-planner.md`
+- `docs/superpowers/plans/2026-05-07-persistent-epub-planner.md`
+- `docs/superpowers/plans/2026-05-07-persistent-stored-unit-execution.md`
+- `docs/superpowers/plans/2026-05-07-translation-policy.md`
+- `docs/superpowers/plans/2026-05-08-api-channel-reliability.md`
+- `docs/superpowers/plans/2026-05-08-document-sandbox-v1.md`
+- `docs/superpowers/plans/2026-05-08-durable-backend-beta.md`
+- `docs/superpowers/plans/2026-05-08-epub-repair-pipeline.md`
+- `docs/superpowers/plans/2026-05-08-epub-translation-parity-hardening.md`
+- `docs/superpowers/plans/2026-05-08-folioloom-admin-console-mvp.md`
+- `docs/superpowers/plans/2026-05-08-my-books-detail-ui.md`
+- `docs/superpowers/plans/2026-05-08-postgres-scheduler-parity.md`
+- `docs/superpowers/plans/2026-05-08-production-scheduler.md`
+- `docs/superpowers/plans/2026-05-08-prompt-injection-defense.md`
+- `docs/superpowers/plans/2026-05-08-russian-quality-v2.md`
+- `docs/superpowers/plans/2026-05-08-txt-layout-safe-translation.md`
+- `docs/superpowers/plans/2026-05-08-ukrainian-translation-profile.md`
+- `docs/superpowers/plans/2026-05-08-user-activity-security-logging.md`
+
+Historical context, not current roadmap:
+
+- `docs/superpowers/plans/2026-05-06-reference-alignment-action-plan.md`
+
+Partially active only through restart gaps:
+
+- `docs/superpowers/plans/2026-05-09-admin-practical-ops-roadmap.md` - Alerts
+  MVP and Backups visibility remain active gaps.
+- `docs/superpowers/plans/2026-05-09-admin-server-diagnostics-fix-plan.md` -
+  keep the scheduler/runtime consistency lesson.
