@@ -1,10 +1,16 @@
 import threading
 import time
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from translator_service.beta_safety import (
+    BETA_SAFETY_ALLOWED,
+    BETA_SAFETY_GLOBAL_DAILY_CAP,
+    BetaSafetyDecision,
+)
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.persistent_jobs import (
@@ -80,6 +86,299 @@ class SchedulerRunnerTest(unittest.TestCase):
                 storage.get_bytes(persisted_job.final_object_key).decode("utf-8"),
                 "[uk] First paragraph",
             )
+
+    def test_run_once_does_not_claim_when_beta_guard_blocks(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=1)
+            guard = RecordingBetaSafetyGuard(allowed=False)
+
+            with self.assertLogs(
+                "translator_service.scheduler_runner",
+                level="WARNING",
+            ):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=translator,
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    beta_safety_guard=guard,
+                )
+
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(guard.usage_calls, [])
+            [unit] = store.list_work_units(job.id)
+            self.assertEqual(unit.status.value, "pending")
+            self.assertIsNotNone(
+                store.claim_next_scheduled_work_unit(
+                    worker_id="worker-b",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(max_active_units_global=1),
+                )
+            )
+
+    def test_run_once_still_assembles_due_jobs_when_beta_guard_blocks(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            due_job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-due",
+                file_id="file-due",
+                source_text="Ready paragraph",
+            )
+            due_claim = store.claim_next_scheduled_work_unit(
+                worker_id="setup",
+                lease_seconds=300,
+                limits=SchedulerLimits(max_active_units_global=1),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=due_claim.work_unit_id,
+                claim_token=due_claim.claim_token,
+                translated_text="[uk] Ready paragraph",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            pending_job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-pending",
+                file_id="file-pending",
+                source_text="Pending paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=1)
+            guard = RecordingBetaSafetyGuard(allowed=False)
+
+            with self.assertLogs(
+                "translator_service.scheduler_runner",
+                level="WARNING",
+            ):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=translator,
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    beta_safety_guard=guard,
+                )
+
+            persisted_due_job = store.get_job(due_job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(
+                persisted_due_job.status,
+                PersistentTranslationJobStatus.READY,
+            )
+            self.assertIsNotNone(persisted_due_job.final_object_key)
+            self.assertEqual(
+                storage.get_bytes(persisted_due_job.final_object_key).decode("utf-8"),
+                "[uk] Ready paragraph",
+            )
+            self.assertEqual(guard.consumed_jobs, [due_job.id])
+            self.assertEqual(guard.released_jobs, [])
+            [pending_unit] = store.list_work_units(pending_job.id)
+            self.assertEqual(pending_unit.status.value, "pending")
+            self.assertIsNotNone(
+                store.claim_next_scheduled_work_unit(
+                    worker_id="worker-b",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(max_active_units_global=1),
+                )
+            )
+
+    def test_run_once_records_usage_after_serial_success(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph",
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                beta_safety_guard=guard,
+                max_parallel_units=1,
+            )
+
+            [unit] = store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(
+                guard.usage_calls,
+                [
+                    UsageCall(
+                        job_id=job.id,
+                        user_id="telegram:42",
+                        work_unit_id=unit.id,
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                    )
+                ],
+            )
+
+    def test_run_once_records_usage_after_parallel_success(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph",
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                beta_safety_guard=guard,
+                max_parallel_units=2,
+            )
+
+            [unit] = store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(
+                guard.usage_calls,
+                [
+                    UsageCall(
+                        job_id=job.id,
+                        user_id="telegram:42",
+                        work_unit_id=unit.id,
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                    )
+                ],
+            )
+
+    def test_assemble_due_jobs_marks_ready_reservation_consumed(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                translated_text="[uk] First paragraph",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=guard,
+            )
+
+            self.assertEqual(assembled, 1)
+            self.assertEqual(guard.consumed_jobs, [job.id])
+            self.assertEqual(guard.released_jobs, [])
+
+    def test_assemble_due_jobs_releases_partial_reservation(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                translated_text="[uk] First paragraph",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="notes.uk.partial.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"[uk] First paragraph",
+            )
+            store.attach_job_output(job.id, partial_object_key=partial.object_key)
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=guard,
+            )
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.PARTIAL,
+            )
+            self.assertEqual(guard.consumed_jobs, [])
+            self.assertEqual(guard.released_jobs, [(job.id, "partial_assembly")])
 
     def test_assemble_due_jobs_preserves_txt_layout_from_original_source(self):
         with TemporaryDirectory() as temp_dir:
@@ -706,6 +1005,63 @@ class BlockingRunnerTranslator:
         with self._lock:
             self.active_calls -= 1
         return f"[{target_language}] {text}"
+
+
+@dataclass(frozen=True)
+class UsageCall:
+    job_id: str
+    user_id: str
+    work_unit_id: str
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class RecordingBetaSafetyGuard:
+    def __init__(self, *, allowed: bool) -> None:
+        self.allowed = allowed
+        self.can_start_calls = 0
+        self.usage_calls: list[UsageCall] = []
+        self.consumed_jobs: list[str] = []
+        self.released_jobs: list[tuple[str, str]] = []
+
+    def can_start_new_work(self) -> BetaSafetyDecision:
+        self.can_start_calls += 1
+        if self.allowed:
+            return BetaSafetyDecision(
+                allowed=True,
+                reason_code=BETA_SAFETY_ALLOWED,
+                safe_message="allowed",
+            )
+        return BetaSafetyDecision(
+            allowed=False,
+            reason_code=BETA_SAFETY_GLOBAL_DAILY_CAP,
+            safe_message="blocked",
+        )
+
+    def record_work_unit_usage(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        work_unit_id: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        self.usage_calls.append(
+            UsageCall(
+                job_id=job_id,
+                user_id=user_id,
+                work_unit_id=work_unit_id,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+        )
+
+    def release_job(self, *, job_id: str, reason: str) -> None:
+        self.released_jobs.append((job_id, reason))
+
+    def mark_job_consumed(self, *, job_id: str) -> None:
+        self.consumed_jobs.append(job_id)
 
 
 def _create_single_unit_txt_job(

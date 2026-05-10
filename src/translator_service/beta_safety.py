@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
 
-
 BETA_SAFETY_ALLOWED = "allowed"
 BETA_SAFETY_KILL_SWITCH = "kill_switch"
 BETA_SAFETY_GLOBAL_DAILY_CAP = "global_daily_cap"
@@ -19,12 +18,18 @@ BETA_SAFETY_RESERVATION_EXISTS = "reservation_exists"
 _SAFE_MESSAGES = {
     BETA_SAFETY_ALLOWED: "The translation can start.",
     BETA_SAFETY_KILL_SWITCH: "Translations are temporarily paused.",
-    BETA_SAFETY_JOB_ESTIMATE_CAP: "This translation cannot start under the current beta limits.",
-    BETA_SAFETY_USER_DAILY_JOB_LIMIT: "You have reached today's beta translation limit.",
+    BETA_SAFETY_JOB_ESTIMATE_CAP: (
+        "This translation cannot start under the current beta limits."
+    ),
+    BETA_SAFETY_USER_DAILY_JOB_LIMIT: (
+        "You have reached today's beta translation limit."
+    ),
     BETA_SAFETY_GLOBAL_DAILY_CAP: "Translations are temporarily limited for today.",
     BETA_SAFETY_GLOBAL_MONTHLY_CAP: "Translations are temporarily limited this month.",
     BETA_SAFETY_USER_DAILY_CAP: "You have reached today's beta translation limit.",
-    BETA_SAFETY_USER_MONTHLY_CAP: "You have reached this month's beta translation limit.",
+    BETA_SAFETY_USER_MONTHLY_CAP: (
+        "You have reached this month's beta translation limit."
+    ),
     BETA_SAFETY_RESERVATION_EXISTS: "This translation is already reserved.",
 }
 
@@ -88,6 +93,9 @@ class BetaSafetyGuard(Protocol):
         ...
 
     def release_job(self, *, job_id: str, reason: str) -> None:
+        ...
+
+    def mark_job_consumed(self, *, job_id: str) -> None:
         ...
 
     def record_work_unit_usage(

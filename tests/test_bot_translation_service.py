@@ -1,24 +1,25 @@
-import unittest
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stdout
 import hashlib
 import io
 import json
-from pathlib import Path
 import re
 import threading
-from tempfile import TemporaryDirectory
 import time
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
+from translator_service.beta_safety import BetaSafetyDecision, JobCostEstimate
 from translator_service.bot_translation_service import (
     BotTranslationService,
-    PendingUpload,
     PendingTranslation,
+    PendingUpload,
     RightsConfirmationRequired,
     UserBookResult,
     estimate_translation_seconds,
 )
-from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.document_sandbox import (
     DocumentSandbox,
     DocumentSandboxError,
@@ -27,8 +28,11 @@ from translator_service.document_sandbox import (
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import extract_text_from_docx, extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
-from translator_service.job_runner import DocumentKind
-from translator_service.job_runner import InMemoryTranslationJobRepository, TranslationJobStatus
+from translator_service.job_runner import (
+    DocumentKind,
+    InMemoryTranslationJobRepository,
+    TranslationJobStatus,
+)
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
@@ -59,7 +63,9 @@ class RecordingTranslator:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, str]] = []
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.requests.append((text, source_language, target_language))
         if "<translation_block" in text:
             blocks = re.findall(
@@ -70,12 +76,68 @@ class RecordingTranslator:
             return "\n".join(
                 ["<translation_batch>"]
                 + [
-                    f'<translation_block id="{index}">[{target_language}] {block}</translation_block>'
+                    (
+                        f'<translation_block id="{index}">'
+                        f"[{target_language}] {block}</translation_block>"
+                    )
                     for index, block in enumerate(blocks)
                 ]
                 + ["</translation_batch>"]
             )
         return f"[{target_language}] {text}"
+
+
+class RecordingBetaSafetyGuard:
+    def __init__(self, *, allowed: bool = True) -> None:
+        self.allowed = allowed
+        self.reservations: list[tuple[str, str, JobCostEstimate]] = []
+        self.releases: list[tuple[str, str]] = []
+        self.consumed: list[str] = []
+        self.usage_events: list[tuple[str, str, str, int, int]] = []
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+    def can_start_new_work(self) -> BetaSafetyDecision:
+        return BetaSafetyDecision(
+            allowed=self.allowed,
+            reason_code="allowed" if self.allowed else "user_daily_cap",
+            safe_message=(
+                "The translation can start."
+                if self.allowed
+                else "You have reached today's beta translation limit."
+            ),
+        )
+
+    def reserve_job(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        estimate: JobCostEstimate,
+    ) -> BetaSafetyDecision:
+        self.reservations.append((job_id, user_id, estimate))
+        return self.can_start_new_work()
+
+    def release_job(self, *, job_id: str, reason: str) -> None:
+        self.releases.append((job_id, reason))
+
+    def mark_job_consumed(self, *, job_id: str) -> None:
+        self.consumed.append(job_id)
+
+    def record_work_unit_usage(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        work_unit_id: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        self.usage_events.append(
+            (job_id, user_id, work_unit_id, prompt_tokens, completion_tokens)
+        )
 
 
 class SecurityEventTranslator(RecordingTranslator):
@@ -103,7 +165,9 @@ class RepeatedSecurityEventTranslator(RecordingTranslator):
         super().__init__()
         self._events: list[dict] = []
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         translated = super().translate(
             text=text,
             source_language=source_language,
@@ -127,7 +191,9 @@ class RepeatedSecurityEventTranslator(RecordingTranslator):
 
 
 class FailingTranslator:
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         raise RuntimeError("network failed")
 
 
@@ -137,7 +203,9 @@ class CancellingTranslator:
         self._user_telegram_id = user_telegram_id
         self.requests: list[str] = []
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.requests.append(text)
         if len(self.requests) == 1:
             self._service.cancel_translation(self._user_telegram_id)
@@ -148,7 +216,9 @@ class BlockingTranslator:
     def __init__(self) -> None:
         self.requests: list[str] = []
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.requests.append(text)
         time.sleep(0.05)
         return f"[{target_language}] {text}"
@@ -162,7 +232,9 @@ class ParallelBlockingTranslator:
         self.active_calls = 0
         self.max_active_calls = 0
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         with self._lock:
             self.requests.append(text)
             self.active_calls += 1
@@ -179,7 +251,9 @@ class MalformedSecondUnitTranslator:
     def __init__(self) -> None:
         self.requests: list[str] = []
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.requests.append(text)
         if len(self.requests) == 2:
             return "Одна строка вместо двух"
@@ -225,7 +299,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         pending = service.prepare_document(
             user_telegram_id=42,
             file_name="notes.txt",
-            content="Первый абзац.\n\nВторой абзац.".encode("utf-8"),
+            content="Первый абзац.\n\nВторой абзац.".encode(),
             source_language="ru",
             target_language="en",
             rights_confirmed=False,
@@ -236,7 +310,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             PendingTranslation(
                 user_telegram_id=42,
                 file_name="notes.txt",
-                content="Первый абзац.\n\nВторой абзац.".encode("utf-8"),
+                content="Первый абзац.\n\nВторой абзац.".encode(),
                 source_language="ru",
                 target_language="en",
                 price_usd=0.10,
@@ -269,11 +343,13 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(pending.estimated_seconds, 20)
 
     def test_stores_selected_interface_language_per_user(self):
-        service = BotTranslationService(
-            job_repository=InMemoryTranslationJobRepository(),
-            pricing_rules=_pricing_rules(),
-            max_upload_mb=50,
-            max_fragment_chars=20,
+        self.assertIsNotNone(
+            BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+            )
         )
 
     def test_prepare_document_uses_configured_document_sandbox(self):
@@ -495,7 +571,9 @@ class BotTranslationServiceTest(unittest.TestCase):
 
             self.assertIsNotNone(upload.source_object_key)
             self.assertEqual(upload.source_object_key, pending.source_object_key)
-            self.assertEqual(storage.get_bytes(upload.source_object_key), upload.content)
+            self.assertEqual(
+                storage.get_bytes(upload.source_object_key), upload.content
+            )
             self.assertEqual(
                 storage.get_metadata(upload.source_object_key).kind,
                 StoredFileKind.ORIGINAL,
@@ -518,7 +596,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "English: The quick brown fox jumps over the lazy dog.\n"
                 "Polski: Zażółć gęślą jaźń.\n"
                 "Nederlands: Ik fiets vandaag naar Zwolle."
-            ).encode("utf-8"),
+            ).encode(),
             source_language="auto",
         )
 
@@ -527,7 +605,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             "Russian (admixtures: English, Polish, Dutch)",
         )
 
-    def test_prepares_estimate_from_pending_upload_after_translation_language_choice(self):
+    def test_prepares_estimate_from_pending_upload_after_translation_language_choice(
+        self,
+    ):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
             pricing_rules=_pricing_rules(),
@@ -697,9 +777,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             events = activity_store.list_events(actor_id="telegram:42")
             event_types = [event.event_type for event in events]
             completed = next(
-                event
-                for event in events
-                if event.event_type == "translation.completed"
+                event for event in events if event.event_type == "translation.completed"
             )
             profile = activity_store.get_user_profile("telegram:42")
 
@@ -811,11 +889,11 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertNotIn("translated_text", fragment)
             self.assertEqual(
                 fragment["source_text_hash"],
-                hashlib.sha256("One.".encode("utf-8")).hexdigest(),
+                hashlib.sha256(b"One.").hexdigest(),
             )
             self.assertEqual(
                 fragment["translated_text_hash"],
-                hashlib.sha256("[uk] One.".encode("utf-8")).hexdigest(),
+                hashlib.sha256(b"[uk] One.").hexdigest(),
             )
             self.assertEqual(fragment["source_text_chars"], 4)
             self.assertEqual(fragment["translated_text_chars"], 9)
@@ -906,7 +984,9 @@ class BotTranslationServiceTest(unittest.TestCase):
                 },
             )
             self.assertIn("## Translation Stack", summary)
-            self.assertIn("Target language profile: `target-profile:ru:russian-v2`", summary)
+            self.assertIn(
+                "Target language profile: `target-profile:ru:russian-v2`", summary
+            )
             self.assertIn("Source-pair profile: `source-pair:en-ru:v1`", summary)
 
     def test_confirmed_translation_run_log_records_security_events(self):
@@ -1108,11 +1188,11 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertNotIn("translated_text", fragment)
             self.assertEqual(
                 fragment["source_text_hash"],
-                hashlib.sha256("Chapter".encode("utf-8")).hexdigest(),
+                hashlib.sha256(b"Chapter").hexdigest(),
             )
             self.assertEqual(
                 fragment["translated_text_hash"],
-                hashlib.sha256("[uk] Chapter".encode("utf-8")).hexdigest(),
+                hashlib.sha256(b"[uk] Chapter").hexdigest(),
             )
             self.assertEqual(fragment["source_text_chars"], 7)
             self.assertEqual(fragment["translated_text_chars"], 12)
@@ -1126,6 +1206,151 @@ class BotTranslationServiceTest(unittest.TestCase):
                     "version": "rights-v1",
                 },
             )
+
+    def test_persistent_confirmation_reserves_beta_safety_before_deferred_queue(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
+            translator = RecordingTranslator()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                defer_persistent_jobs_to_worker=True,
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            persisted = persistent_store.get_job(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(len(guard.reservations), 1)
+            reserved_job_id, reserved_user_id, estimate = guard.reservations[0]
+            self.assertEqual(reserved_job_id, job.id)
+            self.assertEqual(reserved_user_id, persisted.user_id)
+            self.assertEqual(estimate.prompt_tokens, 3)
+            self.assertEqual(estimate.completion_tokens, 3)
+            self.assertEqual(guard.releases, [])
+
+    def test_persistent_confirmation_denied_by_beta_safety_fails_safely(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard(allowed=False)
+            translator = RecordingTranslator()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"Secret source text.",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            persisted = persistent_store.get_job(job.id)
+            self.assertEqual(job.status, TranslationJobStatus.FAILED)
+            self.assertEqual(
+                job.error_message,
+                "You have reached today's beta translation limit.",
+            )
+            self.assertNotIn("Secret source text", job.error_message)
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(
+                persisted.status,
+                PersistentTranslationJobStatus.INTERRUPTED,
+            )
+            self.assertEqual(len(guard.reservations), 1)
+            self.assertEqual(guard.releases, [])
+            self.assertIsNone(service.get_pending(42))
+
+    def test_successful_inline_persistent_confirmation_records_beta_usage(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\n\nTwo.",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            work_unit_ids = {
+                unit.id for unit in persistent_store.list_work_units(job.id)
+            }
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(len(guard.usage_events), 2)
+            self.assertEqual({event[0] for event in guard.usage_events}, {job.id})
+            self.assertEqual(
+                {event[1] for event in guard.usage_events}, {"telegram:42"}
+            )
+            self.assertEqual({event[2] for event in guard.usage_events}, work_unit_ids)
+            self.assertEqual(guard.releases, [])
+            self.assertEqual(guard.consumed, [job.id])
 
     def test_user_book_detail_shows_download_and_resume_state(self):
         with TemporaryDirectory() as temp_dir:
@@ -1245,6 +1470,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 Path(temp_dir) / "jobs.sqlite3"
             )
             self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -1253,6 +1479,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 file_storage=storage,
                 persistent_job_store=persistent_store,
                 use_scheduler_runner=True,
+                beta_safety_guard=guard,
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -1278,6 +1505,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 job.result_content.decode("utf-8"),
                 "# [uk] Chapter\n\nKEY=value\n- [uk] First item\n[uk] Body text.\n",
             )
+            self.assertEqual(guard.consumed, [job.id])
 
     def test_persistent_confirmation_can_defer_work_to_external_worker(self):
         with TemporaryDirectory() as temp_dir:
@@ -1319,10 +1547,15 @@ class BotTranslationServiceTest(unittest.TestCase):
             persisted_job = persistent_store.get_job(job.id)
             work_units = persistent_store.list_work_units(job.id)
             self.assertEqual(job.status, TranslationJobStatus.QUEUED)
-            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.QUEUED)
+            self.assertEqual(
+                persisted_job.status, PersistentTranslationJobStatus.QUEUED
+            )
             self.assertTrue(work_units)
             self.assertTrue(
-                all(unit.status is PersistentWorkUnitStatus.PENDING for unit in work_units)
+                all(
+                    unit.status is PersistentWorkUnitStatus.PENDING
+                    for unit in work_units
+                )
             )
             self.assertEqual(translator.requests, [])
             self.assertFalse(run_log_root.exists())
@@ -1334,6 +1567,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 Path(temp_dir) / "jobs.sqlite3"
             )
             self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -1342,6 +1576,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 file_storage=storage,
                 persistent_job_store=persistent_store,
                 max_parallel_work_units=2,
+                beta_safety_guard=guard,
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -1367,6 +1602,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 job.result_content.decode("utf-8"),
                 "[uk] One.\n\n[uk] Two.",
             )
+            self.assertEqual(guard.consumed, [job.id])
 
     def test_persistent_txt_cancellation_returns_partial_result(self):
         with TemporaryDirectory() as temp_dir:
@@ -1375,6 +1611,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 Path(temp_dir) / "jobs.sqlite3"
             )
             self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -1382,6 +1619,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=5,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                beta_safety_guard=guard,
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -1408,6 +1646,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 persisted_job.status,
                 PersistentTranslationJobStatus.CANCELLED,
             )
+            self.assertEqual(guard.releases, [(job.id, "cancelled")])
             self.assertIsNotNone(persisted_job.partial_object_key)
             self.assertEqual(
                 storage.get_bytes(persisted_job.partial_object_key),
@@ -1535,7 +1774,9 @@ class BotTranslationServiceTest(unittest.TestCase):
                 ],
             )
 
-    def test_persistent_docx_confirmation_fails_closed_when_sandbox_assembly_fails(self):
+    def test_persistent_docx_confirmation_fails_closed_when_sandbox_assembly_fails(
+        self,
+    ):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
             persistent_store = SQLiteTranslationJobStore(
@@ -1633,7 +1874,8 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(job.result_file_name, "contract.uk.docx")
             self.assertEqual(
                 extract_text_from_docx(job.result_content),
-                "[uk] Intro paragraph.\n\n[uk] Source\n\n[uk] Target\n\n[uk] Outro paragraph.",
+                "[uk] Intro paragraph.\n\n[uk] Source\n\n[uk] Target\n\n"
+                "[uk] Outro paragraph.",
             )
             self.assertIsNotNone(persisted_job.final_object_key)
 
@@ -1875,7 +2117,9 @@ class BotTranslationServiceTest(unittest.TestCase):
                 content_type="text/plain; charset=utf-8",
                 content=b"translated",
             )
-            persistent_store.attach_job_output(job.id, final_object_key=stored.object_key)
+            persistent_store.attach_job_output(
+                job.id, final_object_key=stored.object_key
+            )
 
             result = service.get_latest_user_book_result(user_telegram_id=42)
 
@@ -2087,7 +2331,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             self.assertIsNotNone(persistent_store.get_job(job.id))
 
-            self.assertTrue(service.delete_user_book(user_telegram_id=42, job_id=job.id))
+            self.assertTrue(
+                service.delete_user_book(user_telegram_id=42, job_id=job.id)
+            )
 
             self.assertIsNone(persistent_store.get_job(job.id))
             for object_key in (
@@ -2154,7 +2400,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             target_language="uk",
         )
 
-        with self.assertLogs("translator_service.bot_translation_service", level="ERROR") as logs:
+        with self.assertLogs(
+            "translator_service.bot_translation_service", level="ERROR"
+        ) as logs:
             job = service.confirm_pending_translation(
                 user_telegram_id=42,
                 translator=FailingTranslator(),
@@ -2329,7 +2577,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertFalse(
                 service.cancel_user_book(user_telegram_id=100, job_id=job.id)
             )
-            self.assertTrue(service.cancel_user_book(user_telegram_id=42, job_id=job.id))
+            self.assertTrue(
+                service.cancel_user_book(user_telegram_id=42, job_id=job.id)
+            )
             detail = service.get_user_book_detail(user_telegram_id=42, job_id=job.id)
 
             self.assertEqual(detail.status, "cancelled")
@@ -2659,9 +2909,7 @@ class RecordingDocumentSandbox(DocumentSandbox):
         self.assemble_calls.append((document_format, content, translated_units))
         texts = [unit.translated_text for unit in translated_units]
         if document_format is DocumentFormat.DOCX:
-            body = "".join(
-                f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>" for text in texts
-            )
+            body = "".join(f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>" for text in texts)
             return _make_docx(
                 f"""
                 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">

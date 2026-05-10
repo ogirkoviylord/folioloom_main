@@ -907,7 +907,7 @@ Expected: commit succeeds.
 - Modify `src/translator_service/bot_translation_service.py`
 - Modify `tests/test_translation_jobs.py`
 
-- [ ] **Step 1: Add failing tests for rejection and reservation**
+- [x] **Step 1: Add failing tests for rejection and reservation**
 
 Add a fake guard to `tests/test_translation_jobs.py`:
 
@@ -983,7 +983,7 @@ If current test helpers have different names, add equivalent helpers inside the 
 - denied reservation returns a user-safe failed/ignored job;
 - raw source text is not included in `error_message`.
 
-- [ ] **Step 2: Run translation tests and verify failure**
+- [x] **Step 2: Run translation tests and verify failure**
 
 Run:
 
@@ -993,7 +993,7 @@ PYTHONPATH=src python3 -m pytest tests/test_translation_jobs.py -q
 
 Expected: FAIL because `BotTranslationService` does not accept or use `beta_safety_guard`.
 
-- [ ] **Step 3: Add service injection and estimate helper**
+- [x] **Step 3: Add service injection and estimate helper**
 
 Modify `BotTranslationService.__init__`:
 
@@ -1037,7 +1037,7 @@ def _estimate_persistent_plan_cost(
 
 This estimate is intentionally conservative for beta safety. It does not inspect or store raw text.
 
-- [ ] **Step 4: Enforce reservation in persistent path**
+- [x] **Step 4: Enforce reservation in persistent path**
 
 Immediately after persistent `plan.job` is created and before work units are executed/deferred:
 
@@ -1080,7 +1080,7 @@ def _beta_safety_user_error(reason_code: str) -> str:
     return "This translation cannot be started under the current beta safety limits."
 ```
 
-- [ ] **Step 5: Release reservation on cancel before completion**
+- [x] **Step 5: Release reservation on cancel before completion**
 
 In persistent cancel/failure-before-assembly paths, call:
 
@@ -1091,7 +1091,7 @@ if self._beta_safety_guard is not None:
 
 Use reasons `cancelled`, `failed_before_completion`, `security_threshold`.
 
-- [ ] **Step 6: Run translation tests**
+- [x] **Step 6: Run translation tests**
 
 Run:
 
@@ -1101,7 +1101,7 @@ PYTHONPATH=src python3 -m pytest tests/test_translation_jobs.py tests/test_job_r
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit bot enqueue guard**
+- [x] **Step 7: Commit bot enqueue guard**
 
 Run:
 
@@ -1111,6 +1111,16 @@ git commit -m "feat: reserve beta budget before persistent enqueue"
 ```
 
 Expected: commit succeeds.
+
+- [x] **Review fix: Consume successful READY reservations**
+
+Expose `mark_job_consumed` through the configured guard and mark reservations consumed
+after READY inline, parallel, and scheduler-backed persistent jobs.
+
+- [x] **Review fix: Do not restore pending after beta denial**
+
+Reservation-denied persistent jobs return FAILED with a safe message and do not re-add
+the pending translation.
 
 ---
 
@@ -1123,7 +1133,7 @@ Expected: commit succeeds.
 - Modify `tests/test_scheduler_runner.py`
 - Modify `tests/test_persistent_jobs.py`
 
-- [ ] **Step 1: Add failing scheduler runner tests**
+- [x] **Step 1: Add failing scheduler runner tests**
 
 Add to `tests/test_scheduler_runner.py`:
 
@@ -1215,7 +1225,7 @@ def test_scheduler_records_usage_after_successful_claim_completion():
 
 If existing fixture names differ, implement local fixtures in the test module using the existing in-memory SQLite store and local object storage helpers.
 
-- [ ] **Step 2: Run scheduler runner tests and verify failure**
+- [x] **Step 2: Run scheduler runner tests and verify failure**
 
 Run:
 
@@ -1225,7 +1235,7 @@ PYTHONPATH=src python3 -m pytest tests/test_scheduler_runner.py -q
 
 Expected: FAIL because `run_scheduler_once` has no `beta_safety_guard`.
 
-- [ ] **Step 3: Add guard to scheduler runner**
+- [x] **Step 3: Add guard to scheduler runner**
 
 Modify `run_scheduler_once(..., beta_safety_guard: BetaSafetyGuard | None = None)`.
 
@@ -1264,7 +1274,7 @@ if beta_safety_guard is not None:
 
 Apply the same usage callback to serial scheduled path by adding an optional callback parameter to `run_next_scheduled_stored_text_work_unit` or by wrapping completion in scheduler runner where possible.
 
-- [ ] **Step 4: Add direct worker hook**
+- [x] **Step 4: Add direct worker hook**
 
 Modify direct persistent worker functions in `src/translator_service/worker.py` with optional:
 
@@ -1274,7 +1284,7 @@ usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None
 
 Invoke it only after successful, non-stale completion. This keeps Telegram inline persistent execution and scheduler execution consistent.
 
-- [ ] **Step 5: Run worker/scheduler tests**
+- [x] **Step 5: Run worker/scheduler tests**
 
 Run:
 
@@ -1284,7 +1294,7 @@ PYTHONPATH=src python3 -m pytest tests/test_scheduler_runner.py tests/test_worke
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit accounting hooks**
+- [x] **Step 6: Commit accounting hooks**
 
 Run:
 
@@ -1292,6 +1302,21 @@ Run:
 git add src/translator_service/worker.py src/translator_service/scheduler_runner.py tests/test_scheduler_runner.py tests/test_persistent_jobs.py
 git commit -m "feat: account beta usage from completed work units"
 ```
+
+- [x] **Review fix: Wire beta safety guard into worker scheduler loop**
+
+`worker.main` builds a configured beta safety guard, passes it to `run_scheduler_once`,
+and closes it in the worker shutdown path.
+
+- [x] **Review fix: Record usage before progress callback failures**
+
+Parallel persistent execution records completed work-unit usage immediately after durable
+completion, before progress callbacks can raise.
+
+- [x] **Review fix: Consume/release deferred worker assemblies**
+
+Scheduler assembly now consumes READY reservations and releases partial assemblies,
+including due assembly work reached while beta safety blocks new claims.
 
 Expected: commit succeeds.
 

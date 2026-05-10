@@ -278,12 +278,15 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
     def test_translation_service_uses_postgres_store_for_postgres_backend(self):
         fake_store = _FakePostgresStore()
 
-        with patch(
-            "translator_service.postgres_scheduler.PostgresSchedulerStore",
-            return_value=fake_store,
-        ), patch(
-            "translator_service.postgres_scheduler."
-            "initialize_postgres_scheduler_schema"
+        with (
+            patch(
+                "translator_service.postgres_scheduler.PostgresSchedulerStore",
+                return_value=fake_store,
+            ),
+            patch(
+                "translator_service.postgres_scheduler."
+                "initialize_postgres_scheduler_schema"
+            ),
         ):
             service = build_translation_service(
                 BotRuntimeConfig(
@@ -557,6 +560,33 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("document.estimated", [event.event_type for event in events])
 
+    def test_build_translation_service_wires_and_owns_beta_safety_guard(self):
+        class FakeBetaSafetyGuard:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        with TemporaryDirectory() as temp_dir:
+            guard = FakeBetaSafetyGuard()
+            with patch(
+                "translator_service.bot.runtime.build_beta_safety_guard",
+                return_value=guard,
+            ):
+                service = build_translation_service(
+                    BotRuntimeConfig(
+                        object_storage_root=str(Path(temp_dir) / "objects"),
+                        persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                        user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
+                        admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                    )
+                )
+
+            self.assertIs(service._beta_safety_guard, guard)
+            service.close()
+            self.assertTrue(guard.closed)
+
     def test_build_beta_safety_guard_uses_admin_db_path_and_live_settings(self):
         with TemporaryDirectory() as temp_dir:
             admin_db_path = Path(temp_dir) / "admin.sqlite3"
@@ -586,6 +616,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     object_storage_root=str(Path(temp_dir) / "objects"),
                     persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
                     user_settings_db_path=str(Path(temp_dir) / "settings.sqlite3"),
+                    admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
                     translation_run_log_root=str(Path(temp_dir) / "translation-runs"),
                     max_fragment_chars=5,
                 )
@@ -919,13 +950,16 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                         secret_store=secrets,
                     )
 
-            with patch.dict(
-                "os.environ",
-                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
-                clear=False,
-            ), patch(
-                "translator_service.bot.runtime.DeepSeekClient",
-                _RuntimeKeyEchoDeepSeekClient,
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ),
             ):
                 translator = build_deepseek_translator(settings)
                 snapshot = translator.snapshot()
@@ -978,13 +1012,16 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                         max_parallel_requests=2,
                     )
 
-            with patch.dict(
-                "os.environ",
-                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
-                clear=False,
-            ), patch(
-                "translator_service.bot.runtime.DeepSeekClient",
-                _RuntimeKeyEchoDeepSeekClient,
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ),
             ):
                 translator = build_deepseek_translator(settings)
                 translator.snapshot()
@@ -1018,13 +1055,16 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                         max_parallel_requests=2,
                     )
 
-            with patch.dict(
-                "os.environ",
-                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
-                clear=False,
-            ), patch(
-                "translator_service.bot.runtime.DeepSeekClient",
-                _RuntimeKeyEchoDeepSeekClient,
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ),
             ):
                 translator = build_deepseek_translator(settings)
                 slots = translator.available_parallel_slots()

@@ -496,6 +496,31 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         self.assertEqual(reservation.status, RESERVATION_RELEASED)
         self.assertEqual(reservation.reason, "cancelled")
 
+    def test_configured_guard_delegates_mark_consumed_to_store(self):
+        now = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+        guard = ConfiguredBetaSafetyGuard(
+            store=self.store,
+            limits_loader=lambda: BetaSafetyLimits(),
+            rates_loader=lambda: BetaSafetyRates(),
+            now_provider=lambda: now,
+        )
+        self.addCleanup(guard.close)
+        guard.reserve_job(
+            job_id="job-a",
+            user_id="user-1",
+            estimate=JobCostEstimate(
+                prompt_tokens=1000,
+                completion_tokens=1000,
+                estimated_cost_usd=0.01,
+            ),
+        )
+
+        guard.mark_job_consumed(job_id="job-a")
+
+        reservation = self.store.get_reservation("job-a")
+        self.assertEqual(reservation.status, RESERVATION_CONSUMED)
+        self.assertIsNotNone(reservation.consumed_at)
+
     def _reserve(
         self,
         job_id: str,
