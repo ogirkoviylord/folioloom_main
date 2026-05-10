@@ -1,10 +1,10 @@
-from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
 import json
 import logging
 import re
 import time
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from typing import Protocol
 
 from translator_service.file_storage import (
@@ -18,19 +18,24 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
+from translator_service.protected_text import (
+    ProtectedText,
+    protect_text,
+    restore_protected_text,
+)
+from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.scheduler import (
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
 )
-from translator_service.protected_text import ProtectedText, protect_text, restore_protected_text
-from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.translation_context import (
     TranslationContextMemory,
-    translation_context_from_payload,
     translate_with_context,
+    translation_context_from_payload,
     update_translation_context_memory,
 )
+from translator_service.translation_postprocess import clean_inline_formatting_artifacts
 from translator_service.translation_runner import (
     _clean_translated_text,
     _format_translation_batch,
@@ -42,8 +47,6 @@ from translator_service.translation_runner import (
     _source_language_hints,
     _target_language_uses_cjk,
 )
-from translator_service.translation_postprocess import clean_inline_formatting_artifacts
-
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,7 @@ def run_next_persistent_work_unit(
     source_loader: Callable[[PersistentWorkUnit], str],
     translator: PersistentWorkUnitTranslator,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
 ) -> PersistentWorkUnit | None:
     work_unit = store.claim_next_work_unit(job_id, worker_id=worker_id)
     if work_unit is None:
@@ -148,7 +152,7 @@ def run_next_persistent_work_unit(
             raise
 
     try:
-        return store.complete_work_unit(
+        completed = store.complete_work_unit(
             work_unit.id,
             translated_text=translation_result.translated_text,
             prompt_tokens=translation_result.usage.prompt_tokens,
@@ -156,6 +160,10 @@ def run_next_persistent_work_unit(
             cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
             cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
         )
+        if _is_successful_completed_work_unit(completed):
+            if usage_completed_callback is not None:
+                usage_completed_callback(completed)
+        return completed
     except ValueError as error:
         if _is_stale_work_unit_claim(error):
             logger.warning(
@@ -177,6 +185,7 @@ def run_stored_text_job_until_idle(
     translator: PersistentWorkUnitTranslator,
     progress_callback: Callable[[PersistentJobExecutionProgress], None] | None = None,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     total_units = len(store.list_work_units(job_id))
@@ -190,6 +199,7 @@ def run_stored_text_job_until_idle(
             worker_id=worker_id,
             translator=translator,
             work_unit_started_callback=work_unit_started_callback,
+            usage_completed_callback=usage_completed_callback,
             encoding=encoding,
         )
         if completed is None:
@@ -226,6 +236,7 @@ def run_stored_text_job_parallel_until_idle(
     max_parallel_units: int,
     progress_callback: Callable[[PersistentJobExecutionProgress], None] | None = None,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
@@ -238,12 +249,16 @@ def run_stored_text_job_parallel_until_idle(
             translator=translator,
             progress_callback=progress_callback,
             work_unit_started_callback=work_unit_started_callback,
+            usage_completed_callback=usage_completed_callback,
             encoding=encoding,
         )
 
     total_units = len(store.list_work_units(job_id))
     failed_work_unit_id: str | None = None
-    active: dict[Future[_WorkUnitTranslationResult], tuple[PersistentWorkUnit, float]] = {}
+    active: dict[
+        Future[_WorkUnitTranslationResult],
+        tuple[PersistentWorkUnit, float],
+    ] = {}
     worker_sequence = 0
     job_context = _job_translation_context(store, job_id)
 
@@ -334,6 +349,9 @@ def run_stored_text_job_parallel_until_idle(
                         )
                         continue
                     raise
+                if _is_successful_completed_work_unit(completed):
+                    if usage_completed_callback is not None:
+                        usage_completed_callback(completed)
                 if progress_callback is not None:
                     progress_callback(
                         PersistentJobExecutionProgress(
@@ -363,6 +381,7 @@ def run_next_stored_text_work_unit(
     worker_id: str,
     translator: PersistentWorkUnitTranslator,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     return run_next_persistent_work_unit(
@@ -376,6 +395,7 @@ def run_next_stored_text_work_unit(
         ),
         translator=translator,
         work_unit_started_callback=work_unit_started_callback,
+        usage_completed_callback=usage_completed_callback,
     )
 
 
@@ -390,6 +410,7 @@ def run_next_scheduled_stored_text_work_unit(
     retry_base_delay_seconds: int = 30,
     retry_max_delay_seconds: int = 600,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     claim = store.claim_next_scheduled_work_unit(
@@ -455,7 +476,7 @@ def run_next_scheduled_stored_text_work_unit(
         )
 
     try:
-        return store.complete_claimed_work_unit(
+        completed = store.complete_claimed_work_unit(
             work_unit_id=claim.work_unit_id,
             claim_token=claim.claim_token,
             translated_text=translation_result.translated_text,
@@ -464,6 +485,10 @@ def run_next_scheduled_stored_text_work_unit(
             cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
             cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
         )
+        if _is_successful_completed_work_unit(completed):
+            if usage_completed_callback is not None:
+                usage_completed_callback(completed)
+        return completed
     except ValueError as error:
         if _is_stale_work_unit_claim(error):
             logger.warning(
@@ -532,6 +557,13 @@ def _fail_claimed_work_unit_or_ignore_stale(
             )
             return None
         raise
+
+
+def _is_successful_completed_work_unit(work_unit: PersistentWorkUnit) -> bool:
+    return work_unit.status in {
+        PersistentWorkUnitStatus.TRANSLATED,
+        PersistentWorkUnitStatus.CACHED,
+    }
 
 
 def _translate_stored_text_work_unit(
@@ -1155,7 +1187,11 @@ def scheduler_limits_from_settings(
 
 
 def main() -> None:
-    from translator_service.bot.runtime import build_deepseek_translator
+    from translator_service.bot.runtime import (
+        bot_runtime_config_from_settings,
+        build_beta_safety_guard,
+        build_deepseek_translator,
+    )
     from translator_service.config import Settings
     from translator_service.file_storage import LocalObjectStorage
     from translator_service.scheduler_runner import run_scheduler_once
@@ -1169,7 +1205,11 @@ def main() -> None:
         effective_global_capacity=worker_parallel_units,
     )
     store = open_scheduler_store(settings)
+    beta_safety_guard = None
     try:
+        beta_safety_guard = build_beta_safety_guard(
+            bot_runtime_config_from_settings(settings)
+        )
         while True:
             run_scheduler_once(
                 store=store,
@@ -1183,9 +1223,12 @@ def main() -> None:
                     settings.scheduler_retry_base_delay_seconds
                 ),
                 retry_max_delay_seconds=settings.scheduler_retry_max_delay_seconds,
+                beta_safety_guard=beta_safety_guard,
             )
             time.sleep(settings.scheduler_poll_seconds)
     finally:
+        if beta_safety_guard is not None:
+            beta_safety_guard.close()
         store.close()
 
 

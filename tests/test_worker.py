@@ -1,21 +1,22 @@
-from pathlib import Path
 import re
 import threading
-from tempfile import TemporaryDirectory
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
-from translator_service.persistent_planner import (
-    create_persistent_docx_job_plan,
-    create_persistent_epub_job_plan,
-)
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
     WorkUnitPlan,
+)
+from translator_service.persistent_planner import (
+    create_persistent_docx_job_plan,
+    create_persistent_epub_job_plan,
 )
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.worker import (
@@ -33,6 +34,60 @@ from translator_service.worker import (
 
 
 class WorkerTest(unittest.TestCase):
+    def test_worker_main_passes_beta_safety_guard_to_scheduler_and_closes_it(self):
+        from translator_service import worker
+        from translator_service.scheduler import SchedulerLimits
+
+        settings = SimpleNamespace(
+            object_storage_root="objects",
+            scheduler_lease_seconds=300,
+            scheduler_retry_base_delay_seconds=30,
+            scheduler_retry_max_delay_seconds=600,
+            scheduler_poll_seconds=0,
+        )
+        store = _FakePostgresStore()
+        guard = SimpleNamespace(closed=False)
+        guard.close = lambda: setattr(guard, "closed", True)
+        config = object()
+        scheduler_calls = []
+
+        def run_once(**kwargs):
+            scheduler_calls.append(kwargs)
+
+        with patch("translator_service.config.Settings", return_value=settings), patch(
+            "translator_service.bot.runtime.build_deepseek_translator",
+            return_value=object(),
+        ), patch(
+            "translator_service.bot.runtime.bot_runtime_config_from_settings",
+            return_value=config,
+        ) as config_from_settings, patch(
+            "translator_service.bot.runtime.build_beta_safety_guard",
+            return_value=guard,
+        ) as build_guard, patch(
+            "translator_service.worker.effective_worker_parallel_units",
+            return_value=1,
+        ), patch(
+            "translator_service.worker.scheduler_limits_from_settings",
+            return_value=SchedulerLimits(),
+        ), patch(
+            "translator_service.worker.open_scheduler_store",
+            return_value=store,
+        ), patch(
+            "translator_service.scheduler_runner.run_scheduler_once",
+            side_effect=run_once,
+        ), patch(
+            "translator_service.worker.time.sleep",
+            side_effect=KeyboardInterrupt,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                worker.main()
+
+        config_from_settings.assert_called_once_with(settings)
+        build_guard.assert_called_once_with(config)
+        self.assertEqual(scheduler_calls[0]["beta_safety_guard"], guard)
+        self.assertTrue(guard.closed)
+        self.assertTrue(store.closed)
+
     def test_open_scheduler_store_returns_sqlite_store_for_sqlite_backend(self):
         from translator_service.config import Settings
         from translator_service.worker import open_scheduler_store
@@ -199,6 +254,7 @@ class WorkerTest(unittest.TestCase):
         store = self._store()
         job = _job_with_units(store)
         translator = RecordingTranslator()
+        completed_callbacks = []
 
         completed = run_next_persistent_work_unit(
             store=store,
@@ -206,6 +262,7 @@ class WorkerTest(unittest.TestCase):
             worker_id="worker-a",
             source_loader=lambda unit: _source_text_for(unit),
             translator=translator,
+            usage_completed_callback=completed_callbacks.append,
         )
 
         self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
@@ -223,6 +280,7 @@ class WorkerTest(unittest.TestCase):
             translator.calls,
             [("First paragraph", "en", "uk")],
         )
+        self.assertEqual(completed_callbacks, [completed])
 
     def test_returns_none_when_no_pending_work_units_exist(self):
         store = self._store()
@@ -252,6 +310,9 @@ class WorkerTest(unittest.TestCase):
             worker_id="worker-a",
             source_loader=lambda unit: _source_text_for(unit),
             translator=RecordingTranslator(),
+            usage_completed_callback=lambda unit: self.fail(
+                f"unexpected usage callback for {unit.id}"
+            ),
         )
 
         self.assertIsNone(result)
@@ -263,6 +324,7 @@ class WorkerTest(unittest.TestCase):
     def test_marks_work_unit_failed_and_job_interrupted_when_translation_fails(self):
         store = self._store()
         job = _job_with_units(store)
+        completed_callbacks = []
 
         with self.assertLogs("translator_service.worker", level="ERROR"):
             failed = run_next_persistent_work_unit(
@@ -271,6 +333,7 @@ class WorkerTest(unittest.TestCase):
                 worker_id="worker-a",
                 source_loader=lambda unit: _source_text_for(unit),
                 translator=FailingTranslator(),
+                usage_completed_callback=completed_callbacks.append,
             )
 
         self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED)
@@ -280,6 +343,7 @@ class WorkerTest(unittest.TestCase):
             store.get_job(job.id).status,
             PersistentTranslationJobStatus.INTERRUPTED,
         )
+        self.assertEqual(completed_callbacks, [])
 
     def test_stored_worker_loads_source_text_from_object_storage(self):
         with TemporaryDirectory() as temp_dir:
@@ -363,7 +427,7 @@ class WorkerTest(unittest.TestCase):
                 content=b"First paragraph",
             )
             store = self._store()
-            job = _job_with_stored_unit(store, source.object_key)
+            _job_with_stored_unit(store, source.object_key)
             translator = RecordingTranslator()
 
             completed = run_next_scheduled_stored_text_work_unit(
@@ -404,6 +468,9 @@ class WorkerTest(unittest.TestCase):
                     lease_seconds=300,
                     limits=SchedulerLimits(),
                     translator=translator,
+                    usage_completed_callback=lambda unit: self.fail(
+                        f"unexpected usage callback for {unit.id}"
+                    ),
                 )
 
             self.assertIsNone(completed)
@@ -567,6 +634,7 @@ class WorkerTest(unittest.TestCase):
             translator = RecordingTranslator()
             progress_events = []
             lifecycle_events = []
+            completed_callbacks = []
 
             summary = run_stored_text_job_until_idle(
                 store=store,
@@ -578,6 +646,7 @@ class WorkerTest(unittest.TestCase):
                     ("started", unit.sequence)
                 ),
                 progress_callback=progress_events.append,
+                usage_completed_callback=completed_callbacks.append,
             )
 
             persisted_units = store.list_work_units(plan.job.id)
@@ -589,6 +658,10 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(
                 lifecycle_events,
                 [("started", 1), ("started", 2), ("started", 3)],
+            )
+            self.assertEqual(
+                [unit.sequence for unit in completed_callbacks],
+                [1, 2, 3],
             )
             self.assertEqual(
                 [unit.translated_text for unit in persisted_units],
@@ -612,9 +685,11 @@ class WorkerTest(unittest.TestCase):
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
                 content=(
-                    "English + Dutch: The afspraak is scheduled for dinsdag om kwart over drie.\n\n"
-                    "CJK: The label 東京-大阪 should remain readable; Chinese example: 请保留变量 {{变量}}."
-                ).encode("utf-8"),
+                    "English + Dutch: The afspraak is scheduled for dinsdag "
+                    "om kwart over drie.\n\n"
+                    "CJK: The label 東京-大阪 should remain readable; "
+                    "Chinese example: 请保留变量 {{变量}}."
+                ).encode(),
             )
             store = self._store()
             job = _job_with_stored_multi_block_unit(
@@ -636,8 +711,10 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
             self.assertEqual(
                 completed.translated_text,
-                "Английский + нидерландский: Встреча назначена на вторник в четверть четвертого.\n\n"
-                "CJK: Метка 東京-大阪 должна оставаться читаемой; пример на китайском: сохраните переменную {{变量}}.",
+                "Английский + нидерландский: Встреча назначена на вторник "
+                "в четверть четвертого.\n\n"
+                "CJK: Метка 東京-大阪 должна оставаться читаемой; "
+                "пример на китайском: сохраните переменную {{变量}}.",
             )
             self.assertEqual(
                 [call[1] for call in translator.calls],
@@ -652,9 +729,10 @@ class WorkerTest(unittest.TestCase):
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
                 content=(
-                    "English + Dutch: The afspraak is scheduled for dinsdag om kwart over drie.\n\n"
-                    "Plain English sentence."
-                ).encode("utf-8"),
+                    b"English + Dutch: The afspraak is scheduled for dinsdag "
+                    b"om kwart over drie.\n\n"
+                    b"Plain English sentence."
+                ),
             )
             store = self._store()
             job = _job_with_stored_multi_block_unit(
@@ -676,7 +754,8 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
             self.assertEqual(
                 completed.translated_text,
-                "Английский + нидерландский: встреча назначена на вторник в четверть четвертого.\n\n"
+                "Английский + нидерландский: встреча назначена на вторник "
+                "в четверть четвертого.\n\n"
                 "Обычное английское предложение.",
             )
             self.assertEqual(
@@ -694,7 +773,7 @@ class WorkerTest(unittest.TestCase):
                 content=(
                     "English + Ukrainian: Please translate this sentence, "
                     "але не ламай український текст у середині."
-                ).encode("utf-8"),
+                ).encode(),
             )
             store = self._store()
             job = _job_with_stored_unit(
@@ -734,7 +813,7 @@ class WorkerTest(unittest.TestCase):
                 content=(
                     "עברית / العربية mixed with English 12345 and token {{RTL_TOKEN}}. "
                     "Direction and glyphs should survive."
-                ).encode("utf-8"),
+                ).encode(),
             )
             store = self._store()
             job = _job_with_stored_unit(
@@ -770,8 +849,8 @@ class WorkerTest(unittest.TestCase):
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
                 content=(
-                    "This paragraph has subscript H2O and superscript x2."
-                ).encode("utf-8"),
+                    b"This paragraph has subscript H2O and superscript x2."
+                ),
             )
             store = self._store()
             job = _job_with_stored_unit(
@@ -945,6 +1024,7 @@ class WorkerTest(unittest.TestCase):
             )
             translator = BlockingParallelTranslator(expected_parallel_calls=2)
             started_sequences: list[int] = []
+            completed_callbacks = []
 
             summary = run_stored_text_job_parallel_until_idle(
                 store=store,
@@ -956,6 +1036,7 @@ class WorkerTest(unittest.TestCase):
                 work_unit_started_callback=lambda unit: started_sequences.append(
                     unit.sequence
                 ),
+                usage_completed_callback=completed_callbacks.append,
             )
 
             persisted_units = store.list_work_units(job.id)
@@ -964,8 +1045,59 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(translator.max_active_calls, 2)
             self.assertEqual(sorted(started_sequences), [1, 2])
             self.assertEqual(
+                sorted(unit.sequence for unit in completed_callbacks),
+                [1, 2],
+            )
+            self.assertEqual(
                 [unit.translated_text for unit in persisted_units],
                 ["[uk] First paragraph", "[uk] Second paragraph"],
+            )
+
+    def test_parallel_usage_callback_runs_before_progress_callback_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            first_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            second_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second paragraph",
+            )
+            store = self._store()
+            job = _job_with_two_stored_units(
+                store,
+                first_source.object_key,
+                second_source.object_key,
+            )
+            translator = BlockingParallelTranslator(expected_parallel_calls=2)
+            usage_callbacks = []
+
+            def fail_progress(_progress):
+                raise RuntimeError("progress sink failed")
+
+            with self.assertRaisesRegex(RuntimeError, "progress sink failed"):
+                run_stored_text_job_parallel_until_idle(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    worker_id="worker",
+                    translator=translator,
+                    max_parallel_units=2,
+                    progress_callback=fail_progress,
+                    usage_completed_callback=usage_callbacks.append,
+                )
+
+            self.assertGreaterEqual(len(usage_callbacks), 1)
+            self.assertTrue(
+                all(
+                    unit.status is PersistentWorkUnitStatus.TRANSLATED
+                    for unit in usage_callbacks
+                )
             )
 
     def test_stored_job_executor_stops_on_failed_work_unit(self):
@@ -1033,7 +1165,8 @@ class RecordingTranslator:
             return "\n".join(
                 ["<translation_batch>"]
                 + [
-                    f'<translation_block id="{index}">[{target_language}] {block}</translation_block>'
+                    f'<translation_block id="{index}">[{target_language}] '
+                    f"{block}</translation_block>"
                     for index, block in enumerate(blocks)
                 ]
                 + ["</translation_batch>"]
@@ -1141,7 +1274,10 @@ class SecondaryLanguageRetryTranslator:
         prefix_marker = markers[0] if markers else "CJK:"
         variable_marker = markers[-1] if markers else "{{变量}}"
         if source_language == "auto" and "afspraak" in text:
-            return "Английский + нидерландский: Встреча назначена на вторник в четверть четвертого."
+            return (
+                "Английский + нидерландский: Встреча назначена на вторник "
+                "в четверть четвертого."
+            )
         if source_language == "auto" and "请保留变量" in text:
             return (
                 f"{prefix_marker} Метка 東京-大阪 должна оставаться читаемой; "
@@ -1149,8 +1285,11 @@ class SecondaryLanguageRetryTranslator:
             )
         return (
             "<translation_batch>"
-            '<translation_block id="0">Английский + нидерландский: Встреча назначена на dinsdag om kwart over drie.</translation_block>'
-            f'<translation_block id="1">{prefix_marker} Метка 東京-大阪 должна оставаться читаемой; '
+            '<translation_block id="0">Английский + нидерландский: '
+            "Встреча назначена на dinsdag om kwart over drie."
+            "</translation_block>"
+            f'<translation_block id="1">{prefix_marker} Метка 東京-大阪 '
+            "должна оставаться читаемой; "
             f"пример на китайском: 请保留变量 {variable_marker}.</translation_block>"
             "</translation_batch>"
         )
@@ -1171,11 +1310,16 @@ class MixedLanguageLabelRetryTranslator:
         self.calls.append((text, source_language, target_language))
         self.last_usage = ProviderUsage(prompt_tokens=10, completion_tokens=5)
         if source_language == "auto":
-            return "Английский + нидерландский: встреча назначена на вторник в четверть четвертого."
+            return (
+                "Английский + нидерландский: встреча назначена на вторник "
+                "в четверть четвертого."
+            )
         return (
             "<translation_batch>"
-            '<translation_block id="0">Встреча назначена на вторник в пятнадцать пятнадцать.</translation_block>'
-            '<translation_block id="1">Обычное английское предложение.</translation_block>'
+            '<translation_block id="0">Встреча назначена на вторник '
+            "в пятнадцать пятнадцать.</translation_block>"
+            '<translation_block id="1">Обычное английское предложение.'
+            "</translation_block>"
             "</translation_batch>"
         )
 
@@ -1446,7 +1590,10 @@ def _job_with_stored_multi_block_unit(
         [
             WorkUnitPlan(
                 sequence=1,
-                source_block_ids=("docx:word/document.xml:1", "docx:word/document.xml:2"),
+                source_block_ids=(
+                    "docx:word/document.xml:1",
+                    "docx:word/document.xml:2",
+                ),
                 source_text_hash="hash-1",
                 prompt_tier="plain",
                 source_language=source_language,

@@ -582,6 +582,12 @@ class ConfiguredBetaSafetyGuard:
             now=self._now(),
         )
 
+    def mark_job_consumed(self, *, job_id: str) -> None:
+        self._store.mark_job_consumed(
+            job_id=job_id,
+            now=self._now(),
+        )
+
     def record_work_unit_usage(
         self,
         *,

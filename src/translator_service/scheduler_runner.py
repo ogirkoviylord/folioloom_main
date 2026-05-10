@@ -3,6 +3,7 @@ from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 
+from translator_service.beta_safety import BetaSafetyGuard
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import DocumentKind
 from translator_service.persistent_assembly import (
@@ -53,7 +54,31 @@ def run_scheduler_once(
     retry_max_delay_seconds: int = 600,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     max_parallel_units: int = 1,
+    beta_safety_guard: BetaSafetyGuard | None = None,
 ) -> SchedulerRunOnceSummary:
+    if beta_safety_guard is not None:
+        decision = beta_safety_guard.can_start_new_work()
+        if not decision.allowed:
+            logger.warning(
+                "Scheduler beta safety guard blocked new work: reason_code=%s",
+                decision.reason_code,
+            )
+            assembled_jobs = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=beta_safety_guard,
+            )
+            return SchedulerRunOnceSummary(
+                completed_units=0,
+                failed_units=0,
+                assembled_jobs=assembled_jobs,
+            )
+
+    usage_completed_callback = _usage_completed_callback(
+        store=store,
+        beta_safety_guard=beta_safety_guard,
+    )
+
     if max_parallel_units <= 1:
         completed_units = 0
         failed_units = 0
@@ -70,6 +95,7 @@ def run_scheduler_once(
                 retry_base_delay_seconds=retry_base_delay_seconds,
                 retry_max_delay_seconds=retry_max_delay_seconds,
                 work_unit_started_callback=work_unit_started_callback,
+                usage_completed_callback=usage_completed_callback,
             )
         if completed is not None:
             if completed.status.value in {"translated", "cached"}:
@@ -88,9 +114,14 @@ def run_scheduler_once(
             retry_max_delay_seconds=retry_max_delay_seconds,
             work_unit_started_callback=work_unit_started_callback,
             max_parallel_units=max_parallel_units,
+            usage_completed_callback=usage_completed_callback,
         )
 
-    assembled_jobs = assemble_due_jobs(store=store, storage=storage)
+    assembled_jobs = assemble_due_jobs(
+        store=store,
+        storage=storage,
+        beta_safety_guard=beta_safety_guard,
+    )
     return SchedulerRunOnceSummary(
         completed_units=completed_units,
         failed_units=failed_units,
@@ -110,6 +141,7 @@ def _run_scheduled_parallel_once(
     retry_max_delay_seconds: int,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None,
     max_parallel_units: int,
+    usage_completed_callback: Callable[[PersistentWorkUnit], None] | None,
 ) -> tuple[int, int]:
     completed_units = 0
     failed_units = 0
@@ -232,10 +264,35 @@ def _run_scheduled_parallel_once(
                     raise
                 if completed.status.value in {"translated", "cached"}:
                     completed_units += 1
+                    if usage_completed_callback is not None:
+                        usage_completed_callback(completed)
                 elif completed.status.value.startswith("failed"):
                     failed_units += 1
 
     return completed_units, failed_units
+
+
+def _usage_completed_callback(
+    *,
+    store: SQLiteTranslationJobStore,
+    beta_safety_guard: BetaSafetyGuard | None,
+) -> Callable[[PersistentWorkUnit], None] | None:
+    if beta_safety_guard is None:
+        return None
+
+    def record_usage(work_unit: PersistentWorkUnit) -> None:
+        job = store.get_job(work_unit.job_id)
+        if job is None:
+            raise ValueError(f"Work unit job does not exist: {work_unit.job_id}")
+        beta_safety_guard.record_work_unit_usage(
+            job_id=work_unit.job_id,
+            user_id=job.user_id,
+            work_unit_id=work_unit.id,
+            prompt_tokens=work_unit.prompt_tokens,
+            completion_tokens=work_unit.completion_tokens,
+        )
+
+    return record_usage
 
 
 def _translator_available_parallel_slots(
@@ -257,15 +314,26 @@ def assemble_due_jobs(
     *,
     store: SQLiteTranslationJobStore,
     storage: LocalObjectStorage,
+    beta_safety_guard: BetaSafetyGuard | None = None,
 ) -> int:
     assembled = 0
     for job in store.list_jobs_by_status(PersistentTranslationJobStatus.ASSEMBLING):
         if job.final_object_key is not None:
             store.mark_job_assembled(job.id, partial=False)
+            _record_assembled_beta_safety_terminal(
+                beta_safety_guard=beta_safety_guard,
+                job_id=job.id,
+                partial=False,
+            )
             assembled += 1
             continue
         if job.partial_object_key is not None:
             store.mark_job_assembled(job.id, partial=True)
+            _record_assembled_beta_safety_terminal(
+                beta_safety_guard=beta_safety_guard,
+                job_id=job.id,
+                partial=True,
+            )
             assembled += 1
             continue
         partial = count_unassembled_work_units(store.list_work_units(job.id)) > 0
@@ -304,8 +372,30 @@ def assemble_due_jobs(
                 f"Unsupported document kind for assembly: {job.document_kind}"
             )
         store.mark_job_assembled(job.id, partial=partial)
+        _record_assembled_beta_safety_terminal(
+            beta_safety_guard=beta_safety_guard,
+            job_id=job.id,
+            partial=partial,
+        )
         assembled += 1
     return assembled
+
+
+def _record_assembled_beta_safety_terminal(
+    *,
+    beta_safety_guard: BetaSafetyGuard | None,
+    job_id: str,
+    partial: bool,
+) -> None:
+    if beta_safety_guard is None:
+        return
+    if partial:
+        beta_safety_guard.release_job(
+            job_id=job_id,
+            reason="partial_assembly",
+        )
+        return
+    beta_safety_guard.mark_job_consumed(job_id=job_id)
 
 
 def _translated_file_name(

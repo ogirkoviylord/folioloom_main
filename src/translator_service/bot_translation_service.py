@@ -1,16 +1,22 @@
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 import json
 import logging
 import math
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePath
 from threading import RLock
-import time
-from typing import Callable
 
 from translator_service.beta_access import (
     BetaAccessPolicy,
     SQLiteBackedBetaAccessPolicy,
+)
+from translator_service.beta_safety import (
+    BetaSafetyGuard,
+    BetaSafetyRates,
+    JobCostEstimate,
+    estimate_cost_usd,
 )
 from translator_service.document_sandbox import DocumentSandbox
 from translator_service.documents import DocumentFormat, validate_document_upload
@@ -39,17 +45,17 @@ from translator_service.language_detection import (
     format_detected_source_languages,
 )
 from translator_service.order_estimates import estimate_order
+from translator_service.persistent_assembly import (
+    assemble_persistent_docx_result,
+    assemble_persistent_epub_result,
+    assemble_persistent_txt_result,
+    count_unassembled_work_units,
+)
+from translator_service.persistent_job_store import PersistentJobStore
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
     PersistentWorkUnitStatus,
-)
-from translator_service.persistent_job_store import PersistentJobStore
-from translator_service.persistent_assembly import (
-    assemble_persistent_txt_result,
-    assemble_persistent_docx_result,
-    assemble_persistent_epub_result,
-    count_unassembled_work_units,
 )
 from translator_service.persistent_planner import (
     create_persistent_docx_job_plan,
@@ -65,7 +71,10 @@ from translator_service.security_telemetry import (
     SecurityThresholdPolicy,
     normalize_security_event,
 )
-from translator_service.translation_cache import MemoryTranslationCache, TranslationCache
+from translator_service.translation_cache import (
+    MemoryTranslationCache,
+    TranslationCache,
+)
 from translator_service.translation_jobs import (
     CancellationToken,
     TextTranslator,
@@ -76,10 +85,10 @@ from translator_service.translation_policy import (
     translation_policy_signature,
 )
 from translator_service.translation_run_logs import (
-    finish_running_translation_runs_for_job,
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    finish_running_translation_runs_for_job,
 )
 from translator_service.user_activity import (
     ActivityActorType,
@@ -93,7 +102,6 @@ from translator_service.worker import (
     run_next_stored_text_work_unit,
     run_stored_text_job_parallel_until_idle,
 )
-
 
 logger = logging.getLogger(__name__)
 RIGHTS_CONFIRMATION_VERSION = "rights-v1"
@@ -215,6 +223,9 @@ class BotTranslationService:
         beta_access_policy: (
             BetaAccessPolicy | SQLiteBackedBetaAccessPolicy | None
         ) = None,
+        beta_safety_guard: BetaSafetyGuard | None = None,
+        beta_safety_rates: BetaSafetyRates | None = None,
+        beta_safety_guard_owned: bool = False,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -249,6 +260,10 @@ class BotTranslationService:
         self._beta_access_policy = (
             beta_access_policy or BetaAccessPolicy.from_telegram_ids((), enabled=False)
         )
+        self._beta_safety_guard = beta_safety_guard
+        self._beta_safety_rates = beta_safety_rates or BetaSafetyRates()
+        self._beta_safety_guard_owned = beta_safety_guard_owned
+        self._beta_safety_denied_job_ids: set[str] = set()
         self._state_lock = RLock()
 
     def close(self) -> None:
@@ -258,6 +273,10 @@ class BotTranslationService:
             self._user_settings_repository.close()
         if self._activity_store is not None:
             self._activity_store.close()
+        if self._beta_safety_guard_owned and self._beta_safety_guard is not None:
+            close = getattr(self._beta_safety_guard, "close", None)
+            if close is not None:
+                close()
 
     def record_user_activity(
         self,
@@ -437,7 +456,9 @@ class BotTranslationService:
         with self._state_lock:
             pending_upload = self._pending_uploads.get(user_telegram_id)
             if pending_upload is None:
-                raise ValueError("No uploaded document is waiting for rights confirmation")
+                raise ValueError(
+                    "No uploaded document is waiting for rights confirmation"
+                )
             if pending_upload.rights_confirmed:
                 return pending_upload
             confirmed = replace(
@@ -475,7 +496,8 @@ class BotTranslationService:
                 )
             if not pending_upload.rights_confirmed:
                 raise RightsConfirmationRequired(
-                    "Document rights must be confirmed before choosing translation language"
+                    "Document rights must be confirmed before choosing "
+                    "translation language"
                 )
 
         pending = self.prepare_document(
@@ -521,7 +543,8 @@ class BotTranslationService:
             document_kind = _document_kind_from_format(upload.document_format)
             if document_kind is None:
                 raise ValueError(
-                    "Prototype bot currently supports TXT, DOCX, and EPUB translation only"
+                    "Prototype bot currently supports TXT, DOCX, and EPUB "
+                    "translation only"
                 )
 
         estimate = estimate_order(
@@ -609,7 +632,9 @@ class BotTranslationService:
             removed_upload = self._pending_uploads.pop(user_telegram_id, None)
         return removed_pending is not None or removed_upload is not None
 
-    def set_interface_language(self, *, user_telegram_id: int, language_code: str) -> None:
+    def set_interface_language(
+        self, *, user_telegram_id: int, language_code: str
+    ) -> None:
         if self._user_settings_repository is not None:
             self._user_settings_repository.set_interface_language(
                 telegram_id=user_telegram_id,
@@ -763,14 +788,18 @@ class BotTranslationService:
             if job.status in active_statuses
         ]
         queued = sum(
-            1 for job in active_jobs if job.status is PersistentTranslationJobStatus.QUEUED
+            1
+            for job in active_jobs
+            if job.status is PersistentTranslationJobStatus.QUEUED
         )
         translating = len(active_jobs) - queued
         return UserQueueSummary(
             total_active=len(active_jobs),
             queued=queued,
             translating=translating,
-            items=tuple(self._book_summary_from_job(job) for job in active_jobs[:limit]),
+            items=tuple(
+                self._book_summary_from_job(job) for job in active_jobs[:limit]
+            ),
         )
 
     def get_user_book_detail(
@@ -808,7 +837,10 @@ class BotTranslationService:
                 1
                 for unit in work_units
                 if unit.status
-                in {PersistentWorkUnitStatus.TRANSLATED, PersistentWorkUnitStatus.CACHED}
+                in {
+                    PersistentWorkUnitStatus.TRANSLATED,
+                    PersistentWorkUnitStatus.CACHED,
+                }
             ),
             total_fragments=len(work_units),
         )
@@ -886,7 +918,9 @@ class BotTranslationService:
         if not _can_resume_persistent_job(job.status.value):
             return self._book_summary_from_job(job)
 
-        return self._book_summary_from_job(self._persistent_job_store.resume_job(job_id))
+        return self._book_summary_from_job(
+            self._persistent_job_store.resume_job(job_id)
+        )
 
     def resume_user_book_translation(
         self,
@@ -1203,7 +1237,9 @@ class BotTranslationService:
             target_language=job.target_language,
             status=job.status.value,
             has_result=bool(job.final_object_key or job.partial_object_key),
-            has_partial_result=bool(job.partial_object_key and not job.final_object_key),
+            has_partial_result=bool(
+                job.partial_object_key and not job.final_object_key
+            ),
             can_resume=_can_resume_persistent_job(job.status.value),
             can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
@@ -1420,6 +1456,7 @@ class BotTranslationService:
             if (
                 job.status is TranslationJobStatus.FAILED
                 and not _is_security_threshold_error(job.error_message)
+                and job.id not in self._beta_safety_denied_job_ids
             ):
                 with self._state_lock:
                     self._pending.setdefault(user_telegram_id, pending)
@@ -1639,8 +1676,8 @@ class BotTranslationService:
     ) -> TranslationRunLogger | None:
         if self._translation_run_log_root is None:
             return None
-        resolved_adapter_version = adapter_version or _adapter_version_for_document_kind(
-            document_kind
+        resolved_adapter_version = (
+            adapter_version or _adapter_version_for_document_kind(document_kind)
         )
         resolved_prompt_version = prompt_version or "plain-v1"
         translation_policy = _translation_policy_snapshot_for_pending(
@@ -1686,6 +1723,64 @@ class BotTranslationService:
             and pending.source_object_key is not None
         )
 
+    def _reserve_beta_safety_for_persistent_job(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        total_fragments: int,
+    ):
+        if self._beta_safety_guard is None:
+            return None
+        return self._beta_safety_guard.reserve_job(
+            job_id=job_id,
+            user_id=user_id,
+            estimate=_estimate_persistent_job_cost(
+                total_fragments=total_fragments,
+                max_fragment_chars=self._max_fragment_chars,
+                rates=self._beta_safety_rates,
+            ),
+        )
+
+    def _release_beta_safety_reservation(self, *, job_id: str, reason: str) -> None:
+        if self._beta_safety_guard is None:
+            return
+        self._beta_safety_guard.release_job(job_id=job_id, reason=reason)
+
+    def _mark_beta_safety_reservation_consumed(self, *, job_id: str) -> None:
+        if self._beta_safety_guard is None:
+            return
+        mark_job_consumed = getattr(
+            self._beta_safety_guard,
+            "mark_job_consumed",
+            None,
+        )
+        if mark_job_consumed is not None:
+            mark_job_consumed(job_id=job_id)
+
+    def _beta_safety_usage_completed_callback(
+        self,
+    ) -> Callable[[PersistentWorkUnit], None] | None:
+        if self._beta_safety_guard is None:
+            return None
+        assert self._persistent_job_store is not None
+
+        def record_usage(work_unit: PersistentWorkUnit) -> None:
+            assert self._persistent_job_store is not None
+            job = self._persistent_job_store.get_job(work_unit.job_id)
+            if job is None:
+                raise ValueError(f"Work unit job does not exist: {work_unit.job_id}")
+            assert self._beta_safety_guard is not None
+            self._beta_safety_guard.record_work_unit_usage(
+                job_id=work_unit.job_id,
+                user_id=job.user_id,
+                work_unit_id=work_unit.id,
+                prompt_tokens=work_unit.prompt_tokens,
+                completion_tokens=work_unit.completion_tokens,
+            )
+
+        return record_usage
+
     def _confirm_persistent_translation(
         self,
         *,
@@ -1707,6 +1802,20 @@ class BotTranslationService:
             max_fragment_chars=self._max_fragment_chars,
         )
         total_fragments = len(plan.work_units)
+        reservation_decision = self._reserve_beta_safety_for_persistent_job(
+            job_id=plan.job.id,
+            user_id=plan.job.user_id,
+            total_fragments=total_fragments,
+        )
+        if reservation_decision is not None and not reservation_decision.allowed:
+            self._beta_safety_denied_job_ids.add(plan.job.id)
+            self._persistent_job_store.mark_job_interrupted(plan.job.id)
+            return _failed_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                error_message=reservation_decision.safe_message,
+                job_id=plan.job.id,
+            )
         self._mark_active_translation_job(
             user_telegram_id=pending.user_telegram_id,
             job_id=plan.job.id,
@@ -1807,6 +1916,10 @@ class BotTranslationService:
         while True:
             if cancellation_token.is_cancelled:
                 self._persistent_job_store.cancel_job(plan.job.id)
+                self._release_beta_safety_reservation(
+                    job_id=plan.job.id,
+                    reason="cancelled",
+                )
                 cancelled_job = self._build_persistent_result_job_or_fail(
                     document_kind=document_kind,
                     pending=pending,
@@ -1834,6 +1947,7 @@ class BotTranslationService:
                     run_logger=run_logger,
                     total_units=total_fragments,
                 ),
+                usage_completed_callback=self._beta_safety_usage_completed_callback(),
             )
             if completed_unit is None:
                 break
@@ -1851,6 +1965,10 @@ class BotTranslationService:
                     document_kind=document_kind,
                     error_message=completed_unit.last_error or "Translation failed",
                     job_id=plan.job.id,
+                )
+                self._release_beta_safety_reservation(
+                    job_id=plan.job.id,
+                    reason="failed_before_completion",
                 )
                 _finish_run_logger(
                     run_logger,
@@ -1912,6 +2030,13 @@ class BotTranslationService:
             ),
             run_logger=run_logger,
         )
+        if result_job.status is TranslationJobStatus.PARTIAL:
+            self._release_beta_safety_reservation(
+                job_id=plan.job.id,
+                reason="failed_before_completion",
+            )
+        elif result_job.status is TranslationJobStatus.READY:
+            self._mark_beta_safety_reservation_consumed(job_id=plan.job.id)
         _finish_run_logger(
             run_logger,
             status=result_job.status.value,
@@ -1959,6 +2084,7 @@ class BotTranslationService:
                     run_logger=run_logger,
                     total_units=total_fragments,
                 ),
+                beta_safety_guard=self._beta_safety_guard,
             )
             try:
                 _record_translator_security_events(
@@ -2000,6 +2126,16 @@ class BotTranslationService:
             status=result_status,
             run_logger=run_logger,
         )
+        if result_job.status is TranslationJobStatus.CANCELLED:
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="cancelled",
+            )
+        elif result_job.status is not TranslationJobStatus.READY:
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="failed_before_completion",
+            )
         _finish_run_logger(
             run_logger,
             status=result_job.status.value,
@@ -2041,8 +2177,7 @@ class BotTranslationService:
                     prompt_tokens=completed_unit.prompt_tokens,
                     completion_tokens=completed_unit.completion_tokens,
                     total_tokens=(
-                        completed_unit.prompt_tokens
-                        + completed_unit.completion_tokens
+                        completed_unit.prompt_tokens + completed_unit.completion_tokens
                     ),
                     prompt_cache_hit_tokens=completed_unit.cache_hit_tokens,
                     prompt_cache_miss_tokens=completed_unit.cache_miss_tokens,
@@ -2063,6 +2198,7 @@ class BotTranslationService:
                     total_units=total_fragments,
                 ),
                 should_stop=lambda: cancellation_token.is_cancelled,
+                usage_completed_callback=self._beta_safety_usage_completed_callback(),
             )
         except SecurityThresholdExceeded as error:
             return self._fail_persistent_translation_after_security_threshold(
@@ -2075,6 +2211,10 @@ class BotTranslationService:
 
         if cancellation_token.is_cancelled:
             self._persistent_job_store.cancel_job(job_id)
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="cancelled",
+            )
             cancelled_job = self._build_persistent_result_job_or_fail(
                 document_kind=document_kind,
                 pending=pending,
@@ -2117,6 +2257,10 @@ class BotTranslationService:
                 ),
                 job_id=job_id,
             )
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="failed_before_completion",
+            )
             _finish_run_logger(
                 run_logger,
                 status=failed_job.status.value,
@@ -2143,6 +2287,13 @@ class BotTranslationService:
             ),
             run_logger=run_logger,
         )
+        if result_job.status is TranslationJobStatus.PARTIAL:
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="failed_before_completion",
+            )
+        elif result_job.status is TranslationJobStatus.READY:
+            self._mark_beta_safety_reservation_consumed(job_id=job_id)
         _finish_run_logger(
             run_logger,
             status=result_job.status.value,
@@ -2166,6 +2317,10 @@ class BotTranslationService:
             run_logger=run_logger,
         )
         self._persistent_job_store.mark_job_interrupted(job_id)
+        self._release_beta_safety_reservation(
+            job_id=job_id,
+            reason="security_threshold",
+        )
         failed_job = _failed_translation_job(
             pending=pending,
             document_kind=document_kind,
@@ -2215,6 +2370,10 @@ class BotTranslationService:
                 pending.file_name,
             )
             self._persistent_job_store.mark_job_interrupted(job_id)
+            self._release_beta_safety_reservation(
+                job_id=job_id,
+                reason="assembly_failed",
+            )
             return _failed_translation_job(
                 pending=pending,
                 document_kind=document_kind,
@@ -2420,7 +2579,9 @@ def _consume_translator_security_events(
     return tuple(events)
 
 
-def _fragment_log_from_progress(progress: TranslationProgress) -> TranslationFragmentLog:
+def _fragment_log_from_progress(
+    progress: TranslationProgress,
+) -> TranslationFragmentLog:
     return TranslationFragmentLog(
         sequence=progress.completed_fragments,
         source_text=progress.source_text,
@@ -2717,6 +2878,26 @@ def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind 
     return None
 
 
+def _estimate_persistent_job_cost(
+    *,
+    total_fragments: int,
+    max_fragment_chars: int,
+    rates: BetaSafetyRates,
+) -> JobCostEstimate:
+    estimated_tokens = math.ceil(
+        max(0, total_fragments) * max(1, max_fragment_chars) / 4
+    )
+    return JobCostEstimate(
+        prompt_tokens=estimated_tokens,
+        completion_tokens=estimated_tokens,
+        estimated_cost_usd=estimate_cost_usd(
+            prompt_tokens=estimated_tokens,
+            completion_tokens=estimated_tokens,
+            rates=rates,
+        ),
+    )
+
+
 def _failed_translation_job(
     *,
     pending: PendingTranslation,
@@ -2756,7 +2937,9 @@ def _queued_translation_job(
 
 
 def _is_security_threshold_error(error_message: str | None) -> bool:
-    return bool(error_message and error_message.startswith("Security threshold exceeded:"))
+    return bool(
+        error_message and error_message.startswith("Security threshold exceeded:")
+    )
 
 
 def _security_user_id(user_telegram_id: int) -> str:

@@ -273,7 +273,52 @@ def build_beta_safety_guard(config: BotRuntimeConfig) -> ConfiguredBetaSafetyGua
     )
 
 
+def bot_runtime_config_from_settings(settings: Settings) -> BotRuntimeConfig:
+    return BotRuntimeConfig(
+        max_upload_mb=settings.max_upload_mb,
+        object_storage_root=settings.object_storage_root,
+        persistent_jobs_db_path=settings.persistent_jobs_db_path,
+        scheduler_backend=settings.scheduler_backend,
+        postgres_dsn=settings.postgres_dsn,
+        user_settings_db_path=settings.user_settings_db_path,
+        admin_db_path=settings.admin_db_path,
+        translation_run_log_root=settings.translation_run_log_root,
+        max_parallel_work_units=settings.translation_max_parallel_units,
+        provider_parallel_capacity=_deepseek_parallel_capacity(settings),
+        defer_persistent_jobs_to_worker=settings.bot_defer_persistent_jobs_to_worker,
+        security_max_events_per_run=settings.security_max_events_per_run,
+        security_max_unsafe_model_outputs_per_run=(
+            settings.security_max_unsafe_model_outputs_per_run
+        ),
+        security_max_repair_failures_per_run=(
+            settings.security_max_repair_failures_per_run
+        ),
+        security_user_cooldown_thresholds_per_window=(
+            settings.security_user_cooldown_thresholds_per_window
+        ),
+        security_user_cooldown_window_seconds=(
+            settings.security_user_cooldown_window_seconds
+        ),
+        security_user_cooldown_seconds=settings.security_user_cooldown_seconds,
+        beta_allowlist_enabled=settings.beta_allowlist_enabled,
+        beta_allowlist_telegram_ids=tuple(
+            sorted(load_beta_access_policy(settings).allowed_telegram_ids)
+        ),
+        beta_translations_paused=settings.beta_translations_paused,
+        beta_global_daily_cost_cap_usd=settings.beta_global_daily_cost_cap_usd,
+        beta_global_monthly_cost_cap_usd=settings.beta_global_monthly_cost_cap_usd,
+        beta_user_daily_cost_cap_usd=settings.beta_user_daily_cost_cap_usd,
+        beta_user_monthly_cost_cap_usd=settings.beta_user_monthly_cost_cap_usd,
+        beta_user_daily_job_limit=settings.beta_user_daily_job_limit,
+        beta_max_job_estimated_cost_usd=settings.beta_max_job_estimated_cost_usd,
+        beta_cost_input_usd_per_million=settings.beta_cost_input_usd_per_million,
+        beta_cost_output_usd_per_million=settings.beta_cost_output_usd_per_million,
+        beta_cost_warning_fraction=settings.beta_cost_warning_fraction,
+    )
+
+
 def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService:
+    beta_safety_guard = build_beta_safety_guard(config)
     return BotTranslationService(
         job_repository=InMemoryTranslationJobRepository(),
         pricing_rules=build_default_pricing_rules(),
@@ -312,6 +357,9 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
             fallback_telegram_ids=config.beta_allowlist_telegram_ids,
             fallback_enabled=config.beta_allowlist_enabled,
         ),
+        beta_safety_guard=beta_safety_guard,
+        beta_safety_rates=beta_safety_rates_from_settings(config),
+        beta_safety_guard_owned=True,
     )
 
 
@@ -680,9 +728,7 @@ def _runtime_channel_from_snapshot(snapshot) -> AIProviderRuntimeChannel:
         total_rate_limit_failures=snapshot.total_rate_limit_failures,
         total_unavailable_failures=snapshot.total_unavailable_failures,
         total_timeout_failures=snapshot.total_timeout_failures,
-        total_malformed_response_failures=(
-            snapshot.total_malformed_response_failures
-        ),
+        total_malformed_response_failures=(snapshot.total_malformed_response_failures),
         total_auth_failures=snapshot.total_auth_failures,
         total_billing_failures=snapshot.total_billing_failures,
         total_other_provider_failures=snapshot.total_other_provider_failures,
@@ -723,14 +769,13 @@ def _deepseek_runtime_status_from_channels(
 ) -> str:
     if status == "missing_keys":
         return status
-    if (
-        provider_state is not None
-        and provider_state.circuit_state in {"open", "half_open"}
-    ):
+    if provider_state is not None and provider_state.circuit_state in {
+        "open",
+        "half_open",
+    }:
         return "degraded"
     if any(
-        channel.health in {"cooling_down", "degraded"}
-        for channel in runtime_channels
+        channel.health in {"cooling_down", "degraded"} for channel in runtime_channels
     ):
         return "degraded"
     return "ok"
@@ -1421,7 +1466,9 @@ def create_router(
         if language_option is None:
             await message.answer(
                 build_language_selection_message(
-                    interface_language=service.get_interface_language(message.from_user.id)
+                    interface_language=service.get_interface_language(
+                        message.from_user.id
+                    )
                 )
             )
             return
@@ -2168,7 +2215,7 @@ async def _run_confirm_pending_translation(
             last_translated_text=last_translated_text,
             activity_indicator=_next_heartbeat_frame(
                 str(progress_stats["heartbeat_pattern"]),
-                int(progress_stats["spinner_index"]) - 1
+                int(progress_stats["spinner_index"]) - 1,
             ),
             activity_phrase_index=int(progress_stats["spinner_index"]),
         )
@@ -2287,7 +2334,7 @@ async def _run_confirm_pending_translation(
         from aiogram.types import BufferedInputFile
 
         await message.answer_document(
-        BufferedInputFile(job.result_content, filename=job.result_file_name)
+            BufferedInputFile(job.result_content, filename=job.result_file_name)
         )
 
 
@@ -2685,7 +2732,7 @@ async def _run_translation_progress_heartbeat(
                 ),
                 activity_indicator=_next_heartbeat_frame(
                     str(progress_stats["heartbeat_pattern"]),
-                    int(progress_stats["spinner_index"]) - 1
+                    int(progress_stats["spinner_index"]) - 1,
                 ),
                 activity_phrase_index=int(progress_stats["spinner_index"]),
             )
@@ -2907,47 +2954,7 @@ async def run_bot() -> None:
 
     from aiogram import Bot, Dispatcher
 
-    config = BotRuntimeConfig(
-        max_upload_mb=settings.max_upload_mb,
-        object_storage_root=settings.object_storage_root,
-        persistent_jobs_db_path=settings.persistent_jobs_db_path,
-        scheduler_backend=settings.scheduler_backend,
-        postgres_dsn=settings.postgres_dsn,
-        user_settings_db_path=settings.user_settings_db_path,
-        admin_db_path=settings.admin_db_path,
-        translation_run_log_root=settings.translation_run_log_root,
-        max_parallel_work_units=settings.translation_max_parallel_units,
-        provider_parallel_capacity=_deepseek_parallel_capacity(settings),
-        defer_persistent_jobs_to_worker=settings.bot_defer_persistent_jobs_to_worker,
-        security_max_events_per_run=settings.security_max_events_per_run,
-        security_max_unsafe_model_outputs_per_run=(
-            settings.security_max_unsafe_model_outputs_per_run
-        ),
-        security_max_repair_failures_per_run=(
-            settings.security_max_repair_failures_per_run
-        ),
-        security_user_cooldown_thresholds_per_window=(
-            settings.security_user_cooldown_thresholds_per_window
-        ),
-        security_user_cooldown_window_seconds=(
-            settings.security_user_cooldown_window_seconds
-        ),
-        security_user_cooldown_seconds=settings.security_user_cooldown_seconds,
-        beta_allowlist_enabled=settings.beta_allowlist_enabled,
-        beta_allowlist_telegram_ids=tuple(
-            sorted(load_beta_access_policy(settings).allowed_telegram_ids)
-        ),
-        beta_translations_paused=settings.beta_translations_paused,
-        beta_global_daily_cost_cap_usd=settings.beta_global_daily_cost_cap_usd,
-        beta_global_monthly_cost_cap_usd=settings.beta_global_monthly_cost_cap_usd,
-        beta_user_daily_cost_cap_usd=settings.beta_user_daily_cost_cap_usd,
-        beta_user_monthly_cost_cap_usd=settings.beta_user_monthly_cost_cap_usd,
-        beta_user_daily_job_limit=settings.beta_user_daily_job_limit,
-        beta_max_job_estimated_cost_usd=settings.beta_max_job_estimated_cost_usd,
-        beta_cost_input_usd_per_million=settings.beta_cost_input_usd_per_million,
-        beta_cost_output_usd_per_million=settings.beta_cost_output_usd_per_million,
-        beta_cost_warning_fraction=settings.beta_cost_warning_fraction,
-    )
+    config = bot_runtime_config_from_settings(settings)
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)
     dispatcher = Dispatcher()
