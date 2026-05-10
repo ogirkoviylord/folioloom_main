@@ -495,6 +495,61 @@ def ai_providers_body(
     """
 
 
+def deepseek_keys_body(
+    *,
+    csrf_token: str,
+    key_pools: dict[str, tuple[AIProviderKeySummary, ...]],
+    runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+) -> str:
+    keys = key_pools.get("deepseek", ())
+    active_count = sum(
+        1
+        for key in keys
+        if key.enabled and not key.disabled and not is_env_deepseek_key(key)
+    )
+    disabled_count = sum(
+        1
+        for key in keys
+        if (not key.enabled or key.disabled) and not is_env_deepseek_key(key)
+    )
+    env_count = sum(1 for key in keys if is_env_deepseek_key(key))
+    reload_banner = _deepseek_reload_banner(runtime_reload_states)
+    rows = "\n".join(_ai_provider_key_row(key, csrf_token) for key in keys)
+    if not rows:
+        rows = '<p class="empty-state">No DeepSeek keys are configured.</p>'
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>DeepSeek Keys</h3>
+        <p>Manage encrypted DeepSeek API keys without exposing raw secrets.</p>
+      </div>
+      <div class="toolbar-actions">
+        <a class="secondary-action" href="/admin/ai-providers">Back to providers</a>
+        {_ai_provider_test_all_keys_form(
+            "deepseek",
+            csrf_token=csrf_token,
+            active_key_count=active_count,
+        )}
+        {_runtime_reload_form("deepseek", csrf_token)}
+      </div>
+    </section>
+    {reload_banner}
+    <section class="metrics">
+      {_metric("Active admin keys", str(active_count))}
+      {_metric("Disabled admin keys", str(disabled_count))}
+      {_metric("Env keys", str(env_count))}
+    </section>
+    <section class="panel table-panel">
+      <h3>Add key</h3>
+      {_ai_provider_key_add_form("deepseek", csrf_token)}
+    </section>
+    <section class="panel table-panel">
+      <h3>Key inventory</h3>
+      <div class="key-list">{rows}</div>
+    </section>
+    """
+
+
 def _ai_provider_card(
     summary: IntegrationSummary,
     *,
@@ -549,8 +604,15 @@ def _ai_provider_card(
       {balance_panel}
       {test_all_form}
       <div class="key-table">{rows}</div>
+      {_ai_provider_key_add_form(summary.integration_id, csrf_token)}
+    </article>
+    """
+
+
+def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
+    return f"""
       <form class="secret-form key-form" method="post"
-        action="/admin/ai-providers/{escape(summary.integration_id)}/keys">
+        action="/admin/ai-providers/{escape(provider_id)}/keys">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <label>
           <span>Label</span>
@@ -582,7 +644,6 @@ def _ai_provider_card(
         </label>
         <button type="submit">Add key</button>
       </form>
-    </article>
     """
 
 
@@ -656,12 +717,40 @@ def _provider_runtime_panel(
           </div>
         </div>
         <div class="key-table">{provider_state}{channels}</div>
-        <form class="secret-form" method="post"
-          action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
-          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-          <button type="submit">Reload now</button>
-        </form>
+        {_runtime_reload_form(provider_id, csrf_token, label="Reload now")}
       </div>
+    """
+
+
+def _runtime_reload_form(
+    provider_id: str,
+    csrf_token: str,
+    *,
+    label: str = "Reload DeepSeek runtime",
+) -> str:
+    return f"""
+      <form class="secret-form" method="post"
+        action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <button type="submit">{escape(label)}</button>
+      </form>
+    """
+
+
+def _deepseek_reload_banner(
+    runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...],
+) -> str:
+    state = next(
+        (item for item in runtime_reload_states if item.provider_id == "deepseek"),
+        None,
+    )
+    if state is None or not state.pending:
+        return ""
+    return """
+    <section class="panel">
+      <h3>DeepSeek runtime reload pending</h3>
+      <p>Key changes are saved. Reload runtime so bot and worker capacity use them.</p>
+    </section>
     """
 
 

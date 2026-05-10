@@ -178,6 +178,19 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         snapshot.assert_not_called()
 
+    def test_deepseek_keys_page_does_not_build_inventory_without_login(self):
+        with patch(
+            "translator_service.admin.routes._ai_provider_key_pools",
+            side_effect=AssertionError("key inventory should be lazy"),
+        ):
+            response = self.client.get(
+                "/admin/ai-providers/deepseek/keys",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
     def test_owner_can_read_cached_deepseek_balance(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 
@@ -258,6 +271,30 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("8.50", response.text)
         self.assertIn("Refresh balance", response.text)
         self.assertNotIn("sk-", response.text)
+
+    def test_deepseek_keys_page_renders_key_management_surface(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/ai-providers/deepseek/keys")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DeepSeek Keys", response.text)
+        self.assertIn('action="/admin/ai-providers/deepseek/keys"', response.text)
+        self.assertIn("Add key", response.text)
+        self.assertIn("Test all active keys", response.text)
+        self.assertIn("Reload DeepSeek runtime", response.text)
 
     def test_admin_quality_does_not_build_summary_without_login(self):
         with patch(
