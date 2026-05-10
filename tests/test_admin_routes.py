@@ -1668,6 +1668,45 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-raw-secret-value", updated.text)
             self.assertNotIn(".api_keys.", updated.text)
 
+    def test_deepseek_key_mutations_mark_runtime_reload_pending(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "label": "main",
+                    "value": "sk-reload-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+            )
+
+            after_add = client.get("/admin/ai-providers/deepseek/keys")
+            runtime_api = client.get("/admin/api/ai-providers/runtime")
+
+            self.assertIn("DeepSeek runtime reload pending", after_add.text)
+            payload = runtime_api.json()
+            deepseek = next(
+                item
+                for item in payload["providers"]
+                if item["provider_id"] == "deepseek"
+            )
+            self.assertTrue(deepseek["reload_pending"])
+            self.assertIsNotNone(deepseek["reload_requested_at"])
+
     def test_owner_can_add_and_remove_ai_provider_key_rows(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")

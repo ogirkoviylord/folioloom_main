@@ -787,7 +787,7 @@ Expected: commit succeeds.
 - Modify `src/translator_service/admin/views.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add failing reload pending test**
+- [x] **Step 1: Add failing reload pending test**
 
 Add:
 
@@ -830,7 +830,7 @@ def test_deepseek_key_mutations_mark_runtime_reload_pending(self):
         self.assertIsNotNone(deepseek["reload_requested_at"])
 ```
 
-- [ ] **Step 2: Verify reload helper exists**
+- [x] **Step 2: Verify reload helper exists**
 
 Task 3 adds `_request_ai_provider_runtime_reload(...)`. If Task 3 was skipped
 or implemented differently, add this helper near the runtime helper functions:
@@ -846,7 +846,7 @@ def _request_ai_provider_runtime_reload(
         runtime.request_reload(provider_id=provider_id, actor_id=actor_id)
 ```
 
-- [ ] **Step 3: Call helper after mutations**
+- [x] **Step 3: Call helper after mutations**
 
 In these routes, after successful store mutation and before audit:
 
@@ -872,7 +872,7 @@ Update each audit metadata dict to include:
 "runtime_reload_requested": True,
 ```
 
-- [ ] **Step 4: Ensure banner renders pending state**
+- [x] **Step 4: Ensure banner renders pending state**
 
 If Task 1's `_deepseek_reload_banner(...)` only checks state presence, tighten it
 to pending only:
@@ -885,7 +885,7 @@ if state is None or not state.pending:
 `AIProviderRuntimeReloadRequest` already exposes `pending`, and
 `/admin/api/ai-providers/runtime` already exposes `reload_pending`.
 
-- [ ] **Step 5: Run reload pending tests**
+- [x] **Step 5: Run reload pending tests**
 
 Run:
 
@@ -899,7 +899,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit reload pending UX**
+- [x] **Step 6: Commit reload pending UX**
 
 Run:
 
