@@ -1015,6 +1015,7 @@ def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
     </div>
     """
     remove_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/remove"
+    rotate_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/rotate"
     test_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/test"
     update_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/update"
     toggle_action_name = "disable" if key.enabled and not key.disabled else "enable"
@@ -1052,6 +1053,15 @@ def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
           >
         </label>
         <button type="submit">Save</button>
+      </form>
+      <form method="post" action="{rotate_action}">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <input type="hidden" name="key_id" value="{escape(key.key_id)}">
+        <label>
+          <span>New key value</span>
+          <input name="value" type="password" autocomplete="new-password">
+        </label>
+        <button type="submit">Rotate</button>
       </form>
       <span>weight {key.weight}</span>
       <span>parallel {key.max_parallel_requests}</span>
