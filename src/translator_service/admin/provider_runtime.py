@@ -66,6 +66,39 @@ class AIProviderRuntimeChannel:
 
 
 @dataclass(frozen=True)
+class AIProviderRuntimeProviderState:
+    adaptive_enabled: bool = False
+    current_limit: int = 1
+    max_capacity: int = 1
+    active_requests: int = 0
+    available_slots: int = 1
+    circuit_state: str = "closed"
+    circuit_open_remaining_seconds: float = 0.0
+    last_reason: str | None = None
+    total_ramp_ups: int = 0
+    total_decreases: int = 0
+    total_circuit_opened: int = 0
+
+    def __repr__(self) -> str:
+        last_reason = self.last_reason if self.last_reason is None else "<redacted>"
+        return (
+            "AIProviderRuntimeProviderState("
+            f"adaptive_enabled={self.adaptive_enabled!r}, "
+            f"current_limit={self.current_limit!r}, "
+            f"max_capacity={self.max_capacity!r}, "
+            f"active_requests={self.active_requests!r}, "
+            f"available_slots={self.available_slots!r}, "
+            f"circuit_state={self.circuit_state!r}, "
+            "circuit_open_remaining_seconds="
+            f"{self.circuit_open_remaining_seconds!r}, "
+            f"last_reason={last_reason!r}, "
+            f"total_ramp_ups={self.total_ramp_ups!r}, "
+            f"total_decreases={self.total_decreases!r}, "
+            f"total_circuit_opened={self.total_circuit_opened!r})"
+        )
+
+
+@dataclass(frozen=True)
 class AIProviderRuntimeStatus:
     provider_id: str
     source: str
@@ -73,6 +106,7 @@ class AIProviderRuntimeStatus:
     reload_interval_seconds: float
     last_reloaded_at: datetime
     active_channels: tuple[AIProviderRuntimeChannel, ...]
+    provider_state: AIProviderRuntimeProviderState = AIProviderRuntimeProviderState()
     error: str | None = None
 
 
@@ -115,6 +149,7 @@ class SQLiteAIProviderRuntimeStore:
         reload_interval_seconds: float,
         active_channels: tuple[AIProviderRuntimeChannel, ...],
         error: str | None,
+        provider_state: AIProviderRuntimeProviderState | None = None,
     ) -> AIProviderRuntimeStatus:
         now = datetime.now(UTC)
         payload = json.dumps(
@@ -204,19 +239,27 @@ class SQLiteAIProviderRuntimeStore:
             ],
             sort_keys=True,
         )
+        provider_state_payload = json.dumps(
+            _provider_state_to_payload(
+                provider_state or AIProviderRuntimeProviderState()
+            ),
+            sort_keys=True,
+        )
         with self._connection:
             self._connection.execute(
                 """
                 INSERT INTO admin_ai_provider_runtime_status (
                     provider_id, source, status, reload_interval_seconds,
-                    active_channels_json, error, last_reloaded_at
+                    active_channels_json, provider_state_json, error,
+                    last_reloaded_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     source = excluded.source,
                     status = excluded.status,
                     reload_interval_seconds = excluded.reload_interval_seconds,
                     active_channels_json = excluded.active_channels_json,
+                    provider_state_json = excluded.provider_state_json,
                     error = excluded.error,
                     last_reloaded_at = excluded.last_reloaded_at
                 """,
@@ -226,6 +269,7 @@ class SQLiteAIProviderRuntimeStore:
                     status,
                     max(0.0, float(reload_interval_seconds)),
                     payload,
+                    provider_state_payload,
                     error,
                     now.isoformat(),
                 ),
@@ -348,11 +392,25 @@ class SQLiteAIProviderRuntimeStore:
                     status TEXT NOT NULL,
                     reload_interval_seconds REAL NOT NULL,
                     active_channels_json TEXT NOT NULL,
+                    provider_state_json TEXT NOT NULL DEFAULT '{}',
                     error TEXT,
                     last_reloaded_at TEXT NOT NULL
                 )
                 """
             )
+            status_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(admin_ai_provider_runtime_status)"
+                ).fetchall()
+            }
+            if "provider_state_json" not in status_columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE admin_ai_provider_runtime_status
+                    ADD COLUMN provider_state_json TEXT NOT NULL DEFAULT '{}'
+                    """
+                )
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS admin_ai_provider_runtime_reload_requests (
@@ -377,7 +435,115 @@ def _status_from_row(row: sqlite3.Row) -> AIProviderRuntimeStatus:
             _channel_from_payload(item)
             for item in json.loads(row["active_channels_json"])
         ),
+        provider_state=_provider_state_from_payload(
+            json.loads(row["provider_state_json"] or "{}")
+        ),
         error=row["error"],
+    )
+
+
+def _provider_state_to_payload(
+    provider_state: AIProviderRuntimeProviderState,
+) -> dict[str, object]:
+    return {
+        "adaptive_enabled": bool(provider_state.adaptive_enabled),
+        "current_limit": _int_at_least(
+            provider_state.current_limit,
+            minimum=1,
+            default=1,
+        ),
+        "max_capacity": _int_at_least(
+            provider_state.max_capacity,
+            minimum=1,
+            default=1,
+        ),
+        "active_requests": _int_at_least(
+            provider_state.active_requests,
+            minimum=0,
+            default=0,
+        ),
+        "available_slots": _int_at_least(
+            provider_state.available_slots,
+            minimum=0,
+            default=1,
+        ),
+        "circuit_state": _string_or_default(
+            provider_state.circuit_state,
+            "closed",
+        ),
+        "circuit_open_remaining_seconds": _float_at_least(
+            provider_state.circuit_open_remaining_seconds,
+            minimum=0.0,
+            default=0.0,
+        ),
+        "last_reason": _optional_string(provider_state.last_reason),
+        "total_ramp_ups": _int_at_least(
+            provider_state.total_ramp_ups,
+            minimum=0,
+            default=0,
+        ),
+        "total_decreases": _int_at_least(
+            provider_state.total_decreases,
+            minimum=0,
+            default=0,
+        ),
+        "total_circuit_opened": _int_at_least(
+            provider_state.total_circuit_opened,
+            minimum=0,
+            default=0,
+        ),
+    }
+
+
+def _provider_state_from_payload(item: object) -> AIProviderRuntimeProviderState:
+    payload = item if isinstance(item, dict) else {}
+    return AIProviderRuntimeProviderState(
+        adaptive_enabled=bool(payload.get("adaptive_enabled", False)),
+        current_limit=_int_at_least(
+            payload.get("current_limit", 1),
+            minimum=1,
+            default=1,
+        ),
+        max_capacity=_int_at_least(
+            payload.get("max_capacity", 1),
+            minimum=1,
+            default=1,
+        ),
+        active_requests=_int_at_least(
+            payload.get("active_requests", 0),
+            minimum=0,
+            default=0,
+        ),
+        available_slots=_int_at_least(
+            payload.get("available_slots", 1),
+            minimum=0,
+            default=1,
+        ),
+        circuit_state=_string_or_default(
+            payload.get("circuit_state", "closed"),
+            "closed",
+        ),
+        circuit_open_remaining_seconds=_float_at_least(
+            payload.get("circuit_open_remaining_seconds", 0.0),
+            minimum=0.0,
+            default=0.0,
+        ),
+        last_reason=_optional_string(payload.get("last_reason")),
+        total_ramp_ups=_int_at_least(
+            payload.get("total_ramp_ups", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_decreases=_int_at_least(
+            payload.get("total_decreases", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_circuit_opened=_int_at_least(
+            payload.get("total_circuit_opened", 0),
+            minimum=0,
+            default=0,
+        ),
     )
 
 

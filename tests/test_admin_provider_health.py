@@ -14,6 +14,7 @@ from translator_service.admin.integrations import (
 from translator_service.admin.provider_health import build_provider_health
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
     AIProviderRuntimeStatus,
 )
 
@@ -186,6 +187,39 @@ class AdminProviderHealthTest(unittest.TestCase):
         self.assertIn("[redacted]", health[0].last_error_excerpt)
         self.assertNotIn("sk-runtime-secret", health[0].last_error_excerpt)
         self.assertNotIn("Bearer", health[0].last_error_excerpt)
+        self.assertNotIn(".api_keys.", health[0].last_error_excerpt)
+
+    def test_open_provider_circuit_degrades_provider_without_exposing_secret_text(self):
+        health = build_provider_health(
+            (_provider(),),
+            {"deepseek": (_key(),)},
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="bot_runtime",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=datetime(2026, 5, 9, tzinfo=UTC),
+                    active_channels=(),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=1,
+                        max_capacity=4,
+                        available_slots=0,
+                        circuit_state="open",
+                        circuit_open_remaining_seconds=90.0,
+                        last_reason="billing sk-runtime-secret .api_keys.deepseek",
+                    ),
+                    error=None,
+                ),
+            ),
+        )
+
+        self.assertEqual(health[0].status, "degraded")
+        self.assertEqual(health[0].last_validation_status, "runtime degraded")
+        self.assertIn("provider circuit open", health[0].last_error_excerpt)
+        self.assertIn("[redacted]", health[0].last_error_excerpt)
+        self.assertNotIn("sk-runtime-secret", health[0].last_error_excerpt)
         self.assertNotIn(".api_keys.", health[0].last_error_excerpt)
 
 

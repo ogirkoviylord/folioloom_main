@@ -9,6 +9,7 @@ from translator_service.deepseek_key_pool import (
     DeepSeekKeyPoolTranslator,
     PROVIDER_ERROR_RATE_LIMITED,
 )
+from translator_service.provider_throttle import ProviderThrottleConfig
 
 
 class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
@@ -338,6 +339,111 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertEqual([item.active_requests for item in pool.snapshot()], [0, 0])
         self.assertEqual([item.total_started_requests for item in pool.snapshot()], [1, 1])
 
+    def test_adaptive_throttle_limits_concurrent_provider_starts(self):
+        started = threading.Event()
+        release = threading.Event()
+        factory = HoldingClientFactory(started=started, release=release)
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            throttle_config=ProviderThrottleConfig(
+                enabled=True,
+                initial_parallel=1,
+                min_parallel=1,
+                success_ramp_interval=99,
+            ),
+        )
+        result = {}
+
+        def translate() -> None:
+            result["value"] = pool.translate(
+                text="one",
+                source_language="en",
+                target_language="uk",
+            )
+
+        thread = threading.Thread(target=translate)
+        thread.start()
+        self.assertTrue(started.wait(timeout=1.0))
+
+        self.assertEqual(pool.available_parallel_slots(), 0)
+        provider_snapshot = pool.provider_snapshot()
+        self.assertEqual(provider_snapshot.current_limit, 1)
+        self.assertEqual(provider_snapshot.active_requests, 1)
+
+        release.set()
+        thread.join(timeout=5.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result["value"], "[key-a] one")
+
+    def test_provider_circuit_opens_after_repeated_temporary_failures(self):
+        now = FakeClock(100.0)
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 503: unavailable")
+                ],
+                "key-b": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 503: unavailable")
+                ],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            throttle_config=ProviderThrottleConfig(
+                enabled=True,
+                initial_parallel=2,
+                min_parallel=1,
+                circuit_failure_threshold=2,
+                circuit_reset_seconds=60.0,
+            ),
+            cooldown_seconds=0,
+            clock=now,
+        )
+
+        with self.assertRaises(DeepSeekApiError):
+            pool.translate(text="source", source_language="en", target_language="uk")
+
+        snapshot = pool.provider_snapshot()
+        self.assertEqual(snapshot.circuit_state, "open")
+        self.assertEqual(snapshot.available_slots, 0)
+        self.assertEqual(snapshot.last_reason, "unavailable")
+
+    def test_channel_cooldown_jitter_is_applied_to_temporary_failures(self):
+        now = FakeClock(100.0)
+        factory = RecordingClientFactory(
+            {
+                "key-a": [DeepSeekApiError("DeepSeek API returned HTTP 429: busy")],
+                "key-b": ["ok"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=30,
+            cooldown_jitter_fraction=0.20,
+            cooldown_jitter_random=lambda: 0.0,
+            clock=now,
+        )
+
+        self.assertEqual(
+            pool.translate(text="source", source_language="en", target_language="uk"),
+            "ok",
+        )
+
+        first = pool.snapshot()[0]
+        self.assertEqual(first.cooldown_until, 124.0)
+
     def test_keeps_last_usage_thread_local_for_parallel_calls(self):
         barrier = threading.Barrier(2)
         factory = BlockingClientFactory(barrier=barrier)
@@ -426,6 +532,31 @@ class BlockingClient:
         self.barrier.wait(timeout=5)
         prompt_tokens = 101 if self.api_key == "key-a" else 202
         self.last_usage = _Usage(prompt_tokens=prompt_tokens)
+        return f"[{self.api_key}] {text}"
+
+
+class HoldingClientFactory:
+    def __init__(self, *, started: threading.Event, release: threading.Event) -> None:
+        self.started = started
+        self.release = release
+        self.calls = []
+
+    def __call__(self, *, api_key: str):
+        return HoldingClient(api_key=api_key, factory=self)
+
+
+class HoldingClient:
+    def __init__(self, *, api_key: str, factory: HoldingClientFactory) -> None:
+        self.api_key = api_key
+        self.factory = factory
+        self.last_usage = None
+
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.factory.calls.append((self.api_key, text))
+        self.factory.started.set()
+        if not self.factory.release.wait(timeout=5.0):
+            raise TimeoutError("holding client was not released")
+        self.last_usage = _Usage(prompt_tokens=1)
         return f"[{self.api_key}] {text}"
 
 

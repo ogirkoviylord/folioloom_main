@@ -70,6 +70,9 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   concurrency.
 - `docs/superpowers/plans/2026-05-10-provider-channel-observability-phase-2.md`
   - implemented provider-channel observability and key scoring plan.
+- `docs/superpowers/plans/2026-05-10-adaptive-provider-throttling-phase-3.md`
+  - active implementation plan for adaptive provider throttling and circuit
+  breaker behavior.
 
 ## Paid-Beta Draft Docs
 

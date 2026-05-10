@@ -24,6 +24,7 @@ from translator_service.bot.runtime import (
     _confirm_pending_upload_rights,
     _deepseek_parallel_capacity,
     _deepseek_parallel_capacity_from_env,
+    _deepseek_throttle_config_from_env,
     _document_exceeds_upload_limit,
     _edit_callback_message,
     _include_progress_preview,
@@ -930,6 +931,79 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(translate_channel.total_successful_requests, 1)
         self.assertNotIn("admin-key-secret", repr(translate_channel))
 
+    def test_reloadable_deepseek_translator_records_provider_adaptive_state(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        max_parallel_requests=2,
+                    )
+
+            with patch.dict(
+                "os.environ",
+                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                clear=False,
+            ), patch(
+                "translator_service.bot.runtime.DeepSeekClient",
+                _RuntimeKeyEchoDeepSeekClient,
+            ):
+                translator = build_deepseek_translator(settings)
+                translator.snapshot()
+                with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                    status = runtime.get_status("deepseek")
+
+        self.assertIsNotNone(status)
+        self.assertTrue(status.provider_state.adaptive_enabled)
+        self.assertEqual(status.provider_state.current_limit, 1)
+        self.assertEqual(status.provider_state.max_capacity, 2)
+        self.assertEqual(status.provider_state.available_slots, 1)
+        self.assertEqual(status.provider_state.circuit_state, "closed")
+
+    def test_reloadable_deepseek_translator_exposes_available_parallel_slots(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        max_parallel_requests=2,
+                    )
+
+            with patch.dict(
+                "os.environ",
+                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                clear=False,
+            ), patch(
+                "translator_service.bot.runtime.DeepSeekClient",
+                _RuntimeKeyEchoDeepSeekClient,
+            ):
+                translator = build_deepseek_translator(settings)
+                slots = translator.available_parallel_slots()
+
+        self.assertEqual(slots, 1)
+
     def test_admin_deepseek_translator_adds_admin_without_dropping_env(
         self,
     ):
@@ -1051,6 +1125,42 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             clear=False,
         ):
             self.assertEqual(_deepseek_parallel_capacity_from_env(), 3)
+
+    def test_deepseek_throttle_config_uses_safe_beta_defaults(self):
+        with patch.dict("os.environ", {}, clear=True):
+            config = _deepseek_throttle_config_from_env()
+
+        self.assertTrue(config.enabled)
+        self.assertEqual(config.initial_parallel, 1)
+        self.assertEqual(config.min_parallel, 1)
+        self.assertEqual(config.success_ramp_interval, 8)
+        self.assertEqual(config.decrease_factor, 0.5)
+        self.assertEqual(config.circuit_failure_threshold, 5)
+        self.assertEqual(config.circuit_reset_seconds, 120.0)
+
+    def test_deepseek_throttle_config_can_be_disabled_for_legacy_behavior(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_ADAPTIVE_THROTTLING_ENABLED": "false",
+                "DEEPSEEK_ADAPTIVE_INITIAL_PARALLEL": "3",
+                "DEEPSEEK_ADAPTIVE_MIN_PARALLEL": "2",
+                "DEEPSEEK_ADAPTIVE_SUCCESS_RAMP_INTERVAL": "4",
+                "DEEPSEEK_ADAPTIVE_DECREASE_FACTOR": "0.75",
+                "DEEPSEEK_PROVIDER_CIRCUIT_FAILURE_THRESHOLD": "7",
+                "DEEPSEEK_PROVIDER_CIRCUIT_RESET_SECONDS": "60",
+            },
+            clear=True,
+        ):
+            config = _deepseek_throttle_config_from_env()
+
+        self.assertFalse(config.enabled)
+        self.assertEqual(config.initial_parallel, 3)
+        self.assertEqual(config.min_parallel, 2)
+        self.assertEqual(config.success_ramp_interval, 4)
+        self.assertEqual(config.decrease_factor, 0.75)
+        self.assertEqual(config.circuit_failure_threshold, 7)
+        self.assertEqual(config.circuit_reset_seconds, 60.0)
 
     def test_language_button_filter_ignores_missing_message_text(self):
         self.assertFalse(_is_language_button_text(None))

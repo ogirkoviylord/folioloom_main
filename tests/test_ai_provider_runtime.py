@@ -1,3 +1,4 @@
+import sqlite3
 import unittest
 from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
@@ -7,6 +8,7 @@ from tempfile import TemporaryDirectory
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
     SQLiteAIProviderRuntimeStore,
 )
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
@@ -183,6 +185,116 @@ class AIProviderRuntimeTest(unittest.TestCase):
         self.assertNotIn(".api_keys.", repr(channel))
         self.assertNotIn("sk-", repr(fetched))
         self.assertNotIn(".api_keys.", repr(fetched))
+
+    def test_runtime_status_roundtrips_provider_state(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteAIProviderRuntimeStore(db_path) as store:
+                provider_state = AIProviderRuntimeProviderState(
+                    adaptive_enabled=True,
+                    current_limit=2,
+                    max_capacity=5,
+                    active_requests=1,
+                    available_slots=1,
+                    circuit_state="open",
+                    circuit_open_remaining_seconds=42.5,
+                    last_reason="provider rejected sk-secret .api_keys.deepseek",
+                    total_ramp_ups=3,
+                    total_decreases=4,
+                    total_circuit_opened=5,
+                )
+                recorded = store.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(),
+                    provider_state=provider_state,
+                    error=None,
+                )
+                fetched = store.get_status("deepseek")
+
+        self.assertIsNotNone(fetched)
+        self.assertEqual(recorded.provider_state, provider_state)
+        self.assertEqual(fetched.provider_state, provider_state)
+        self.assertNotIn("sk-", repr(fetched.provider_state))
+        self.assertNotIn(".api_keys.", repr(fetched.provider_state))
+        self.assertNotIn("sk-", repr(fetched))
+        self.assertNotIn(".api_keys.", repr(fetched))
+
+    def test_runtime_status_reads_legacy_provider_state_with_defaults(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteAIProviderRuntimeStore(db_path) as store:
+                with store._connection:
+                    store._connection.execute(
+                        """
+                        INSERT INTO admin_ai_provider_runtime_status (
+                            provider_id, source, status, reload_interval_seconds,
+                            active_channels_json, error, last_reloaded_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            "deepseek",
+                            "admin_store",
+                            "ok",
+                            30.0,
+                            "[]",
+                            None,
+                            datetime.now(UTC).isoformat(),
+                        ),
+                    )
+                status = store.get_status("deepseek")
+
+        self.assertIsNotNone(status)
+        self.assertEqual(status.provider_state, AIProviderRuntimeProviderState())
+
+    def test_runtime_status_migrates_database_without_provider_state_column(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            connection = sqlite3.connect(db_path)
+            with connection:
+                connection.execute(
+                    """
+                    CREATE TABLE admin_ai_provider_runtime_status (
+                        provider_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        reload_interval_seconds REAL NOT NULL,
+                        active_channels_json TEXT NOT NULL,
+                        error TEXT,
+                        last_reloaded_at TEXT NOT NULL
+                    )
+                    """
+                )
+            connection.close()
+
+            with SQLiteAIProviderRuntimeStore(db_path) as store:
+                columns = {
+                    row["name"]
+                    for row in store._connection.execute(
+                        "PRAGMA table_info(admin_ai_provider_runtime_status)"
+                    ).fetchall()
+                }
+                store.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(),
+                    provider_state=AIProviderRuntimeProviderState(
+                        current_limit=3,
+                        available_slots=2,
+                    ),
+                    error=None,
+                )
+                status = store.get_status("deepseek")
+
+        self.assertIn("provider_state_json", columns)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.provider_state.current_limit, 3)
+        self.assertEqual(status.provider_state.available_slots, 2)
 
     def test_runtime_status_reads_legacy_channel_json_with_defaults(self):
         with TemporaryDirectory() as temp_dir:

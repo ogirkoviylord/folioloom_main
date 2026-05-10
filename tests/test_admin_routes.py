@@ -23,6 +23,7 @@ from translator_service.admin.costs import (
 from translator_service.admin.provider_probe import AIProviderProbeResult
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
     SQLiteAIProviderRuntimeStore,
 )
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
@@ -1695,6 +1696,22 @@ class AdminRoutesTest(unittest.TestCase):
                             ),
                         ),
                     ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=1,
+                        max_capacity=3,
+                        active_requests=1,
+                        available_slots=0,
+                        circuit_state="open",
+                        circuit_open_remaining_seconds=90.0,
+                        last_reason=(
+                            "billing Bearer sk-runtime-secret "
+                            "secret_id=deepseek.api_keys.key-1"
+                        ),
+                        total_ramp_ups=2,
+                        total_decreases=3,
+                        total_circuit_opened=1,
+                    ),
                     error=None,
                 )
             client = TestClient(
@@ -1726,6 +1743,12 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("started/ok/temp/perm 11/7/3/1", page.text)
             self.assertIn("429/503/timeout/auth/billing 2/1/4/1/0", page.text)
             self.assertIn("rate_limit", page.text)
+            self.assertIn("Adaptive throttle", page.text)
+            self.assertIn("circuit open", page.text)
+            self.assertIn("limit 1/3", page.text)
+            self.assertIn("available 0", page.text)
+            self.assertIn("open for 90s", page.text)
+            self.assertIn("ramp/decrease/open 2/3/1", page.text)
             self.assertIn("[redacted]", page.text)
             self.assertIn(
                 'action="/admin/ai-providers/deepseek/runtime/reload"',
@@ -1772,6 +1795,18 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(channel_payload["last_latency_ms"], 150.0)
             self.assertEqual(channel_payload["error_kind"], "rate_limit")
             self.assertIn("[redacted]", channel_payload["last_error_excerpt"])
+            provider_state = payload["providers"][0]["provider_state"]
+            self.assertTrue(provider_state["adaptive_enabled"])
+            self.assertEqual(provider_state["current_limit"], 1)
+            self.assertEqual(provider_state["max_capacity"], 3)
+            self.assertEqual(provider_state["active_requests"], 1)
+            self.assertEqual(provider_state["available_slots"], 0)
+            self.assertEqual(provider_state["circuit_state"], "open")
+            self.assertEqual(provider_state["circuit_open_remaining_seconds"], 90.0)
+            self.assertIn("[redacted]", provider_state["last_reason"])
+            self.assertEqual(provider_state["total_ramp_ups"], 2)
+            self.assertEqual(provider_state["total_decreases"], 3)
+            self.assertEqual(provider_state["total_circuit_opened"], 1)
             serialized_payload = json.dumps(payload, sort_keys=True)
             self.assertNotIn("sk-runtime-secret", serialized_payload)
             self.assertNotIn("Bearer", serialized_payload)
@@ -1782,6 +1817,9 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Degraded channels", live_page.text)
             self.assertIn("429 count", live_page.text)
             self.assertIn("Timeout count", live_page.text)
+            self.assertIn("Adaptive limit", live_page.text)
+            self.assertIn("Provider circuit", live_page.text)
+            self.assertIn("Available provider slots", live_page.text)
             with SQLiteAdminAuditLog(db_path) as audit:
                 event = next(
                     event

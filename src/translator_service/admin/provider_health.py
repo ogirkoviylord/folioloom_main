@@ -127,6 +127,8 @@ def _runtime_degraded(runtime: AIProviderRuntimeStatus | None) -> bool:
         return False
     if runtime_status != "ok":
         return True
+    if runtime.provider_state.circuit_state.lower() in {"open", "half_open"}:
+        return True
     return any(
         channel.health.lower() in _DEGRADED_RUNTIME_CHANNEL_HEALTH
         for channel in runtime.active_channels
@@ -139,6 +141,13 @@ def _runtime_error_excerpt(runtime: AIProviderRuntimeStatus | None) -> str:
     summaries: list[str] = []
     if runtime.status.lower() != "ok" and runtime.error:
         summaries.append(f"runtime status {runtime.status}: {runtime.error}")
+    provider_state = runtime.provider_state
+    if provider_state.circuit_state.lower() in {"open", "half_open"}:
+        summaries.append(
+            "provider circuit "
+            f"{provider_state.circuit_state}; "
+            f"reason {provider_state.last_reason or 'n/a'}"
+        )
     for channel in runtime.active_channels:
         if not (
             channel.health.lower() in _DEGRADED_RUNTIME_CHANNEL_HEALTH

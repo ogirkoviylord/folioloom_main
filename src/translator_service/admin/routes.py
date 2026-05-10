@@ -50,6 +50,7 @@ from translator_service.admin.provider_health import (
 )
 from translator_service.admin.provider_probe import validate_ai_provider_key
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
+from translator_service.admin.provider_runtime import AIProviderRuntimeProviderState
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
 from translator_service.admin.quality import build_quality_run_summary
 from translator_service.admin.quality_runner import QualityRunResult, write_quality_run
@@ -1476,6 +1477,9 @@ def _ai_provider_runtime_payload(
             "last_reported_at": None,
             "reload_interval_seconds": None,
             "active_channels": [],
+            "provider_state": _ai_provider_runtime_provider_state_payload(
+                AIProviderRuntimeProviderState()
+            ),
             "error": None,
             "reload_pending": bool(reload_state and reload_state.pending),
             "reload_requested_by": (
@@ -1505,6 +1509,9 @@ def _ai_provider_runtime_payload(
             _ai_provider_runtime_channel_payload(channel)
             for channel in status.active_channels
         ],
+        "provider_state": _ai_provider_runtime_provider_state_payload(
+            status.provider_state
+        ),
         "error": _safe_runtime_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
         "reload_requested_by": (
@@ -1518,6 +1525,22 @@ def _ai_provider_runtime_payload(
             if reload_state is not None and reload_state.consumed_at is not None
             else None
         ),
+    }
+
+
+def _ai_provider_runtime_provider_state_payload(state):
+    return {
+        "adaptive_enabled": state.adaptive_enabled,
+        "current_limit": state.current_limit,
+        "max_capacity": state.max_capacity,
+        "active_requests": state.active_requests,
+        "available_slots": state.available_slots,
+        "circuit_state": _safe_runtime_text(state.circuit_state),
+        "circuit_open_remaining_seconds": state.circuit_open_remaining_seconds,
+        "last_reason": _safe_runtime_text(state.last_reason),
+        "total_ramp_ups": state.total_ramp_ups,
+        "total_decreases": state.total_decreases,
+        "total_circuit_opened": state.total_circuit_opened,
     }
 
 
