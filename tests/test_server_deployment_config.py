@@ -64,6 +64,8 @@ class ServerDeploymentConfigTest(unittest.TestCase):
             "SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB=1",
             "SCHEDULER_PRIORITY_AGING_SECONDS=1800",
             "TRANSLATION_MAX_PARALLEL_UNITS=2",
+            "DEEPSEEK_CHANNEL_COOLDOWN_SECONDS=30",
+            "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS=300",
             "POSTGRES_PASSWORD=change-me",
             "POSTGRES_DSN=postgresql://translator:change-me@postgres:5432/translator",
             "DATABASE_URL=postgresql://translator:change-me@postgres:5432/translator",

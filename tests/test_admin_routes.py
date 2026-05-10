@@ -1674,6 +1674,25 @@ class AdminRoutesTest(unittest.TestCase):
                             label="stable",
                             weight=3,
                             max_parallel_requests=2,
+                            active_requests=1,
+                            health="cooling_down",
+                            cooldown_remaining_seconds=9.0,
+                            total_started_requests=11,
+                            total_successful_requests=7,
+                            total_temporary_failures=3,
+                            total_permanent_failures=1,
+                            total_rate_limit_failures=2,
+                            total_unavailable_failures=1,
+                            total_timeout_failures=4,
+                            total_auth_failures=1,
+                            total_billing_failures=0,
+                            average_latency_ms=123.45,
+                            last_latency_ms=150.0,
+                            error_kind="rate_limit",
+                            last_error_excerpt=(
+                                "HTTP 429 Bearer sk-runtime-secret "
+                                "secret_id=deepseek.api_keys.key-1"
+                            ),
                         ),
                     ),
                     error=None,
@@ -1700,10 +1719,20 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("stable", page.text)
             self.assertIn("weight 3", page.text)
             self.assertIn("parallel 2", page.text)
+            self.assertIn("cooling_down", page.text)
+            self.assertIn("active 1/2", page.text)
+            self.assertIn("cooldown 9s", page.text)
+            self.assertIn("latency 150.0ms", page.text)
+            self.assertIn("started/ok/temp/perm 11/7/3/1", page.text)
+            self.assertIn("429/503/timeout/auth/billing 2/1/4/1/0", page.text)
+            self.assertIn("rate_limit", page.text)
+            self.assertIn("[redacted]", page.text)
             self.assertIn(
                 'action="/admin/ai-providers/deepseek/runtime/reload"',
                 page.text,
             )
+            self.assertNotIn("sk-runtime-secret", page.text)
+            self.assertNotIn("Bearer", page.text)
             self.assertNotIn(".api_keys.", page.text)
             reload_response = client.post(
                 "/admin/ai-providers/deepseek/runtime/reload",
@@ -1726,9 +1755,33 @@ class AdminRoutesTest(unittest.TestCase):
             payload = runtime_api.json()
             self.assertTrue(payload["providers"][0]["reload_pending"])
             self.assertEqual(payload["providers"][0]["freshness"], "fresh")
+            channel_payload = payload["providers"][0]["active_channels"][0]
+            self.assertEqual(channel_payload["health"], "cooling_down")
+            self.assertEqual(channel_payload["active_requests"], 1)
+            self.assertEqual(channel_payload["cooldown_remaining_seconds"], 9.0)
+            self.assertEqual(channel_payload["total_started_requests"], 11)
+            self.assertEqual(channel_payload["total_successful_requests"], 7)
+            self.assertEqual(channel_payload["total_temporary_failures"], 3)
+            self.assertEqual(channel_payload["total_permanent_failures"], 1)
+            self.assertEqual(channel_payload["total_rate_limit_failures"], 2)
+            self.assertEqual(channel_payload["total_unavailable_failures"], 1)
+            self.assertEqual(channel_payload["total_timeout_failures"], 4)
+            self.assertEqual(channel_payload["total_auth_failures"], 1)
+            self.assertEqual(channel_payload["total_billing_failures"], 0)
+            self.assertEqual(channel_payload["average_latency_ms"], 123.45)
+            self.assertEqual(channel_payload["last_latency_ms"], 150.0)
+            self.assertEqual(channel_payload["error_kind"], "rate_limit")
+            self.assertIn("[redacted]", channel_payload["last_error_excerpt"])
+            serialized_payload = json.dumps(payload, sort_keys=True)
+            self.assertNotIn("sk-runtime-secret", serialized_payload)
+            self.assertNotIn("Bearer", serialized_payload)
+            self.assertNotIn(".api_keys.", serialized_payload)
             self.assertIn("DeepSeek runtime", live_page.text)
             self.assertIn("admin_store", live_page.text)
             self.assertIn("Reload pending", live_page.text)
+            self.assertIn("Degraded channels", live_page.text)
+            self.assertIn("429 count", live_page.text)
+            self.assertIn("Timeout count", live_page.text)
             with SQLiteAdminAuditLog(db_path) as audit:
                 event = next(
                     event

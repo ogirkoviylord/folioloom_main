@@ -65,6 +65,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/specs/2026-05-08-api-channel-reliability-design.md`
 - `docs/superpowers/specs/2026-05-08-user-activity-security-logging-design.md`
 - `docs/restart/upload-safety-and-retention.md`
+- `docs/superpowers/plans/2026-05-10-smart-concurrency-phase-1.md` -
+  implemented smart scheduler fairness/capacity plan for beta-safe worker
+  concurrency.
+- `docs/superpowers/plans/2026-05-10-provider-channel-observability-phase-2.md`
+  - implemented provider-channel observability and key scoring plan.
 
 ## Paid-Beta Draft Docs
 

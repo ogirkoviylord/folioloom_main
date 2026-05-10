@@ -12,6 +12,10 @@ from translator_service.admin.integrations import (
     IntegrationSummary,
 )
 from translator_service.admin.provider_health import build_provider_health
+from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeChannel,
+    AIProviderRuntimeStatus,
+)
 
 
 class AdminProviderHealthTest(unittest.TestCase):
@@ -27,6 +31,27 @@ class AdminProviderHealthTest(unittest.TestCase):
         self.assertEqual(health[0].status, "missing_keys")
         self.assertEqual(health[0].last_validation_status, "not checked")
         self.assertEqual(health[0].last_error_excerpt, "n/a")
+        self.assertFalse(health[0].can_test)
+
+    def test_missing_runtime_keys_keep_provider_missing_instead_of_degraded(self):
+        health = build_provider_health(
+            (_provider(),),
+            {},
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="missing_keys",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=datetime(2026, 5, 9, tzinfo=UTC),
+                    active_channels=(),
+                    error="No active DeepSeek admin provider keys are set",
+                ),
+            ),
+        )
+
+        self.assertEqual(health[0].status, "missing_keys")
+        self.assertEqual(health[0].last_validation_status, "not checked")
         self.assertFalse(health[0].can_test)
 
     def test_active_keys_make_provider_healthy(self):
@@ -123,6 +148,45 @@ class AdminProviderHealthTest(unittest.TestCase):
         self.assertNotIn("deepseek.api_keys.key-1", serialized)
         self.assertNotIn("secret_id", serialized)
         self.assertNotIn("masked_value", serialized)
+
+    def test_runtime_cooldown_degrades_provider_without_exposing_secret_text(self):
+        health = build_provider_health(
+            (_provider(),),
+            {"deepseek": (_key(),)},
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="bot_runtime",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=datetime(2026, 5, 9, tzinfo=UTC),
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=2,
+                            health="cooling_down",
+                            cooldown_remaining_seconds=12.0,
+                            error_kind="rate_limit",
+                            last_error_excerpt=(
+                                "HTTP 429 for Bearer sk-runtime-secret "
+                                "secret_id=deepseek.api_keys.key-1"
+                            ),
+                        ),
+                    ),
+                    error=None,
+                ),
+            ),
+        )
+
+        self.assertEqual(health[0].status, "degraded")
+        self.assertEqual(health[0].last_validation_status, "runtime degraded")
+        self.assertIn("main", health[0].last_error_excerpt)
+        self.assertIn("rate_limit", health[0].last_error_excerpt)
+        self.assertIn("[redacted]", health[0].last_error_excerpt)
+        self.assertNotIn("sk-runtime-secret", health[0].last_error_excerpt)
+        self.assertNotIn("Bearer", health[0].last_error_excerpt)
+        self.assertNotIn(".api_keys.", health[0].last_error_excerpt)
 
 
 def _provider(

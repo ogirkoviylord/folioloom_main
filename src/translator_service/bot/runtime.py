@@ -308,6 +308,9 @@ class ReloadableDeepSeekTranslator:
         self._signature: tuple[object, ...] | None = None
         self._translator: TextTranslator | None = None
         self._channels: list[DeepSeekChannelConfig] = []
+        self._runtime_source = "admin_store"
+        self._runtime_status = "missing_keys"
+        self._runtime_error: str | None = None
         self._next_reload_at = 0.0
         with self._lock:
             self._reload_locked(now=self._clock())
@@ -327,12 +330,23 @@ class ReloadableDeepSeekTranslator:
                 )
             translator = self._translator
             channels = list(self._channels)
+            source = self._runtime_source
+            status = self._runtime_status
+            error = self._runtime_error
         if translator is None:
             return []
         snapshot = getattr(translator, "snapshot", None)
         if snapshot is None:
             return channels
-        return snapshot()
+        snapshots = snapshot()
+        self._record_runtime_snapshot(
+            source=source,
+            status=status,
+            channels=channels,
+            snapshots=snapshots,
+            error=error,
+        )
+        return snapshots
 
     def translate(
         self,
@@ -342,11 +356,14 @@ class ReloadableDeepSeekTranslator:
         target_language: str,
     ) -> str:
         translator = self._current_translator()
-        translated = translator.translate(
-            text=text,
-            source_language=source_language,
-            target_language=target_language,
-        )
+        try:
+            translated = translator.translate(
+                text=text,
+                source_language=source_language,
+                target_language=target_language,
+            )
+        finally:
+            self._record_current_runtime_snapshot(translator)
         self._last_usage.value = getattr(translator, "last_usage", None)
         return translated
 
@@ -362,6 +379,44 @@ class ReloadableDeepSeekTranslator:
             if self._translator is None:
                 raise RuntimeError("No active DeepSeek admin provider keys are set")
             return self._translator
+
+    def _record_current_runtime_snapshot(self, translator: TextTranslator) -> None:
+        snapshot = getattr(translator, "snapshot", None)
+        if snapshot is None:
+            return
+        with self._lock:
+            source = self._runtime_source
+            status = self._runtime_status
+            channels = list(self._channels)
+            error = self._runtime_error
+        self._record_runtime_snapshot(
+            source=source,
+            status=status,
+            channels=channels,
+            snapshots=snapshot(),
+            error=error,
+        )
+
+    def _record_runtime_snapshot(
+        self,
+        *,
+        source: str,
+        status: str,
+        channels: list[DeepSeekChannelConfig],
+        snapshots,
+        error: str | None,
+    ) -> None:
+        runtime_channels = tuple(
+            _runtime_channel_from_snapshot(snapshot) for snapshot in snapshots
+        )
+        _record_deepseek_runtime_status(
+            self._settings,
+            source=source,
+            status=_deepseek_runtime_status_from_channels(status, runtime_channels),
+            channels=channels,
+            error=error,
+            runtime_channels=runtime_channels,
+        )
 
     def _reload_locked(
         self,
@@ -389,6 +444,9 @@ class ReloadableDeepSeekTranslator:
             source = "admin_store+env"
         elif env_channels:
             source = "env_fallback"
+        self._runtime_source = source
+        self._runtime_status = status
+        self._runtime_error = error
         signature = (source, tuple(runtime_keys), tuple(channels))
         if reload_requested or signature != self._signature:
             self._translator = (
@@ -416,16 +474,6 @@ def _deepseek_translator_from_channels(
     timeout_seconds = _env_float("DEEPSEEK_TIMEOUT_SECONDS", 120.0)
     retry_attempts = _env_int("DEEPSEEK_RETRY_ATTEMPTS", 3)
     retry_delay_seconds = _env_float("DEEPSEEK_RETRY_DELAY_SECONDS", 1.0)
-
-    if len(channels) == 1:
-        return DeepSeekClient(
-            api_key=channels[0].api_key,
-            model=settings.deepseek_model,
-            base_url=base_url,
-            timeout_seconds=timeout_seconds,
-            retry_attempts=retry_attempts,
-            retry_delay_seconds=retry_delay_seconds,
-        )
 
     cooldown_seconds = _env_float("DEEPSEEK_CHANNEL_COOLDOWN_SECONDS", 30.0)
     max_cooldown_seconds = _env_float(
@@ -532,6 +580,7 @@ def _record_deepseek_runtime_status(
     status: str,
     channels: list[DeepSeekChannelConfig],
     error: str | None,
+    runtime_channels: tuple[AIProviderRuntimeChannel, ...] | None = None,
 ) -> None:
     with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as store:
         store.record_status(
@@ -539,7 +588,9 @@ def _record_deepseek_runtime_status(
             source=source,
             status=status,
             reload_interval_seconds=settings.admin_provider_runtime_reload_seconds,
-            active_channels=tuple(
+            active_channels=runtime_channels
+            if runtime_channels is not None
+            else tuple(
                 AIProviderRuntimeChannel(
                     label=channel.label or "unnamed",
                     weight=channel.weight,
@@ -549,6 +600,48 @@ def _record_deepseek_runtime_status(
             ),
             error=error,
         )
+
+
+def _runtime_channel_from_snapshot(snapshot) -> AIProviderRuntimeChannel:
+    return AIProviderRuntimeChannel(
+        label=snapshot.label,
+        weight=snapshot.weight,
+        max_parallel_requests=snapshot.max_parallel_requests,
+        active_requests=snapshot.active_requests,
+        health=snapshot.health,
+        cooldown_remaining_seconds=snapshot.cooldown_remaining_seconds,
+        total_started_requests=snapshot.total_started_requests,
+        total_successful_requests=snapshot.total_successful_requests,
+        total_temporary_failures=snapshot.total_temporary_failures,
+        total_permanent_failures=snapshot.total_permanent_failures,
+        total_rate_limit_failures=snapshot.total_rate_limit_failures,
+        total_unavailable_failures=snapshot.total_unavailable_failures,
+        total_timeout_failures=snapshot.total_timeout_failures,
+        total_malformed_response_failures=(
+            snapshot.total_malformed_response_failures
+        ),
+        total_auth_failures=snapshot.total_auth_failures,
+        total_billing_failures=snapshot.total_billing_failures,
+        total_other_provider_failures=snapshot.total_other_provider_failures,
+        average_latency_ms=snapshot.average_latency_ms,
+        last_latency_ms=snapshot.last_latency_ms,
+        error_kind=snapshot.error_kind,
+        last_error_excerpt=snapshot.last_error,
+    )
+
+
+def _deepseek_runtime_status_from_channels(
+    status: str,
+    runtime_channels: tuple[AIProviderRuntimeChannel, ...],
+) -> str:
+    if status == "missing_keys":
+        return status
+    if any(
+        channel.health in {"cooling_down", "degraded"}
+        for channel in runtime_channels
+    ):
+        return "degraded"
+    return "ok"
 
 
 def _deepseek_channel_weights_from_env(channel_count: int) -> list[int]:
