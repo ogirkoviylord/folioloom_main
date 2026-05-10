@@ -14,10 +14,10 @@ from translator_service.beta_safety import (
     JobCostEstimate,
 )
 from translator_service.beta_safety_store import (
-    ConfiguredBetaSafetyGuard,
     RESERVATION_ACTIVE,
     RESERVATION_CONSUMED,
     RESERVATION_RELEASED,
+    ConfiguredBetaSafetyGuard,
     SQLiteBetaSafetyStore,
 )
 
@@ -439,6 +439,7 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
             rates_loader=load_rates,
             now_provider=lambda: now,
         )
+        self.addCleanup(guard.close)
 
         guard.can_start_new_work()
         guard.reserve_job(
@@ -478,6 +479,7 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
             rates_loader=lambda: BetaSafetyRates(),
             now_provider=lambda: now,
         )
+        self.addCleanup(guard.close)
         guard.reserve_job(
             job_id="job-a",
             user_id="user-1",

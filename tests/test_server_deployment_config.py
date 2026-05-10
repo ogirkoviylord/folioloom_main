@@ -92,6 +92,24 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         for line in required_lines:
             self.assertIn(line, content)
 
+    def test_env_server_example_documents_beta_safety_caps(self):
+        content = (ROOT / ".env.server.example").read_text(encoding="utf-8")
+
+        required_lines = [
+            "BETA_TRANSLATIONS_PAUSED=false",
+            "BETA_GLOBAL_DAILY_COST_CAP_USD=5.00",
+            "BETA_GLOBAL_MONTHLY_COST_CAP_USD=50.00",
+            "BETA_USER_DAILY_COST_CAP_USD=1.00",
+            "BETA_USER_MONTHLY_COST_CAP_USD=10.00",
+            "BETA_USER_DAILY_JOB_LIMIT=3",
+            "BETA_MAX_JOB_ESTIMATED_COST_USD=2.00",
+            "BETA_COST_INPUT_USD_PER_MILLION=0.28",
+            "BETA_COST_OUTPUT_USD_PER_MILLION=1.10",
+            "BETA_COST_WARNING_FRACTION=0.80",
+        ]
+        for line in required_lines:
+            self.assertIn(line, content)
+
     def test_server_operator_scripts_exist(self):
         deploy_script = ROOT / "scripts" / "deploy_server.sh"
         predeploy_script = ROOT / "scripts" / "predeploy_check.sh"

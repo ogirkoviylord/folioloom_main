@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import Callable
 
 from translator_service.beta_safety import (
     BETA_SAFETY_ALLOWED,
@@ -21,7 +21,6 @@ from translator_service.beta_safety import (
     decide_beta_safety,
     estimate_cost_usd,
 )
-
 
 RESERVATION_ACTIVE = "active"
 RESERVATION_RELEASED = "released"
@@ -306,7 +305,10 @@ class SQLiteBetaSafetyStore:
             return _decision(False, BETA_SAFETY_KILL_SWITCH)
 
         summary = self.get_budget_summary(now=now)
-        if _cap_reached(summary.global_daily_total_usd, limits.global_daily_cost_cap_usd):
+        if _cap_reached(
+            summary.global_daily_total_usd,
+            limits.global_daily_cost_cap_usd,
+        ):
             return _decision(False, BETA_SAFETY_GLOBAL_DAILY_CAP)
         if _cap_reached(
             summary.global_monthly_total_usd,
@@ -541,6 +543,15 @@ class ConfiguredBetaSafetyGuard:
         self._limits_loader = limits_loader
         self._rates_loader = rates_loader
         self._now_provider = now_provider
+
+    def close(self) -> None:
+        self._store.close()
+
+    def __enter__(self) -> ConfiguredBetaSafetyGuard:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def can_start_new_work(self) -> BetaSafetyDecision:
         return self._store.can_start_new_work(

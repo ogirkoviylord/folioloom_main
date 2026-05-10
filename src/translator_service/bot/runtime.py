@@ -7,16 +7,25 @@ import threading
 import time
 from dataclasses import dataclass
 
+from translator_service.admin.beta_safety_settings import (
+    beta_safety_rates_from_settings,
+    load_beta_safety_limits,
+)
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
     AIProviderRuntimeProviderState,
     SQLiteAIProviderRuntimeStore,
 )
+from translator_service.admin.settings import SQLiteAdminSettingsStore
 from translator_service.ai_provider_runtime import load_ai_provider_runtime_keys
 from translator_service.beta_access import (
     BetaAccessDenied,
     SQLiteBackedBetaAccessPolicy,
     load_beta_access_policy,
+)
+from translator_service.beta_safety_store import (
+    ConfiguredBetaSafetyGuard,
+    SQLiteBetaSafetyStore,
 )
 from translator_service.bot.messages import (
     build_back_to_menu_message,
@@ -152,6 +161,16 @@ class BotRuntimeConfig:
     user_action_lock_ttl_seconds: float = 900.0
     beta_allowlist_enabled: bool = False
     beta_allowlist_telegram_ids: tuple[int, ...] = ()
+    beta_translations_paused: bool = False
+    beta_global_daily_cost_cap_usd: float = 5.0
+    beta_global_monthly_cost_cap_usd: float = 50.0
+    beta_user_daily_cost_cap_usd: float = 1.0
+    beta_user_monthly_cost_cap_usd: float = 10.0
+    beta_user_daily_job_limit: int = 3
+    beta_max_job_estimated_cost_usd: float = 2.0
+    beta_cost_input_usd_per_million: float = 0.28
+    beta_cost_output_usd_per_million: float = 1.10
+    beta_cost_warning_fraction: float = 0.8
 
 
 class _CallbackSpamGuard:
@@ -238,6 +257,20 @@ def build_default_pricing_rules() -> PricingRules:
 
 def build_polling_started_message() -> str:
     return "Telegram bot polling started. Open Telegram and send /start."
+
+
+def build_beta_safety_guard(config: BotRuntimeConfig) -> ConfiguredBetaSafetyGuard:
+    beta_safety_store = SQLiteBetaSafetyStore(config.admin_db_path)
+
+    def load_limits():
+        with SQLiteAdminSettingsStore(config.admin_db_path) as settings_store:
+            return load_beta_safety_limits(settings_store, config)
+
+    return ConfiguredBetaSafetyGuard(
+        store=beta_safety_store,
+        limits_loader=load_limits,
+        rates_loader=lambda: beta_safety_rates_from_settings(config),
+    )
 
 
 def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService:
@@ -2904,6 +2937,16 @@ async def run_bot() -> None:
         beta_allowlist_telegram_ids=tuple(
             sorted(load_beta_access_policy(settings).allowed_telegram_ids)
         ),
+        beta_translations_paused=settings.beta_translations_paused,
+        beta_global_daily_cost_cap_usd=settings.beta_global_daily_cost_cap_usd,
+        beta_global_monthly_cost_cap_usd=settings.beta_global_monthly_cost_cap_usd,
+        beta_user_daily_cost_cap_usd=settings.beta_user_daily_cost_cap_usd,
+        beta_user_monthly_cost_cap_usd=settings.beta_user_monthly_cost_cap_usd,
+        beta_user_daily_job_limit=settings.beta_user_daily_job_limit,
+        beta_max_job_estimated_cost_usd=settings.beta_max_job_estimated_cost_usd,
+        beta_cost_input_usd_per_million=settings.beta_cost_input_usd_per_million,
+        beta_cost_output_usd_per_million=settings.beta_cost_output_usd_per_million,
+        beta_cost_warning_fraction=settings.beta_cost_warning_fraction,
     )
     service = build_translation_service(config)
     translator = build_deepseek_translator(settings)
