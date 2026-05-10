@@ -139,6 +139,11 @@ keys added in the admin UI are additive with `DEEPSEEK_API_KEY` /
 `DEEPSEEK_API_KEYS`: adding an admin key does not disable env keys. The
 SSH-tunneled `/admin/ai-providers` page can show and refresh the safe DeepSeek
 account balance snapshot without exposing real keys.
+Admin -> AI Providers -> DeepSeek Keys is the operator surface for key rotation
+and capacity changes. Add or rotate a key there, test it, then request DeepSeek
+runtime reload so bot and worker processes pick up the new key pool. Env keys
+remain read-only fallbacks; admin-managed keys are stored encrypted and only
+masked values are shown.
 
 Worker parallelism is beta-safe and capacity-bound. The server example uses
 `TRANSLATION_MAX_PARALLEL_UNITS=2`, but concurrency is layered:

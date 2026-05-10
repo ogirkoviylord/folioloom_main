@@ -1133,7 +1133,7 @@ Expected: commit succeeds.
 - Modify `docs/deployment/admin-vps-runbook.md`
 - Modify `DOCUMENT_INDEX.md`
 
-- [ ] **Step 1: Update README key management section**
+- [x] **Step 1: Update README key management section**
 
 In both `README.md` and `README.project.md`, extend the existing DeepSeek admin
 key paragraph with:
@@ -1146,7 +1146,7 @@ remain read-only fallbacks; admin-managed keys are stored encrypted and only
 masked values are shown.
 ```
 
-- [ ] **Step 2: Update VPS runbook**
+- [x] **Step 2: Update VPS runbook**
 
 In `docs/deployment/admin-vps-runbook.md`, add a `DeepSeek key operations`
 subsection near the existing DeepSeek balance section:
@@ -1169,7 +1169,7 @@ admin-managed keys encrypted and renders only masked values. Env keys remain
 read-only and must be changed on the server.
 ```
 
-- [ ] **Step 3: Update document index**
+- [x] **Step 3: Update document index**
 
 In `DOCUMENT_INDEX.md`, add:
 
@@ -1181,7 +1181,7 @@ In `DOCUMENT_INDEX.md`, add:
   implementation plan for the dedicated DeepSeek Keys admin page.
 ```
 
-- [ ] **Step 4: Run docs sanity**
+- [x] **Step 4: Run docs sanity**
 
 Run:
 
@@ -1192,7 +1192,7 @@ rg -n "DeepSeek Keys|rotate|runtime reload|masked values|read-only" README.md RE
 
 Expected: no whitespace errors; `rg` shows the new docs references.
 
-- [ ] **Step 5: Commit docs**
+- [x] **Step 5: Commit docs**
 
 Run:
 
