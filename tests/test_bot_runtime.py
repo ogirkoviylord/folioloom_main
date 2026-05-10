@@ -8,10 +8,14 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
+from translator_service.admin.beta_safety_settings import (
+    BETA_TRANSLATIONS_PAUSED_SETTING,
+)
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.admin.settings import SQLiteAdminSettingsStore
 from translator_service.beta_access import BETA_ALLOWLIST_SETTING
+from translator_service.beta_safety import BETA_SAFETY_KILL_SWITCH
 from translator_service.bot.runtime import (
     HEARTBEAT_PATTERNS,
     BotRuntimeConfig,
@@ -43,6 +47,7 @@ from translator_service.bot.runtime import (
     _settings_keyboard,
     _should_schedule_progress_edit,
     _UserActionInFlightGuard,
+    build_beta_safety_guard,
     build_deepseek_translator,
     build_default_pricing_rules,
     build_translation_service,
@@ -551,6 +556,28 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 events = activity_store.list_events(actor_id="telegram:42")
 
             self.assertIn("document.estimated", [event.event_type for event in events])
+
+    def test_build_beta_safety_guard_uses_admin_db_path_and_live_settings(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            guard = build_beta_safety_guard(
+                BotRuntimeConfig(admin_db_path=str(admin_db_path))
+            )
+            self.addCleanup(guard.close)
+
+            initial = guard.can_start_new_work()
+            self.assertTrue(initial.allowed)
+
+            with SQLiteAdminSettingsStore(admin_db_path) as store:
+                store.set_value(
+                    BETA_TRANSLATIONS_PAUSED_SETTING,
+                    "true",
+                    changed_by="owner",
+                )
+
+            paused = guard.can_start_new_work()
+            self.assertFalse(paused.allowed)
+            self.assertEqual(paused.reason_code, BETA_SAFETY_KILL_SWITCH)
 
     def test_build_translation_service_wires_persistent_txt_confirmation(self):
         with TemporaryDirectory() as temp_dir:

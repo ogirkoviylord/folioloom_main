@@ -165,6 +165,80 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.admin_secret_master_key, "secret-master-key")
         self.assertTrue(settings.admin_cookie_secure)
 
+    def test_beta_safety_defaults_are_safe_for_closed_beta(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "BETA_TRANSLATIONS_PAUSED": "",
+                "BETA_GLOBAL_DAILY_COST_CAP_USD": "",
+                "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "",
+                "BETA_USER_DAILY_COST_CAP_USD": "",
+                "BETA_USER_MONTHLY_COST_CAP_USD": "",
+                "BETA_USER_DAILY_JOB_LIMIT": "",
+                "BETA_MAX_JOB_ESTIMATED_COST_USD": "",
+                "BETA_COST_INPUT_USD_PER_MILLION": "",
+                "BETA_COST_OUTPUT_USD_PER_MILLION": "",
+                "BETA_COST_WARNING_FRACTION": "",
+            },
+        ):
+            settings = Settings()
+
+        self.assertFalse(settings.beta_translations_paused)
+        self.assertEqual(settings.beta_global_daily_cost_cap_usd, 5.0)
+        self.assertEqual(settings.beta_global_monthly_cost_cap_usd, 50.0)
+        self.assertEqual(settings.beta_user_daily_cost_cap_usd, 1.0)
+        self.assertEqual(settings.beta_user_monthly_cost_cap_usd, 10.0)
+        self.assertEqual(settings.beta_user_daily_job_limit, 3)
+        self.assertEqual(settings.beta_max_job_estimated_cost_usd, 2.0)
+        self.assertEqual(settings.beta_cost_input_usd_per_million, 0.28)
+        self.assertEqual(settings.beta_cost_output_usd_per_million, 1.10)
+        self.assertEqual(settings.beta_cost_warning_fraction, 0.8)
+
+    def test_beta_safety_settings_can_be_configured_from_environment(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "BETA_TRANSLATIONS_PAUSED": "true",
+                "BETA_GLOBAL_DAILY_COST_CAP_USD": "7.5",
+                "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "75",
+                "BETA_USER_DAILY_COST_CAP_USD": "1.5",
+                "BETA_USER_MONTHLY_COST_CAP_USD": "15",
+                "BETA_USER_DAILY_JOB_LIMIT": "4",
+                "BETA_MAX_JOB_ESTIMATED_COST_USD": "3.5",
+                "BETA_COST_INPUT_USD_PER_MILLION": "0.30",
+                "BETA_COST_OUTPUT_USD_PER_MILLION": "1.20",
+                "BETA_COST_WARNING_FRACTION": "0.65",
+            },
+        ):
+            settings = Settings()
+
+        self.assertTrue(settings.beta_translations_paused)
+        self.assertEqual(settings.beta_global_daily_cost_cap_usd, 7.5)
+        self.assertEqual(settings.beta_global_monthly_cost_cap_usd, 75.0)
+        self.assertEqual(settings.beta_user_daily_cost_cap_usd, 1.5)
+        self.assertEqual(settings.beta_user_monthly_cost_cap_usd, 15.0)
+        self.assertEqual(settings.beta_user_daily_job_limit, 4)
+        self.assertEqual(settings.beta_max_job_estimated_cost_usd, 3.5)
+        self.assertEqual(settings.beta_cost_input_usd_per_million, 0.30)
+        self.assertEqual(settings.beta_cost_output_usd_per_million, 1.20)
+        self.assertEqual(settings.beta_cost_warning_fraction, 0.65)
+
+    def test_beta_safety_settings_are_clamped_to_safe_ranges(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "BETA_USER_DAILY_JOB_LIMIT": "-1",
+                "BETA_COST_WARNING_FRACTION": "1.5",
+            },
+        ):
+            high_warning = Settings()
+        with patch.dict("os.environ", {"BETA_COST_WARNING_FRACTION": "-0.2"}):
+            low_warning = Settings()
+
+        self.assertEqual(high_warning.beta_user_daily_job_limit, 0)
+        self.assertEqual(high_warning.beta_cost_warning_fraction, 1.0)
+        self.assertEqual(low_warning.beta_cost_warning_fraction, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -667,7 +667,7 @@ Expected: commit succeeds.
 - Modify `tests/test_config.py`
 - Modify `tests/test_server_deployment_config.py`
 
-- [ ] **Step 1: Add failing config tests**
+- [x] **Step 1: Add failing config tests**
 
 Add to `tests/test_config.py`:
 
@@ -718,7 +718,7 @@ def test_env_server_example_documents_beta_safety_caps():
     assert "BETA_MAX_JOB_ESTIMATED_COST_USD=2.00" in example
 ```
 
-- [ ] **Step 2: Run config tests and verify failure**
+- [x] **Step 2: Run config tests and verify failure**
 
 Run:
 
@@ -728,7 +728,7 @@ PYTHONPATH=src python3 -m pytest tests/test_config.py tests/test_server_deployme
 
 Expected: FAIL because settings and env defaults do not exist.
 
-- [ ] **Step 3: Add settings and admin setting definitions**
+- [x] **Step 3: Add settings and admin setting definitions**
 
 Add fields to settings dataclass in `src/translator_service/config.py` using the defaults above.
 
@@ -869,7 +869,7 @@ def load_beta_safety_limits(settings_store, defaults) -> BetaSafetyLimits:
 
 Use env-only `BetaSafetyRates` from settings.
 
-- [ ] **Step 4: Wire runtime store construction**
+- [x] **Step 4: Wire runtime store construction**
 
 In `src/translator_service/bot/runtime.py`, construct `SQLiteBetaSafetyStore` beside the existing admin/runtime SQLite path. Inject it into:
 
@@ -878,7 +878,7 @@ In `src/translator_service/bot/runtime.py`, construct `SQLiteBetaSafetyStore` be
 
 Keep guard optional for tests and local development paths that do not configure persistent jobs.
 
-- [ ] **Step 5: Run config/deployment tests**
+- [x] **Step 5: Run config/deployment tests**
 
 Run:
 
@@ -888,7 +888,7 @@ PYTHONPATH=src python3 -m pytest tests/test_config.py tests/test_server_deployme
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit config/runtime wiring**
+- [x] **Step 6: Commit config/runtime wiring**
 
 Run:
 

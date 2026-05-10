@@ -10,6 +10,26 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_float(name: str, default: float, *, minimum: float | None = None) -> float:
+    raw = os.getenv(name)
+    value = default if raw is None or not raw.strip() else float(raw)
+    if minimum is not None:
+        value = max(minimum, value)
+    return value
+
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    raw = os.getenv(name)
+    value = default if raw is None or not raw.strip() else int(raw)
+    if minimum is not None:
+        value = max(minimum, value)
+    return value
+
+
+def _clamp(value: float, *, minimum: float, maximum: float) -> float:
+    return min(maximum, max(minimum, value))
+
+
 def _env_telegram_ids(name: str) -> tuple[int, ...]:
     raw = os.getenv(name, "")
     ids: list[int] = []
@@ -38,6 +58,72 @@ class Settings:
     )
     beta_allowlist_telegram_ids: tuple[int, ...] = field(
         default_factory=lambda: _env_telegram_ids("BETA_ALLOWLIST_TELEGRAM_IDS")
+    )
+    beta_translations_paused: bool = field(
+        default_factory=lambda: _env_bool("BETA_TRANSLATIONS_PAUSED", False)
+    )
+    beta_global_daily_cost_cap_usd: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_GLOBAL_DAILY_COST_CAP_USD",
+            5.0,
+            minimum=0.0,
+        )
+    )
+    beta_global_monthly_cost_cap_usd: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_GLOBAL_MONTHLY_COST_CAP_USD",
+            50.0,
+            minimum=0.0,
+        )
+    )
+    beta_user_daily_cost_cap_usd: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_USER_DAILY_COST_CAP_USD",
+            1.0,
+            minimum=0.0,
+        )
+    )
+    beta_user_monthly_cost_cap_usd: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_USER_MONTHLY_COST_CAP_USD",
+            10.0,
+            minimum=0.0,
+        )
+    )
+    beta_user_daily_job_limit: int = field(
+        default_factory=lambda: _env_int(
+            "BETA_USER_DAILY_JOB_LIMIT",
+            3,
+            minimum=0,
+        )
+    )
+    beta_max_job_estimated_cost_usd: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_MAX_JOB_ESTIMATED_COST_USD",
+            2.0,
+            minimum=0.0,
+        )
+    )
+    beta_cost_input_usd_per_million: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_COST_INPUT_USD_PER_MILLION",
+            0.28,
+            minimum=0.0,
+        )
+    )
+    beta_cost_output_usd_per_million: float = field(
+        default_factory=lambda: _env_float(
+            "BETA_COST_OUTPUT_USD_PER_MILLION",
+            1.10,
+            minimum=0.0,
+        )
+    )
+    beta_cost_warning_fraction: float = field(
+        default_factory=lambda: _clamp(
+            _env_float("BETA_COST_WARNING_FRACTION", 0.8),
+            minimum=0.0,
+            maximum=1.0,
+        )
     )
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
