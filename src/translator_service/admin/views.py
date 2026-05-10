@@ -591,6 +591,13 @@ def _ai_provider_card(
         csrf_token=csrf_token,
         active_key_count=testable_key_count,
     )
+    manage_keys_link = ""
+    if summary.integration_id == "deepseek":
+        manage_keys_link = """
+      <a class="secondary-action" href="/admin/ai-providers/deepseek/keys">
+        Manage DeepSeek keys
+      </a>
+    """
     return f"""
     <article class="integration-card wide-card">
       <div>
@@ -603,6 +610,7 @@ def _ai_provider_card(
       {runtime_panel}
       {balance_panel}
       {test_all_form}
+      {manage_keys_link}
       <div class="key-table">{rows}</div>
       {_ai_provider_key_add_form(summary.integration_id, csrf_token)}
     </article>

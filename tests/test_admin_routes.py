@@ -892,6 +892,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Test key", page.text)
         self.assertIn("Add key", page.text)
 
+    def test_ai_providers_overview_links_to_deepseek_key_management(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/ai-providers")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/admin/ai-providers/deepseek/keys"', response.text)
+        self.assertIn("Manage DeepSeek keys", response.text)
+
     def test_env_bootstrap_secrets_are_visible_without_raw_secret_values(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
@@ -1620,6 +1629,45 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(save.json()["secret"]["masked_value"], "sk-****alue")
             self.assertNotIn("sk-live-secret-value", str(save.json()))
 
+    def test_deepseek_keys_page_shows_masked_values_without_raw_keys(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            response = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "label": "main",
+                    "value": "sk-raw-secret-value",
+                    "weight": "2",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+
+            updated = client.get("/admin/ai-providers/deepseek/keys")
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(
+                response.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
+            self.assertIn("<strong>main</strong>", updated.text)
+            self.assertIn("sk-****alue", updated.text)
+            self.assertNotIn("sk-raw-secret-value", updated.text)
+            self.assertNotIn(".api_keys.", updated.text)
+
     def test_owner_can_add_and_remove_ai_provider_key_rows(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
@@ -1683,6 +1731,10 @@ class AdminRoutesTest(unittest.TestCase):
             )
 
             self.assertEqual(remove.status_code, 303)
+            self.assertEqual(
+                remove.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             after_remove = client.get("/admin/ai-providers")
             self.assertNotIn("<strong>main</strong>", after_remove.text)
             self.assertIn("<strong>backup</strong>", after_remove.text)
@@ -1798,6 +1850,10 @@ class AdminRoutesTest(unittest.TestCase):
                 )
 
             self.assertEqual(tested.status_code, 303)
+            self.assertEqual(
+                tested.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             probe.assert_called_once_with(
                 "deepseek",
                 "sk-testable-secret",
@@ -1872,6 +1928,10 @@ class AdminRoutesTest(unittest.TestCase):
                 )
 
             self.assertEqual(tested.status_code, 303)
+            self.assertEqual(
+                tested.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             self.assertEqual(probe.call_count, 2)
             self.assertEqual(
                 [call.args[1] for call in probe.call_args_list],
@@ -1947,7 +2007,15 @@ class AdminRoutesTest(unittest.TestCase):
             )
 
             self.assertEqual(saved.status_code, 303)
+            self.assertEqual(
+                saved.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             self.assertEqual(disabled.status_code, 303)
+            self.assertEqual(
+                disabled.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             after_disable = client.get("/admin/ai-providers")
             self.assertIn("<strong>primary</strong>", after_disable.text)
             self.assertIn("0 active keys", after_disable.text)
@@ -1970,6 +2038,10 @@ class AdminRoutesTest(unittest.TestCase):
             )
 
             self.assertEqual(enabled.status_code, 303)
+            self.assertEqual(
+                enabled.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
             after_enable = client.get("/admin/ai-providers")
             self.assertIn("1 active keys", after_enable.text)
             self.assertIn("weight 4", after_enable.text)
