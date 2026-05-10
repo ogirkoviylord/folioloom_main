@@ -1769,6 +1769,51 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-validation-secret", after_rotate.text)
             self.assertNotIn("sk-validation-secret-rotated", after_rotate.text)
 
+    def test_deepseek_key_management_never_exposes_raw_secret_or_secret_id(self):
+        raw_secret = "sk-never-show-this-secret"
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "label": "main",
+                    "value": raw_secret,
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+            )
+
+            outputs = [
+                client.get("/admin/ai-providers").text,
+                client.get("/admin/ai-providers/deepseek/keys").text,
+                json.dumps(client.get("/admin/api/ai-providers").json()),
+                json.dumps(client.get("/admin/api/ai-providers/runtime").json()),
+            ]
+            with SQLiteAdminAuditLog(db_path) as audit:
+                outputs.extend(
+                    f"{event.action} {event.target_id} {event.metadata_json}"
+                    for event in audit.list_events(limit=20)
+                )
+
+            serialized = "\n".join(outputs)
+            self.assertNotIn(raw_secret, serialized)
+            self.assertNotIn("deepseek.api_keys.", serialized)
+            self.assertNotIn("source_text", serialized)
+            self.assertNotIn("translated_text", serialized)
+
     def test_owner_can_add_and_remove_ai_provider_key_rows(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
