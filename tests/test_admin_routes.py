@@ -26,6 +26,7 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeProviderState,
     SQLiteAIProviderRuntimeStore,
 )
+from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.api import create_app
 from translator_service.beta_access import (
@@ -900,6 +901,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('href="/admin/ai-providers/deepseek/keys"', response.text)
         self.assertIn("Manage DeepSeek keys", response.text)
+        self.assertNotIn("Last validation: not checked", response.text)
 
     def test_env_bootstrap_secrets_are_visible_without_raw_secret_values(self):
         with TemporaryDirectory() as temp_dir:
@@ -1706,6 +1708,66 @@ class AdminRoutesTest(unittest.TestCase):
             )
             self.assertTrue(deepseek["reload_pending"])
             self.assertIsNotNone(deepseek["reload_requested_at"])
+
+    def test_deepseek_keys_page_shows_safe_validation_status(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "label": "main",
+                    "value": "sk-validation-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+            )
+            updated = client.get("/admin/ai-providers/deepseek/keys")
+            key_id = re.search(r'name="key_id" value="([^"]+)"', updated.text)
+            self.assertIsNotNone(key_id)
+            with SQLiteAIProviderValidationStore(db_path) as validations:
+                validations.record_result(
+                    provider_id="deepseek",
+                    key_id=key_id.group(1),
+                    status="auth_failed",
+                    error="auth failed for sk-validation-secret",
+                    actor_id="owner",
+                )
+
+            response = client.get("/admin/ai-providers/deepseek/keys")
+
+            self.assertIn("auth_failed", response.text)
+            self.assertIn("auth failed for [redacted]", response.text)
+            self.assertNotIn("sk-validation-secret", response.text)
+
+            rotated = client.post(
+                "/admin/ai-providers/deepseek/keys/rotate",
+                data={
+                    "csrf_token": _csrf_token(response.text),
+                    "key_id": key_id.group(1),
+                    "value": "sk-validation-secret-rotated",
+                },
+                follow_redirects=False,
+            )
+            after_rotate = client.get("/admin/ai-providers/deepseek/keys")
+
+            self.assertEqual(rotated.status_code, 303)
+            self.assertIn("Last validation: not checked", after_rotate.text)
+            self.assertNotIn("auth_failed", after_rotate.text)
+            self.assertNotIn("sk-validation-secret", after_rotate.text)
+            self.assertNotIn("sk-validation-secret-rotated", after_rotate.text)
 
     def test_owner_can_add_and_remove_ai_provider_key_rows(self):
         with TemporaryDirectory() as temp_dir:

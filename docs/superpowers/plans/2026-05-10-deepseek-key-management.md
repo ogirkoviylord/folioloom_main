@@ -918,7 +918,7 @@ Expected: commit succeeds.
 - Modify `src/translator_service/admin/views.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add failing validation visibility test**
+- [x] **Step 1: Add failing validation visibility test**
 
 Add a focused test that seeds a failed validation result and verifies safe
 rendering:
@@ -967,7 +967,7 @@ def test_deepseek_keys_page_shows_safe_validation_status(self):
         self.assertNotIn("sk-validation-secret", response.text)
 ```
 
-- [ ] **Step 2: Extend key row rendering**
+- [x] **Step 2: Extend key row rendering**
 
 In `src/translator_service/admin/views.py`, include validation status already
 present on `ProviderHealthSummary` or available key validation summaries. If
@@ -988,7 +988,7 @@ class AIProviderKeyValidationView:
 If adding a dataclass would bloat `views.py`, place it in
 `src/translator_service/admin/provider_validation.py` and import it.
 
-- [ ] **Step 3: Keep redaction at source**
+- [x] **Step 3: Keep redaction at source**
 
 Use existing safe error helpers from provider validation/provider health. If no
 public helper exists, add a small local redaction in `provider_validation.py`,
@@ -1003,7 +1003,7 @@ def safe_validation_error(value: str | None) -> str:
 
 Use the existing regex redaction patterns in that module.
 
-- [ ] **Step 4: Run validation visibility test**
+- [x] **Step 4: Run validation visibility test**
 
 Run:
 
@@ -1015,7 +1015,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit validation visibility**
+- [x] **Step 5: Commit validation visibility**
 
 Run:
 

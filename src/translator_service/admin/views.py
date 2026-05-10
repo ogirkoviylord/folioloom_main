@@ -35,6 +35,7 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
+from translator_service.admin.provider_validation import AIProviderKeyValidationView
 from translator_service.admin.quality import (
     QualityLanguageGroup,
     QualityRunSummary,
@@ -500,6 +501,7 @@ def deepseek_keys_body(
     csrf_token: str,
     key_pools: dict[str, tuple[AIProviderKeySummary, ...]],
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+    key_validations: dict[str, AIProviderKeyValidationView] | None = None,
 ) -> str:
     keys = key_pools.get("deepseek", ())
     active_count = sum(
@@ -514,7 +516,16 @@ def deepseek_keys_body(
     )
     env_count = sum(1 for key in keys if is_env_deepseek_key(key))
     reload_banner = _deepseek_reload_banner(runtime_reload_states)
-    rows = "\n".join(_ai_provider_key_row(key, csrf_token) for key in keys)
+    validations = key_validations or {}
+    rows = "\n".join(
+        _ai_provider_key_row(
+            key,
+            csrf_token,
+            validation=validations.get(key.key_id),
+            show_validation=True,
+        )
+        for key in keys
+    )
     if not rows:
         rows = '<p class="empty-state">No DeepSeek keys are configured.</p>'
     return f"""
@@ -1001,7 +1012,13 @@ def _provider_health_panel(health: ProviderHealthSummary | None) -> str:
     """
 
 
-def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
+def _ai_provider_key_row(
+    key: AIProviderKeySummary,
+    csrf_token: str,
+    *,
+    validation: AIProviderKeyValidationView | None = None,
+    show_validation: bool = False,
+) -> str:
     if is_env_deepseek_key(key):
         return f"""
     <div class="key-row">
@@ -1024,12 +1041,16 @@ def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
     )
     toggle_label = "Disable" if key.enabled and not key.disabled else "Enable"
     enabled_status = "enabled" if key.enabled and not key.disabled else "disabled"
+    validation_html = (
+        _ai_provider_key_validation(validation) if show_validation else ""
+    )
     return f"""
     <div class="key-row">
       <div>
         <strong>{escape(key.label)}</strong>
         <code>{escape(key.masked_value or "missing")}</code>
         <span>{enabled_status}</span>
+        {validation_html}
       </div>
       <form method="post" action="{update_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
@@ -1084,6 +1105,18 @@ def _ai_provider_key_row(key: AIProviderKeySummary, csrf_token: str) -> str:
         </button>
       </form>
     </div>
+    """
+
+
+def _ai_provider_key_validation(
+    validation: AIProviderKeyValidationView | None,
+) -> str:
+    if validation is None:
+        return '<span>Last validation: not checked</span>'
+    return f"""
+        <span>Last validation: {escape(validation.status)}</span>
+        <span>Checked: {escape(validation.checked_at)}</span>
+        <span>Last error: {escape(validation.error)}</span>
     """
 
 

@@ -230,8 +230,17 @@ def create_admin_router(settings: Settings) -> APIRouter:
             active="ai_providers",
             body=lambda session: deepseek_keys_body(
                 csrf_token=session.csrf_token,
-                key_pools=_ai_provider_key_pools(settings),
+                key_pools=(
+                    key_pools := _ai_provider_key_pools(settings)
+                ),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+                key_validations=dict(
+                    _ai_provider_key_validation_views(
+                        settings,
+                        "deepseek",
+                        keys=key_pools.get("deepseek", ()),
+                    )
+                ),
             ),
         )
 
@@ -1561,6 +1570,19 @@ def _ai_provider_health(settings: Settings):
 def _ai_provider_validation_metadata(settings: Settings):
     with SQLiteAIProviderValidationStore(settings.admin_db_path) as validations:
         return validations.latest_by_provider()
+
+
+def _ai_provider_key_validation_views(
+    settings: Settings,
+    provider_id: str,
+    *,
+    keys=(),
+):
+    with SQLiteAIProviderValidationStore(settings.admin_db_path) as validations:
+        return validations.latest_by_key(
+            provider_id,
+            key_updated_at={key.key_id: key.updated_at for key in keys},
+        )
 
 
 def _ai_provider_runtime_statuses(settings: Settings):
