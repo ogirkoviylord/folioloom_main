@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import threading
 import time
 from typing import Callable, Protocol
 
 from translator_service.deepseek_client import DeepSeekApiError, DeepSeekClient
+
+
+CHANNEL_HEALTH_HEALTHY = "healthy"
+CHANNEL_HEALTH_BUSY = "busy"
+CHANNEL_HEALTH_COOLING_DOWN = "cooling_down"
+CHANNEL_HEALTH_DEGRADED = "degraded"
+
+PROVIDER_ERROR_RATE_LIMITED = "rate_limited"
+PROVIDER_ERROR_UNAVAILABLE = "unavailable"
+PROVIDER_ERROR_TIMEOUT = "timeout"
+PROVIDER_ERROR_MALFORMED_RESPONSE = "malformed_response"
+PROVIDER_ERROR_AUTH = "auth"
+PROVIDER_ERROR_BILLING = "billing"
+PROVIDER_ERROR_PROVIDER = "provider_error"
+
+_RECENT_FAILURE_PENALTY_SECONDS = 300.0
 
 
 class _PooledClient(Protocol):
@@ -41,6 +58,18 @@ class DeepSeekChannelSnapshot:
     last_success_at: float | None
     last_failure_at: float | None
     last_error: str | None
+    health: str = CHANNEL_HEALTH_HEALTHY
+    cooldown_remaining_seconds: float = 0.0
+    error_kind: str | None = None
+    last_latency_ms: float | None = None
+    average_latency_ms: float | None = None
+    total_rate_limit_failures: int = 0
+    total_unavailable_failures: int = 0
+    total_timeout_failures: int = 0
+    total_malformed_response_failures: int = 0
+    total_auth_failures: int = 0
+    total_billing_failures: int = 0
+    total_other_provider_failures: int = 0
 
 
 @dataclass
@@ -54,10 +83,22 @@ class _DeepSeekChannel:
     total_temporary_failures: int = 0
     total_permanent_failures: int = 0
     consecutive_temporary_failures: int = 0
+    consecutive_failures: int = 0
     last_selected_at: float | None = None
     last_success_at: float | None = None
     last_failure_at: float | None = None
     last_error: str | None = None
+    error_kind: str | None = None
+    last_latency_ms: float | None = None
+    total_latency_ms: float = 0.0
+    latency_sample_count: int = 0
+    total_rate_limit_failures: int = 0
+    total_unavailable_failures: int = 0
+    total_timeout_failures: int = 0
+    total_malformed_response_failures: int = 0
+    total_auth_failures: int = 0
+    total_billing_failures: int = 0
+    total_other_provider_failures: int = 0
 
     @property
     def label(self) -> str:
@@ -71,7 +112,13 @@ class _DeepSeekChannel:
     def weight(self) -> int:
         return max(1, self.config.weight)
 
-    def snapshot(self) -> DeepSeekChannelSnapshot:
+    def snapshot(self, *, now: float) -> DeepSeekChannelSnapshot:
+        cooldown_remaining_seconds = max(0.0, self.cooldown_until - now)
+        average_latency_ms = (
+            self.total_latency_ms / self.latency_sample_count
+            if self.latency_sample_count > 0
+            else None
+        )
         return DeepSeekChannelSnapshot(
             label=self.label,
             max_parallel_requests=self.capacity,
@@ -87,6 +134,18 @@ class _DeepSeekChannel:
             last_success_at=self.last_success_at,
             last_failure_at=self.last_failure_at,
             last_error=self.last_error,
+            health=_channel_health(self, now=now),
+            cooldown_remaining_seconds=cooldown_remaining_seconds,
+            error_kind=self.error_kind,
+            last_latency_ms=self.last_latency_ms,
+            average_latency_ms=average_latency_ms,
+            total_rate_limit_failures=self.total_rate_limit_failures,
+            total_unavailable_failures=self.total_unavailable_failures,
+            total_timeout_failures=self.total_timeout_failures,
+            total_malformed_response_failures=self.total_malformed_response_failures,
+            total_auth_failures=self.total_auth_failures,
+            total_billing_failures=self.total_billing_failures,
+            total_other_provider_failures=self.total_other_provider_failures,
         )
 
 
@@ -137,7 +196,8 @@ class DeepSeekKeyPoolTranslator:
 
     def snapshot(self) -> list[DeepSeekChannelSnapshot]:
         with self._condition:
-            return [channel.snapshot() for channel in self._channels]
+            now = self._clock()
+            return [channel.snapshot(now=now) for channel in self._channels]
 
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
         attempted_labels: set[str] = set()
@@ -146,21 +206,24 @@ class DeepSeekKeyPoolTranslator:
         while len(attempted_labels) < len(self._channels):
             channel = self._acquire_channel(exclude_labels=attempted_labels)
             attempted_labels.add(channel.label)
+            started_at = self._clock()
             try:
                 translated = channel.client.translate(
                     text=text,
                     source_language=source_language,
                     target_language=target_language,
                 )
-                self._record_channel_success(channel)
+                latency_ms = self._elapsed_ms_since(started_at)
+                self._record_channel_success(channel, latency_ms=latency_ms)
                 self._last_usage.value = getattr(channel.client, "last_usage", None)
                 return translated
             except DeepSeekApiError as error:
+                latency_ms = self._elapsed_ms_since(started_at)
                 if not _is_channel_cooldown_error(error):
-                    self._record_channel_permanent_failure(channel, error)
+                    self._record_channel_permanent_failure(channel, error, latency_ms=latency_ms)
                     raise
                 last_rate_error = error
-                self._cool_down_channel(channel, error)
+                self._cool_down_channel(channel, error, latency_ms=latency_ms)
             finally:
                 self._release_channel(channel)
 
@@ -180,7 +243,10 @@ class DeepSeekKeyPoolTranslator:
                     and channel.active_requests < channel.capacity
                 ]
                 if candidates:
-                    channel = min(candidates, key=_channel_selection_key)
+                    channel = min(
+                        candidates,
+                        key=lambda candidate: _channel_selection_key(candidate, now=now),
+                    )
                     channel.active_requests += 1
                     channel.total_started_requests += 1
                     channel.last_selected_at = now
@@ -199,37 +265,57 @@ class DeepSeekKeyPoolTranslator:
             channel.active_requests = max(0, channel.active_requests - 1)
             self._condition.notify_all()
 
-    def _record_channel_success(self, channel: _DeepSeekChannel) -> None:
+    def _elapsed_ms_since(self, started_at: float) -> float:
+        return max(0.0, (self._clock() - started_at) * 1000.0)
+
+    def _record_channel_success(self, channel: _DeepSeekChannel, *, latency_ms: float) -> None:
         with self._condition:
             now = self._clock()
+            _record_channel_latency(channel, latency_ms)
             channel.total_successful_requests += 1
             channel.consecutive_temporary_failures = 0
+            channel.consecutive_failures = 0
             channel.last_success_at = now
             channel.last_error = None
+            channel.error_kind = None
             self._condition.notify_all()
 
     def _record_channel_permanent_failure(
         self,
         channel: _DeepSeekChannel,
         error: DeepSeekApiError,
+        *,
+        latency_ms: float,
     ) -> None:
         with self._condition:
+            error_kind = _classify_provider_error(error)
+            _record_channel_latency(channel, latency_ms)
             channel.total_permanent_failures += 1
+            channel.consecutive_failures += 1
             channel.last_failure_at = self._clock()
             channel.last_error = _redact_channel_error(error, channel)
+            channel.error_kind = error_kind
+            _increment_error_kind_counter(channel, error_kind)
             self._condition.notify_all()
 
     def _cool_down_channel(
         self,
         channel: _DeepSeekChannel,
         error: DeepSeekApiError,
+        *,
+        latency_ms: float,
     ) -> None:
         with self._condition:
             now = self._clock()
+            error_kind = _classify_provider_error(error)
+            _record_channel_latency(channel, latency_ms)
             channel.total_temporary_failures += 1
             channel.consecutive_temporary_failures += 1
+            channel.consecutive_failures += 1
             channel.last_failure_at = now
             channel.last_error = _redact_channel_error(error, channel)
+            channel.error_kind = error_kind
+            _increment_error_kind_counter(channel, error_kind)
             cooldown_seconds = _channel_cooldown_seconds(
                 channel,
                 default_cooldown_seconds=self._cooldown_seconds,
@@ -280,18 +366,29 @@ def _seconds_until_next_channel(
     return 0.01
 
 
-def _channel_selection_key(channel: _DeepSeekChannel) -> tuple[float, int, float, str]:
-    load_denominator = channel.capacity * channel.weight
-    relative_load = (
-        channel.active_requests + channel.total_started_requests
-    ) / load_denominator
+def _channel_selection_key(
+    channel: _DeepSeekChannel,
+    *,
+    now: float,
+) -> tuple[float, float, int, float, int, float, str]:
+    active_load = channel.active_requests / channel.capacity
+    fairness = channel.total_started_requests / (channel.capacity * channel.weight)
+    error_penalty = _recent_error_penalty(channel, now=now)
+    latency_penalty = (
+        channel.total_latency_ms / channel.latency_sample_count
+        if channel.latency_sample_count > 0
+        else 0.0
+    )
     last_selected_at = (
         channel.last_selected_at
         if channel.last_selected_at is not None
         else float("-inf")
     )
     return (
-        relative_load,
+        active_load,
+        fairness,
+        error_penalty,
+        latency_penalty,
         -channel.weight,
         last_selected_at,
         channel.label,
@@ -321,12 +418,81 @@ def _channel_cooldown_seconds(
 
 
 def _is_channel_cooldown_error(error: DeepSeekApiError) -> bool:
-    message = str(error)
-    return "HTTP 429" in message or "HTTP 503" in message
+    error_kind = _classify_provider_error(error)
+    return error_kind in {
+        PROVIDER_ERROR_RATE_LIMITED,
+        PROVIDER_ERROR_UNAVAILABLE,
+        PROVIDER_ERROR_TIMEOUT,
+    }
 
 
 def _redact_channel_error(error: DeepSeekApiError, channel: _DeepSeekChannel) -> str:
     message = str(error).replace(channel.config.api_key, "[redacted-api-key]")
+    message = re.sub(r"\bbearer\b", "[redacted-auth-scheme]", message, flags=re.IGNORECASE)
+    message = re.sub(r"\bsk-[A-Za-z0-9._-]+", "[redacted-api-key]", message)
+    message = re.sub(
+        r"\b[A-Za-z0-9._-]*api_keys[A-Za-z0-9._-]*\b",
+        "[redacted-secret-id]",
+        message,
+    )
     if len(message) > 300:
         return f"{message[:297]}..."
     return message
+
+
+def _channel_health(channel: _DeepSeekChannel, *, now: float) -> str:
+    if channel.cooldown_until > now:
+        return CHANNEL_HEALTH_COOLING_DOWN
+    if channel.active_requests >= channel.capacity:
+        return CHANNEL_HEALTH_BUSY
+    if channel.error_kind is not None:
+        return CHANNEL_HEALTH_DEGRADED
+    return CHANNEL_HEALTH_HEALTHY
+
+
+def _classify_provider_error(error: DeepSeekApiError) -> str:
+    message = str(error).lower()
+    if "http 429" in message or "rate limit" in message or "rate-limited" in message:
+        return PROVIDER_ERROR_RATE_LIMITED
+    if "http 503" in message or "http 502" in message or "http 504" in message:
+        return PROVIDER_ERROR_UNAVAILABLE
+    if "timeout" in message or "timed out" in message:
+        return PROVIDER_ERROR_TIMEOUT
+    if "malformed" in message or "invalid json" in message:
+        return PROVIDER_ERROR_MALFORMED_RESPONSE
+    if "http 401" in message or "http 403" in message or "auth" in message:
+        return PROVIDER_ERROR_AUTH
+    if "billing" in message or "insufficient" in message or "quota" in message:
+        return PROVIDER_ERROR_BILLING
+    return PROVIDER_ERROR_PROVIDER
+
+
+def _increment_error_kind_counter(channel: _DeepSeekChannel, error_kind: str) -> None:
+    if error_kind == PROVIDER_ERROR_RATE_LIMITED:
+        channel.total_rate_limit_failures += 1
+    elif error_kind == PROVIDER_ERROR_UNAVAILABLE:
+        channel.total_unavailable_failures += 1
+    elif error_kind == PROVIDER_ERROR_TIMEOUT:
+        channel.total_timeout_failures += 1
+    elif error_kind == PROVIDER_ERROR_MALFORMED_RESPONSE:
+        channel.total_malformed_response_failures += 1
+    elif error_kind == PROVIDER_ERROR_AUTH:
+        channel.total_auth_failures += 1
+    elif error_kind == PROVIDER_ERROR_BILLING:
+        channel.total_billing_failures += 1
+    else:
+        channel.total_other_provider_failures += 1
+
+
+def _record_channel_latency(channel: _DeepSeekChannel, latency_ms: float) -> None:
+    channel.last_latency_ms = latency_ms
+    channel.total_latency_ms += latency_ms
+    channel.latency_sample_count += 1
+
+
+def _recent_error_penalty(channel: _DeepSeekChannel, *, now: float) -> int:
+    if channel.last_failure_at is None:
+        return 0
+    if now - channel.last_failure_at > _RECENT_FAILURE_PENALTY_SECONDS:
+        return 0
+    return max(1, channel.consecutive_failures)

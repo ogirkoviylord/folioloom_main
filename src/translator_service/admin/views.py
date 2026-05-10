@@ -24,8 +24,12 @@ from translator_service.admin.integrations import (
 from translator_service.admin.live import LiveMonitorSnapshot
 from translator_service.admin.operations import OperationsOverview
 from translator_service.admin.provider_balance import ProviderBalanceSnapshot
-from translator_service.admin.provider_health import ProviderHealthSummary
+from translator_service.admin.provider_health import (
+    ProviderHealthSummary,
+    _redact_sensitive_text,
+)
 from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeChannel,
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
@@ -547,15 +551,9 @@ def _provider_runtime_panel(
         interval = _format_seconds(runtime.reload_interval_seconds)
         last_reload = runtime.last_reloaded_at.isoformat()
         freshness = _runtime_freshness(runtime)
-        error = runtime.error or "n/a"
+        error = _safe_runtime_text(runtime.error)
         channels = "\n".join(
-            (
-                '<span class="status">'
-                f"{escape(channel.label)} · weight {channel.weight} · "
-                f"parallel {channel.max_parallel_requests}"
-                "</span>"
-            )
-            for channel in runtime.active_channels
+            _runtime_channel_row(channel) for channel in runtime.active_channels
         )
         if not channels:
             channels = '<p class="empty-state">No active runtime channels.</p>'
@@ -608,6 +606,65 @@ def _provider_runtime_panel(
         </form>
       </div>
     """
+
+
+def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
+    active = f"active {channel.active_requests}/{channel.max_parallel_requests}"
+    counters = (
+        "started/ok/temp/perm "
+        f"{channel.total_started_requests}/"
+        f"{channel.total_successful_requests}/"
+        f"{channel.total_temporary_failures}/"
+        f"{channel.total_permanent_failures}"
+    )
+    failure_counters = (
+        "429/503/timeout/auth/billing "
+        f"{channel.total_rate_limit_failures}/"
+        f"{channel.total_unavailable_failures}/"
+        f"{channel.total_timeout_failures}/"
+        f"{channel.total_auth_failures}/"
+        f"{channel.total_billing_failures}"
+    )
+    return f"""
+          <div class="key-row">
+            <div>
+              <strong>{escape(_safe_runtime_text(channel.label))}</strong>
+              <span>{escape(channel.health)}</span>
+              <span>error_kind {escape(_safe_runtime_text(channel.error_kind))}</span>
+              <span>
+                last error {escape(_safe_runtime_text(channel.last_error_excerpt))}
+              </span>
+            </div>
+            <span>weight {channel.weight}</span>
+            <span>parallel {channel.max_parallel_requests}</span>
+            <span>{escape(active)}</span>
+            <span>
+              cooldown {escape(_format_seconds(channel.cooldown_remaining_seconds))}
+            </span>
+            <span>latency {escape(_format_channel_latency_ms(channel))}</span>
+            <span>{escape(counters)}</span>
+            <span>{escape(failure_counters)}</span>
+          </div>
+    """
+
+
+def _safe_runtime_text(value: str | None) -> str:
+    if value is None:
+        return "n/a"
+    return _redact_sensitive_text(value) or "n/a"
+
+
+def _format_latency_ms(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.1f}ms"
+
+
+def _format_channel_latency_ms(channel: AIProviderRuntimeChannel) -> str:
+    value = channel.last_latency_ms
+    if value is None:
+        value = channel.average_latency_ms
+    return _format_latency_ms(value)
 
 
 def _provider_balance_panel(
@@ -1448,8 +1505,25 @@ def _live_runtime_cards(
     channels = (
         "none"
         if status is None or not status.active_channels
-        else ", ".join(channel.label for channel in status.active_channels)
+        else ", ".join(
+            _safe_runtime_text(channel.label) for channel in status.active_channels
+        )
     )
+    degraded_channels = 0
+    rate_limit_count = 0
+    timeout_count = 0
+    if status is not None:
+        degraded_channels = sum(
+            1
+            for channel in status.active_channels
+            if channel.health.lower() in {"cooling_down", "degraded"}
+        )
+        rate_limit_count = sum(
+            channel.total_rate_limit_failures for channel in status.active_channels
+        )
+        timeout_count = sum(
+            channel.total_timeout_failures for channel in status.active_channels
+        )
     reload_text = (
         "Reload pending"
         if reload_state is not None and reload_state.pending
@@ -1461,6 +1535,9 @@ def _live_runtime_cards(
         ("Freshness", freshness),
         ("Channels", channels),
         ("Reload", reload_text),
+        ("Degraded channels", str(degraded_channels)),
+        ("429 count", str(rate_limit_count)),
+        ("Timeout count", str(timeout_count)),
     )
     return "\n".join(
         f"""

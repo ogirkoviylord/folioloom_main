@@ -108,6 +108,12 @@ For beta, keep `DEEPSEEK_MAX_PARALLEL_PER_KEY=1`; adding multiple healthy keys
 then lets separate documents progress concurrently without sending two active
 calls to the same key.
 
+The AI Providers admin page reports DeepSeek runtime channel health without
+secrets or document text: active requests, per-key capacity, cooldown,
+429/503/timeout/auth/billing counters, latency and a redacted last error. A
+degraded channel does not disable the key automatically in Phase 2; it lowers
+selection priority and remains visible for operator action.
+
 ## Start Or Update
 
 Preferred deploy command:

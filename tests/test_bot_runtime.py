@@ -47,7 +47,6 @@ from translator_service.bot.runtime import (
     build_translation_service,
 )
 from translator_service.config import Settings
-from translator_service.deepseek_client import DeepSeekClient
 from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
 from translator_service.job_runner import (
@@ -588,10 +587,11 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "[uk] One.\n\n[uk] Two.",
             )
 
-    def test_build_deepseek_translator_keeps_single_key_client(self):
+    def test_build_deepseek_translator_uses_key_pool_for_single_env_key(self):
         with patch.dict(
             "os.environ",
             {
+                "DEEPSEEK_API_KEYS": "",
                 "DEEPSEEK_API_KEY": "single-key",
                 "DEEPSEEK_BASE_URL": "https://deepseek.test",
             },
@@ -601,7 +601,10 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 Settings(deepseek_model="deepseek-test")
             )
 
-        self.assertIsInstance(translator, DeepSeekClient)
+        self.assertIsInstance(translator, DeepSeekKeyPoolTranslator)
+        snapshot = translator.snapshot()
+        self.assertEqual([channel.label for channel in snapshot], ["deepseek-1"])
+        self.assertEqual([channel.max_parallel_requests for channel in snapshot], [1])
 
     def test_build_deepseek_translator_uses_key_pool_for_multiple_keys(self):
         with patch.dict(
@@ -868,6 +871,64 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(first, "admin-key-old:uk:Hello")
         self.assertEqual(second, "admin-key-new:uk:Hello")
+
+    def test_reloadable_deepseek_translator_records_channel_telemetry_snapshot(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+            with patch.dict(
+                "os.environ",
+                {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                clear=False,
+            ), patch(
+                "translator_service.bot.runtime.DeepSeekClient",
+                _RuntimeKeyEchoDeepSeekClient,
+            ):
+                translator = build_deepseek_translator(settings)
+                snapshot = translator.snapshot()
+                with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                    status_after_snapshot = runtime.get_status("deepseek")
+
+                translated = translator.translate(
+                    text="Hello",
+                    source_language="en",
+                    target_language="uk",
+                )
+                with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                    status_after_translate = runtime.get_status("deepseek")
+
+        self.assertEqual([channel.label for channel in snapshot], ["stable"])
+        self.assertEqual(translated, "admin-key-secret:uk:Hello")
+        self.assertIsNotNone(status_after_snapshot)
+        snapshot_channel = status_after_snapshot.active_channels[0]
+        self.assertEqual(snapshot_channel.label, "stable")
+        self.assertEqual(snapshot_channel.health, "healthy")
+        self.assertEqual(snapshot_channel.active_requests, 0)
+        self.assertEqual(snapshot_channel.total_started_requests, 0)
+
+        self.assertIsNotNone(status_after_translate)
+        translate_channel = status_after_translate.active_channels[0]
+        self.assertEqual(status_after_translate.status, "ok")
+        self.assertEqual(translate_channel.health, "healthy")
+        self.assertEqual(translate_channel.active_requests, 0)
+        self.assertEqual(translate_channel.total_started_requests, 1)
+        self.assertEqual(translate_channel.total_successful_requests, 1)
+        self.assertNotIn("admin-key-secret", repr(translate_channel))
 
     def test_admin_deepseek_translator_adds_admin_without_dropping_env(
         self,

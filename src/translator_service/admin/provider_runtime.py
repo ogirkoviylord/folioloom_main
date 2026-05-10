@@ -13,6 +13,56 @@ class AIProviderRuntimeChannel:
     label: str
     weight: int
     max_parallel_requests: int
+    active_requests: int = 0
+    health: str = "healthy"
+    cooldown_remaining_seconds: float = 0.0
+    total_started_requests: int = 0
+    total_successful_requests: int = 0
+    total_temporary_failures: int = 0
+    total_permanent_failures: int = 0
+    total_rate_limit_failures: int = 0
+    total_unavailable_failures: int = 0
+    total_timeout_failures: int = 0
+    total_malformed_response_failures: int = 0
+    total_auth_failures: int = 0
+    total_billing_failures: int = 0
+    total_other_provider_failures: int = 0
+    average_latency_ms: float | None = None
+    last_latency_ms: float | None = None
+    error_kind: str | None = None
+    last_error_excerpt: str | None = None
+
+    def __repr__(self) -> str:
+        error_kind = self.error_kind if self.error_kind is None else "<redacted>"
+        last_error_excerpt = (
+            self.last_error_excerpt if self.last_error_excerpt is None else "<redacted>"
+        )
+        return (
+            "AIProviderRuntimeChannel("
+            f"label={self.label!r}, "
+            f"weight={self.weight!r}, "
+            f"max_parallel_requests={self.max_parallel_requests!r}, "
+            f"active_requests={self.active_requests!r}, "
+            f"health={self.health!r}, "
+            f"cooldown_remaining_seconds={self.cooldown_remaining_seconds!r}, "
+            f"total_started_requests={self.total_started_requests!r}, "
+            f"total_successful_requests={self.total_successful_requests!r}, "
+            f"total_temporary_failures={self.total_temporary_failures!r}, "
+            f"total_permanent_failures={self.total_permanent_failures!r}, "
+            f"total_rate_limit_failures={self.total_rate_limit_failures!r}, "
+            f"total_unavailable_failures={self.total_unavailable_failures!r}, "
+            f"total_timeout_failures={self.total_timeout_failures!r}, "
+            "total_malformed_response_failures="
+            f"{self.total_malformed_response_failures!r}, "
+            f"total_auth_failures={self.total_auth_failures!r}, "
+            f"total_billing_failures={self.total_billing_failures!r}, "
+            "total_other_provider_failures="
+            f"{self.total_other_provider_failures!r}, "
+            f"average_latency_ms={self.average_latency_ms!r}, "
+            f"last_latency_ms={self.last_latency_ms!r}, "
+            f"error_kind={error_kind!r}, "
+            f"last_error_excerpt={last_error_excerpt!r})"
+        )
 
 
 @dataclass(frozen=True)
@@ -71,10 +121,83 @@ class SQLiteAIProviderRuntimeStore:
             [
                 {
                     "label": channel.label,
-                    "weight": max(1, int(channel.weight)),
-                    "max_parallel_requests": max(
-                        1,
-                        int(channel.max_parallel_requests),
+                    "weight": _int_at_least(channel.weight, minimum=1, default=1),
+                    "max_parallel_requests": _int_at_least(
+                        channel.max_parallel_requests,
+                        minimum=1,
+                        default=1,
+                    ),
+                    "active_requests": _int_at_least(
+                        channel.active_requests,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "health": _string_or_default(channel.health, "healthy"),
+                    "cooldown_remaining_seconds": _float_at_least(
+                        channel.cooldown_remaining_seconds,
+                        minimum=0.0,
+                        default=0.0,
+                    ),
+                    "total_started_requests": _int_at_least(
+                        channel.total_started_requests,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_successful_requests": _int_at_least(
+                        channel.total_successful_requests,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_temporary_failures": _int_at_least(
+                        channel.total_temporary_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_permanent_failures": _int_at_least(
+                        channel.total_permanent_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_rate_limit_failures": _int_at_least(
+                        channel.total_rate_limit_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_unavailable_failures": _int_at_least(
+                        channel.total_unavailable_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_timeout_failures": _int_at_least(
+                        channel.total_timeout_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_malformed_response_failures": _int_at_least(
+                        channel.total_malformed_response_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_auth_failures": _int_at_least(
+                        channel.total_auth_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_billing_failures": _int_at_least(
+                        channel.total_billing_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_other_provider_failures": _int_at_least(
+                        channel.total_other_provider_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "average_latency_ms": _optional_float(channel.average_latency_ms),
+                    "last_latency_ms": _optional_float(channel.last_latency_ms),
+                    "error_kind": _optional_string(channel.error_kind),
+                    "last_error_excerpt": _optional_string(
+                        channel.last_error_excerpt,
                     ),
                 }
                 for channel in active_channels
@@ -251,15 +374,128 @@ def _status_from_row(row: sqlite3.Row) -> AIProviderRuntimeStatus:
         reload_interval_seconds=float(row["reload_interval_seconds"]),
         last_reloaded_at=datetime.fromisoformat(row["last_reloaded_at"]),
         active_channels=tuple(
-            AIProviderRuntimeChannel(
-                label=str(item.get("label", "")),
-                weight=max(1, int(item.get("weight", 1))),
-                max_parallel_requests=max(
-                    1,
-                    int(item.get("max_parallel_requests", 1)),
-                ),
-            )
+            _channel_from_payload(item)
             for item in json.loads(row["active_channels_json"])
         ),
         error=row["error"],
     )
+
+
+def _channel_from_payload(item: object) -> AIProviderRuntimeChannel:
+    payload = item if isinstance(item, dict) else {}
+    return AIProviderRuntimeChannel(
+        label=str(payload.get("label", "")),
+        weight=_int_at_least(payload.get("weight", 1), minimum=1, default=1),
+        max_parallel_requests=_int_at_least(
+            payload.get("max_parallel_requests", 1),
+            minimum=1,
+            default=1,
+        ),
+        active_requests=_int_at_least(
+            payload.get("active_requests", 0),
+            minimum=0,
+            default=0,
+        ),
+        health=_string_or_default(payload.get("health", "healthy"), "healthy"),
+        cooldown_remaining_seconds=_float_at_least(
+            payload.get("cooldown_remaining_seconds", 0.0),
+            minimum=0.0,
+            default=0.0,
+        ),
+        total_started_requests=_int_at_least(
+            payload.get("total_started_requests", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_successful_requests=_int_at_least(
+            payload.get("total_successful_requests", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_temporary_failures=_int_at_least(
+            payload.get("total_temporary_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_permanent_failures=_int_at_least(
+            payload.get("total_permanent_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_rate_limit_failures=_int_at_least(
+            payload.get("total_rate_limit_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_unavailable_failures=_int_at_least(
+            payload.get("total_unavailable_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_timeout_failures=_int_at_least(
+            payload.get("total_timeout_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_malformed_response_failures=_int_at_least(
+            payload.get("total_malformed_response_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_auth_failures=_int_at_least(
+            payload.get("total_auth_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_billing_failures=_int_at_least(
+            payload.get("total_billing_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_other_provider_failures=_int_at_least(
+            payload.get("total_other_provider_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        average_latency_ms=_optional_float(payload.get("average_latency_ms")),
+        last_latency_ms=_optional_float(payload.get("last_latency_ms")),
+        error_kind=_optional_string(payload.get("error_kind")),
+        last_error_excerpt=_optional_string(payload.get("last_error_excerpt")),
+    )
+
+
+def _int_at_least(value: object, *, minimum: int, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
+def _float_at_least(value: object, *, minimum: float, default: float) -> float:
+    parsed = _optional_float(value)
+    if parsed is None:
+        return default
+    return max(minimum, parsed)
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _string_or_default(value: object, default: str) -> str:
+    if value is None:
+        return default
+    parsed = str(value)
+    return parsed if parsed else default

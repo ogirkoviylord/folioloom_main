@@ -28,6 +28,21 @@ free closed beta после прохождения release gates.
 
 ## Последняя зафиксированная проверка
 
+После Phase 1 smart scheduler fairness/capacity и Phase 2 provider channel
+observability были пройдены:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_bot_runtime tests.test_admin_provider_health tests.test_admin_routes tests.test_admin_live_monitor tests.test_server_deployment_config
+PYTHONPATH=src python3 -m unittest tests.test_worker tests.test_scheduler tests.test_scheduler_runner tests.test_persistent_jobs tests.test_postgres_scheduler
+PYTHONPATH=src python3 -m compileall src
+scripts/predeploy_check.sh
+docker compose run --rm --no-deps -v "$PWD:/workspace" -w /workspace -e TEST_POSTGRES_DSN=postgresql://translator:translator@postgres:5432/translator -e PYTHONPATH=src api python -m unittest tests.test_postgres_scheduler
+```
+
+Результаты: Phase 2 targeted suite `Ran 146 tests`, `OK`; scheduler regression
+`Ran 85 tests`, `OK`, `skipped=13`; Docker/Postgres scheduler `Ran 14 tests`,
+`OK`; predeploy check passed.
+
 После добавления rights confirmation gate были пройдены:
 
 ```bash
@@ -97,6 +112,9 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Worker-side scheduler execution can run multiple distinct scheduled work
   units concurrently within configured capacity, while provider calls remain
   capped by DeepSeek key/channel capacity.
+- Scheduler claim ordering is beta-safe and fairness-aware: user/job/document
+  active caps, priority aging and capacity-aware batch claiming prevent one
+  huge document or heavy user from monopolizing worker slots.
 - Docker Compose stack with `api`, `bot`, `worker`, `postgres`, `redis`.
 - Server env example uses `SCHEDULER_BACKEND=postgres`.
 
@@ -104,8 +122,14 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 
 - DeepSeek-compatible chat completion client.
 - Multiple internal API channel/key support.
-- Key cooldown/failover behavior.
-- Admin-visible provider runtime status and reload request flow.
+- Weighted least-loaded key selection with active-load, fairness, recent-error
+  and latency signals.
+- Key cooldown/failover behavior for rate-limit/unavailable/timeout failures.
+- Admin-visible provider runtime status, reload request flow and per-channel
+  health telemetry.
+- Runtime channel telemetry includes active requests, capacity, cooldown,
+  latency, 429/503/timeout/malformed/auth/billing counters and redacted safe
+  error summaries.
 - Provider validation/probe surfaces.
 - Admin-visible DeepSeek account balance snapshot/refresh flow.
 - DeepSeek admin keys and `.env` keys are additive for balance/runtime use.

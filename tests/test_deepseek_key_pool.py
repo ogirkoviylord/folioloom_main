@@ -3,9 +3,11 @@ import unittest
 
 from translator_service.deepseek_client import DeepSeekApiError
 from translator_service.deepseek_key_pool import (
+    CHANNEL_HEALTH_COOLING_DOWN,
     DeepSeekChannelConfig,
     DeepSeekChannelSnapshot,
     DeepSeekKeyPoolTranslator,
+    PROVIDER_ERROR_RATE_LIMITED,
 )
 
 
@@ -122,10 +124,16 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
     def test_temporary_error_records_cooldown_and_fails_over(self):
         factory = RecordingClientFactory(
             {
-                "key-a": [DeepSeekApiError("DeepSeek API returned HTTP 429: key-a busy")],
+                "key-a": [
+                    DeepSeekApiError(
+                        "DeepSeek API returned HTTP 429: Bearer key-a busy "
+                        "fallback sk-unrelated-secret .api_keys.deepseek",
+                    )
+                ],
                 "key-b": ["ok"],
             }
         )
+        now = FakeClock(100.0)
         pool = DeepSeekKeyPoolTranslator(
             channels=[
                 DeepSeekChannelConfig(api_key="key-a", label="a"),
@@ -134,7 +142,7 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             client_factory=factory,
             cooldown_seconds=30,
             max_cooldown_seconds=120,
-            clock=lambda: 100.0,
+            clock=now,
         )
 
         result = pool.translate(text="source", source_language="en", target_language="uk")
@@ -145,9 +153,21 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertEqual(first.total_temporary_failures, 1)
         self.assertEqual(first.consecutive_temporary_failures, 1)
         self.assertEqual(first.cooldown_until, 130.0)
+        self.assertEqual(first.cooldown_remaining_seconds, 30.0)
+        self.assertEqual(first.health, CHANNEL_HEALTH_COOLING_DOWN)
+        self.assertEqual(first.error_kind, PROVIDER_ERROR_RATE_LIMITED)
+        self.assertEqual(first.total_rate_limit_failures, 1)
+        self.assertEqual(first.last_latency_ms, 0.0)
+        self.assertEqual(first.average_latency_ms, 0.0)
         self.assertEqual(first.last_failure_at, 100.0)
         self.assertIn("HTTP 429", first.last_error or "")
         self.assertNotIn("key-a", first.last_error or "")
+        self.assertNotIn("Bearer", first.last_error or "")
+        self.assertNotIn("sk-unrelated-secret", first.last_error or "")
+        self.assertNotIn(".api_keys.", first.last_error or "")
+        self.assertNotIn("key-a", repr(first))
+        now.value = 125.0
+        self.assertEqual(pool.snapshot()[0].cooldown_remaining_seconds, 5.0)
         self.assertEqual(second.total_successful_requests, 1)
 
     def test_repeated_temporary_errors_use_exponential_backoff_capped_by_max(self):
@@ -164,7 +184,7 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         )
         pool = DeepSeekKeyPoolTranslator(
             channels=[
-                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-a", label="a", weight=2),
                 DeepSeekChannelConfig(api_key="key-b", label="b"),
             ],
             client_factory=factory,
@@ -196,7 +216,7 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         )
         pool = DeepSeekKeyPoolTranslator(
             channels=[
-                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-a", label="a", weight=2),
                 DeepSeekChannelConfig(api_key="key-b", label="b"),
             ],
             client_factory=factory,
@@ -230,6 +250,59 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertEqual(pool.translate(text="source", source_language="en", target_language="uk"), "b")
 
         self.assertEqual(factory.calls, [("key-b", "source")])
+
+    def test_recent_provider_error_penalizes_channel_after_cooldown_expires(self):
+        now = FakeClock(100.0)
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 429: busy"),
+                    "recovered",
+                ],
+                "key-b": ["fallback", "healthy-next"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=10,
+            clock=now,
+        )
+
+        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "fallback")
+        now.value = 110.0
+
+        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "healthy-next")
+
+        self.assertEqual(factory.calls, [("key-a", "one"), ("key-b", "one"), ("key-b", "two")])
+
+    def test_slower_channel_is_penalized_when_load_and_fairness_are_equal(self):
+        now = FakeClock(100.0)
+        factory = LatencyClientFactory(
+            clock=now,
+            delays_by_key={
+                "key-a": [0.500, 0.500],
+                "key-b": [0.010, 0.010],
+            },
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=30,
+            clock=now,
+        )
+
+        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "[key-a] one")
+        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "[key-b] two")
+        self.assertEqual(pool.translate(text="three", source_language="en", target_language="uk"), "[key-b] three")
+
+        self.assertEqual(factory.calls, [("key-a", "one"), ("key-b", "two"), ("key-b", "three")])
 
     def test_selection_uses_available_capacity_before_waiting(self):
         barrier = threading.Barrier(2)
@@ -353,6 +426,33 @@ class BlockingClient:
         self.barrier.wait(timeout=5)
         prompt_tokens = 101 if self.api_key == "key-a" else 202
         self.last_usage = _Usage(prompt_tokens=prompt_tokens)
+        return f"[{self.api_key}] {text}"
+
+
+class LatencyClientFactory:
+    def __init__(self, *, clock: FakeClock, delays_by_key):
+        self.clock = clock
+        self.delays_by_key = {
+            key: list(delays)
+            for key, delays in delays_by_key.items()
+        }
+        self.calls = []
+
+    def __call__(self, *, api_key: str):
+        return LatencyClient(api_key=api_key, factory=self)
+
+
+class LatencyClient:
+    def __init__(self, *, api_key: str, factory: LatencyClientFactory) -> None:
+        self.api_key = api_key
+        self.factory = factory
+        self.last_usage = None
+
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        self.factory.calls.append((self.api_key, text))
+        delay = self.factory.delays_by_key[self.api_key].pop(0)
+        self.factory.clock.value += delay
+        self.last_usage = _Usage(prompt_tokens=1)
         return f"[{self.api_key}] {text}"
 
 

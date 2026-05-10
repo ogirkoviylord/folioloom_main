@@ -124,6 +124,12 @@ scheduler fairness caps keep one job/user from monopolizing available slots.
 With one key at capacity 1, provider calls remain serial; with multiple free
 keys, separate documents can progress concurrently.
 
+The AI Providers admin page reports DeepSeek runtime channel health without
+secrets or document text: active requests, per-key capacity, cooldown,
+429/503/timeout/auth/billing counters, latency and a redacted last error. A
+degraded channel does not disable the key automatically in Phase 2; it lowers
+selection priority and remains visible for operator action.
+
 Start or update the stack:
 
 ```bash

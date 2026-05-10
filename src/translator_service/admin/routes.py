@@ -44,7 +44,10 @@ from translator_service.admin.provider_balance import (
     get_cached_deepseek_balance,
     refresh_deepseek_balance,
 )
-from translator_service.admin.provider_health import build_provider_health
+from translator_service.admin.provider_health import (
+    build_provider_health,
+    _redact_sensitive_text,
+)
 from translator_service.admin.provider_probe import validate_ai_provider_key
 from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
@@ -1375,12 +1378,14 @@ def _ai_provider_key_pools(settings: Settings):
 def _ai_provider_health(settings: Settings):
     summaries = _ai_provider_summaries(settings)
     validation_metadata = _ai_provider_validation_metadata(settings)
+    runtime_statuses = _ai_provider_runtime_statuses(settings)
     bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
         return build_provider_health(
             summaries,
             apply_ai_provider_key_bootstrap({}, bootstrap_config),
             validation_metadata,
+            runtime_statuses=runtime_statuses,
         )
     try:
         with SQLiteEncryptedSecretStore(
@@ -1399,7 +1404,12 @@ def _ai_provider_health(settings: Settings):
     except SecretStoreUnavailable:
         key_pools = {}
     key_pools = apply_ai_provider_key_bootstrap(key_pools, bootstrap_config)
-    return build_provider_health(summaries, key_pools, validation_metadata)
+    return build_provider_health(
+        summaries,
+        key_pools,
+        validation_metadata,
+        runtime_statuses=runtime_statuses,
+    )
 
 
 def _ai_provider_validation_metadata(settings: Settings):
@@ -1492,14 +1502,10 @@ def _ai_provider_runtime_payload(
         "last_reported_at": status.last_reloaded_at.isoformat(),
         "reload_interval_seconds": status.reload_interval_seconds,
         "active_channels": [
-            {
-                "label": channel.label,
-                "weight": channel.weight,
-                "max_parallel_requests": channel.max_parallel_requests,
-            }
+            _ai_provider_runtime_channel_payload(channel)
             for channel in status.active_channels
         ],
-        "error": status.error,
+        "error": _safe_runtime_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
         "reload_requested_by": (
             reload_state.actor_id if reload_state is not None else None
@@ -1513,6 +1519,40 @@ def _ai_provider_runtime_payload(
             else None
         ),
     }
+
+
+def _ai_provider_runtime_channel_payload(channel):
+    return {
+        "label": _safe_runtime_text(channel.label),
+        "weight": channel.weight,
+        "max_parallel_requests": channel.max_parallel_requests,
+        "active_requests": channel.active_requests,
+        "health": channel.health,
+        "cooldown_remaining_seconds": channel.cooldown_remaining_seconds,
+        "total_started_requests": channel.total_started_requests,
+        "total_successful_requests": channel.total_successful_requests,
+        "total_temporary_failures": channel.total_temporary_failures,
+        "total_permanent_failures": channel.total_permanent_failures,
+        "total_rate_limit_failures": channel.total_rate_limit_failures,
+        "total_unavailable_failures": channel.total_unavailable_failures,
+        "total_timeout_failures": channel.total_timeout_failures,
+        "total_malformed_response_failures": (
+            channel.total_malformed_response_failures
+        ),
+        "total_auth_failures": channel.total_auth_failures,
+        "total_billing_failures": channel.total_billing_failures,
+        "total_other_provider_failures": channel.total_other_provider_failures,
+        "average_latency_ms": channel.average_latency_ms,
+        "last_latency_ms": channel.last_latency_ms,
+        "error_kind": _safe_runtime_text(channel.error_kind),
+        "last_error_excerpt": _safe_runtime_text(channel.last_error_excerpt),
+    }
+
+
+def _safe_runtime_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return _redact_sensitive_text(value)
 
 
 def _deepseek_balance_snapshot(settings: Settings) -> ProviderBalanceSnapshot | None:

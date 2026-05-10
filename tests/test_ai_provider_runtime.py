@@ -1,5 +1,6 @@
 import unittest
 from base64 import urlsafe_b64encode
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -115,6 +116,114 @@ class AIProviderRuntimeTest(unittest.TestCase):
         self.assertEqual(status.active_channels[0].weight, 3)
         self.assertNotIn(".api_keys.", repr(status))
         self.assertNotIn("sk-", repr(status))
+
+    def test_runtime_status_roundtrips_channel_telemetry(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteAIProviderRuntimeStore(db_path) as store:
+                recorded = store.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="stable",
+                            weight=3,
+                            max_parallel_requests=2,
+                            active_requests=1,
+                            health="cooling_down",
+                            cooldown_remaining_seconds=12.5,
+                            total_started_requests=10,
+                            total_successful_requests=7,
+                            total_temporary_failures=2,
+                            total_permanent_failures=1,
+                            total_rate_limit_failures=1,
+                            total_unavailable_failures=1,
+                            total_timeout_failures=1,
+                            total_malformed_response_failures=1,
+                            total_auth_failures=1,
+                            total_billing_failures=1,
+                            total_other_provider_failures=1,
+                            average_latency_ms=123.4,
+                            last_latency_ms=234.5,
+                            error_kind="temporary",
+                            last_error_excerpt="provider rejected sk-secret .api_keys.deepseek",
+                        ),
+                    ),
+                    error=None,
+                )
+                fetched = store.get_status("deepseek")
+
+        self.assertIsNotNone(fetched)
+        self.assertEqual(recorded.active_channels, fetched.active_channels)
+        channel = fetched.active_channels[0]
+        self.assertEqual(channel.health, "cooling_down")
+        self.assertEqual(channel.active_requests, 1)
+        self.assertEqual(channel.cooldown_remaining_seconds, 12.5)
+        self.assertEqual(channel.total_started_requests, 10)
+        self.assertEqual(channel.total_successful_requests, 7)
+        self.assertEqual(channel.total_temporary_failures, 2)
+        self.assertEqual(channel.total_permanent_failures, 1)
+        self.assertEqual(channel.total_rate_limit_failures, 1)
+        self.assertEqual(channel.total_unavailable_failures, 1)
+        self.assertEqual(channel.total_timeout_failures, 1)
+        self.assertEqual(channel.total_malformed_response_failures, 1)
+        self.assertEqual(channel.total_auth_failures, 1)
+        self.assertEqual(channel.total_billing_failures, 1)
+        self.assertEqual(channel.total_other_provider_failures, 1)
+        self.assertEqual(channel.average_latency_ms, 123.4)
+        self.assertEqual(channel.last_latency_ms, 234.5)
+        self.assertEqual(channel.error_kind, "temporary")
+        self.assertEqual(
+            channel.last_error_excerpt,
+            "provider rejected sk-secret .api_keys.deepseek",
+        )
+        self.assertNotIn("sk-", repr(channel))
+        self.assertNotIn(".api_keys.", repr(channel))
+        self.assertNotIn("sk-", repr(fetched))
+        self.assertNotIn(".api_keys.", repr(fetched))
+
+    def test_runtime_status_reads_legacy_channel_json_with_defaults(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteAIProviderRuntimeStore(db_path) as store:
+                with store._connection:
+                    store._connection.execute(
+                        """
+                        INSERT INTO admin_ai_provider_runtime_status (
+                            provider_id, source, status, reload_interval_seconds,
+                            active_channels_json, error, last_reloaded_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            "deepseek",
+                            "admin_store",
+                            "ok",
+                            30.0,
+                            '[{"label": "legacy", "weight": 2, "max_parallel_requests": 3}]',
+                            None,
+                            datetime.now(UTC).isoformat(),
+                        ),
+                    )
+                status = store.get_status("deepseek")
+
+        self.assertIsNotNone(status)
+        channel = status.active_channels[0]
+        self.assertEqual(channel.label, "legacy")
+        self.assertEqual(channel.weight, 2)
+        self.assertEqual(channel.max_parallel_requests, 3)
+        self.assertEqual(channel.active_requests, 0)
+        self.assertEqual(channel.health, "healthy")
+        self.assertEqual(channel.cooldown_remaining_seconds, 0.0)
+        self.assertEqual(channel.total_started_requests, 0)
+        self.assertEqual(channel.total_successful_requests, 0)
+        self.assertEqual(channel.total_temporary_failures, 0)
+        self.assertIsNone(channel.average_latency_ms)
+        self.assertIsNone(channel.last_latency_ms)
+        self.assertIsNone(channel.error_kind)
+        self.assertIsNone(channel.last_error_excerpt)
 
 
 if __name__ == "__main__":
