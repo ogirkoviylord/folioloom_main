@@ -886,7 +886,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 },
             )
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -960,7 +960,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 metadata={"provider_id": provider_id, "key_id": removed.key_id},
             )
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -1017,7 +1017,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 },
             )
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -1086,7 +1086,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 metadata={"provider_id": provider_id, "key_id": key.key_id},
             )
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -1166,7 +1166,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         if response_status != HTTPStatus.SEE_OTHER:
             return _html(error or "Unable to test key", status_code=response_status)
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -1243,7 +1243,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 },
             )
         return RedirectResponse(
-            "/admin/ai-providers",
+            _ai_provider_keys_redirect(provider_id),
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -1666,6 +1666,12 @@ def _deepseek_balance_payload(settings: Settings):
         "error_code": snapshot.error_code,
         "error_message": snapshot.error_message,
     }
+
+
+def _ai_provider_keys_redirect(provider_id: str) -> str:
+    if provider_id == "deepseek":
+        return "/admin/ai-providers/deepseek/keys"
+    return "/admin/ai-providers"
 
 
 def _overview_action_center(settings: Settings):

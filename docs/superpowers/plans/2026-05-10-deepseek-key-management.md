@@ -352,7 +352,7 @@ Expected: commit succeeds.
 - Modify `src/translator_service/admin/views.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add failing overview CTA test**
+- [x] **Step 1: Add failing overview CTA test**
 
 Add to the existing `test_ai_providers_page_and_api_show_configured_providers`
 or create a focused test:
@@ -368,7 +368,7 @@ def test_ai_providers_overview_links_to_deepseek_key_management(self):
     self.assertIn("Manage DeepSeek keys", response.text)
 ```
 
-- [ ] **Step 2: Add failing no raw key render test**
+- [x] **Step 2: Add failing no raw key render test**
 
 Add:
 
@@ -413,7 +413,7 @@ def test_deepseek_keys_page_shows_masked_values_without_raw_keys(self):
         self.assertNotIn(".api_keys.", updated.text)
 ```
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -426,7 +426,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: failures because overview CTA and redirects are not updated.
 
-- [ ] **Step 4: Add overview CTA**
+- [x] **Step 4: Add overview CTA**
 
 In `src/translator_service/admin/views.py`, within the DeepSeek provider card
 rendered by `ai_providers_body(...)`, add a compact link:
@@ -441,7 +441,7 @@ Place it near the existing provider health/key pool controls. Do not remove the
 existing add-key form until the dedicated page is complete unless tests are
 updated accordingly.
 
-- [ ] **Step 5: Redirect DeepSeek key mutations to keys page**
+- [x] **Step 5: Redirect DeepSeek key mutations to keys page**
 
 In `src/translator_service/admin/routes.py`, add:
 
@@ -464,7 +464,7 @@ return RedirectResponse(
 For the DeepSeek balance refresh route, keep redirecting to `/admin/ai-providers`
 because balance belongs to provider overview.
 
-- [ ] **Step 6: Run CTA and render tests**
+- [x] **Step 6: Run CTA and render tests**
 
 Run:
 
@@ -477,7 +477,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit overview UX**
+- [x] **Step 7: Commit overview UX**
 
 Run:
 
