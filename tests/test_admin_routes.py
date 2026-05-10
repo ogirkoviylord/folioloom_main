@@ -2106,6 +2106,74 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-main-secret", event.metadata_json)
             self.assertNotIn(".api_keys.", event.metadata_json)
 
+    def test_test_all_ai_provider_keys_skips_disabled_keys(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            csrf_token = _csrf_token(page.text)
+            for label, value in (
+                ("main", "sk-active-secret"),
+                ("backup", "sk-disabled-secret"),
+            ):
+                added = client.post(
+                    "/admin/ai-providers/deepseek/keys",
+                    data={
+                        "csrf_token": csrf_token,
+                        "label": label,
+                        "value": value,
+                        "weight": "1",
+                        "max_parallel_requests": "1",
+                    },
+                    follow_redirects=False,
+                )
+                self.assertEqual(added.status_code, 303)
+            updated = client.get("/admin/ai-providers/deepseek/keys")
+            key_ids = list(
+                dict.fromkeys(
+                    re.findall(r'name="key_id" value="([^"]+)"', updated.text)
+                )
+            )
+            self.assertEqual(len(key_ids), 2)
+            disabled = client.post(
+                "/admin/ai-providers/deepseek/keys/disable",
+                data={"csrf_token": csrf_token, "key_id": key_ids[1]},
+                follow_redirects=False,
+            )
+            self.assertEqual(disabled.status_code, 303)
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                return_value=AIProviderProbeResult(
+                    status="provider_check_passed",
+                    error=None,
+                ),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test-all",
+                    data={"csrf_token": csrf_token},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 303)
+            self.assertEqual(probe.call_count, 1)
+            self.assertEqual(probe.call_args.args[1], "sk-active-secret")
+            after_test = client.get("/admin/ai-providers/deepseek/keys")
+            self.assertIn("provider_check_passed", after_test.text)
+            self.assertNotIn("Key is disabled or unavailable.", after_test.text)
+            self.assertNotIn("sk-active-secret", after_test.text)
+            self.assertNotIn("sk-disabled-secret", after_test.text)
+
     def test_owner_can_update_disable_and_enable_ai_provider_key(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")

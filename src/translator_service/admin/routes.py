@@ -1294,6 +1294,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
                         secret_describer=secrets.describe_secret,
                     )
                     for key in key_summaries:
+                        if not key.enabled or key.disabled:
+                            continue
                         status, error = _test_ai_provider_key(
                             provider_id,
                             key,
