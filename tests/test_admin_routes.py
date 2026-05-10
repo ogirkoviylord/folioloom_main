@@ -1722,7 +1722,11 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Last validation", updated.text)
             self.assertIn("Test key", updated.text)
 
-            key_ids = re.findall(r'name="key_id" value="([^"]+)"', updated.text)
+            key_ids = list(
+                dict.fromkeys(
+                    re.findall(r'name="key_id" value="([^"]+)"', updated.text)
+                )
+            )
             self.assertEqual(len(key_ids), 2)
             remove = client.post(
                 "/admin/ai-providers/deepseek/keys/remove",
@@ -2057,6 +2061,99 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("ai_provider.key.enabled", serialized_events)
             self.assertNotIn("sk-editable-secret", serialized_events)
             self.assertNotIn(".api_keys.", serialized_events)
+
+    def test_owner_can_rotate_ai_provider_key_without_changing_key_id(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+            client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "label": "main",
+                    "value": "sk-old-secret-value",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+            )
+            updated = client.get("/admin/ai-providers/deepseek/keys")
+            key_id = re.search(r'name="key_id" value="([^"]+)"', updated.text)
+            self.assertIsNotNone(key_id)
+
+            rotate = client.post(
+                "/admin/ai-providers/deepseek/keys/rotate",
+                data={
+                    "csrf_token": _csrf_token(updated.text),
+                    "key_id": key_id.group(1),
+                    "value": "sk-new-secret-value",
+                },
+                follow_redirects=False,
+            )
+            after_rotate = client.get("/admin/ai-providers/deepseek/keys")
+
+            self.assertEqual(rotate.status_code, 303)
+            self.assertEqual(
+                rotate.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
+            self.assertIn(f'name="key_id" value="{key_id.group(1)}"', after_rotate.text)
+            self.assertIn("sk-****alue", after_rotate.text)
+            self.assertNotIn("sk-old-secret-value", after_rotate.text)
+            self.assertNotIn("sk-new-secret-value", after_rotate.text)
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                self.assertEqual(
+                    secrets.get_secret_value(f"deepseek.api_keys.{key_id.group(1)}"),
+                    "sk-new-secret-value",
+                )
+            with SQLiteAdminAuditLog(db_path) as audit:
+                events = audit.list_events(limit=10)
+            serialized_events = "\n".join(
+                f"{event.action} {event.target_id} {event.metadata_json}"
+                for event in events
+            )
+            self.assertIn("ai_provider.key.rotated", serialized_events)
+            self.assertNotIn("sk-old-secret-value", serialized_events)
+            self.assertNotIn("sk-new-secret-value", serialized_events)
+            self.assertNotIn(".api_keys.", serialized_events)
+
+    def test_rotate_ai_provider_key_requires_non_empty_secret_value(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers/deepseek/keys")
+
+            response = client.post(
+                "/admin/ai-providers/deepseek/keys/rotate",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "key_id": "missing",
+                    "value": "   ",
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("Key value is required", response.text)
 
     def test_ai_provider_page_shows_runtime_status_and_requests_reload(self):
         with TemporaryDirectory() as temp_dir:

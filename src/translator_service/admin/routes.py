@@ -1021,6 +1021,63 @@ def create_admin_router(settings: Settings) -> APIRouter:
             status_code=HTTPStatus.SEE_OTHER,
         )
 
+    @router.post("/ai-providers/{provider_id}/keys/rotate")
+    async def rotate_ai_provider_key(
+        provider_id: str,
+        request: Request,
+    ) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        try:
+            DEFAULT_AI_PROVIDER_REGISTRY.get_definition(provider_id)
+        except KeyError:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        try:
+            with SQLiteEncryptedSecretStore(
+                settings.admin_db_path,
+                master_key=settings.admin_secret_master_key,
+            ) as secrets:
+                with SQLiteAIProviderKeyStore(settings.admin_db_path) as keys:
+                    rotated = keys.rotate_key(
+                        provider_id=provider_id,
+                        key_id=form.get("key_id", ""),
+                        plaintext=form.get("value", ""),
+                        actor_id=session.actor_id,
+                        secret_store=secrets,
+                    )
+        except ValueError as error:
+            return _html(str(error), status_code=HTTPStatus.BAD_REQUEST)
+        except (KeyError, SecretStoreUnavailable):
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        _request_ai_provider_runtime_reload(
+            settings,
+            provider_id=provider_id,
+            actor_id=session.actor_id,
+        )
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="ai_provider.key.rotated",
+                target_type="ai_provider_key",
+                target_id=rotated.key_id,
+                outcome=AuditOutcome.SUCCESS,
+                metadata={
+                    "provider_id": provider_id,
+                    "key_id": rotated.key_id,
+                    "fingerprint": rotated.fingerprint,
+                    "runtime_reload_requested": True,
+                },
+            )
+        return RedirectResponse(
+            _ai_provider_keys_redirect(provider_id),
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
     @router.post("/ai-providers/{provider_id}/keys/disable")
     async def disable_ai_provider_key(
         provider_id: str,
@@ -1672,6 +1729,16 @@ def _ai_provider_keys_redirect(provider_id: str) -> str:
     if provider_id == "deepseek":
         return "/admin/ai-providers/deepseek/keys"
     return "/admin/ai-providers"
+
+
+def _request_ai_provider_runtime_reload(
+    settings: Settings,
+    *,
+    provider_id: str,
+    actor_id: str,
+) -> None:
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as runtime:
+        runtime.request_reload(provider_id=provider_id, actor_id=actor_id)
 
 
 def _overview_action_center(settings: Settings):

@@ -147,6 +147,38 @@ class SQLiteAIProviderKeyStore:
             secret_describer=secret_describer,
         )
 
+    def rotate_key(
+        self,
+        *,
+        provider_id: str,
+        key_id: str,
+        plaintext: str,
+        actor_id: str,
+        secret_store: SecretStore,
+    ) -> AIProviderKeySummary:
+        clean_plaintext = plaintext.strip()
+        if not clean_plaintext:
+            raise ValueError("Key value is required")
+        row = self._editable_key_row(provider_id, key_id)
+        secret = secret_store.put_secret(
+            secret_id=row["secret_id"],
+            label=row["label"],
+            kind="api_key",
+            plaintext=clean_plaintext,
+            actor_id=actor_id,
+        )
+        now = datetime.now(UTC)
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE admin_ai_provider_keys
+                SET updated_at = ?, updated_by = ?
+                WHERE provider_id = ? AND key_id = ?
+                """,
+                (now.isoformat(), actor_id, provider_id, key_id),
+            )
+        return _summary_from_row(self._key_row(provider_id, key_id), secret)
+
     def set_key_enabled(
         self,
         *,

@@ -498,7 +498,7 @@ Expected: commit succeeds.
 - Modify `src/translator_service/admin/views.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add failing rotate test**
+- [x] **Step 1: Add failing rotate test**
 
 Add to `tests/test_admin_routes.py` near existing key update tests:
 
@@ -569,7 +569,7 @@ def test_owner_can_rotate_ai_provider_key_without_changing_key_id(self):
         self.assertNotIn(".api_keys.", serialized_events)
 ```
 
-- [ ] **Step 2: Add failing empty rotate value test**
+- [x] **Step 2: Add failing empty rotate value test**
 
 Add:
 
@@ -603,7 +603,7 @@ def test_rotate_ai_provider_key_requires_non_empty_secret_value(self):
         self.assertIn("Key value is required", response.text)
 ```
 
-- [ ] **Step 3: Run rotate tests and verify failure**
+- [x] **Step 3: Run rotate tests and verify failure**
 
 Run:
 
@@ -616,7 +616,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: FAIL because rotate route/store method do not exist.
 
-- [ ] **Step 4: Add `rotate_key` store method**
+- [x] **Step 4: Add `rotate_key` store method**
 
 In `src/translator_service/admin/ai_provider_keys.py`, add to
 `SQLiteAIProviderKeyStore` after `update_key(...)`:
@@ -655,7 +655,7 @@ def rotate_key(
     return _summary_from_row(self._key_row(provider_id, key_id), secret)
 ```
 
-- [ ] **Step 5: Add rotate form to key rows**
+- [x] **Step 5: Add rotate form to key rows**
 
 In `src/translator_service/admin/views.py`, inside `_ai_provider_key_row(...)`
 for non-env keys, add after metadata update form:
@@ -678,7 +678,7 @@ Because this is inside a Python f-string, build `rotate_action` first:
 rotate_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/rotate"
 ```
 
-- [ ] **Step 6: Add rotate route**
+- [x] **Step 6: Add rotate route**
 
 In `src/translator_service/admin/routes.py`, first add this helper near the
 runtime helper functions:
@@ -752,7 +752,7 @@ async def rotate_ai_provider_key(provider_id: str, request: Request) -> Response
     )
 ```
 
-- [ ] **Step 7: Run rotate tests**
+- [x] **Step 7: Run rotate tests**
 
 Run:
 
@@ -765,7 +765,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit rotate support**
+- [x] **Step 8: Commit rotate support**
 
 Run:
 
