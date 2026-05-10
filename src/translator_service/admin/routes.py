@@ -871,6 +871,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     )
         except (SecretStoreUnavailable, ValueError):
             return _html("Secret store unavailable", status_code=HTTPStatus.BAD_REQUEST)
+        _request_ai_provider_runtime_reload(
+            settings,
+            provider_id=provider_id,
+            actor_id=session.actor_id,
+        )
         with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
             audit.record(
                 actor_id=session.actor_id,
@@ -883,6 +888,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     "provider_id": provider_id,
                     "key_id": key.key_id,
                     "fingerprint": key.fingerprint,
+                    "runtime_reload_requested": True,
                 },
             )
         return RedirectResponse(
@@ -949,6 +955,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     )
         except (KeyError, SecretStoreUnavailable):
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        _request_ai_provider_runtime_reload(
+            settings,
+            provider_id=provider_id,
+            actor_id=session.actor_id,
+        )
         with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
             audit.record(
                 actor_id=session.actor_id,
@@ -957,7 +968,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 target_type="ai_provider_key",
                 target_id=removed.key_id,
                 outcome=AuditOutcome.SUCCESS,
-                metadata={"provider_id": provider_id, "key_id": removed.key_id},
+                metadata={
+                    "provider_id": provider_id,
+                    "key_id": removed.key_id,
+                    "runtime_reload_requested": True,
+                },
             )
         return RedirectResponse(
             _ai_provider_keys_redirect(provider_id),
@@ -1000,6 +1015,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         except ValueError:
             return _html("Invalid key settings", status_code=HTTPStatus.BAD_REQUEST)
+        _request_ai_provider_runtime_reload(
+            settings,
+            provider_id=provider_id,
+            actor_id=session.actor_id,
+        )
         with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
             audit.record(
                 actor_id=session.actor_id,
@@ -1014,6 +1034,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     "label": updated.label,
                     "weight": updated.weight,
                     "max_parallel_requests": updated.max_parallel_requests,
+                    "runtime_reload_requested": True,
                 },
             )
         return RedirectResponse(
@@ -1132,6 +1153,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
         except (KeyError, SecretNotFound, SecretStoreUnavailable):
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         action = "enabled" if enabled else "disabled"
+        _request_ai_provider_runtime_reload(
+            settings,
+            provider_id=provider_id,
+            actor_id=session.actor_id,
+        )
         with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
             audit.record(
                 actor_id=session.actor_id,
@@ -1140,7 +1166,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 target_type="ai_provider_key",
                 target_id=key.key_id,
                 outcome=AuditOutcome.SUCCESS,
-                metadata={"provider_id": provider_id, "key_id": key.key_id},
+                metadata={
+                    "provider_id": provider_id,
+                    "key_id": key.key_id,
+                    "runtime_reload_requested": True,
+                },
             )
         return RedirectResponse(
             _ai_provider_keys_redirect(provider_id),
