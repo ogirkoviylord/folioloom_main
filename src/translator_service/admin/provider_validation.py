@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +21,13 @@ _SENSITIVE_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9._-]+"),
     re.compile(r"\b[A-Za-z0-9._-]*api_keys[A-Za-z0-9._-]*\b"),
 )
+
+
+@dataclass(frozen=True)
+class AIProviderKeyValidationView:
+    status: str
+    error: str
+    checked_at: str
 
 
 class SQLiteAIProviderValidationStore:
@@ -102,6 +110,41 @@ class SQLiteAIProviderValidationStore:
             latest[provider_id] = metadata
         return latest
 
+    def latest_by_key(
+        self,
+        provider_id: str,
+        *,
+        key_updated_at: Mapping[str, datetime] | None = None,
+    ) -> Mapping[str, AIProviderKeyValidationView]:
+        rows = self._connection.execute(
+            """
+            SELECT key_id, status, error, created_at
+            FROM admin_ai_provider_validations
+            WHERE provider_id = ?
+            ORDER BY datetime(created_at) DESC, rowid DESC
+            """,
+            (provider_id,),
+        ).fetchall()
+        latest: dict[str, AIProviderKeyValidationView] = {}
+        updated_at_by_key = key_updated_at or {}
+        for row in rows:
+            key_id = row["key_id"]
+            if key_id in latest:
+                continue
+            created_at = datetime.fromisoformat(row["created_at"])
+            key_updated_at_value = updated_at_by_key.get(key_id)
+            if (
+                key_updated_at_value is not None
+                and created_at < key_updated_at_value
+            ):
+                continue
+            latest[key_id] = AIProviderKeyValidationView(
+                status=row["status"],
+                error=safe_validation_error(row["error"]),
+                checked_at=row["created_at"],
+            )
+        return latest
+
     def _create_schema(self) -> None:
         with self._connection:
             self._connection.execute(
@@ -125,6 +168,13 @@ def _redact_sensitive_text(value: str | None) -> str | None:
     redacted = " ".join(value.split())
     for pattern in _SENSITIVE_PATTERNS:
         redacted = pattern.sub("[redacted]", redacted)
+    return redacted
+
+
+def safe_validation_error(value: str | None) -> str:
+    redacted = _redact_sensitive_text(value)
+    if not redacted:
+        return "n/a"
     return redacted
 
 
