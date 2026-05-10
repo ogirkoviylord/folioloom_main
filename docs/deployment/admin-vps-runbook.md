@@ -94,6 +94,21 @@ key, restored encrypted admin secrets cannot be decrypted. Do not commit `.env`.
 The same master key is required for encrypted admin-managed integration and
 provider keys. If it is missing, the admin UI cannot store new keys.
 
+For a small closed beta, start with conservative operational safety caps and
+adjust the live values later from Admin -> Settings:
+
+- `BETA_GLOBAL_DAILY_COST_CAP_USD=5.00`
+- `BETA_GLOBAL_MONTHLY_COST_CAP_USD=50.00`
+- `BETA_USER_DAILY_COST_CAP_USD=1.00`
+- `BETA_USER_DAILY_JOB_LIMIT=3`
+
+Phase 4 beta safety is an operational guard, not billing. New persistent jobs
+reserve estimated budget before queue execution, global/user caps are checked
+before enqueue, completed work units record prompt/completion token usage
+idempotently, and the scheduler stops claiming new work when the live kill
+switch or global caps are active. Telegram Stars/XTR and a paid ledger remain a
+separate release gate.
+
 `DEEPSEEK_API_KEY` and `DEEPSEEK_API_KEYS` remain valid runtime sources even
 after additional DeepSeek keys are added from the admin UI. Admin-added keys and
 env keys are additive: the balance view and runtime provider layer can use both
@@ -203,6 +218,31 @@ list receive an invite-only message and new upload files are not downloaded.
 `BETA_ALLOWLIST_TELEGRAM_IDS` is only a bootstrap/default list for fresh admin
 state. Once admin settings are saved, the live SQLite setting is the source of
 truth.
+
+## Beta Safety / Cost Guard
+
+Use the SSH-tunneled admin console for live beta safety operations:
+
+- Admin -> Settings edits `BETA_TRANSLATIONS_PAUSED`, global/user cost caps and
+  per-user job limits without restart.
+- Admin -> Costs shows consumed, reserved and remaining beta budget, plus users
+  near cap.
+- Admin -> Live shows active kill switch/cap warnings for operator awareness.
+
+To pause all beta translations without restart, enable
+`BETA_TRANSLATIONS_PAUSED` in Admin -> Settings. New uploads/jobs are rejected
+safely and the scheduler stops claiming new work. Existing idempotent
+work-unit usage records remain counted once by work-unit id.
+
+## Cost Or Provider Incident Response
+
+If provider cost or error rate spikes:
+
+1. Enable `BETA_TRANSLATIONS_PAUSED=true` in Admin -> Settings.
+2. Check Admin -> Costs for consumed vs reserved budget.
+3. Check Admin -> AI Providers for cooldown/circuit state.
+4. Check Admin -> Live for active budget warnings and kill switch state.
+5. Resume only after budget and provider health are understood.
 
 ## DeepSeek Balance
 

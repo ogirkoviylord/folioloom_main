@@ -42,9 +42,12 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   enabled or disabled with an admin toggle.
 - [x] Rights confirmation is shown before full processing.
 - [ ] Free preview exists before full translation.
-- [ ] Per-user quotas are enforced.
-- [ ] Global cost cap is enforced.
-- [ ] Admin kill switch exists and is tested.
+- [x] Per-user cost caps/job limits are enforced by the Phase 4 operational
+  beta safety guard.
+- [x] Global cost caps are enforced by reservation-at-enqueue and scheduler
+  claim guards.
+- [x] Admin kill switch exists in Settings/Live visibility and stops new
+  uploads/jobs and new scheduler claims without restart.
 - [ ] Upload hardening/quarantine baseline is active.
 - [ ] TTL cleanup is active for sources, finals, partials and quarantine.
 - [ ] Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact.
@@ -66,6 +69,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [ ] No payment UI is exposed.
 - [ ] No paid job can be started.
 - [ ] Logs/admin do not expose raw document text.
+- [x] Beta safety telemetry stores safe budget metadata only: job/user ids,
+  reservations, usage counts, costs, statuses and reason codes. It does not
+  store raw document text, prompts, translations or API keys.
 - [ ] The common verification commands pass.
 - [ ] `scripts/server_smoke_check.sh` passes on the beta server.
 

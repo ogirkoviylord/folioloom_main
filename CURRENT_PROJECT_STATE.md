@@ -125,6 +125,10 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Scheduler claim ordering is beta-safe and fairness-aware: user/job/document
   active caps, priority aging and capacity-aware batch claiming prevent one
   huge document or heavy user from monopolizing worker slots.
+- Phase 4 beta safety is implemented: live admin kill switch, global/user cost
+  caps, reservation-at-enqueue, idempotent work-unit usage accounting and
+  budget warnings. This is an operational beta guard, not a paid billing
+  ledger.
 - Docker Compose stack with `api`, `bot`, `worker`, `postgres`, `redis`.
 - Server env example uses `SCHEDULER_BACKEND=postgres`.
 
@@ -169,6 +173,8 @@ Implemented owner/admin areas include:
 - security events;
 - operations/jobs;
 - token/cost analytics;
+- beta safety Costs/Settings/Live visibility for consumed, reserved and
+  remaining budget, cap warnings and the live kill switch state;
 - quality run trigger;
 - audit logging;
 - deployment smoke checks.
@@ -192,7 +198,6 @@ product yet.
 
 ## Main gaps against closed beta
 
-- Per-user quotas, global cost cap and admin kill switch.
 - Free preview before full translation.
 - Upload hardening/quarantine baseline.
 - TTL cleanup/delete verification.
