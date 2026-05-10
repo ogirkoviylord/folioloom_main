@@ -81,6 +81,7 @@ from translator_service.admin.views import (
     ai_providers_body,
     billing_body,
     costs_body,
+    deepseek_keys_body,
     integrations_body,
     live_body,
     log_detail_body,
@@ -216,6 +217,21 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 balance_snapshot=_deepseek_balance_snapshot(settings),
                 balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
                 top_up_url=settings.admin_deepseek_top_up_url,
+            ),
+        )
+
+    @router.get("/ai-providers/deepseek/keys", response_class=HTMLResponse)
+    async def deepseek_keys(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="DeepSeek Keys",
+            active="ai_providers",
+            body=lambda session: deepseek_keys_body(
+                csrf_token=session.csrf_token,
+                key_pools=_ai_provider_key_pools(settings),
+                runtime_reload_states=_ai_provider_runtime_reload_states(settings),
             ),
         )
 

@@ -97,7 +97,7 @@ Never put plaintext API keys or full `secret_id` values in audit metadata.
 - Modify `src/translator_service/admin/views.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add failing unauthenticated route laziness test**
+- [x] **Step 1: Add failing unauthenticated route laziness test**
 
 Add to `tests/test_admin_routes.py` near the existing admin auth laziness tests:
 
@@ -116,7 +116,7 @@ def test_deepseek_keys_page_does_not_build_inventory_without_login(self):
     self.assertEqual(response.headers["location"], "/admin/login")
 ```
 
-- [ ] **Step 2: Add failing authenticated page render test**
+- [x] **Step 2: Add failing authenticated page render test**
 
 Add to `tests/test_admin_routes.py` near existing AI Providers tests:
 
@@ -146,7 +146,7 @@ def test_deepseek_keys_page_renders_key_management_surface(self):
         self.assertIn("Reload DeepSeek runtime", response.text)
 ```
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -159,7 +159,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: the authenticated test fails because the route does not exist.
 
-- [ ] **Step 4: Extract add-key form helper and add `deepseek_keys_body`**
+- [x] **Step 4: Extract add-key form helper and add `deepseek_keys_body`**
 
 In `src/translator_service/admin/views.py`, first extract the existing add-key
 form markup from `_ai_provider_card(...)` into a reusable helper:
@@ -297,7 +297,7 @@ def _deepseek_reload_banner(
     """
 ```
 
-- [ ] **Step 5: Wire route**
+- [x] **Step 5: Wire route**
 
 In `src/translator_service/admin/routes.py`, import `deepseek_keys_body` from
 `translator_service.admin.views`, then add the route after `/admin/ai-providers`:
@@ -319,7 +319,7 @@ async def deepseek_keys(request: Request) -> Response:
     )
 ```
 
-- [ ] **Step 6: Run route tests**
+- [x] **Step 6: Run route tests**
 
 Run:
 
@@ -332,7 +332,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit route skeleton**
+- [x] **Step 7: Commit route skeleton**
 
 Run:
 
