@@ -1036,7 +1036,7 @@ changed, omit it from `git add`.
 
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add no raw secret leakage regression**
+- [x] **Step 1: Add no raw secret leakage regression**
 
 Add:
 
@@ -1090,7 +1090,7 @@ def test_deepseek_key_management_never_exposes_raw_secret_or_secret_id(self):
         self.assertNotIn("translated_text", serialized)
 ```
 
-- [ ] **Step 2: Run security regression**
+- [x] **Step 2: Run security regression**
 
 Run:
 
@@ -1102,7 +1102,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run all admin route tests**
+- [x] **Step 3: Run all admin route tests**
 
 Run:
 
@@ -1112,7 +1112,7 @@ PYTHONPATH=src python3 -m pytest tests/test_admin_routes.py -q
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit security regression**
+- [x] **Step 4: Commit security regression**
 
 Run:
 
