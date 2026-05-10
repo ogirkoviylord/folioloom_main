@@ -1678,7 +1678,7 @@ Expected: commit succeeds.
 
 - No code files unless verification finds a concrete bug.
 
-- [ ] **Step 1: Run targeted suite**
+- [x] **Step 1: Run targeted suite**
 
 Run:
 
@@ -1703,7 +1703,7 @@ PYTHONPATH=src python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run compile check**
+- [x] **Step 2: Run compile check**
 
 Run:
 
@@ -1713,7 +1713,7 @@ PYTHONPATH=src python3 -m compileall src
 
 Expected: PASS.
 
-- [ ] **Step 3: Run predeploy check**
+- [x] **Step 3: Run predeploy check**
 
 Run:
 
@@ -1723,7 +1723,7 @@ bash scripts/predeploy_check.sh
 
 Expected: PASS.
 
-- [ ] **Step 4: Inspect git status**
+- [x] **Step 4: Inspect git status**
 
 Run:
 
