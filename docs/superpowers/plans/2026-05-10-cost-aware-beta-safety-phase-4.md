@@ -1334,7 +1334,7 @@ Expected: commit succeeds.
 - Modify `tests/test_admin_routes.py`
 - Modify `tests/test_admin_live_monitor.py`
 
-- [ ] **Step 1: Add failing admin route tests**
+- [x] **Step 1: Add failing admin route tests**
 
 Add to `tests/test_admin_routes.py`:
 
@@ -1394,7 +1394,7 @@ def test_live_monitor_warns_when_beta_budget_nears_cap(client, beta_safety_store
 
 If current fixtures do not expose `beta_safety_store`, add route factory dependency injection matching existing admin runtime stores.
 
-- [ ] **Step 2: Run admin tests and verify failure**
+- [x] **Step 2: Run admin tests and verify failure**
 
 Run:
 
@@ -1404,13 +1404,13 @@ PYTHONPATH=src python3 -m pytest tests/test_admin_routes.py tests/test_admin_liv
 
 Expected: FAIL because admin budget summary/settings are not wired.
 
-- [ ] **Step 3: Extend settings page**
+- [x] **Step 3: Extend settings page**
 
 In `admin/routes.py`, include `BETA_SAFETY_SETTING_DEFINITIONS` in the settings definitions list. Persist submitted values through existing `SQLiteAdminSettingsStore.set_value(...)`.
 
 In `admin/views.py`, render beta safety controls in the existing settings page as operational controls, not billing controls. Use fixed labels from definitions and no raw text.
 
-- [ ] **Step 4: Extend costs analytics response**
+- [x] **Step 4: Extend costs analytics response**
 
 In `admin/costs.py`, add:
 
@@ -1446,7 +1446,7 @@ In `/admin/api/costs`, include:
 }
 ```
 
-- [ ] **Step 5: Add live warning**
+- [x] **Step 5: Add live warning**
 
 Add action-center/live warning when:
 
@@ -1462,7 +1462,7 @@ Daily beta cost budget is near the configured cap.
 Monthly beta cost budget is near the configured cap.
 ```
 
-- [ ] **Step 6: Run admin tests**
+- [x] **Step 6: Run admin tests**
 
 Run:
 
@@ -1472,7 +1472,7 @@ PYTHONPATH=src python3 -m pytest tests/test_admin_routes.py tests/test_admin_liv
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit admin UI/API**
+- [x] **Step 7: Commit admin UI/API**
 
 Run:
 

@@ -32,6 +32,12 @@ from translator_service.beta_access import (
     BETA_ALLOWLIST_ENABLED_SETTING,
     BETA_ALLOWLIST_SETTING,
 )
+from translator_service.beta_safety import (
+    BetaSafetyLimits,
+    BetaSafetyRates,
+    JobCostEstimate,
+)
+from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
 from translator_service.translation_run_logs import (
@@ -396,6 +402,163 @@ class AdminRoutesTest(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_settings_page_renders_and_updates_beta_safety_controls(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            settings = Settings(
+                admin_db_path=db_path,
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/settings")
+
+            self.assertIn("Beta Safety Controls", page.text)
+            self.assertIn("Pause all beta translations", page.text)
+            self.assertIn("Global daily cost cap USD", page.text)
+
+            response = client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "BETA_TRANSLATIONS_PAUSED": "true",
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "3.25",
+                    "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "33.00",
+                    "BETA_USER_DAILY_COST_CAP_USD": "0.75",
+                    "BETA_USER_MONTHLY_COST_CAP_USD": "7.50",
+                    "BETA_USER_DAILY_JOB_LIMIT": "2",
+                    "BETA_MAX_JOB_ESTIMATED_COST_USD": "1.25",
+                    "BETA_COST_WARNING_FRACTION": "0.60",
+                },
+                follow_redirects=False,
+            )
+            updated = client.get("/admin/settings")
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/admin/settings")
+            self.assertIn('name="BETA_TRANSLATIONS_PAUSED" checked', updated.text)
+            self.assertIn(
+                'name="BETA_GLOBAL_DAILY_COST_CAP_USD" type="number" value="3.25"',
+                updated.text,
+            )
+            self.assertEqual(
+                _admin_setting_row(db_path, "BETA_TRANSLATIONS_PAUSED")[0],
+                "true",
+            )
+
+            unpause = client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(updated.text),
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "4.00",
+                    "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "44.00",
+                    "BETA_USER_DAILY_COST_CAP_USD": "0.80",
+                    "BETA_USER_MONTHLY_COST_CAP_USD": "8.00",
+                    "BETA_USER_DAILY_JOB_LIMIT": "3",
+                    "BETA_MAX_JOB_ESTIMATED_COST_USD": "1.50",
+                    "BETA_COST_WARNING_FRACTION": "0.70",
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(unpause.status_code, 303)
+            self.assertEqual(
+                _admin_setting_row(db_path, "BETA_TRANSLATIONS_PAUSED")[0],
+                "false",
+            )
+
+    def test_invalid_beta_safety_settings_do_not_partially_save(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/settings")
+
+            response = client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "BETA_TRANSLATIONS_PAUSED": "true",
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "-1.00",
+                    "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "50.00",
+                    "BETA_USER_DAILY_COST_CAP_USD": "1.00",
+                    "BETA_USER_MONTHLY_COST_CAP_USD": "10.00",
+                    "BETA_USER_DAILY_JOB_LIMIT": "3",
+                    "BETA_MAX_JOB_ESTIMATED_COST_USD": "2.00",
+                    "BETA_COST_WARNING_FRACTION": "0.80",
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIsNone(
+                _admin_setting_row(db_path, "BETA_TRANSLATIONS_PAUSED")
+            )
+            with SQLiteAdminAuditLog(db_path) as audit:
+                events = audit.list_events(limit=5)
+            self.assertNotIn(
+                "settings.beta_safety.updated",
+                {event.action for event in events},
+            )
+
+    def test_incomplete_beta_safety_settings_do_not_reset_existing_values(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/settings")
+            complete = client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(page.text),
+                    "BETA_TRANSLATIONS_PAUSED": "true",
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "3.25",
+                    "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "33.00",
+                    "BETA_USER_DAILY_COST_CAP_USD": "0.75",
+                    "BETA_USER_MONTHLY_COST_CAP_USD": "7.50",
+                    "BETA_USER_DAILY_JOB_LIMIT": "2",
+                    "BETA_MAX_JOB_ESTIMATED_COST_USD": "1.25",
+                    "BETA_COST_WARNING_FRACTION": "0.60",
+                },
+            )
+            self.assertEqual(complete.status_code, 200)
+            updated = client.get("/admin/settings")
+
+            incomplete = client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(updated.text),
+                    "BETA_TRANSLATIONS_PAUSED": "false",
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "4.00",
+                },
+            )
+
+            self.assertEqual(incomplete.status_code, 400)
+            self.assertEqual(
+                _admin_setting_row(db_path, "BETA_TRANSLATIONS_PAUSED")[0],
+                "true",
+            )
+            self.assertEqual(
+                _admin_setting_row(db_path, "BETA_GLOBAL_DAILY_COST_CAP_USD")[0],
+                "3.25",
+            )
 
     def test_login_cookie_can_be_marked_secure_for_deployment(self):
         client = TestClient(
@@ -772,6 +935,56 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["top_runs"][0]["estimated_cost_usd"], 0.00248)
         self.assertEqual(payload["top_users"][0]["user_id"], "telegram:42")
         self.assertEqual(payload["top_users"][0]["estimated_cost_usd"], 0.00248)
+
+    def test_costs_page_and_api_include_beta_safety_summary(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            settings = Settings(
+                admin_db_path=db_path,
+                translation_run_log_root=str(Path(temp_dir) / "runs"),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            now = datetime.now(UTC)
+            with SQLiteBetaSafetyStore(db_path) as store:
+                store.reserve_job(
+                    "job-reserved",
+                    "telegram:42",
+                    JobCostEstimate(
+                        prompt_tokens=100,
+                        completion_tokens=100,
+                        estimated_cost_usd=0.8,
+                    ),
+                    BetaSafetyLimits(),
+                    BetaSafetyRates(),
+                    now=now,
+                )
+                store.record_work_unit_usage(
+                    "job-consumed",
+                    "telegram:77",
+                    "unit-1",
+                    prompt_tokens=1_000_000,
+                    completion_tokens=0,
+                    rates=BetaSafetyRates(input_usd_per_million=0.2),
+                    now=now,
+                )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/costs")
+            api = client.get("/admin/api/costs")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Beta safety budget", page.text)
+            self.assertIn("Translations paused", page.text)
+            self.assertEqual(api.status_code, 200)
+            payload = api.json()["beta_safety"]
+            self.assertEqual(payload["global_daily_cap_usd"], 5.0)
+            self.assertEqual(payload["global_daily_reserved_usd"], 0.8)
+            self.assertEqual(payload["global_daily_consumed_usd"], 0.2)
+            self.assertEqual(payload["global_daily_remaining_usd"], 4.0)
+            self.assertFalse(payload["translations_paused"])
+            self.assertFalse(payload["warning"])
 
     def test_operations_page_and_api_show_empty_overview(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
@@ -1177,7 +1390,7 @@ class AdminRoutesTest(unittest.TestCase):
 
     def test_live_monitor_page_and_api_show_snapshot(self):
         with TemporaryDirectory() as temp_dir:
-            logger = TranslationRunLogger.start(
+            _logger = TranslationRunLogger.start(
                 root=temp_dir,
                 metadata=TranslationRunMetadata(
                     job_id="job-live-1",
@@ -1227,6 +1440,42 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("cpu_percent", payload["server"])
             self.assertIn("memory_percent", payload["server"])
             self.assertIn("disk_percent", payload["server"])
+
+    def test_live_and_action_center_warn_when_beta_safety_is_paused(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        translation_run_log_root=str(Path(temp_dir) / "runs"),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            settings_page = client.get("/admin/settings")
+            client.post(
+                "/admin/settings/beta-safety",
+                data={
+                    "csrf_token": _csrf_token(settings_page.text),
+                    "BETA_TRANSLATIONS_PAUSED": "true",
+                    "BETA_GLOBAL_DAILY_COST_CAP_USD": "5.00",
+                    "BETA_GLOBAL_MONTHLY_COST_CAP_USD": "50.00",
+                    "BETA_USER_DAILY_COST_CAP_USD": "1.00",
+                    "BETA_USER_MONTHLY_COST_CAP_USD": "10.00",
+                    "BETA_USER_DAILY_JOB_LIMIT": "3",
+                    "BETA_MAX_JOB_ESTIMATED_COST_USD": "2.00",
+                    "BETA_COST_WARNING_FRACTION": "0.80",
+                },
+            )
+
+            live = client.get("/admin/live")
+            overview = client.get("/admin/overview")
+
+            self.assertIn("Beta translations are paused", live.text)
+            self.assertIn("Beta translations are paused", overview.text)
 
     def test_owner_can_store_ai_provider_secret_with_csrf(self):
         with TemporaryDirectory() as temp_dir:

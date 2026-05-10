@@ -10,6 +10,7 @@ from translator_service.admin.ai_provider_keys import AIProviderKeySummary
 from translator_service.admin.auth import AdminSession
 from translator_service.admin.bootstrap_config import is_env_deepseek_key
 from translator_service.admin.costs import (
+    BetaSafetyCostSummary,
     CostAnalytics,
     CostRunSummary,
     CostUserSummary,
@@ -40,6 +41,7 @@ from translator_service.admin.quality import (
     QualitySampleScore,
 )
 from translator_service.admin.secret_safety import SecretSafetyItem, SecretSafetyReport
+from translator_service.admin.settings import AdminSettingValue, SettingValueType
 from translator_service.admin.translation_logs import (
     TranslationRunDetails,
     TranslationRunEvent,
@@ -214,6 +216,7 @@ def settings_body(
     *,
     beta_allowlist_enabled: bool,
     beta_allowlist_ids: tuple[int, ...],
+    beta_safety_settings: tuple[AdminSettingValue, ...],
     csrf_token: str,
 ) -> str:
     rows = "\n".join(_secret_safety_row(item) for item in report.items)
@@ -250,6 +253,19 @@ def settings_body(
         <button type="submit">Add ID</button>
       </form>
       {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
+    </section>
+    <section class="panel table-panel">
+      <h3>Beta Safety Controls</h3>
+      <p>
+        Live budget guardrails for the closed beta. These values protect beta
+        spend and can pause new translation starts without exposing document text.
+      </p>
+      <form class="secret-form key-form" method="post"
+        action="/admin/settings/beta-safety">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        {_beta_safety_setting_inputs(beta_safety_settings)}
+        <button type="submit">Save beta safety</button>
+      </form>
     </section>
     <section class="metrics">
       <div class="metric">
@@ -289,6 +305,44 @@ def settings_body(
         <tbody>{rows}</tbody>
       </table>
     </section>
+    """
+
+
+def _beta_safety_setting_inputs(settings: tuple[AdminSettingValue, ...]) -> str:
+    return "\n".join(_beta_safety_setting_input(setting) for setting in settings)
+
+
+def _beta_safety_setting_input(setting: AdminSettingValue) -> str:
+    safe_key = escape(setting.key)
+    safe_label = escape(setting.label)
+    safe_value = escape(setting.value)
+    if setting.value_type is SettingValueType.BOOLEAN:
+        checked = " checked" if setting.value.strip().lower() == "true" else ""
+        return f"""
+        <label>
+          <span>{safe_label}</span>
+          <input name="{safe_key}"{checked} type="checkbox" value="true">
+        </label>
+        """
+    if setting.value_type is SettingValueType.INTEGER:
+        return f"""
+        <label>
+          <span>{safe_label}</span>
+          <input name="{safe_key}" type="number" value="{safe_value}" step="1">
+        </label>
+        """
+    if setting.value_type is SettingValueType.FLOAT:
+        return f"""
+        <label>
+          <span>{safe_label}</span>
+          <input name="{safe_key}" type="number" value="{safe_value}" step="0.01">
+        </label>
+        """
+    return f"""
+        <label>
+          <span>{safe_label}</span>
+          <input name="{safe_key}" type="text" value="{safe_value}">
+        </label>
     """
 
 
@@ -999,6 +1053,7 @@ def costs_body(analytics: CostAnalytics) -> str:
         <tbody>{_cost_run_rows(analytics.top_runs)}</tbody>
       </table>
     </section>
+    {_beta_safety_cost_panel(analytics.beta_safety)}
     <section class="panel table-panel">
       <h3>Top users (all time)</h3>
       <table class="log-table">
@@ -1015,6 +1070,47 @@ def costs_body(analytics: CostAnalytics) -> str:
       </table>
     </section>
     """
+
+
+def _beta_safety_cost_panel(summary: BetaSafetyCostSummary | None) -> str:
+    if summary is None:
+        return ""
+    rows = (
+        ("Daily cap", _format_optional_usd(summary.global_daily_cap_usd)),
+        ("Daily reserved", _format_usd(summary.global_daily_reserved_usd)),
+        ("Daily consumed", _format_usd(summary.global_daily_consumed_usd)),
+        ("Daily remaining", _format_optional_usd(summary.global_daily_remaining_usd)),
+        ("Monthly cap", _format_optional_usd(summary.global_monthly_cap_usd)),
+        ("Monthly reserved", _format_usd(summary.global_monthly_reserved_usd)),
+        ("Monthly consumed", _format_usd(summary.global_monthly_consumed_usd)),
+        (
+            "Monthly remaining",
+            _format_optional_usd(summary.global_monthly_remaining_usd),
+        ),
+        ("Translations paused", "yes" if summary.translations_paused else "no"),
+        ("Warning", "yes" if summary.warning else "no"),
+    )
+    cards = "\n".join(_metric(label, value) for label, value in rows)
+    warning = ""
+    if summary.warning:
+        warning = f"""
+        <p class="error">
+          {escape(_beta_safety_warning_text(summary))}
+        </p>
+        """
+    return f"""
+    <section class="panel">
+      <h3>Beta safety budget</h3>
+      {warning}
+      <div class="metric-grid">{cards}</div>
+    </section>
+    """
+
+
+def _format_optional_usd(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return _format_usd(value)
 
 
 def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
@@ -1357,6 +1453,7 @@ def live_body(
     *,
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+    beta_safety: BetaSafetyCostSummary | None = None,
 ) -> str:
     metrics = (
         ("Active translations", snapshot.active_translations, "active_translations"),
@@ -1384,6 +1481,7 @@ def live_body(
         for label, value, field in metrics
     )
     runtime_cards = _live_runtime_cards(runtime_statuses, runtime_reload_states)
+    beta_warning = _beta_safety_live_warning(beta_safety)
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -1397,6 +1495,7 @@ def live_body(
         Open monitor
       </a>
     </section>
+    {beta_warning}
     <section class="metrics live-grid">{metric_cards}</section>
     <section class="panel">
       <h3>DeepSeek runtime</h3>
@@ -1514,6 +1613,34 @@ def live_body(
       setInterval(refreshLiveMonitor, 3000);
     </script>
     """
+
+
+def _beta_safety_live_warning(summary: BetaSafetyCostSummary | None) -> str:
+    if summary is None or not summary.warning:
+        return ""
+    daily_remaining = escape(
+        _format_optional_usd(summary.global_daily_remaining_usd)
+    )
+    monthly_remaining = escape(
+        _format_optional_usd(summary.global_monthly_remaining_usd)
+    )
+    return f"""
+    <section class="panel">
+      <h3>{escape(_beta_safety_warning_text(summary))}</h3>
+      <p>
+        Daily remaining {daily_remaining} and monthly remaining
+        {monthly_remaining}.
+      </p>
+    </section>
+    """
+
+
+def _beta_safety_warning_text(summary: BetaSafetyCostSummary) -> str:
+    if summary.translations_paused:
+        return "Beta translations are paused"
+    if summary.warning_reason == "global_monthly_cap":
+        return "Beta safety monthly budget is near its cap"
+    return "Beta safety daily budget is near its cap"
 
 
 def _live_runtime_cards(
@@ -1781,8 +1908,16 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         {_metric("Stage", _stage_label(summary), field="stage")}
         {_metric("Progress", _progress_label(summary), field="progress")}
         {_metric("ETA", _eta_label(summary), field="eta")}
-        {_metric("Started", _format_datetime(summary.started_at), field="started_at")}
-        {_metric("Finished", _format_datetime(summary.finished_at), field="finished_at")}
+        {_metric(
+            "Started",
+            _format_datetime(summary.started_at),
+            field="started_at",
+        )}
+        {_metric(
+            "Finished",
+            _format_datetime(summary.finished_at),
+            field="finished_at",
+        )}
         {_metric("Fragments", str(summary.fragment_count), field="fragments")}
         {_metric("Tokens", str(summary.total_tokens), field="tokens")}
       </div>
@@ -1874,7 +2009,9 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           const done = summary.fragment_count ?? 0;
           const total = summary.total_fragment_count ?? 0;
           const percent = summary.progress_percent;
-          if (total > 0 && percent != null) return `${{done}}/${{total}} · ${{percent}}%`;
+          if (total > 0 && percent != null) {{
+            return `${{done}}/${{total}} · ${{percent}}%`;
+          }}
           if (total > 0) return `${{done}}/${{total}}`;
           return `${{done}}/?`;
         }};
@@ -1887,8 +2024,16 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         `).join("");
         const fragmentRows = (fragments) => (fragments || []).map((fragment) => {{
           const blocks = (fragment.source_block_ids || []).join(", ") || "n/a";
-          const chars = `${{fragment.source_text_chars || 0}} -> ${{fragment.translated_text_chars || 0}}`;
-          const tokens = `${{fragment.prompt_tokens || 0}} + ${{fragment.completion_tokens || 0}} = ${{fragment.total_tokens || 0}}`;
+          const chars = [
+            fragment.source_text_chars || 0,
+            fragment.translated_text_chars || 0
+          ].join(" -> ");
+          const tokens = [
+            `${{fragment.prompt_tokens || 0}} +`,
+            fragment.completion_tokens || 0,
+            "=",
+            fragment.total_tokens || 0
+          ].join(" ");
           const notes = [
             fragment.error_message,
             ...(fragment.warnings || [])
@@ -1896,19 +2041,26 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           return `
             <tr>
               <td>${{escapeHtml(fragment.sequence || 0)}}</td>
-              <td><span class="status">${{escapeHtml(fragment.status || "unknown")}}</span></td>
+              <td>
+                <span class="status">
+                  ${{escapeHtml(fragment.status || "unknown")}}
+                </span>
+              </td>
               <td>${{escapeHtml(blocks)}}</td>
               <td>${{escapeHtml(fragment.prompt_tier || "n/a")}}</td>
               <td>${{escapeHtml(chars)}}</td>
               <td>${{escapeHtml(tokens)}}</td>
               <td>${{escapeHtml(fragment.retry_count || 0)}}</td>
-              <td>${{escapeHtml(Number(fragment.elapsed_seconds || 0).toFixed(2))}}s</td>
+              <td>
+                ${{escapeHtml(Number(fragment.elapsed_seconds || 0).toFixed(2))}}s
+              </td>
               <td>${{escapeHtml(notes)}}</td>
             </tr>
           `;
         }}).join("");
         async function refreshTranslationDetails() {{
-          const response = await fetch(`/admin/api/logs/${{encodeURIComponent(runId)}}`, {{
+          const detailsUrl = `/admin/api/logs/${{encodeURIComponent(runId)}}`;
+          const response = await fetch(detailsUrl, {{
             cache: "no-store"
           }});
           if (!response.ok) return;

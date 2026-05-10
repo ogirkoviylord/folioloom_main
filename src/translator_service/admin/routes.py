@@ -22,13 +22,20 @@ from translator_service.admin.auth import (
     AdminSession,
     AdminSessionManager,
 )
+from translator_service.admin.beta_safety_settings import (
+    beta_safety_setting_definitions_from_settings,
+    load_beta_safety_limits,
+)
 from translator_service.admin.bootstrap_config import (
     apply_ai_provider_key_bootstrap,
     apply_integration_bootstrap,
     apply_integration_connection_bootstrap,
     env_bootstrap_config,
 )
-from translator_service.admin.costs import build_cost_analytics
+from translator_service.admin.costs import (
+    build_beta_safety_cost_summary,
+    build_cost_analytics,
+)
 from translator_service.admin.integration_connections import (
     SQLiteIntegrationConnectionStore,
 )
@@ -45,12 +52,14 @@ from translator_service.admin.provider_balance import (
     refresh_deepseek_balance,
 )
 from translator_service.admin.provider_health import (
-    build_provider_health,
     _redact_sensitive_text,
+    build_provider_health,
 )
 from translator_service.admin.provider_probe import validate_ai_provider_key
-from translator_service.admin.provider_runtime import SQLiteAIProviderRuntimeStore
-from translator_service.admin.provider_runtime import AIProviderRuntimeProviderState
+from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeProviderState,
+    SQLiteAIProviderRuntimeStore,
+)
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
 from translator_service.admin.quality import build_quality_run_summary
 from translator_service.admin.quality_runner import QualityRunResult, write_quality_run
@@ -60,7 +69,7 @@ from translator_service.admin.secrets import (
     SecretStoreUnavailable,
     SQLiteEncryptedSecretStore,
 )
-from translator_service.admin.settings import SQLiteAdminSettingsStore
+from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
     build_translation_run_archive,
     get_translation_run_details,
@@ -93,6 +102,7 @@ from translator_service.beta_access import (
     load_beta_access_policy,
     parse_telegram_id_list,
 )
+from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.persistent_job_store import open_persistent_job_store
@@ -299,6 +309,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 _secret_safety_report(settings),
                 beta_allowlist_enabled=_beta_allowlist_policy(settings).enabled,
                 beta_allowlist_ids=_beta_allowlist_ids(settings),
+                beta_safety_settings=_beta_safety_setting_values(settings),
                 csrf_token=session.csrf_token,
             ),
         )
@@ -398,6 +409,36 @@ def create_admin_router(settings: Settings) -> APIRouter:
         )
         return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
 
+    @router.post("/settings/beta-safety")
+    async def save_beta_safety_settings(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        definitions = beta_safety_setting_definitions_from_settings(settings)
+        try:
+            values = [
+                (definition, _form_setting_value(definition, form))
+                for definition in definitions
+            ]
+            with SQLiteAdminSettingsStore(settings.admin_db_path) as store:
+                store.set_values(values, changed_by=session.actor_id)
+        except ValueError as error:
+            return _html(str(error), status_code=HTTPStatus.BAD_REQUEST)
+        with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+            audit.record(
+                actor_id=session.actor_id,
+                role=session.role,
+                action="settings.beta_safety.updated",
+                target_type="setting_group",
+                target_id="beta_safety",
+                outcome=AuditOutcome.SUCCESS,
+                metadata={"keys": [definition.key for definition, _value in values]},
+            )
+        return RedirectResponse("/admin/settings", status_code=HTTPStatus.SEE_OTHER)
+
     @router.get("/live", response_class=HTMLResponse)
     async def live(request: Request) -> Response:
         return _protected_page(
@@ -410,6 +451,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 _live_snapshot(settings),
                 runtime_statuses=_ai_provider_runtime_statuses(settings),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+                beta_safety=_beta_safety_cost_summary(settings),
             ),
         )
 
@@ -1634,6 +1676,7 @@ def _overview_action_center(settings: Settings):
         ),
         deepseek_low_balance_currency=settings.admin_deepseek_low_balance_currency,
         deepseek_balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
+        beta_safety=_beta_safety_cost_summary(settings),
     )
 
 
@@ -1840,7 +1883,40 @@ def _split_channel_user_id(user_id: str) -> tuple[str | None, str | None]:
 
 
 def _cost_analytics(settings: Settings):
-    return build_cost_analytics(settings.translation_run_log_root)
+    analytics = build_cost_analytics(settings.translation_run_log_root)
+    return type(analytics)(
+        tokens_today=analytics.tokens_today,
+        tokens_last_7_days=analytics.tokens_last_7_days,
+        tokens_month_to_date=analytics.tokens_month_to_date,
+        estimated_cost_today_usd=analytics.estimated_cost_today_usd,
+        estimated_cost_last_7_days_usd=analytics.estimated_cost_last_7_days_usd,
+        estimated_cost_month_to_date_usd=analytics.estimated_cost_month_to_date_usd,
+        top_runs=analytics.top_runs,
+        top_users=analytics.top_users,
+        beta_safety=_beta_safety_cost_summary(settings),
+    )
+
+
+def _beta_safety_cost_summary(settings: Settings):
+    with SQLiteAdminSettingsStore(settings.admin_db_path) as settings_store:
+        limits = load_beta_safety_limits(settings_store, settings)
+    with SQLiteBetaSafetyStore(settings.admin_db_path) as beta_store:
+        summary = beta_store.get_budget_summary(now=datetime.now(UTC))
+    return build_beta_safety_cost_summary(summary, limits)
+
+
+def _beta_safety_setting_values(settings: Settings):
+    definitions = beta_safety_setting_definitions_from_settings(settings)
+    with SQLiteAdminSettingsStore(settings.admin_db_path) as store:
+        return tuple(store.get_value(definition) for definition in definitions)
+
+
+def _form_setting_value(definition, form: dict[str, str]) -> str:
+    if definition.value_type is SettingValueType.BOOLEAN:
+        return "true" if form.get(definition.key) == "true" else "false"
+    if definition.key not in form:
+        raise ValueError(f"Missing setting: {definition.key}")
+    return form[definition.key].strip()
 
 
 def _beta_allowlist_ids(settings: Settings) -> tuple[int, ...]:
