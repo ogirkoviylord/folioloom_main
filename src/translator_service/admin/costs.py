@@ -37,6 +37,21 @@ class CostUserSummary:
 
 
 @dataclass(frozen=True)
+class BetaSafetyCostSummary:
+    global_daily_cap_usd: float | None
+    global_monthly_cap_usd: float | None
+    global_daily_reserved_usd: float
+    global_daily_consumed_usd: float
+    global_daily_remaining_usd: float | None
+    global_monthly_reserved_usd: float
+    global_monthly_consumed_usd: float
+    global_monthly_remaining_usd: float | None
+    translations_paused: bool
+    warning: bool
+    warning_reason: str
+
+
+@dataclass(frozen=True)
 class CostAnalytics:
     tokens_today: int
     tokens_last_7_days: int
@@ -46,6 +61,7 @@ class CostAnalytics:
     estimated_cost_month_to_date_usd: float
     top_runs: tuple[CostRunSummary, ...]
     top_users: tuple[CostUserSummary, ...]
+    beta_safety: BetaSafetyCostSummary | None = None
 
 
 def build_cost_analytics(
@@ -107,6 +123,63 @@ def build_cost_analytics(
         top_runs=tuple(top_runs),
         top_users=top_users,
     )
+
+
+def build_beta_safety_cost_summary(summary, limits) -> BetaSafetyCostSummary:
+    daily_remaining = summary.global_daily_remaining_usd(
+        limits.global_daily_cost_cap_usd,
+    )
+    monthly_remaining = summary.global_monthly_remaining_usd(
+        limits.global_monthly_cost_cap_usd,
+    )
+    warning_reason = _beta_safety_warning_reason(
+        daily_total=summary.global_daily_total_usd,
+        daily_cap=limits.global_daily_cost_cap_usd,
+        monthly_total=summary.global_monthly_total_usd,
+        monthly_cap=limits.global_monthly_cost_cap_usd,
+        warning_fraction=limits.warning_fraction,
+        paused=limits.translations_paused,
+    )
+    return BetaSafetyCostSummary(
+        global_daily_cap_usd=limits.global_daily_cost_cap_usd,
+        global_monthly_cap_usd=limits.global_monthly_cost_cap_usd,
+        global_daily_reserved_usd=summary.global_daily_reserved_usd,
+        global_daily_consumed_usd=summary.global_daily_consumed_usd,
+        global_daily_remaining_usd=daily_remaining,
+        global_monthly_reserved_usd=summary.global_monthly_reserved_usd,
+        global_monthly_consumed_usd=summary.global_monthly_consumed_usd,
+        global_monthly_remaining_usd=monthly_remaining,
+        translations_paused=limits.translations_paused,
+        warning=bool(warning_reason),
+        warning_reason=warning_reason,
+    )
+
+
+def _beta_safety_warning_reason(
+    *,
+    daily_total: float,
+    daily_cap: float | None,
+    monthly_total: float,
+    monthly_cap: float | None,
+    warning_fraction: float,
+    paused: bool,
+) -> str:
+    if paused:
+        return "paused"
+    fraction = min(1.0, max(0.0, warning_fraction))
+    if _near_or_over_cap(daily_total, daily_cap, fraction):
+        return "global_daily_cap"
+    if _near_or_over_cap(monthly_total, monthly_cap, fraction):
+        return "global_monthly_cap"
+    return ""
+
+
+def _near_or_over_cap(total: float, cap: float | None, fraction: float) -> bool:
+    if cap is None:
+        return False
+    if cap <= 0:
+        return True
+    return total >= cap * fraction
 
 
 def _read_runs(log_root: str | Path, rates: CostRates) -> list[CostRunSummary]:

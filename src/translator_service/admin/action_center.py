@@ -7,15 +7,16 @@ from decimal import Decimal
 from typing import Any
 
 from translator_service.admin.bootstrap_config import AdminBootstrapConfig
+from translator_service.admin.costs import BetaSafetyCostSummary
 from translator_service.admin.integration_connections import (
     IntegrationConnectionSummary,
 )
 from translator_service.admin.integrations import IntegrationSummary
+from translator_service.admin.provider_balance import ProviderBalanceSnapshot
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
-from translator_service.admin.provider_balance import ProviderBalanceSnapshot
 
 _REQUIRED_INTEGRATION_IDS = frozenset({"telegram"})
 _RUNTIME_DEGRADED_STATUSES = frozenset({"degraded", "error", "failed", "missing_keys"})
@@ -54,6 +55,7 @@ def build_action_center(
     deepseek_low_balance_threshold: Decimal | None = None,
     deepseek_low_balance_currency: str = "USD",
     deepseek_balance_stale_seconds: int = 300,
+    beta_safety: BetaSafetyCostSummary | None = None,
     now: datetime | None = None,
 ) -> ActionCenter:
     items: list[ActionItem] = []
@@ -154,6 +156,7 @@ def build_action_center(
             now=current_time,
         )
     )
+    items.extend(_beta_safety_action_items(beta_safety))
 
     return ActionCenter(items=tuple(items))
 
@@ -300,6 +303,32 @@ def _deepseek_balance_action_items(
                 )
             )
     return tuple(items)
+
+
+def _beta_safety_action_items(
+    beta_safety: BetaSafetyCostSummary | None,
+) -> tuple[ActionItem, ...]:
+    if beta_safety is None or not beta_safety.warning:
+        return ()
+    if beta_safety.translations_paused:
+        return (
+            ActionItem(
+                key="beta_safety_paused",
+                severity="critical",
+                title="Beta translations are paused",
+                detail="New beta translation starts are blocked by live settings.",
+                href="/admin/settings",
+            ),
+        )
+    return (
+        ActionItem(
+            key="beta_safety_budget_warning",
+            severity="warning",
+            title="Beta safety budget is near its cap",
+            detail="Reserved and consumed beta spend is close to a global cap.",
+            href="/admin/costs",
+        ),
+    )
 
 
 def _runtime_status(

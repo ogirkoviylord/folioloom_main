@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -120,6 +121,32 @@ class SQLiteAdminSettingsStore:
                 (definition.key, value, changed_by, now.isoformat()),
             )
         return self.get_value(definition)
+
+    def set_values(
+        self,
+        values: Sequence[tuple[AdminSettingDefinition, str]],
+        *,
+        changed_by: str,
+    ) -> tuple[AdminSettingValue, ...]:
+        for definition, value in values:
+            _validate_value(definition, value)
+        now = datetime.now(UTC)
+        with self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO admin_settings (key, value, changed_by, changed_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    changed_by = excluded.changed_by,
+                    changed_at = excluded.changed_at
+                """,
+                [
+                    (definition.key, value, changed_by, now.isoformat())
+                    for definition, value in values
+                ],
+            )
+        return tuple(self.get_value(definition) for definition, _value in values)
 
     def _create_schema(self) -> None:
         with self._connection:
