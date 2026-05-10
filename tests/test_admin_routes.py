@@ -986,6 +986,45 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertFalse(payload["translations_paused"])
             self.assertFalse(payload["warning"])
 
+    def test_beta_safety_admin_views_and_api_do_not_expose_raw_document_text(self):
+        raw_text = "SECRET RAW DOCUMENT TEXT SHOULD NOT APPEAR"
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            settings = Settings(
+                admin_db_path=db_path,
+                translation_run_log_root=str(Path(temp_dir) / "runs"),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            with SQLiteBetaSafetyStore(db_path) as store:
+                store.reserve_job(
+                    "job-secret",
+                    "telegram:42",
+                    JobCostEstimate(
+                        prompt_tokens=100,
+                        completion_tokens=100,
+                        estimated_cost_usd=0.1,
+                    ),
+                    BetaSafetyLimits(),
+                    BetaSafetyRates(),
+                    now=datetime.now(UTC),
+                )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            costs_page = client.get("/admin/costs")
+            live_page = client.get("/admin/live")
+            costs_api = client.get("/admin/api/costs")
+
+            self.assertEqual(costs_page.status_code, 200)
+            self.assertEqual(live_page.status_code, 200)
+            self.assertEqual(costs_api.status_code, 200)
+            self.assertNotIn(raw_text, costs_page.text)
+            self.assertNotIn(raw_text, live_page.text)
+            self.assertNotIn(raw_text, costs_api.text)
+            self.assertNotIn("source_text", costs_api.text)
+            self.assertNotIn("translated_text", costs_api.text)
+
     def test_operations_page_and_api_show_empty_overview(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 

@@ -250,6 +250,52 @@ class SchedulerRunnerTest(unittest.TestCase):
                 ],
             )
 
+    def test_beta_safety_guard_preserves_capacity_one_serial_success_path(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph",
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                beta_safety_guard=guard,
+                max_parallel_units=1,
+            )
+
+            [unit] = store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(
+                guard.usage_calls,
+                [
+                    UsageCall(
+                        job_id=job.id,
+                        user_id="telegram:42",
+                        work_unit_id=unit.id,
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                    )
+                ],
+            )
+            self.assertEqual(guard.consumed_jobs, [job.id])
+            self.assertEqual(guard.released_jobs, [])
+
     def test_run_once_records_usage_after_parallel_success(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
