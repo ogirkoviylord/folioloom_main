@@ -1492,7 +1492,7 @@ Expected: commit succeeds. If only one of `live.py` or `action_center.py` change
 - Modify `tests/test_scheduler_runner.py`
 - Modify `tests/test_admin_routes.py`
 
-- [ ] **Step 1: Add cancellation release test**
+- [x] **Step 1: Add cancellation release test**
 
 Add to `tests/test_translation_jobs.py`:
 
@@ -1508,7 +1508,7 @@ def test_cancelled_persistent_job_releases_beta_reservation():
     assert guard.releases[-1][1] == "cancelled"
 ```
 
-- [ ] **Step 2: Add no raw text tests**
+- [x] **Step 2: Add no raw text tests**
 
 Add to `tests/test_admin_routes.py`:
 
@@ -1532,7 +1532,7 @@ def test_beta_safety_admin_views_do_not_expose_raw_document_text(client, beta_sa
 
 This test intentionally does not write raw text into the safety store. It protects the admin path from adding document text later.
 
-- [ ] **Step 3: Add capacity=1 legacy guard test**
+- [x] **Step 3: Add capacity=1 legacy guard test**
 
 Add to `tests/test_scheduler_runner.py`:
 
@@ -1556,7 +1556,7 @@ def test_beta_safety_guard_preserves_capacity_one_serial_success_path():
     assert len(guard.usage_events) == 1
 ```
 
-- [ ] **Step 4: Run regression subset**
+- [x] **Step 4: Run regression subset**
 
 Run:
 
@@ -1566,7 +1566,7 @@ PYTHONPATH=src python3 -m pytest tests/test_translation_jobs.py tests/test_sched
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit regression coverage**
+- [x] **Step 5: Commit regression coverage**
 
 Run:
 
@@ -1648,7 +1648,7 @@ In `docs/restart/release-gates.md`, mark beta safety guard as done for closed be
 
 In `DOCUMENT_INDEX.md`, add the new plan and docs references.
 
-- [ ] **Step 5: Run docs/deployment checks**
+- [x] **Step 5: Run docs/deployment checks**
 
 Run:
 
@@ -1658,7 +1658,7 @@ bash scripts/predeploy_check.sh
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit docs**
+- [x] **Step 6: Commit docs**
 
 Run:
 

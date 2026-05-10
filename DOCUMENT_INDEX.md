@@ -73,6 +73,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/plans/2026-05-10-adaptive-provider-throttling-phase-3.md`
   - active implementation plan for adaptive provider throttling and circuit
   breaker behavior.
+- `docs/superpowers/plans/2026-05-10-cost-aware-beta-safety-phase-4.md` -
+  implemented operational beta safety guard: live admin kill switch,
+  global/user cost caps, reservation-at-enqueue, idempotent work-unit usage and
+  Admin Costs/Settings/Live visibility. Not a paid ledger or Telegram Stars/XTR
+  implementation.
 
 ## Paid-Beta Draft Docs
 

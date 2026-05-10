@@ -52,6 +52,23 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Admin console through SSH tunnel | Subscriptions, referrals, coupons, teams |
 | Backup/restore workflow | Stripe/YooKassa/card flow as immediate Telegram path |
 
+### Beta Safety / Cost Guard
+
+FolioLoom keeps beta throughput bounded with a cost-aware safety layer:
+
+- new persistent jobs use reservation-at-enqueue before queue execution;
+- global and per-user cost caps are enforced at reservation time;
+- completed work units record prompt/completion token usage idempotently;
+- the scheduler stops claiming new units when the admin kill switch or global
+  caps are active;
+- Admin -> Costs, Admin -> Settings and Admin -> Live show consumed, reserved
+  and remaining beta budget, cap warnings and live pause state;
+- no raw document text, prompts, translations or API keys are stored in safety
+  telemetry.
+
+This layer is an operational beta guard, separate from paid beta billing.
+Telegram Stars/XTR and a payment ledger remain a separate release gate.
+
 ## Source Of Truth
 
 - `CURRENT_PROJECT_STATE.md` - фактическое состояние проекта.
@@ -108,6 +125,14 @@ Required values include:
 - `ADMIN_OWNER_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 - `ADMIN_SECRET_MASTER_KEY`
+
+For a small closed beta, keep conservative safety caps in `.env` bootstrap and
+adjust the live values from Admin -> Settings after deploy:
+
+- `BETA_GLOBAL_DAILY_COST_CAP_USD=5.00`
+- `BETA_GLOBAL_MONTHLY_COST_CAP_USD=50.00`
+- `BETA_USER_DAILY_COST_CAP_USD=1.00`
+- `BETA_USER_DAILY_JOB_LIMIT=3`
 
 `ADMIN_SECRET_MASTER_KEY` enables encrypted admin-managed secrets. DeepSeek
 keys added in the admin UI are additive with `DEEPSEEK_API_KEY` /
@@ -191,6 +216,11 @@ The allowlist can be filled ahead of time. Enforcement remains off until the
 owner presses `Enable allowlist`; when enabled, non-allowlisted Telegram users
 receive an invite-only message and new uploads are not downloaded.
 
+To pause all beta translations without restart, open Admin -> Settings and
+enable `BETA_TRANSLATIONS_PAUSED`. New uploads/jobs are rejected safely and the
+scheduler stops claiming new work while already recorded work-unit usage remains
+idempotent.
+
 After deploy:
 
 ```bash
@@ -264,6 +294,7 @@ See `docs/restart/release-gates.md` for the canonical checklists.
 
 - Do not present FolioLoom as a paid public production service yet.
 - Do not expose payment UI before the payment gate.
+- Do not treat beta safety reservations or usage accounting as a paid ledger.
 - Do not expand beta formats beyond TXT/DOCX/EPUB.
 - Do not expose admin publicly in closed beta.
 - Do not log or show raw document text in admin/run logs.
