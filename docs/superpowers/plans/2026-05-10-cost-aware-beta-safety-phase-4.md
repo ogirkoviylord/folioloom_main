@@ -431,7 +431,7 @@ Expected: commit succeeds.
 - Create `src/translator_service/beta_safety_store.py`
 - Create `tests/test_beta_safety_store.py`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Create `tests/test_beta_safety_store.py`:
 
@@ -571,7 +571,7 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         self.assertFalse(capped.allowed)
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -581,7 +581,7 @@ PYTHONPATH=src python3 -m unittest tests.test_beta_safety_store
 
 Expected: FAIL because `translator_service.beta_safety_store` does not exist.
 
-- [ ] **Step 3: Implement SQLite store schema and operations**
+- [x] **Step 3: Implement SQLite store schema and operations**
 
 Create `src/translator_service/beta_safety_store.py` with:
 
@@ -633,7 +633,7 @@ Implementation requirements:
 - `get_budget_summary(...)` returns consumed/reserved totals for UTC day and UTC month.
 - `can_start_new_work(...)` blocks on kill switch and global caps using current consumed + active reserved totals.
 
-- [ ] **Step 4: Run store tests**
+- [x] **Step 4: Run store tests**
 
 Run:
 
@@ -643,7 +643,7 @@ PYTHONPATH=src python3 -m unittest tests.test_beta_safety_store
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit store**
+- [x] **Step 5: Commit store**
 
 Run:
 
