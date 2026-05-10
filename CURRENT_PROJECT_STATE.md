@@ -28,6 +28,16 @@ free closed beta после прохождения release gates.
 
 ## Последняя зафиксированная проверка
 
+После Phase 3 adaptive provider throttling были пройдены:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_provider_throttle tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_bot_runtime tests.test_scheduler_runner tests.test_admin_provider_health tests.test_admin_routes tests.test_admin_live_monitor tests.test_server_deployment_config
+```
+
+Результат: Phase 3 targeted suite `Ran 176 tests`, `OK`; scheduler regression
+`Ran 88 tests`, `OK`, `skipped=13`; Docker/Postgres scheduler `Ran 14 tests`,
+`OK`; predeploy check passed.
+
 После Phase 1 smart scheduler fairness/capacity и Phase 2 provider channel
 observability были пройдены:
 
@@ -125,11 +135,16 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Weighted least-loaded key selection with active-load, fairness, recent-error
   and latency signals.
 - Key cooldown/failover behavior for rate-limit/unavailable/timeout failures.
+- Local per-worker adaptive provider throttling with conservative initial
+  capacity, success-based ramp, multiplicative decrease and provider circuit
+  breaker for sustained provider degradation or auth/billing failures.
 - Admin-visible provider runtime status, reload request flow and per-channel
   health telemetry.
 - Runtime channel telemetry includes active requests, capacity, cooldown,
   latency, 429/503/timeout/malformed/auth/billing counters and redacted safe
   error summaries.
+- Runtime provider telemetry includes adaptive limit, available provider slots,
+  circuit state, reset remaining time and redacted last reason.
 - Provider validation/probe surfaces.
 - Admin-visible DeepSeek account balance snapshot/refresh flow.
 - DeepSeek admin keys and `.env` keys are additive for balance/runtime use.

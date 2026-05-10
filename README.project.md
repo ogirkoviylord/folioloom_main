@@ -130,6 +130,12 @@ secrets or document text: active requests, per-key capacity, cooldown,
 degraded channel does not disable the key automatically in Phase 2; it lowers
 selection priority and remains visible for operator action.
 
+Phase 3 adaptive provider throttling starts each runtime conservatively and
+ramps DeepSeek concurrency after clean successes. 429/503/timeouts decrease the
+local adaptive limit and cool down affected channels; auth/billing failures open
+a provider circuit for the configured reset window. This is local per worker,
+not a distributed global quota system.
+
 Start or update the stack:
 
 ```bash

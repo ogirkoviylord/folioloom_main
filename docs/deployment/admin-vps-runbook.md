@@ -114,6 +114,18 @@ secrets or document text: active requests, per-key capacity, cooldown,
 degraded channel does not disable the key automatically in Phase 2; it lowers
 selection priority and remains visible for operator action.
 
+Adaptive provider throttling starts each worker runtime conservatively and
+ramps DeepSeek concurrency after clean successes. 429/503/timeouts decrease the
+local adaptive limit and cool down affected channels; auth/billing failures open
+a provider circuit for the configured reset window. This is local per worker,
+not a distributed global quota system.
+
+If `/admin/ai-providers` shows an open provider circuit, do not raise
+`TRANSLATION_MAX_PARALLEL_UNITS` as a first response. Check the redacted reason,
+DeepSeek balance/auth state, per-channel 429/503/timeout counters and cooldowns.
+The circuit should half-open after `DEEPSEEK_PROVIDER_CIRCUIT_RESET_SECONDS`.
+Use runtime reload after fixing keys or balance.
+
 ## Start Or Update
 
 Preferred deploy command:

@@ -392,6 +392,123 @@ class SchedulerRunnerTest(unittest.TestCase):
                 PersistentTranslationJobStatus.READY,
             )
 
+    def test_run_once_parallel_skips_claims_when_translator_reports_zero_slots(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            first = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph",
+            )
+            second = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-2",
+                file_id="file-2",
+                user_id="telegram:100",
+                source_text="Second paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=0)
+            first_statuses = [
+                unit.status.value for unit in store.list_work_units(first.id)
+            ]
+            second_statuses = [
+                unit.status.value for unit in store.list_work_units(second.id)
+            ]
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=2),
+                lease_seconds=300,
+                max_parallel_units=2,
+            )
+
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(
+                [unit.status.value for unit in store.list_work_units(first.id)],
+                first_statuses,
+            )
+            self.assertEqual(
+                [unit.status.value for unit in store.list_work_units(second.id)],
+                second_statuses,
+            )
+
+    def test_run_once_serial_skips_claim_when_translator_reports_zero_slots(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=0)
+            original_statuses = [
+                unit.status.value for unit in store.list_work_units(job.id)
+            ]
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                max_parallel_units=1,
+            )
+
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(
+                [unit.status.value for unit in store.list_work_units(job.id)],
+                original_statuses,
+            )
+
+    def test_run_once_parallel_claims_when_translator_reports_positive_slots(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=1)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=2),
+                lease_seconds=300,
+                max_parallel_units=2,
+            )
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(translator.calls, ["First paragraph"])
+
     def test_assemble_due_jobs_reconciles_existing_final_output(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -539,6 +656,30 @@ class RunnerTranslator:
         target_language: str,
     ) -> str:
         return f"[{target_language}] {text}"
+
+
+class HintedRunnerTranslator(RunnerTranslator):
+    def __init__(self, *, available_slots: int) -> None:
+        super().__init__()
+        self.available_slots = available_slots
+        self.calls: list[str] = []
+
+    def available_parallel_slots(self) -> int:
+        return self.available_slots
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append(text)
+        return super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
 
 
 class BlockingRunnerTranslator:

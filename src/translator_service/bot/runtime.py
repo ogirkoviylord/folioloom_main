@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
     SQLiteAIProviderRuntimeStore,
 )
 from translator_service.ai_provider_runtime import load_ai_provider_runtime_keys
@@ -99,6 +100,7 @@ from translator_service.languages import (
 from translator_service.order_estimates import DocumentEstimationNotReadyError
 from translator_service.persistent_job_store import open_persistent_job_store
 from translator_service.pricing import PricingRules
+from translator_service.provider_throttle import ProviderThrottleConfig
 from translator_service.security_telemetry import (
     SecurityCooldownActive,
     SecurityCooldownPolicy,
@@ -339,11 +341,13 @@ class ReloadableDeepSeekTranslator:
         if snapshot is None:
             return channels
         snapshots = snapshot()
+        provider_snapshot = _provider_snapshot_from_translator(translator)
         self._record_runtime_snapshot(
             source=source,
             status=status,
             channels=channels,
             snapshots=snapshots,
+            provider_snapshot=provider_snapshot,
             error=error,
         )
         return snapshots
@@ -366,6 +370,13 @@ class ReloadableDeepSeekTranslator:
             self._record_current_runtime_snapshot(translator)
         self._last_usage.value = getattr(translator, "last_usage", None)
         return translated
+
+    def available_parallel_slots(self) -> int:
+        translator = self._current_translator()
+        available = getattr(translator, "available_parallel_slots", None)
+        if available is None:
+            return 1
+        return max(0, int(available()))
 
     def _current_translator(self) -> TextTranslator:
         with self._lock:
@@ -394,6 +405,7 @@ class ReloadableDeepSeekTranslator:
             status=status,
             channels=channels,
             snapshots=snapshot(),
+            provider_snapshot=_provider_snapshot_from_translator(translator),
             error=error,
         )
 
@@ -404,18 +416,29 @@ class ReloadableDeepSeekTranslator:
         status: str,
         channels: list[DeepSeekChannelConfig],
         snapshots,
+        provider_snapshot,
         error: str | None,
     ) -> None:
         runtime_channels = tuple(
             _runtime_channel_from_snapshot(snapshot) for snapshot in snapshots
         )
+        provider_state = (
+            _runtime_provider_state_from_snapshot(provider_snapshot)
+            if provider_snapshot is not None
+            else AIProviderRuntimeProviderState()
+        )
         _record_deepseek_runtime_status(
             self._settings,
             source=source,
-            status=_deepseek_runtime_status_from_channels(status, runtime_channels),
+            status=_deepseek_runtime_status_from_channels(
+                status,
+                runtime_channels,
+                provider_state,
+            ),
             channels=channels,
             error=error,
             runtime_channels=runtime_channels,
+            provider_state=provider_state,
         )
 
     def _reload_locked(
@@ -501,6 +524,11 @@ def _deepseek_translator_from_channels(
         retry_delay_seconds=retry_delay_seconds,
         cooldown_seconds=cooldown_seconds,
         max_cooldown_seconds=max_cooldown_seconds,
+        throttle_config=_deepseek_throttle_config_from_env(),
+        cooldown_jitter_fraction=_env_float(
+            "DEEPSEEK_CHANNEL_COOLDOWN_JITTER_FRACTION",
+            0.20,
+        ),
     )
 
 
@@ -581,6 +609,7 @@ def _record_deepseek_runtime_status(
     channels: list[DeepSeekChannelConfig],
     error: str | None,
     runtime_channels: tuple[AIProviderRuntimeChannel, ...] | None = None,
+    provider_state: AIProviderRuntimeProviderState | None = None,
 ) -> None:
     with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as store:
         store.record_status(
@@ -598,6 +627,7 @@ def _record_deepseek_runtime_status(
                 )
                 for channel in channels
             ),
+            provider_state=provider_state,
             error=error,
         )
 
@@ -630,12 +660,41 @@ def _runtime_channel_from_snapshot(snapshot) -> AIProviderRuntimeChannel:
     )
 
 
+def _provider_snapshot_from_translator(translator: TextTranslator):
+    provider_snapshot = getattr(translator, "provider_snapshot", None)
+    if provider_snapshot is None:
+        return None
+    return provider_snapshot()
+
+
+def _runtime_provider_state_from_snapshot(snapshot) -> AIProviderRuntimeProviderState:
+    return AIProviderRuntimeProviderState(
+        adaptive_enabled=snapshot.enabled,
+        current_limit=snapshot.current_limit,
+        max_capacity=snapshot.max_capacity,
+        active_requests=snapshot.active_requests,
+        available_slots=snapshot.available_slots,
+        circuit_state=snapshot.circuit_state,
+        circuit_open_remaining_seconds=snapshot.circuit_open_remaining_seconds,
+        last_reason=snapshot.last_reason,
+        total_ramp_ups=snapshot.total_ramp_ups,
+        total_decreases=snapshot.total_decreases,
+        total_circuit_opened=snapshot.total_circuit_opened,
+    )
+
+
 def _deepseek_runtime_status_from_channels(
     status: str,
     runtime_channels: tuple[AIProviderRuntimeChannel, ...],
+    provider_state: AIProviderRuntimeProviderState | None = None,
 ) -> str:
     if status == "missing_keys":
         return status
+    if (
+        provider_state is not None
+        and provider_state.circuit_state in {"open", "half_open"}
+    ):
+        return "degraded"
     if any(
         channel.health in {"cooling_down", "degraded"}
         for channel in runtime_channels
@@ -657,6 +716,43 @@ def _deepseek_channel_weights_from_env(channel_count: int) -> list[int]:
         logger.warning("Ignoring invalid DeepSeek channel weights: %r", raw)
         return [1] * channel_count
     return weights
+
+
+def _deepseek_throttle_config_from_env() -> ProviderThrottleConfig:
+    return ProviderThrottleConfig(
+        enabled=_env_bool("DEEPSEEK_ADAPTIVE_THROTTLING_ENABLED", True),
+        initial_parallel=max(
+            1,
+            _env_int("DEEPSEEK_ADAPTIVE_INITIAL_PARALLEL", 1),
+        ),
+        min_parallel=max(
+            1,
+            _env_int("DEEPSEEK_ADAPTIVE_MIN_PARALLEL", 1),
+        ),
+        success_ramp_interval=max(
+            1,
+            _env_int("DEEPSEEK_ADAPTIVE_SUCCESS_RAMP_INTERVAL", 8),
+        ),
+        decrease_factor=min(
+            0.95,
+            max(0.1, _env_float("DEEPSEEK_ADAPTIVE_DECREASE_FACTOR", 0.5)),
+        ),
+        circuit_failure_threshold=max(
+            1,
+            _env_int("DEEPSEEK_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", 5),
+        ),
+        circuit_reset_seconds=max(
+            1.0,
+            _env_float("DEEPSEEK_PROVIDER_CIRCUIT_RESET_SECONDS", 120.0),
+        ),
+    )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:

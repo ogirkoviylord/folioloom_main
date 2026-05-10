@@ -30,6 +30,7 @@ from translator_service.admin.provider_health import (
 )
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
@@ -544,6 +545,7 @@ def _provider_runtime_panel(
         last_reload = "n/a"
         freshness = "not reporting"
         error = "n/a"
+        provider_state = _runtime_provider_state_row(AIProviderRuntimeProviderState())
         channels = '<p class="empty-state">No runtime channels reported.</p>'
     else:
         source = runtime.source
@@ -552,6 +554,7 @@ def _provider_runtime_panel(
         last_reload = runtime.last_reloaded_at.isoformat()
         freshness = _runtime_freshness(runtime)
         error = _safe_runtime_text(runtime.error)
+        provider_state = _runtime_provider_state_row(runtime.provider_state)
         channels = "\n".join(
             _runtime_channel_row(channel) for channel in runtime.active_channels
         )
@@ -598,13 +601,39 @@ def _provider_runtime_panel(
             <strong>{escape(reload_detail)}</strong>
           </div>
         </div>
-        <div class="key-table">{channels}</div>
+        <div class="key-table">{provider_state}{channels}</div>
         <form class="secret-form" method="post"
           action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
           <button type="submit">Reload now</button>
         </form>
       </div>
+    """
+
+
+def _runtime_provider_state_row(state: AIProviderRuntimeProviderState) -> str:
+    adaptive = "enabled" if state.adaptive_enabled else "disabled"
+    counters = (
+        "ramp/decrease/open "
+        f"{state.total_ramp_ups}/{state.total_decreases}/"
+        f"{state.total_circuit_opened}"
+    )
+    return f"""
+          <div class="key-row">
+            <div>
+              <strong>Adaptive throttle</strong>
+              <span>{escape(adaptive)}</span>
+              <span>circuit {escape(_safe_runtime_text(state.circuit_state))}</span>
+              <span>reason {escape(_safe_runtime_text(state.last_reason))}</span>
+            </div>
+            <span>limit {state.current_limit}/{state.max_capacity}</span>
+            <span>active {state.active_requests}</span>
+            <span>available {state.available_slots}</span>
+            <span>
+              open for {escape(_format_seconds(state.circuit_open_remaining_seconds))}
+            </span>
+            <span>{escape(counters)}</span>
+          </div>
     """
 
 
@@ -1512,6 +1541,9 @@ def _live_runtime_cards(
     degraded_channels = 0
     rate_limit_count = 0
     timeout_count = 0
+    adaptive_limit = "n/a"
+    provider_circuit = "not reporting"
+    available_provider_slots = "n/a"
     if status is not None:
         degraded_channels = sum(
             1
@@ -1524,6 +1556,12 @@ def _live_runtime_cards(
         timeout_count = sum(
             channel.total_timeout_failures for channel in status.active_channels
         )
+        adaptive_limit = (
+            f"{status.provider_state.current_limit}/"
+            f"{status.provider_state.max_capacity}"
+        )
+        provider_circuit = _safe_runtime_text(status.provider_state.circuit_state)
+        available_provider_slots = str(status.provider_state.available_slots)
     reload_text = (
         "Reload pending"
         if reload_state is not None and reload_state.pending
@@ -1538,6 +1576,9 @@ def _live_runtime_cards(
         ("Degraded channels", str(degraded_channels)),
         ("429 count", str(rate_limit_count)),
         ("Timeout count", str(timeout_count)),
+        ("Adaptive limit", adaptive_limit),
+        ("Provider circuit", provider_circuit),
+        ("Available provider slots", available_provider_slots),
     )
     return "\n".join(
         f"""

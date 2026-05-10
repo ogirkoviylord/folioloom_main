@@ -57,17 +57,20 @@ def run_scheduler_once(
     if max_parallel_units <= 1:
         completed_units = 0
         failed_units = 0
-        completed = run_next_scheduled_stored_text_work_unit(
-            store=store,
-            storage=storage,
-            worker_id=worker_id,
-            lease_seconds=lease_seconds,
-            limits=limits,
-            translator=translator,
-            retry_base_delay_seconds=retry_base_delay_seconds,
-            retry_max_delay_seconds=retry_max_delay_seconds,
-            work_unit_started_callback=work_unit_started_callback,
-        )
+        hinted_slots = _translator_available_parallel_slots(translator)
+        completed = None
+        if hinted_slots is None or hinted_slots > 0:
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+                limits=limits,
+                translator=translator,
+                retry_base_delay_seconds=retry_base_delay_seconds,
+                retry_max_delay_seconds=retry_max_delay_seconds,
+                work_unit_started_callback=work_unit_started_callback,
+            )
         if completed is not None:
             if completed.status.value in {"translated", "cached"}:
                 completed_units = 1
@@ -116,7 +119,13 @@ def _run_scheduled_parallel_once(
 
     with ThreadPoolExecutor(max_workers=capacity) as executor:
         while True:
-            while len(active) < capacity:
+            hinted_slots = _translator_available_parallel_slots(translator)
+            claim_capacity = (
+                capacity
+                if hinted_slots is None
+                else min(capacity, len(active) + hinted_slots)
+            )
+            while len(active) < claim_capacity:
                 worker_sequence += 1
                 claim = store.claim_next_scheduled_work_unit(
                     worker_id=f"{worker_id}-{worker_sequence}",
@@ -227,6 +236,15 @@ def _run_scheduled_parallel_once(
                     failed_units += 1
 
     return completed_units, failed_units
+
+
+def _translator_available_parallel_slots(
+    translator: PersistentWorkUnitTranslator,
+) -> int | None:
+    available = getattr(translator, "available_parallel_slots", None)
+    if available is None:
+        return None
+    return max(0, int(available()))
 
 
 def _failed_unit_count(work_unit: PersistentWorkUnit | None) -> int:

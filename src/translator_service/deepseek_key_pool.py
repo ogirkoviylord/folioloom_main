@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 import re
 import threading
 import time
 from typing import Callable, Protocol
 
 from translator_service.deepseek_client import DeepSeekApiError, DeepSeekClient
+from translator_service.provider_throttle import (
+    ProviderAdaptiveThrottle,
+    ProviderThrottleConfig,
+    ProviderThrottleSnapshot,
+)
 
 
 CHANNEL_HEALTH_HEALTHY = "healthy"
@@ -162,6 +168,9 @@ class DeepSeekKeyPoolTranslator:
         retry_delay_seconds: float = 1.0,
         cooldown_seconds: float = 30.0,
         max_cooldown_seconds: float = 300.0,
+        throttle_config: ProviderThrottleConfig | None = None,
+        cooldown_jitter_fraction: float = 0.0,
+        cooldown_jitter_random: Callable[[], float] | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
         if not channels:
@@ -172,6 +181,11 @@ class DeepSeekKeyPoolTranslator:
         self._clock = clock or time.monotonic
         self._cooldown_seconds = max(0.0, cooldown_seconds)
         self._max_cooldown_seconds = max(self._cooldown_seconds, max_cooldown_seconds)
+        self._throttle = ProviderAdaptiveThrottle(
+            throttle_config or ProviderThrottleConfig(enabled=False)
+        )
+        self._cooldown_jitter_fraction = max(0.0, min(1.0, cooldown_jitter_fraction))
+        self._cooldown_jitter_random = cooldown_jitter_random or random.random
         self._condition = threading.Condition()
         self._last_usage = threading.local()
         self._channels = [
@@ -198,6 +212,27 @@ class DeepSeekKeyPoolTranslator:
         with self._condition:
             now = self._clock()
             return [channel.snapshot(now=now) for channel in self._channels]
+
+    def provider_snapshot(self) -> ProviderThrottleSnapshot:
+        with self._condition:
+            return self._throttle.snapshot(
+                now=self._clock(),
+                max_capacity=self._configured_capacity(),
+            )
+
+    def available_parallel_slots(self) -> int:
+        with self._condition:
+            now = self._clock()
+            provider_slots = self._throttle.snapshot(
+                now=now,
+                max_capacity=self._configured_capacity(),
+            ).available_slots
+            channel_slots = sum(
+                max(0, channel.capacity - channel.active_requests)
+                for channel in self._channels
+                if channel.cooldown_until <= now
+            )
+            return min(provider_slots, channel_slots)
 
     def translate(self, *, text: str, source_language: str, target_language: str) -> str:
         attempted_labels: set[str] = set()
@@ -243,6 +278,12 @@ class DeepSeekKeyPoolTranslator:
                     and channel.active_requests < channel.capacity
                 ]
                 if candidates:
+                    if not self._throttle.start_request(
+                        now=now,
+                        max_capacity=self._configured_capacity(),
+                    ):
+                        self._condition.wait(timeout=0.05)
+                        continue
                     channel = min(
                         candidates,
                         key=lambda candidate: _channel_selection_key(candidate, now=now),
@@ -263,6 +304,7 @@ class DeepSeekKeyPoolTranslator:
     def _release_channel(self, channel: _DeepSeekChannel) -> None:
         with self._condition:
             channel.active_requests = max(0, channel.active_requests - 1)
+            self._throttle.finish_request()
             self._condition.notify_all()
 
     def _elapsed_ms_since(self, started_at: float) -> float:
@@ -278,6 +320,10 @@ class DeepSeekKeyPoolTranslator:
             channel.last_success_at = now
             channel.last_error = None
             channel.error_kind = None
+            self._throttle.record_success(
+                now=now,
+                max_capacity=self._configured_capacity(),
+            )
             self._condition.notify_all()
 
     def _record_channel_permanent_failure(
@@ -296,6 +342,17 @@ class DeepSeekKeyPoolTranslator:
             channel.last_error = _redact_channel_error(error, channel)
             channel.error_kind = error_kind
             _increment_error_kind_counter(channel, error_kind)
+            if error_kind in {PROVIDER_ERROR_AUTH, PROVIDER_ERROR_BILLING}:
+                self._throttle.record_permanent_failure(
+                    now=channel.last_failure_at,
+                    reason=error_kind,
+                )
+            elif error_kind == PROVIDER_ERROR_MALFORMED_RESPONSE:
+                self._throttle.record_temporary_failure(
+                    now=channel.last_failure_at,
+                    max_capacity=self._configured_capacity(),
+                    reason=error_kind,
+                )
             self._condition.notify_all()
 
     def _cool_down_channel(
@@ -321,11 +378,24 @@ class DeepSeekKeyPoolTranslator:
                 default_cooldown_seconds=self._cooldown_seconds,
                 default_max_cooldown_seconds=self._max_cooldown_seconds,
             )
+            cooldown_seconds = _apply_cooldown_jitter(
+                cooldown_seconds,
+                fraction=self._cooldown_jitter_fraction,
+                random_value=self._cooldown_jitter_random(),
+            )
+            self._throttle.record_temporary_failure(
+                now=now,
+                max_capacity=self._configured_capacity(),
+                reason=error_kind,
+            )
             channel.cooldown_until = max(
                 channel.cooldown_until,
                 now + cooldown_seconds,
             )
             self._condition.notify_all()
+
+    def _configured_capacity(self) -> int:
+        return max(1, sum(channel.capacity for channel in self._channels))
 
 
 def _build_client(
@@ -415,6 +485,21 @@ def _channel_cooldown_seconds(
     maximum = max(base, maximum)
     multiplier = 2 ** max(0, channel.consecutive_temporary_failures - 1)
     return min(maximum, base * multiplier)
+
+
+def _apply_cooldown_jitter(
+    seconds: float,
+    *,
+    fraction: float,
+    random_value: float,
+) -> float:
+    seconds = max(0.0, seconds)
+    fraction = max(0.0, min(1.0, fraction))
+    if seconds <= 0.0 or fraction <= 0.0:
+        return seconds
+    random_value = max(0.0, min(1.0, random_value))
+    delta = seconds * fraction
+    return max(0.0, seconds - delta + (2 * delta * random_value))
 
 
 def _is_channel_cooldown_error(error: DeepSeekApiError) -> bool:
