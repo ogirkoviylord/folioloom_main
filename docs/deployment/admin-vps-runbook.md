@@ -257,6 +257,22 @@ The UI shows a safe account-level balance snapshot and never displays real API
 keys. If the page reports that secret storage is unavailable, set
 `ADMIN_SECRET_MASTER_KEY`, restart the stack and try again.
 
+### DeepSeek Key Operations
+
+Use Admin -> AI Providers -> DeepSeek Keys to manage admin-stored provider keys.
+
+Recommended operator flow:
+
+1. Add or rotate the key.
+2. Test the changed key.
+3. Check Admin -> AI Providers for balance and provider health.
+4. Click Reload DeepSeek runtime.
+5. Watch Admin -> Live for channel cooldowns, circuit state and available slots.
+
+Never paste raw keys into issue trackers, logs or chat. The admin UI stores
+admin-managed keys encrypted and renders only masked values. Env keys remain
+read-only and must be changed on the server.
+
 ## Data Persistence
 
 Runtime files are persisted in the host `./var` directory mounted into `api`,

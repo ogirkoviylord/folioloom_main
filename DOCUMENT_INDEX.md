@@ -79,10 +79,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   Admin Costs/Settings/Live visibility. Not a paid ledger or Telegram Stars/XTR
   implementation.
 - `docs/superpowers/specs/2026-05-10-deepseek-key-management-design.md` -
-  design for the dedicated admin DeepSeek key management workflow: safe key
-  viewing, add/edit/rotate/remove/test actions and runtime reload UX.
+  active design for the dedicated admin DeepSeek key management workflow: safe
+  key viewing, add/edit/rotate/remove/test actions, validation visibility and
+  runtime reload UX.
 - `docs/superpowers/plans/2026-05-10-deepseek-key-management.md` -
-  implementation plan for the dedicated DeepSeek Keys admin page.
+  implemented plan for the dedicated DeepSeek Keys admin page.
 
 ## Paid-Beta Draft Docs
 
