@@ -29,6 +29,7 @@ from translator_service.document_sandbox import (
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import extract_text_from_docx, extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
@@ -2521,6 +2522,172 @@ class BotTranslationServiceTest(unittest.TestCase):
                 PersistentWorkUnitStatus.PENDING,
             )
 
+    def test_cancel_translation_after_restart_assembles_existing_partial(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.\n\nSecond.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=source.object_key,
+            )
+            units = persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:segment:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="default",
+                        source_language="en",
+                        target_language="uk",
+                    ),
+                    WorkUnitPlan(
+                        sequence=2,
+                        source_block_ids=("txt:segment:3",),
+                        source_text_hash="hash-2",
+                        prompt_tier="default",
+                        source_language="en",
+                        target_language="uk",
+                    ),
+                ],
+            )
+            persistent_store.claim_next_work_unit(
+                job.id,
+                worker_id="worker-before-restart",
+            )
+            persistent_store.complete_work_unit(
+                units[0].id,
+                translated_text="[uk] First.",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            restarted_service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(restarted_service.close)
+
+            self.assertTrue(restarted_service.cancel_translation(42))
+
+            cancelled = persistent_store.get_job(job.id)
+            result = restarted_service.get_user_book_translation_job(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+            self.assertEqual(
+                cancelled.status,
+                PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertIsNotNone(cancelled.partial_object_key)
+            self.assertEqual(result.status, TranslationJobStatus.CANCELLED)
+            self.assertEqual(result.result_file_name, "book.uk.partial.txt")
+            self.assertEqual(
+                result.result_content.decode("utf-8"),
+                "[uk] First.\n\nSecond.",
+            )
+            self.assertEqual(
+                storage.get_bytes(cancelled.partial_object_key),
+                result.result_content,
+            )
+
+    def test_cancel_translation_after_restart_without_fragments_keeps_result_empty(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.\n\nSecond.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=source.object_key,
+            )
+            units = persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:segment:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="default",
+                        source_language="en",
+                        target_language="uk",
+                    )
+                ],
+            )
+            persistent_store.claim_next_work_unit(
+                job.id,
+                worker_id="worker-before-restart",
+            )
+            restarted_service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(restarted_service.close)
+
+            self.assertTrue(restarted_service.cancel_translation(42))
+
+            cancelled = persistent_store.get_job(job.id)
+            recovered_unit = persistent_store.get_work_unit(units[0].id)
+            result = restarted_service.get_user_book_translation_job(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+            self.assertEqual(
+                cancelled.status,
+                PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertIsNone(cancelled.partial_object_key)
+            self.assertEqual(
+                recovered_unit.status,
+                PersistentWorkUnitStatus.PENDING,
+            )
+            self.assertEqual(result.status, TranslationJobStatus.CANCELLED)
+            self.assertIsNone(result.result_file_name)
+            self.assertIsNone(result.result_content)
+
     def test_cancels_specific_persistent_book_for_owner(self):
         with TemporaryDirectory() as temp_dir:
             persistent_store = SQLiteTranslationJobStore(
@@ -2593,6 +2760,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertFalse(detail.can_cancel)
             run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
             self.assertEqual(run_snapshot["status"], "cancelled")
+            self.assertIsNone(run_snapshot["result_file_name"])
             self.assertEqual(run_snapshot["error_message"], "Book cancelled by user.")
 
     def test_user_queue_summary_counts_active_books(self):
