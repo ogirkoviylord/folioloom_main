@@ -1,0 +1,123 @@
+name: Idea intake
+description: Capture a new product, technical, UX, workflow, pricing, release, or format-support idea before implementation.
+title: "[Idea] "
+labels:
+  - idea
+  - needs-orchestrator
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for new ideas only. Do not start implementation from this issue until the idea is accepted, split if needed, and converted into an agent-ready task.
+
+        Keep confirmed facts separate from assumptions. Use `TBD` for human decisions and `Unknown` when repository evidence is missing.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome should this idea create?
+      placeholder: "Example: Improve the closed-beta translation flow by ..."
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / opportunity
+      description: What user, owner, reliability, safety, or workflow problem does this address?
+    validations:
+      required: true
+  - type: dropdown
+    id: idea_type
+    attributes:
+      label: Idea type
+      options:
+        - product
+        - technical
+        - UX
+        - format-support
+        - pricing / payment
+        - workflow / AI orchestration
+        - release / readiness
+        - spike / discovery
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: confirmed_facts
+    attributes:
+      label: Confirmed facts
+      description: Cite repository files, docs, issues, PRs, or observed behavior. Use `Unknown` if evidence is missing.
+      placeholder: "- Confirmed: ...\n- Unknown: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: assumptions
+    attributes:
+      label: Assumptions
+      description: List assumptions that must not be treated as confirmed facts.
+      placeholder: "- Assumption: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_scope
+    attributes:
+      label: Proposed scope
+      description: What might be included if this idea is accepted?
+      placeholder: "- In scope candidate: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What must not be included in this idea or follow-up task?
+      placeholder: "- Out of scope: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria for accepting the idea
+      description: What evidence is needed to accept, defer, spike, or reject this idea?
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and guardrails
+      description: Identify product, security, privacy, legal, payment, deployment, user-data, database, or release risks.
+      placeholder: "- Risk: ...\n- Guardrail: ..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval_gates
+    attributes:
+      label: Approval gates
+      description: Check every area this idea may touch. If any high-risk item is checked, add `needs-human-approval` and usually `needs-architect`.
+      options:
+        - label: Secrets, real `.env*`, keys, tokens, passwords, or secret storage.
+        - label: Deployment, Docker, server scripts, production operations, bind addresses, or public admin exposure.
+        - label: Payments, pricing, billing, refunds, paid jobs, payment UI, or provider/payment policy.
+        - label: Auth, security, RBAC, sessions, admin access, telemetry, or redaction boundaries.
+        - label: Legal/privacy/AUP/refund/support text or user-data handling.
+        - label: Database schema/state, migrations, scheduler/job/work-unit state, retention, TTL, backups, restore, runtime `var/`, or destructive operations.
+        - label: New production dependencies.
+        - label: Product scope beyond Telegram-first closed beta, TXT/DOCX/EPUB, or the approved MVP.
+        - label: No high-risk approval gate identified from current evidence.
+  - type: textarea
+    id: recommended_labels
+    attributes:
+      label: Recommended labels
+      description: Add only existing labels. Suggested examples include `feature`, `spike`, `docs`, `risky-change`, `needs-human-approval`, `needs-architect`, `release-blocker`, or `blocked`.
+      placeholder: "- idea\n- spike\n- needs-orchestrator"
+    validations:
+      required: true
+  - type: textarea
+    id: next_step
+    attributes:
+      label: Proposed next step
+      description: Should this be accepted now, added to roadmap later, explored as a spike, rejected, or split into tasks?
+      placeholder: "TBD"
+    validations:
+      required: true
