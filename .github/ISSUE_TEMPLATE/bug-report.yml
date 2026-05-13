@@ -1,0 +1,135 @@
+name: Bug report
+description: Report a reproducible defect with scope, expected behavior, actual behavior, risks, and verification needs.
+title: "[Bug] "
+labels:
+  - bug
+  - needs-tests
+  - needs-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for defects in existing behavior. If the fix is unclear or risky, label it `needs-orchestrator`, `needs-architect`, `risky-change`, or `needs-human-approval` as appropriate.
+
+        Do not include secrets, raw document text, prompts, translations, API keys, provider internals, stack traces with sensitive data, or unsafe user data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Bug summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      options:
+        - Telegram bot / UX
+        - Backend / API
+        - Worker / scheduler / jobs
+        - TXT adapter
+        - DOCX adapter
+        - EPUB adapter
+        - Admin console
+        - Provider layer
+        - Storage / user data
+        - Security / privacy / redaction
+        - Deployment / operations
+        - Tests / CI
+        - Docs
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen according to repo evidence, docs, or accepted behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide safe reproduction steps. Do not paste secrets or raw document text.
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Link logs, screenshots, tests, files, or commands. Redact sensitive data. Use `Unknown` if evidence is missing.
+      placeholder: "- Confirmed: ...\n- Unknown: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Suspected scope
+      description: What files/modules/flows may be involved? Use `Unknown` if not known.
+      placeholder: "Unknown"
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What should the fix avoid changing?
+      placeholder: "- Out of scope: unrelated refactors, deployment, payments, auth, legal/privacy, user-data handling, migrations unless explicitly approved."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Fix acceptance criteria
+      description: How will we know the bug is fixed?
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: List focused regression tests/checks or explain why more discovery is needed.
+      placeholder: "- [ ] Reproduce before fix\n- [ ] Add/update focused regression test\n- [ ] Command: `...`"
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and impact
+      description: Include user impact, release impact, data/safety/privacy/payment/auth/deployment risks, and whether this is a release blocker.
+      placeholder: "- Impact: ...\n- Risk: ...\n- Release blocker: TBD / yes / no"
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval_gates
+    attributes:
+      label: Human approval gates
+      description: Check all areas the investigation or fix may touch.
+      options:
+        - label: Secrets, real `.env*`, keys, tokens, passwords, or secret storage.
+        - label: Deployment, Docker, server scripts, production operations, bind addresses, or public admin exposure.
+        - label: Payments, pricing, billing, refunds, paid jobs, payment UI, or provider/payment policy.
+        - label: Auth, security, RBAC, sessions, admin access, telemetry, or redaction boundaries.
+        - label: Legal/privacy/AUP/refund/support text or user-data handling.
+        - label: Database schema/state, migrations, scheduler/job/work-unit state, retention, TTL, backups, restore, runtime `var/`, or destructive operations.
+        - label: New production dependencies.
+        - label: Product scope beyond Telegram-first closed beta, TXT/DOCX/EPUB, or the approved MVP.
+        - label: No high-risk approval gate identified from current evidence.
+  - type: textarea
+    id: recommended_labels
+    attributes:
+      label: Recommended labels
+      description: Add only existing labels such as `bug`, `needs-tests`, `needs-review`, `blocked`, `release-blocker`, `risky-change`, `needs-architect`, or `needs-human-approval`.
+      placeholder: "- bug\n- needs-tests\n- needs-review"
+    validations:
+      required: true
