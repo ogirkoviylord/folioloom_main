@@ -52,6 +52,14 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Admin console through SSH tunnel | Subscriptions, referrals, coupons, teams |
 | Backup/restore workflow | Stripe/YooKassa/card flow as immediate Telegram path |
 
+Deferred format ideas:
+
+- FB2 support is captured as GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). Owner
+  decision is TBD. FB2 remains unsupported for the next beta unless the owner
+  explicitly approves a scope change, Architect review and a separate
+  agent-ready implementation issue.
+
 ### Beta Safety / Cost Guard
 
 FolioLoom keeps beta throughput bounded with a cost-aware safety layer:

@@ -20,7 +20,7 @@
 | ID | Risk | Area | Level | Evidence | Impact | Mitigation | Owner | Status |
 |---|---|---|---|---|---|---|---|---|
 | R-001 | Potential: целевая аудитория будущих paid users не зафиксирована | Product | Medium | `docs/PROJECT_BRIEF.md` помечает будущих платных пользователей как TBD | Агенты могут строить не тот paid/public продукт | Держать paid/public вне scope до решения; фиксировать ICP перед Gate C/D | Human / Orchestrator | Needs decision |
-| R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan и human approval | Human / Architect | Open |
+| R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is FB2 idea only | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
 | R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps | Beta может быть открыта без preview, upload safety, TTL, real-file QA, restore evidence | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
 | R-004 | Formal success criteria для beta не утверждены | Product | Medium | `docs/PROJECT_BRIEF.md` помечает formal success metrics как TBD | Команда может оптимизировать объем фич вместо beta learning и reliability | Владелец утверждает 3-5 beta metrics до go/no-go | Human / Scribe | Needs decision |
 | R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report | Architect / Reviewer | Open |
@@ -58,6 +58,8 @@
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
 - Scope creep: High risk, потому что active docs ограничивают текущий продукт Telegram-first closed beta и TXT/DOCX/EPUB.
+  FB2 из GitHub issue #23 остается deferred idea: owner decision TBD,
+  authorized fixtures Unknown, dependency impact Unknown.
 - Unclear MVP: Medium/High risk; MVP scope описан, но readiness не подтвержден, пока Gate B не закрыт.
 - Unclear success criteria: formal beta metrics - TBD; draft criteria есть в `docs/PROJECT_BRIEF.md`.
 
@@ -188,6 +190,14 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Priority: High.
   Suggested owner: Architect / Implementer / Reviewer.
   Acceptance criteria: tests for wrong extension, traversal, oversize, corrupt ZIP and zip-bomb-like fixture; safe user errors; quarantine/files do not reach workers.
+
+- Task: Run FB2 idea intake only if owner wants to revisit issue #23.
+  Risk reduced: R-002, R-008, R-009, R-014.
+  Priority: Low / deferred.
+  Suggested owner: Human / Architect.
+  Acceptance criteria: owner decision recorded; supported FB2 subset, authorized
+  fixture rights basis, dependency impact, parser/resource safety constraints
+  and verification plan are defined before any implementation issue exists.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.

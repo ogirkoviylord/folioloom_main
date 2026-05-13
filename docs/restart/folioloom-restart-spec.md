@@ -103,6 +103,13 @@ confirmation payload without storing raw confirmation text.
 
 No PDF, OCR, MOBI, FB2, batch ZIP or arbitrary containers in the next beta.
 
+FB2 follow-up idea: GitHub issue
+[#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) captures a
+request to explore FB2 support. This issue does not change the next-beta format
+scope. Before any implementation, owner approval and Architect review must
+define the supported FB2 subset, parser/resource safety constraints, fixture
+rights basis, dependency impact and verification plan.
+
 ### Worker, scheduler and object storage rules
 
 - Server runtime uses `SCHEDULER_BACKEND=postgres`.
@@ -231,6 +238,9 @@ EPUB fixtures plus negative and ops scenarios. See
 - Subscriptions.
 - Coupons/referrals/team seats.
 - PDF/OCR/MOBI/FB2/batch ZIP.
+- FB2 implementation from issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) without
+  explicit owner approval and Architect review.
 - Public website/customer portal.
 - WhatsApp/Discord/API channels.
 - Full glossary UI.
