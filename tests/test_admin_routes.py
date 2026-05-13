@@ -266,12 +266,49 @@ class AdminRoutesTest(unittest.TestCase):
                 error_message=None,
             )
             response = self.client.get("/admin/ai-providers")
+            api = self.client.get("/admin/api/ai-providers/deepseek/balance")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("DeepSeek account balance", response.text)
         self.assertIn("8.50", response.text)
         self.assertIn("Refresh balance", response.text)
         self.assertNotIn("sk-", response.text)
+        self.assertEqual(api.status_code, 200)
+        self.assertIsNone(api.json()["balance"]["error_message"])
+
+    def test_deepseek_balance_error_is_redacted_in_admin_output(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        raw_key = "sk-balance-secret-value"
+        raw_bearer = "Bearer balance-bearer-token-value"
+        raw_secret_id = "deepseek.api_keys.balance-key"
+
+        with patch(
+            "translator_service.admin.routes._deepseek_balance_snapshot",
+        ) as snapshot:
+            snapshot.return_value = SimpleNamespace(
+                provider_id="deepseek",
+                status="provider_error",
+                is_available=None,
+                balances=(),
+                last_checked_at=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                last_success_at=None,
+                error_code="provider_error",
+                error_message=(
+                    f"DeepSeek rejected {raw_bearer}; api_key={raw_key}; "
+                    f"secret_id={raw_secret_id}"
+                ),
+            )
+            page = self.client.get("/admin/ai-providers")
+            api = self.client.get("/admin/api/ai-providers/deepseek/balance")
+
+        serialized = page.text + api.text
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(api.status_code, 200)
+        self.assertIn("[redacted]", serialized)
+        self.assertNotIn(raw_key, serialized)
+        self.assertNotIn(raw_bearer, serialized)
+        self.assertNotIn(raw_secret_id, serialized)
+        self.assertNotIn(".api_keys.", serialized)
 
     def test_deepseek_keys_page_renders_key_management_surface(self):
         with TemporaryDirectory() as temp_dir:
@@ -646,6 +683,38 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("integrations_missing", response.text)
         self.assertIn("/admin/integrations", response.text)
         self.assertNotIn("pending actions will live here", response.text)
+
+    def test_overview_action_center_redacts_deepseek_balance_error(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        raw_key = "sk-overview-balance-secret"
+        raw_bearer = "Bearer overview-bearer-token"
+        raw_secret_id = "deepseek.api_keys.overview-key"
+
+        with patch(
+            "translator_service.admin.routes._deepseek_balance_snapshot",
+        ) as snapshot:
+            snapshot.return_value = SimpleNamespace(
+                provider_id="deepseek",
+                status="failed",
+                is_available=None,
+                balances=(),
+                last_checked_at=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                last_success_at=None,
+                error_code="provider_error",
+                error_message=(
+                    f"DeepSeek rejected {raw_bearer}; api_key={raw_key}; "
+                    f"secret_id={raw_secret_id}"
+                ),
+            )
+            response = self.client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DeepSeek balance check failed", response.text)
+        self.assertIn("[redacted]", response.text)
+        self.assertNotIn(raw_key, response.text)
+        self.assertNotIn(raw_bearer, response.text)
+        self.assertNotIn(raw_secret_id, response.text)
+        self.assertNotIn(".api_keys.", response.text)
 
     def test_overview_flags_runtime_not_reporting_when_keys_exist(self):
         with TemporaryDirectory() as temp_dir:
@@ -1306,6 +1375,12 @@ class AdminRoutesTest(unittest.TestCase):
                     completion_tokens=12,
                     total_tokens=22,
                     source_block_ids=("block-1",),
+                    error_message=(
+                        "Provider failed for Chapter one -> Глава первая "
+                        "with Bearer processing-bearer-token and "
+                        "api_key=sk-processing-secret-value "
+                        "secret_id=deepseek.api_keys.processing-key"
+                    ),
                 )
             )
             logger.finish(status="ready", result_file_name="book.ru.txt")
@@ -1358,6 +1433,9 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("22", details.text)
             self.assertNotIn("Chapter one", details.text)
             self.assertNotIn("Глава первая", details.text)
+            self.assertNotIn("processing-bearer-token", details.text)
+            self.assertNotIn("sk-processing-secret-value", details.text)
+            self.assertNotIn("deepseek.api_keys.processing-key", details.text)
             self.assertEqual(api.status_code, 200)
             payload = api.json()
             self.assertEqual(payload["logs"][0]["job_id"], "job-logs-1")
@@ -1368,6 +1446,13 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(payload["logs"][0]["current_stage"], "run_finished")
             self.assertIn("last_event_at", payload["logs"][0])
             self.assertEqual(details_api.status_code, 200)
+            details_api_text = details_api.text
+            self.assertIn("[redacted]", details_api_text)
+            self.assertNotIn("Chapter one", details_api_text)
+            self.assertNotIn("Глава первая", details_api_text)
+            self.assertNotIn("processing-bearer-token", details_api_text)
+            self.assertNotIn("sk-processing-secret-value", details_api_text)
+            self.assertNotIn("deepseek.api_keys.processing-key", details_api_text)
             self.assertEqual(
                 details_api.json()["details"]["summary"]["job_id"],
                 "job-logs-1",

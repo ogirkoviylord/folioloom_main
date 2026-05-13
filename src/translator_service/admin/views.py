@@ -882,7 +882,7 @@ def _provider_balance_panel(
             if snapshot.last_success_at is not None
             else "n/a"
         )
-        error = snapshot.error_message or "n/a"
+        error = _safe_runtime_text(snapshot.error_message)
     safe_top_up = _safe_external_href(top_up_url)
     return f"""
       <div class="provider-health">

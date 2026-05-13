@@ -398,9 +398,13 @@ def _eta_seconds(
 
 
 def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, ...]:
+    return tuple(_fragment_detail(data) for data in _read_fragment_records(fragments_dir))
+
+
+def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
     if not fragments_dir.exists():
         return ()
-    fragments: list[TranslationRunFragmentDetail] = []
+    fragments: list[dict[str, Any]] = []
     for path in sorted(fragments_dir.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -408,7 +412,7 @@ def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, 
             continue
         if not isinstance(data, dict):
             continue
-        fragments.append(_fragment_detail(data))
+        fragments.append(data)
     return tuple(fragments)
 
 
@@ -435,8 +439,15 @@ def _fragment_detail(data: dict[str, Any]) -> TranslationRunFragmentDetail:
             if str(item).strip()
         ),
         warnings=tuple(str(item) for item in data.get("warnings", ()) if str(item)),
-        error_message=_truncate(_optional_string(data.get("error_message"))),
+        error_message=_safe_error_text(data.get("error_message")),
     )
+
+
+def _safe_error_text(value: Any) -> str | None:
+    text = _optional_string(value)
+    if text is None:
+        return None
+    return "[redacted]"
 
 
 def _safe_dict(value: Any) -> dict[str, Any]:
@@ -466,6 +477,8 @@ def _safe_value(value: Any, *, key: str = "") -> Any:
         )
     ):
         return "[redacted]"
+    if lowered in {"error", "error_message", "last_error", "last_error_excerpt"}:
+        return _safe_error_text(value)
     if isinstance(value, dict):
         return {
             str(child_key): _safe_value(child_value, key=str(child_key))
