@@ -735,6 +735,7 @@ def _provider_runtime_panel(
             <strong>{escape(reload_detail)}</strong>
           </div>
         </div>
+        {_provider_processing_summary(runtime)}
         <div class="key-table">{provider_state}{channels}</div>
         {_runtime_reload_form(provider_id, csrf_token, label="Reload now")}
       </div>
@@ -796,6 +797,124 @@ def _runtime_provider_state_row(state: AIProviderRuntimeProviderState) -> str:
             </span>
             <span>{escape(counters)}</span>
           </div>
+    """
+
+
+def _provider_processing_summary(runtime: AIProviderRuntimeStatus | None) -> str:
+    if runtime is None:
+        cards = (
+            (
+                "Active key channels",
+                "Unknown",
+                "Runtime has not reported how many configured channels are usable.",
+            ),
+            (
+                "Active requests",
+                "Unknown",
+                "Current provider requests are not available yet.",
+            ),
+            (
+                "Available capacity slots",
+                "Unknown",
+                "Open request slots are not available yet.",
+            ),
+            (
+                "Adaptive limit",
+                "Unknown",
+                "The adaptive throttle limit is not available yet.",
+            ),
+            (
+                "Cooling/degraded channels",
+                "Unknown",
+                "Channel health has not been reported by runtime.",
+            ),
+            (
+                "Provider warning counts",
+                "Unknown",
+                "Rate-limit, auth, billing, and timeout counts are not available yet.",
+            ),
+        )
+    else:
+        channels = runtime.active_channels
+        active_channels = sum(
+            1 for channel in channels if channel.health.lower() != "disabled"
+        )
+        degraded_channels = sum(
+            1
+            for channel in channels
+            if channel.health.lower() in {"cooling_down", "degraded"}
+        )
+        rate_limit_count = sum(
+            channel.total_rate_limit_failures for channel in channels
+        )
+        auth_count = sum(channel.total_auth_failures for channel in channels)
+        billing_count = sum(channel.total_billing_failures for channel in channels)
+        timeout_count = sum(channel.total_timeout_failures for channel in channels)
+        provider_state = runtime.provider_state
+        adaptive_state = "on" if provider_state.adaptive_enabled else "off"
+        cards = (
+            (
+                "Active key channels",
+                str(active_channels),
+                "Configured DeepSeek channels currently available to accept work.",
+            ),
+            (
+                "Active requests",
+                str(provider_state.active_requests),
+                "Requests currently in flight across the provider runtime.",
+            ),
+            (
+                "Available capacity slots",
+                str(provider_state.available_slots),
+                "Open request slots after current adaptive throttling.",
+            ),
+            (
+                "Adaptive limit",
+                (
+                    f"{provider_state.current_limit}/"
+                    f"{provider_state.max_capacity} ({adaptive_state})"
+                ),
+                "Current runtime cap compared with configured maximum capacity.",
+            ),
+            (
+                "Cooling/degraded channels",
+                str(degraded_channels),
+                "Channels slowed or degraded by recent provider signals.",
+            ),
+            (
+                "Provider warning counts",
+                (
+                    f"429 {rate_limit_count} / auth {auth_count} / "
+                    f"billing {billing_count} / timeout {timeout_count}"
+                ),
+                (
+                    "Existing counters for provider rate-limit, auth, billing, "
+                    "and timeout signals."
+                ),
+            ),
+        )
+    items = "\n".join(
+        f"""
+          <div class="metric-card">
+            <span>{escape(label)}</span>
+            <strong>{escape(value)}</strong>
+            <small>{escape(detail)}</small>
+          </div>
+        """
+        for label, value, detail in cards
+    )
+    return f"""
+        <div class="processing-summary">
+          <div>
+            <h4>Processing summary</h4>
+            <p>
+              Read-only diagnostics from existing DeepSeek runtime data. These
+              values explain current processing state; they are not controls or
+              production readiness guarantees.
+            </p>
+          </div>
+          <div class="metric-grid">{items}</div>
+        </div>
     """
 
 
@@ -3181,6 +3300,16 @@ button.danger {
 .metric-card strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.metric-card small,
+.processing-summary p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+.processing-summary {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
 }
 .progress-bar {
   height: 10px;
