@@ -46,6 +46,9 @@ core flow, release gates, operational visibility and documentation.
   backup/restore readiness;
 - держать payments, public production, public admin и новые форматы вне
   текущего scope.
+- GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)
+  about FB2 is a deferred idea only; owner decision TBD, authorized fixtures
+  Unknown and dependency impact Unknown.
 
 ## 3. Что уже работает
 
@@ -452,6 +455,12 @@ Potential issues to verify:
   process; no inspection during beta.
 - Recommended default: metadata-only by default, raw file inspection only by
   explicit owner action outside normal agent tasks.
+
+- Question: Should FB2 from GitHub issue #23 be explored after Gate B work?
+- Why it matters: FB2 expands parser, fixture, dependency, QA and support scope
+  beyond the approved TXT/DOCX/EPUB beta.
+- Suggested options: keep deferred; run idea intake/spike later; reject for now.
+- Recommended default: keep deferred until owner approval and Architect review.
 
 - Question: When should paid beta planning start?
 - Why it matters: payments/pricing are high-risk and Gate C is blocked.
