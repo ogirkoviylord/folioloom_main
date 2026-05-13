@@ -390,8 +390,12 @@ def _check_untranslated_source_residue(
 ) -> tuple[RussianQualityIssue, ...]:
     language = _language_root(source_language)
     residue_text = _mask_non_language_residue(translated_text)
-    residue_pattern = _RESIDUE_PATTERNS.get(language)
-    if residue_pattern is None or not residue_pattern.search(residue_text):
+    if language == "en":
+        has_residue = _has_mixed_english_residue(residue_text)
+    else:
+        residue_pattern = _RESIDUE_PATTERNS.get(language)
+        has_residue = bool(residue_pattern and residue_pattern.search(residue_text))
+    if not has_residue:
         return ()
     return (
         RussianQualityIssue(
@@ -568,6 +572,20 @@ def _mask_non_language_residue(text: str) -> str:
     return _mask_spans(text, _URL_RE, *_PLACEHOLDER_RES, _IDENTIFIER_RE, _PROTECTED_MARKER_RE)
 
 
+def _has_mixed_english_residue(text: str) -> bool:
+    if _ENGLISH_NAVIGATION_RESIDUE_RE.fullmatch(text.strip()):
+        return True
+    if _CYRILLIC_RE.search(text) is None:
+        return False
+
+    words = [
+        match.group(0).lower().strip("'")
+        for match in _ENGLISH_WORD_RE.finditer(text)
+    ]
+    common_words = [word for word in words if word in _ENGLISH_RESIDUE_WORDS]
+    return len(common_words) >= 2
+
+
 def _mask_spans(text: str, *patterns: re.Pattern[str]) -> str:
     masked = text
     for pattern in patterns:
@@ -583,3 +601,54 @@ _RESIDUE_PATTERNS = {
     "he": re.compile(r"[\u0590-\u05ff]{2,}"),
     "ar": re.compile(r"[\u0600-\u06ff]{2,}"),
 }
+_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+_ENGLISH_WORD_RE = re.compile(r"\b[A-Za-z][A-Za-z']*\b")
+_ENGLISH_NAVIGATION_RESIDUE_RE = re.compile(
+    r"(?:chapter\s+[ivxlcdm]+|contents|foreword|list\s+of\s+illustrations)",
+    flags=re.IGNORECASE,
+)
+_ENGLISH_RESIDUE_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "assert",
+        "before",
+        "chapter",
+        "contents",
+        "day",
+        "foreword",
+        "from",
+        "had",
+        "has",
+        "have",
+        "he",
+        "her",
+        "his",
+        "in",
+        "information",
+        "is",
+        "it",
+        "list",
+        "meanwhile",
+        "must",
+        "next",
+        "of",
+        "on",
+        "scope",
+        "she",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "was",
+        "were",
+        "when",
+        "while",
+        "with",
+        "would",
+    }
+)

@@ -24,6 +24,7 @@ from translator_service.protected_text import (
     restore_protected_text,
 )
 from translator_service.russian_quality import detect_russian_quality_track
+from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.scheduler import (
     SchedulerClaim,
     SchedulerLimits,
@@ -650,6 +651,7 @@ def _translate_work_unit_text(
             source_text=source_text,
             translated_text=translated_text,
             protected_replacements=protected_source.replacements,
+            source_language=work_unit.source_language,
             target_language=work_unit.target_language,
         ):
             logger.info(
@@ -731,6 +733,7 @@ def _translate_work_unit_text(
         translated_blocks=parsed,
         protected_blocks=protected_blocks,
         translator=translator,
+        source_language=work_unit.source_language,
         target_language=work_unit.target_language,
         translation_context=context_memory,
     )
@@ -806,6 +809,7 @@ def _retry_untranslated_secondary_source_blocks(
     translated_blocks: list[str],
     protected_blocks: list[ProtectedText],
     translator: PersistentWorkUnitTranslator,
+    source_language: str,
     target_language: str,
     translation_context: TranslationContextMemory | None = None,
 ) -> tuple[list[str], ProviderUsage]:
@@ -818,6 +822,7 @@ def _retry_untranslated_secondary_source_blocks(
             source_text=source,
             translated_text=translated,
             protected_replacements=protected.replacements,
+            source_language=source_language,
             target_language=target_language,
         ):
             continue
@@ -871,8 +876,17 @@ def _needs_secondary_language_retry(
     source_text: str,
     translated_text: str,
     protected_replacements: dict[str, str],
+    source_language: str,
     target_language: str,
 ) -> bool:
+    if _has_untranslated_source_language_residue(
+        source_text=source_text,
+        translated_text=translated_text,
+        source_language=source_language,
+        target_language=target_language,
+    ):
+        return True
+
     if (
         not _target_language_uses_cjk(target_language)
         and _has_untranslated_cjk_text(
@@ -902,6 +916,26 @@ def _needs_secondary_language_retry(
         source_text=source_text,
         translated_text=translated_text,
         target_language=target_language,
+    )
+
+
+def _has_untranslated_source_language_residue(
+    *,
+    source_text: str,
+    translated_text: str,
+    source_language: str,
+    target_language: str,
+) -> bool:
+    quality_result = check_russian_translation_quality(
+        source_text=source_text,
+        translated_text=translated_text,
+        source_language=source_language,
+        target_language=target_language,
+        quality_track=None,
+    )
+    return any(
+        issue.code == "untranslated_source_residue"
+        for issue in quality_result.issues
     )
 
 

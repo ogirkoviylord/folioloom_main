@@ -125,12 +125,28 @@ def _recent_live_runs(
     limit: int,
     now: datetime,
 ) -> tuple[TranslationRunSummary, ...]:
+    operation_summaries_by_job_id: dict[str, TranslationRunSummary] = {}
     operation_runs = ()
     if operations is not None:
-        operation_runs = tuple(
+        operation_summaries = tuple(
             _summary_from_operation_job(job, now=now)
             for job in operations.jobs
-            if job.state in _ACTIVE_STATUSES and job.id not in logged_job_ids
+            if job.state in _ACTIVE_STATUSES
+        )
+        operation_summaries_by_job_id = {
+            summary.job_id: summary for summary in operation_summaries if summary.job_id
+        }
+        live_runs = tuple(
+            _merge_run_with_operation_progress(
+                run,
+                operation_summaries_by_job_id.get(run.job_id),
+            )
+            for run in live_runs
+        )
+        operation_runs = tuple(
+            summary
+            for summary in operation_summaries
+            if summary.job_id not in logged_job_ids
         )
 
     rows = (*live_runs, *operation_runs)
@@ -142,6 +158,31 @@ def _recent_live_runs(
         )
     )
     return rows[:limit]
+
+
+def _merge_run_with_operation_progress(
+    run: TranslationRunSummary,
+    operation: TranslationRunSummary | None,
+) -> TranslationRunSummary:
+    if operation is None:
+        return run
+    if operation.total_fragment_count <= 0 and operation.fragment_count <= 0:
+        return run
+    return replace(
+        run,
+        status=operation.status or run.status,
+        fragment_count=operation.fragment_count,
+        total_fragment_count=max(
+            run.total_fragment_count,
+            operation.total_fragment_count,
+        ),
+        progress_percent=operation.progress_percent,
+        eta_seconds=operation.eta_seconds,
+        current_stage=operation.current_stage or run.current_stage,
+        last_event_at=operation.last_event_at or run.last_event_at,
+        total_tokens=max(run.total_tokens, operation.total_tokens),
+        error_message=operation.error_message or run.error_message,
+    )
 
 
 def _summary_from_operation_job(

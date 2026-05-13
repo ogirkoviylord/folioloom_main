@@ -208,6 +208,68 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.recent_runs[0].total_tokens, 14)
         self.assertEqual(snapshot.recent_runs[0].eta_seconds, 120.0)
 
+    def test_recent_runs_merge_operation_progress_into_matching_run_log(self):
+        with TemporaryDirectory() as temp_dir:
+            run_logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-running-with-log",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="logged-upload.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=3,
+                ),
+            )
+            run_logger.record_event(
+                "job_queued",
+                {"job_id": "job-running-with-log", "fragment_count": 3},
+            )
+            operations = build_operations_overview(
+                jobs=[
+                    {
+                        "id": "job-running-with-log",
+                        "status": "translating",
+                        "file_name": "logged-upload.epub",
+                        "document_kind": "epub",
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "created_at": datetime(2026, 5, 9, 11, 59, tzinfo=UTC),
+                        "updated_at": datetime(2026, 5, 9, 12, 1, tzinfo=UTC),
+                    }
+                ],
+                work_units_by_job_id={
+                    "job-running-with-log": (
+                        {"status": "translated", "prompt_tokens": 10},
+                        {"status": "translated", "completion_tokens": 8},
+                        {"status": "translating"},
+                    )
+                },
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                operations=operations,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                server=collect_local_server_health(
+                    disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(snapshot.active_translations, 1)
+        self.assertEqual(
+            [run.job_id for run in snapshot.recent_runs],
+            ["job-running-with-log"],
+        )
+        self.assertEqual(snapshot.recent_runs[0].fragment_count, 2)
+        self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 3)
+        self.assertEqual(snapshot.recent_runs[0].progress_percent, 66.7)
+        self.assertEqual(snapshot.recent_runs[0].total_tokens, 18)
+        self.assertEqual(snapshot.recent_runs[0].run_dir, str(run_logger.run_dir))
+
     def test_recent_runs_include_current_resource_usage(self):
         with TemporaryDirectory() as temp_dir:
             running = TranslationRunLogger.start(
