@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from pathlib import Path
 
 from translator_service.beta_safety import BetaSafetyGuard
 from translator_service.file_storage import LocalObjectStorage
@@ -22,6 +23,9 @@ from translator_service.scheduler import (
     SchedulerLimits,
     WorkUnitFailureKind,
 )
+from translator_service.translation_run_logs import (
+    finish_running_translation_runs_for_job,
+)
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
     _fail_claimed_work_unit_or_ignore_stale,
@@ -31,6 +35,8 @@ from translator_service.worker import (
     run_next_scheduled_stored_text_work_unit,
     translate_claimed_scheduled_stored_text_work_unit,
 )
+
+SAFE_DEFERRED_WORKER_FAILURE_MESSAGE = "Translation failed in the background worker."
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,7 @@ def run_scheduler_once(
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     max_parallel_units: int = 1,
     beta_safety_guard: BetaSafetyGuard | None = None,
+    translation_run_log_root: str | Path | None = None,
 ) -> SchedulerRunOnceSummary:
     if beta_safety_guard is not None:
         decision = beta_safety_guard.can_start_new_work()
@@ -102,6 +109,10 @@ def run_scheduler_once(
                 completed_units = 1
             elif completed.status.value.startswith("failed"):
                 failed_units = 1
+                _finish_failed_translation_run_for_work_unit(
+                    translation_run_log_root,
+                    work_unit=completed,
+                )
     else:
         completed_units, failed_units = _run_scheduled_parallel_once(
             store=store,
@@ -115,6 +126,7 @@ def run_scheduler_once(
             work_unit_started_callback=work_unit_started_callback,
             max_parallel_units=max_parallel_units,
             usage_completed_callback=usage_completed_callback,
+            translation_run_log_root=translation_run_log_root,
         )
 
     assembled_jobs = assemble_due_jobs(
@@ -142,6 +154,7 @@ def _run_scheduled_parallel_once(
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None,
     max_parallel_units: int,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None,
+    translation_run_log_root: str | Path | None,
 ) -> tuple[int, int]:
     completed_units = 0
     failed_units = 0
@@ -179,27 +192,33 @@ def _run_scheduled_parallel_once(
                         work_unit=work_unit,
                     )
                 except FileNotFoundError as error:
-                    failed_units += _failed_unit_count(
-                        _fail_claimed_work_unit_or_ignore_stale(
-                            store=store,
-                            claim=claim,
-                            failure_kind=WorkUnitFailureKind.MISSING_SOURCE_OBJECT,
-                            error_message=str(error),
-                            retry_base_delay_seconds=retry_base_delay_seconds,
-                            retry_max_delay_seconds=retry_max_delay_seconds,
-                        )
+                    failed = _fail_claimed_work_unit_or_ignore_stale(
+                        store=store,
+                        claim=claim,
+                        failure_kind=WorkUnitFailureKind.MISSING_SOURCE_OBJECT,
+                        error_message=str(error),
+                        retry_base_delay_seconds=retry_base_delay_seconds,
+                        retry_max_delay_seconds=retry_max_delay_seconds,
+                    )
+                    failed_units += _failed_unit_count(failed)
+                    _finish_failed_translation_run_for_work_unit(
+                        translation_run_log_root,
+                        work_unit=failed,
                     )
                     continue
                 except ValueError as error:
-                    failed_units += _failed_unit_count(
-                        _fail_claimed_work_unit_or_ignore_stale(
-                            store=store,
-                            claim=claim,
-                            failure_kind=WorkUnitFailureKind.UNSUPPORTED_CONTRACT,
-                            error_message=str(error),
-                            retry_base_delay_seconds=retry_base_delay_seconds,
-                            retry_max_delay_seconds=retry_max_delay_seconds,
-                        )
+                    failed = _fail_claimed_work_unit_or_ignore_stale(
+                        store=store,
+                        claim=claim,
+                        failure_kind=WorkUnitFailureKind.UNSUPPORTED_CONTRACT,
+                        error_message=str(error),
+                        retry_base_delay_seconds=retry_base_delay_seconds,
+                        retry_max_delay_seconds=retry_max_delay_seconds,
+                    )
+                    failed_units += _failed_unit_count(failed)
+                    _finish_failed_translation_run_for_work_unit(
+                        translation_run_log_root,
+                        work_unit=failed,
                     )
                     continue
 
@@ -226,15 +245,18 @@ def _run_scheduled_parallel_once(
                         claim.job_id,
                         claim.work_unit_id,
                     )
-                    failed_units += _failed_unit_count(
-                        _fail_claimed_work_unit_or_ignore_stale(
-                            store=store,
-                            claim=claim,
-                            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-                            error_message=str(error),
-                            retry_base_delay_seconds=retry_base_delay_seconds,
-                            retry_max_delay_seconds=retry_max_delay_seconds,
-                        )
+                    failed = _fail_claimed_work_unit_or_ignore_stale(
+                        store=store,
+                        claim=claim,
+                        failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+                        error_message=str(error),
+                        retry_base_delay_seconds=retry_base_delay_seconds,
+                        retry_max_delay_seconds=retry_max_delay_seconds,
+                    )
+                    failed_units += _failed_unit_count(failed)
+                    _finish_failed_translation_run_for_work_unit(
+                        translation_run_log_root,
+                        work_unit=failed,
                     )
                     continue
 
@@ -308,6 +330,23 @@ def _failed_unit_count(work_unit: PersistentWorkUnit | None) -> int:
     if work_unit is None:
         return 0
     return 1 if work_unit.status.value.startswith("failed") else 0
+
+
+def _finish_failed_translation_run_for_work_unit(
+    root: str | Path | None,
+    *,
+    work_unit: PersistentWorkUnit | None,
+) -> None:
+    if root is None or work_unit is None:
+        return
+    if not work_unit.status.value.startswith("failed"):
+        return
+    finish_running_translation_runs_for_job(
+        root,
+        job_id=work_unit.job_id,
+        status="failed",
+        error_message=SAFE_DEFERRED_WORKER_FAILURE_MESSAGE,
+    )
 
 
 def assemble_due_jobs(

@@ -40,6 +40,7 @@ class WorkerTest(unittest.TestCase):
 
         settings = SimpleNamespace(
             object_storage_root="objects",
+            translation_run_log_root="run-logs",
             scheduler_lease_seconds=300,
             scheduler_retry_base_delay_seconds=30,
             scheduler_retry_max_delay_seconds=600,
@@ -85,6 +86,7 @@ class WorkerTest(unittest.TestCase):
         config_from_settings.assert_called_once_with(settings)
         build_guard.assert_called_once_with(config)
         self.assertEqual(scheduler_calls[0]["beta_safety_guard"], guard)
+        self.assertEqual(scheduler_calls[0]["translation_run_log_root"], "run-logs")
         self.assertTrue(guard.closed)
         self.assertTrue(store.closed)
 
