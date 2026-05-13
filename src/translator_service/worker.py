@@ -1258,6 +1258,7 @@ def main() -> None:
                 ),
                 retry_max_delay_seconds=settings.scheduler_retry_max_delay_seconds,
                 beta_safety_guard=beta_safety_guard,
+                translation_run_log_root=settings.translation_run_log_root,
             )
             time.sleep(settings.scheduler_poll_seconds)
     finally:
