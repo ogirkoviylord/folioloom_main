@@ -146,6 +146,12 @@ class PendingTranslation:
 
 
 @dataclass(frozen=True)
+class CancelTranslationResult:
+    cancelled: bool
+    job: TranslationJob | None = None
+
+
+@dataclass(frozen=True)
 class UserBookSummary:
     job_id: str
     file_name: str
@@ -1262,6 +1268,12 @@ class BotTranslationService:
         )
 
     def cancel_translation(self, user_telegram_id: int) -> bool:
+        return self.cancel_translation_with_result(user_telegram_id).cancelled
+
+    def cancel_translation_with_result(
+        self,
+        user_telegram_id: int,
+    ) -> CancelTranslationResult:
         with self._state_lock:
             active = self._active_cancellations.get(user_telegram_id)
             if active is not None:
@@ -1275,27 +1287,43 @@ class BotTranslationService:
                     cancel_requested=True,
                 )
         if active is None:
-            return self._cancel_latest_persistent_translation(user_telegram_id)
+            job = self._cancel_latest_persistent_translation(user_telegram_id)
+            return CancelTranslationResult(cancelled=job is not None, job=job)
 
         _print_translation_cancel_requested(snapshot)
-        return True
+        return CancelTranslationResult(cancelled=True)
 
-    def _cancel_latest_persistent_translation(self, user_telegram_id: int) -> bool:
+    def _cancel_latest_persistent_translation(
+        self,
+        user_telegram_id: int,
+    ) -> TranslationJob | None:
         if self._persistent_job_store is None:
-            return False
+            return None
 
         for job in self._persistent_job_store.list_jobs_for_user(
             f"telegram:{user_telegram_id}",
             limit=10,
         ):
             if _can_cancel_persistent_job(job.status.value):
-                self._cancel_persistent_job_with_partial_if_available(
+                cancelled_job = self._cancel_persistent_job_with_partial_if_available(
                     job=job,
                     user_telegram_id=user_telegram_id,
                 )
-                return True
+                if self._translation_run_log_root is not None:
+                    finish_running_translation_runs_for_job(
+                        self._translation_run_log_root,
+                        job_id=job.id,
+                        status="cancelled",
+                        result_file_name=(
+                            cancelled_job.result_file_name
+                            if cancelled_job is not None
+                            else None
+                        ),
+                        error_message="Book cancelled by user.",
+                    )
+                return cancelled_job
 
-        return False
+        return None
 
     def _cancel_persistent_job_with_partial_if_available(
         self,
