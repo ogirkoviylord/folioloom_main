@@ -100,6 +100,7 @@ from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
+    TranslationJob,
     TranslationJobStatus,
 )
 from translator_service.languages import (
@@ -1291,6 +1292,7 @@ def create_router(
                     else None
                 ),
             )
+            await _send_translation_result_document(callback.message, job)
         elif book is not None:
             await _edit_callback_message(
                 callback.message,
@@ -1655,8 +1657,19 @@ def create_router(
             target_id="active",
         )
         interface_language = service.get_interface_language(callback.from_user.id)
-        if service.cancel_translation(callback.from_user.id):
+        result = service.cancel_translation_with_result(callback.from_user.id)
+        if result.cancelled:
             await callback.answer(build_cancel_requested_message(interface_language))
+            if result.job is not None and callback.message is not None:
+                await _edit_callback_message(
+                    callback.message,
+                    build_translation_job_status_message(
+                        result.job,
+                        interface_language=interface_language,
+                    ),
+                    reply_markup=None,
+                )
+                await _send_translation_result_document(callback.message, result.job)
             return
 
         await callback.answer(
@@ -2394,11 +2407,7 @@ async def _run_confirm_pending_translation(
         reply_markup=None,
     )
     if job.result_file_name and job.result_content:
-        from aiogram.types import BufferedInputFile
-
-        await message.answer_document(
-            BufferedInputFile(job.result_content, filename=job.result_file_name)
-        )
+        await _send_translation_result_document(message, job)
 
 
 async def _confirm_pending_upload_rights(
@@ -2633,11 +2642,7 @@ async def _resume_user_book_translation(
         ),
     )
     if job.result_file_name and job.result_content:
-        from aiogram.types import BufferedInputFile
-
-        await message.answer_document(
-            BufferedInputFile(job.result_content, filename=job.result_file_name)
-        )
+        await _send_translation_result_document(message, job)
 
 
 async def _cancel_active_translation(
@@ -2646,11 +2651,32 @@ async def _cancel_active_translation(
     service: BotTranslationService,
 ) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
-    if service.cancel_translation(message.from_user.id):
-        await message.answer(build_cancel_requested_message(interface_language))
+    result = service.cancel_translation_with_result(message.from_user.id)
+    if result.cancelled:
+        if result.job is not None:
+            await message.answer(
+                build_translation_job_status_message(
+                    result.job,
+                    interface_language=interface_language,
+                )
+            )
+            await _send_translation_result_document(message, result.job)
+        else:
+            await message.answer(build_cancel_requested_message(interface_language))
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+async def _send_translation_result_document(message, job: TranslationJob) -> None:
+    if not (job.result_file_name and job.result_content):
+        return
+
+    from aiogram.types import BufferedInputFile
+
+    await message.answer_document(
+        BufferedInputFile(job.result_content, filename=job.result_file_name)
+    )
 
 
 async def _send_translation_progress_message(message, text: str, reply_markup=None):
