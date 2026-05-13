@@ -1,16 +1,21 @@
 import threading
 import time
 import unittest
+from base64 import urlsafe_b64encode
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
+from translator_service.admin.secrets import SQLiteEncryptedSecretStore
 from translator_service.beta_safety import (
     BETA_SAFETY_ALLOWED,
     BETA_SAFETY_GLOBAL_DAILY_CAP,
     BetaSafetyDecision,
 )
+from translator_service.bot.runtime import build_deepseek_translator
+from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.persistent_jobs import (
@@ -21,6 +26,8 @@ from translator_service.persistent_jobs import (
 from translator_service.scheduler import SchedulerLimits
 from translator_service.scheduler_runner import assemble_due_jobs, run_scheduler_once
 from translator_service.worker import ProviderUsage
+
+MASTER_KEY = urlsafe_b64encode(b"5" * 32).decode("ascii")
 
 
 class SchedulerRunnerTest(unittest.TestCase):
@@ -609,6 +616,107 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(translator.max_active_calls, 2)
             self.assertEqual(len(set(translator.calls)), 2)
 
+    def test_run_once_keeps_parallel_books_ready_when_runtime_status_write_fails(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            storage = LocalObjectStorage(temp_path / "objects")
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            db_path = temp_path / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable-a",
+                        plaintext="admin-key-a",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable-b",
+                        plaintext="admin-key-b",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+            first = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph",
+            )
+            second = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-2",
+                file_id="file-2",
+                user_id="telegram:100",
+                source_text="Second paragraph",
+            )
+
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DEEPSEEK_API_KEY": "",
+                        "DEEPSEEK_API_KEYS": "",
+                        "DEEPSEEK_ADAPTIVE_INITIAL_PARALLEL": "2",
+                    },
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _SchedulerEchoDeepSeekClient,
+                ),
+            ):
+                translator = build_deepseek_translator(settings)
+                with patch(
+                    "translator_service.bot.runtime._record_deepseek_runtime_status",
+                    side_effect=RuntimeError("database is locked"),
+                ):
+                    summary = run_scheduler_once(
+                        store=store,
+                        storage=storage,
+                        worker_id="worker-a",
+                        translator=translator,
+                        limits=SchedulerLimits(
+                            max_active_units_per_job=1,
+                            max_active_units_per_user=1,
+                            max_active_jobs_per_user=1,
+                            max_active_units_global=2,
+                        ),
+                        lease_seconds=300,
+                        max_parallel_units=2,
+                    )
+
+            first_units = store.list_work_units(first.id)
+            second_units = store.list_work_units(second.id)
+
+        self.assertEqual(summary.completed_units, 2)
+        self.assertEqual(summary.failed_units, 0)
+        self.assertEqual(summary.assembled_jobs, 2)
+        self.assertEqual(
+            store.get_job(first.id).status,
+            PersistentTranslationJobStatus.READY,
+        )
+        self.assertEqual(
+            store.get_job(second.id).status,
+            PersistentTranslationJobStatus.READY,
+        )
+        self.assertTrue(
+            all(unit.translated_text for unit in first_units + second_units)
+        )
+
     def test_run_once_user_caps_prevent_same_user_from_filling_parallel_slots(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -991,6 +1099,21 @@ class SchedulerRunnerTest(unittest.TestCase):
 
 class RunnerTranslator:
     def __init__(self) -> None:
+        self.last_usage = ProviderUsage(prompt_tokens=10, completion_tokens=5)
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        return f"[{target_language}] {text}"
+
+
+class _SchedulerEchoDeepSeekClient:
+    def __init__(self, *, api_key: str, **kwargs) -> None:
+        self.api_key = api_key
         self.last_usage = ProviderUsage(prompt_tokens=10, completion_tokens=5)
 
     def translate(

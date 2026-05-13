@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
 from translator_service.admin.translation_logs import (
@@ -101,6 +103,45 @@ class AdminTranslationLogsTest(unittest.TestCase):
         rows = list_translation_run_summaries("/tmp/does-not-exist-folioloom")
 
         self.assertEqual(rows, ())
+
+    def test_active_eta_uses_wall_clock_elapsed_time(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-slow",
+                    order_id=None,
+                    user_id=None,
+                    file_name="slow-book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=4,
+                ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="One",
+                    translated_text="Один",
+                    status="translated",
+                    elapsed_seconds=10.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                )
+            )
+            run_json = logger.run_dir / "run.json"
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+            snapshot["started_at"] = "2026-05-10T10:00:00+00:00"
+            run_json.write_text(json.dumps(snapshot), encoding="utf-8")
+
+            rows = list_translation_run_summaries(
+                temp_dir,
+                now=datetime(2026, 5, 10, 10, 30, tzinfo=UTC),
+            )
+
+        self.assertEqual(rows[0].eta_seconds, 5400.0)
 
     def test_loads_translation_run_details_without_document_text(self):
         with TemporaryDirectory() as temp_dir:

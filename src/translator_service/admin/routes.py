@@ -1876,6 +1876,7 @@ def _live_snapshot(settings: Settings):
     return build_live_monitor_snapshot(
         settings.translation_run_log_root,
         operations=_operations_overview(settings),
+        runtime_statuses=_ai_provider_runtime_statuses(settings),
     )
 
 

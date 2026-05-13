@@ -405,12 +405,7 @@ class ReloadableDeepSeekTranslator:
     def snapshot(self):
         with self._lock:
             now = self._clock()
-            reload_requested = _consume_deepseek_reload_request(self._settings)
-            if reload_requested or now >= self._next_reload_at:
-                self._reload_locked(
-                    now=now,
-                    reload_requested=reload_requested,
-                )
+            self._reload_if_due_locked(now=now)
             translator = self._translator
             channels = list(self._channels)
             source = self._runtime_source
@@ -462,15 +457,46 @@ class ReloadableDeepSeekTranslator:
     def _current_translator(self) -> TextTranslator:
         with self._lock:
             now = self._clock()
-            reload_requested = _consume_deepseek_reload_request(self._settings)
-            if reload_requested or now >= self._next_reload_at:
-                self._reload_locked(
-                    now=now,
-                    reload_requested=reload_requested,
-                )
+            self._reload_if_due_locked(now=now)
             if self._translator is None:
                 raise RuntimeError("No active DeepSeek admin provider keys are set")
             return self._translator
+
+    def _reload_if_due_locked(self, *, now: float) -> None:
+        try:
+            reload_requested = _consume_deepseek_reload_request(self._settings)
+        except Exception:
+            if self._translator is None:
+                raise
+            logger.warning(
+                "DeepSeek runtime reload check skipped: provider_id=deepseek",
+                exc_info=True,
+            )
+            self._next_reload_at = _next_best_effort_reload_at(
+                now=now,
+                reload_interval_seconds=self._reload_interval_seconds,
+            )
+            return
+
+        if not reload_requested and now < self._next_reload_at:
+            return
+
+        try:
+            self._reload_locked(
+                now=now,
+                reload_requested=reload_requested,
+            )
+        except Exception:
+            if self._translator is None:
+                raise
+            logger.warning(
+                "DeepSeek runtime reload skipped: provider_id=deepseek",
+                exc_info=True,
+            )
+            self._next_reload_at = _next_best_effort_reload_at(
+                now=now,
+                reload_interval_seconds=self._reload_interval_seconds,
+            )
 
     def _record_current_runtime_snapshot(self, translator: TextTranslator) -> None:
         snapshot = getattr(translator, "snapshot", None)
@@ -508,7 +534,7 @@ class ReloadableDeepSeekTranslator:
             if provider_snapshot is not None
             else AIProviderRuntimeProviderState()
         )
-        _record_deepseek_runtime_status(
+        _record_deepseek_runtime_status_best_effort(
             self._settings,
             source=source,
             status=_deepseek_runtime_status_from_channels(
@@ -560,7 +586,7 @@ class ReloadableDeepSeekTranslator:
             )
             self._channels = channels
             self._signature = signature
-            _record_deepseek_runtime_status(
+            _record_deepseek_runtime_status_best_effort(
                 self._settings,
                 source=source,
                 status=status,
@@ -682,6 +708,14 @@ def _consume_deepseek_reload_request(settings: Settings) -> bool:
         return store.consume_reload_request("deepseek") is not None
 
 
+def _next_best_effort_reload_at(
+    *,
+    now: float,
+    reload_interval_seconds: float,
+) -> float:
+    return now + max(1.0, reload_interval_seconds)
+
+
 def _record_deepseek_runtime_status(
     settings: Settings,
     *,
@@ -710,6 +744,33 @@ def _record_deepseek_runtime_status(
             ),
             provider_state=provider_state,
             error=error,
+        )
+
+
+def _record_deepseek_runtime_status_best_effort(
+    settings: Settings,
+    *,
+    source: str = "admin_store",
+    status: str,
+    channels: list[DeepSeekChannelConfig],
+    error: str | None,
+    runtime_channels: tuple[AIProviderRuntimeChannel, ...] | None = None,
+    provider_state: AIProviderRuntimeProviderState | None = None,
+) -> None:
+    try:
+        _record_deepseek_runtime_status(
+            settings,
+            source=source,
+            status=status,
+            channels=channels,
+            error=error,
+            runtime_channels=runtime_channels,
+            provider_state=provider_state,
+        )
+    except Exception:
+        logger.warning(
+            "DeepSeek runtime status update skipped: provider_id=deepseek",
+            exc_info=True,
         )
 
 
@@ -2324,11 +2385,13 @@ async def _run_confirm_pending_translation(
         prompt_cache_miss_tokens=progress_stats["cache_miss_tokens"],
         status=job.status.value,
     )
-    await message.answer(
+    await _edit_callback_message(
+        progress_message,
         build_translation_job_status_message(
             job,
             interface_language=service.get_interface_language(message.from_user.id),
-        )
+        ),
+        reply_markup=None,
     )
     if job.result_file_name and job.result_content:
         from aiogram.types import BufferedInputFile
@@ -2633,7 +2696,12 @@ async def _watch_worker_translation_progress(
         progress_stats["job_status"] = current_job.status.value
         progress_stats["completed"] = progress.completed_fragments
         progress_stats["total"] = progress.total_fragments
-        progress_stats["estimated_total_seconds"] = None
+        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        estimated_total_seconds = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=elapsed_seconds,
+        )
+        progress_stats["estimated_total_seconds"] = estimated_total_seconds
         progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
         if current_job.status is TranslationJobStatus.QUEUED:
             progress_text = build_translation_job_status_message(
@@ -2648,8 +2716,8 @@ async def _watch_worker_translation_progress(
                 user_telegram_id=user_telegram_id,
                 completed_fragments=progress.completed_fragments,
                 total_fragments=progress.total_fragments,
-                estimated_total_seconds=None,
-                elapsed_seconds=max(1, round(time.monotonic() - started_at)),
+                estimated_total_seconds=estimated_total_seconds,
+                elapsed_seconds=elapsed_seconds,
                 last_translated_text=None,
                 activity_indicator=_next_heartbeat_frame(
                     str(progress_stats["heartbeat_pattern"]),
@@ -2826,6 +2894,35 @@ def _progress_translated_text(
     if isinstance(progress, TranslationProgress) and progress.translated_text:
         return progress.translated_text
     return None
+
+
+def _polled_progress_estimated_total_seconds(
+    progress,
+    *,
+    elapsed_seconds: int,
+) -> int | None:
+    completed_fragments = int(getattr(progress, "completed_fragments", 0) or 0)
+    total_fragments = int(getattr(progress, "total_fragments", 0) or 0)
+    if total_fragments <= 0:
+        return None
+
+    baseline_seconds = getattr(progress, "estimated_seconds", None)
+    if baseline_seconds is not None:
+        remaining_fragments = max(0, total_fragments - completed_fragments)
+        remaining_seconds = (
+            int(baseline_seconds)
+            * remaining_fragments
+            / max(1, total_fragments)
+        )
+        return max(elapsed_seconds, round(elapsed_seconds + remaining_seconds))
+
+    if completed_fragments <= 0:
+        return None
+    return round(
+        elapsed_seconds
+        / completed_fragments
+        * max(total_fragments, completed_fragments)
+    )
 
 
 def _include_progress_preview(

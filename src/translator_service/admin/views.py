@@ -217,7 +217,7 @@ def settings_body(
     *,
     beta_allowlist_enabled: bool,
     beta_allowlist_ids: tuple[int, ...],
-    beta_safety_settings: tuple[AdminSettingValue, ...],
+    beta_safety_settings: tuple[AdminSettingValue, ...] = (),
     csrf_token: str,
 ) -> str:
     rows = "\n".join(_secret_safety_row(item) for item in report.items)
@@ -1653,6 +1653,7 @@ def live_body(
             <th>Stage</th>
             <th>Progress</th>
             <th>ETA</th>
+            <th>Resources</th>
             <th>Tokens</th>
           </tr>
         </thead>
@@ -1688,6 +1689,7 @@ def live_body(
           <td>${{escapeHtml(stageLabel(run))}}</td>
           <td>${{progressCell(run)}}</td>
           <td>${{escapeHtml(etaLabel(run))}}</td>
+          <td>${{escapeHtml(resourceLabel(run.resource_usage))}}</td>
           <td>${{escapeHtml(run.total_tokens || 0)}}</td>
         </tr>
       `).join("");
@@ -1716,6 +1718,16 @@ def live_body(
         const minutes = Math.ceil(run.eta_seconds / 60);
         if (minutes >= 60) return `${{Math.floor(minutes / 60)}}h ${{minutes % 60}}m`;
         return `${{minutes}}m`;
+      }};
+      const resourceLabel = (resources) => {{
+        if (!resources || !resources.provider) return "n/a";
+        const active = resources.active_requests ?? 0;
+        const capacity = resources.parallel_capacity ?? 0;
+        const channels = resources.active_key_channels ?? 0;
+        const slots = resources.available_provider_slots;
+        const slotText = slots == null ? "n/a" : slots;
+        return `${{active}}/${{capacity}} req · ${{channels}} keys · `
+          + `${{slotText}} slots`;
       }};
       async function refreshLiveMonitor() {{
         const response = await fetch("/admin/api/live", {{ cache: "no-store" }});
@@ -1862,7 +1874,7 @@ def _live_run_rows(runs: tuple[TranslationRunSummary, ...]) -> str:
     if not runs:
         return """
         <tr>
-          <td colspan="5" class="empty-cell">No recent runs yet.</td>
+          <td colspan="9" class="empty-cell">No recent runs yet.</td>
         </tr>
         """
     return "\n".join(_live_run_row(run) for run in runs)
@@ -1879,6 +1891,7 @@ def _live_run_row(run: TranslationRunSummary) -> str:
       <td>{escape(_stage_label(run))}</td>
       <td>{_progress_mini(run)}</td>
       <td>{escape(_eta_label(run))}</td>
+      <td>{escape(_resource_usage_label(run.resource_usage))}</td>
       <td>{run.total_tokens}</td>
     </tr>
     """
@@ -1926,6 +1939,19 @@ def _eta_label(run: TranslationRunSummary) -> str:
     if run.eta_seconds is None:
         return "n/a"
     return _duration(run.eta_seconds)
+
+
+def _resource_usage_label(resources: dict) -> str:
+    if not resources or not resources.get("provider"):
+        return "n/a"
+    slots = resources.get("available_provider_slots")
+    slot_text = "n/a" if slots is None else str(slots)
+    return (
+        f"{resources.get('active_requests', 0)}/"
+        f"{resources.get('parallel_capacity', 0)} req · "
+        f"{resources.get('active_key_channels', 0)} keys · "
+        f"{slot_text} slots"
+    )
 
 
 def _percent(value: float | None) -> str:

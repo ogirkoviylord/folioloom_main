@@ -66,13 +66,17 @@ _SOURCE_PAIR_PROFILES = {
     ("uk", "ru"): SourcePairProfile(
         source_language="uk",
         target_language="ru",
-        version="v1",
+        version="v2",
         prompt=(
             "Source-pair policy: Ukrainian to Russian source-pair profile. "
             "Translate close Slavic wording into natural Russian without Ukrainian "
             "syntax calques or false friends. Do not transliterate Ukrainian words "
             "as a substitute for translation; translate words containing і, ї, є, ґ "
             "unless they are names, citations, usernames, addresses, or protected text. "
+            "Translate short administrative labels and common-Cyrillic Ukrainian words "
+            "too, even when they look mutually intelligible with Russian; do not leave "
+            "items such as заява, відповідно, довідка, підпис, місце проживання, "
+            "or номер телефону in Ukrainian. "
             "Preserve tone and document register without over-formalizing shared phrasing."
         ),
     ),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -55,12 +55,17 @@ def build_live_monitor_snapshot(
     translation_run_log_root: str | Path,
     *,
     operations: OperationsOverview | None = None,
+    runtime_statuses: tuple[Any, ...] = (),
     now: datetime | None = None,
     recent_limit: int = 8,
     server: ServerHealthSnapshot | None = None,
 ) -> LiveMonitorSnapshot:
     current_time = _aware_utc(now or datetime.now(UTC))
-    runs = list_translation_run_summaries(translation_run_log_root, limit=200)
+    runs = list_translation_run_summaries(
+        translation_run_log_root,
+        limit=200,
+        now=current_time,
+    )
     live_runs = tuple(run for run in runs if run.status in _ACTIVE_STATUSES)
     today = current_time.date()
     one_hour_ago = current_time - timedelta(hours=1)
@@ -82,6 +87,11 @@ def build_live_monitor_snapshot(
         operations=operations,
         logged_job_ids=active_run_job_ids,
         limit=max(1, int(recent_limit)),
+        now=current_time,
+    )
+    resource_usage = _resource_usage_from_runtime_statuses(runtime_statuses)
+    recent_runs = tuple(
+        replace(run, resource_usage=resource_usage) for run in recent_runs
     )
 
     return LiveMonitorSnapshot(
@@ -113,11 +123,12 @@ def _recent_live_runs(
     operations: OperationsOverview | None,
     logged_job_ids: set[str],
     limit: int,
+    now: datetime,
 ) -> tuple[TranslationRunSummary, ...]:
     operation_runs = ()
     if operations is not None:
         operation_runs = tuple(
-            _summary_from_operation_job(job)
+            _summary_from_operation_job(job, now=now)
             for job in operations.jobs
             if job.state in _ACTIVE_STATUSES and job.id not in logged_job_ids
         )
@@ -133,7 +144,11 @@ def _recent_live_runs(
     return rows[:limit]
 
 
-def _summary_from_operation_job(job) -> TranslationRunSummary:
+def _summary_from_operation_job(
+    job,
+    *,
+    now: datetime | None = None,
+) -> TranslationRunSummary:
     total_units = max(0, int(job.total_units))
     completed_units = max(0, int(job.completed_units))
     total_tokens = max(0, int(job.total_tokens))
@@ -156,13 +171,82 @@ def _summary_from_operation_job(job) -> TranslationRunSummary:
         fragment_count=completed_units,
         total_fragment_count=total_units,
         progress_percent=_operation_progress_percent(completed_units, total_units),
-        eta_seconds=None,
+        eta_seconds=_operation_eta_seconds(
+            status=status,
+            completed=completed_units,
+            total=total_units,
+            started_at=started_at,
+            now=now,
+        ),
         current_stage=status,
         last_event_at=job.updated_at,
         total_tokens=total_tokens,
         elapsed_seconds=0.0,
         run_dir="",
     )
+
+
+def _resource_usage_from_runtime_statuses(
+    runtime_statuses: tuple[Any, ...],
+) -> dict[str, Any]:
+    status = next(
+        (
+            item
+            for item in runtime_statuses
+            if getattr(item, "provider_id", None) == "deepseek"
+        ),
+        None,
+    )
+    if status is None:
+        return {}
+    channels = tuple(getattr(status, "active_channels", ()) or ())
+    provider_state = getattr(status, "provider_state", None)
+    parallel_capacity = sum(
+        max(1, int(getattr(channel, "max_parallel_requests", 1) or 1))
+        for channel in channels
+    )
+    active_requests = sum(
+        max(0, int(getattr(channel, "active_requests", 0) or 0))
+        for channel in channels
+    )
+    return {
+        "provider": "deepseek",
+        "active_key_channels": len(channels),
+        "active_requests": active_requests,
+        "parallel_capacity": parallel_capacity,
+        "busy_channels": sum(
+            1
+            for channel in channels
+            if int(getattr(channel, "active_requests", 0) or 0)
+            >= int(getattr(channel, "max_parallel_requests", 1) or 1)
+        ),
+        "cooling_down_channels": sum(
+            1
+            for channel in channels
+            if str(getattr(channel, "health", "")).lower() == "cooling_down"
+        ),
+        "degraded_channels": sum(
+            1
+            for channel in channels
+            if str(getattr(channel, "health", "")).lower()
+            in {"cooling_down", "degraded"}
+        ),
+        "available_provider_slots": (
+            max(0, int(getattr(provider_state, "available_slots", 0) or 0))
+            if provider_state is not None
+            else None
+        ),
+        "adaptive_current_limit": (
+            max(0, int(getattr(provider_state, "current_limit", 0) or 0))
+            if provider_state is not None
+            else None
+        ),
+        "adaptive_max_capacity": (
+            max(0, int(getattr(provider_state, "max_capacity", 0) or 0))
+            if provider_state is not None
+            else None
+        ),
+    }
 
 
 def collect_local_server_health(
@@ -251,6 +335,29 @@ def _operation_progress_percent(completed: int, total: int) -> float | None:
     if total <= 0:
         return None
     return round((completed / total) * 100, 1)
+
+
+def _operation_eta_seconds(
+    *,
+    status: str,
+    completed: int,
+    total: int,
+    started_at: datetime | None,
+    now: datetime | None,
+) -> float | None:
+    if status not in _ACTIVE_STATUSES or total <= 0 or completed <= 0:
+        return None
+    if completed >= total:
+        return 0.0
+    if started_at is None or now is None:
+        return None
+    elapsed_seconds = max(
+        0.0,
+        (_aware_utc(now) - _aware_utc(started_at)).total_seconds(),
+    )
+    if elapsed_seconds <= 0:
+        return None
+    return round((elapsed_seconds / completed) * (total - completed), 1)
 
 
 def _status_text(value: Any) -> str:

@@ -11,6 +11,11 @@ from translator_service.admin.live import (
     collect_local_server_health,
 )
 from translator_service.admin.operations import build_operations_overview
+from translator_service.admin.provider_runtime import (
+    AIProviderRuntimeChannel,
+    AIProviderRuntimeProviderState,
+    AIProviderRuntimeStatus,
+)
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -114,6 +119,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
             snapshot = build_live_monitor_snapshot(
                 temp_dir,
                 operations=operations,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
                 server=collect_local_server_health(
                     disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
                     psutil_module=None,
@@ -165,7 +171,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
                         "document_kind": "epub",
                         "source_language": "en",
                         "target_language": "uk",
-                        "created_at": datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                        "created_at": datetime(2026, 5, 9, 11, 59, tzinfo=UTC),
                         "updated_at": datetime(2026, 5, 9, 12, 1, tzinfo=UTC),
                     }
                 ],
@@ -181,6 +187,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
             snapshot = build_live_monitor_snapshot(
                 temp_dir,
                 operations=operations,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
                 server=collect_local_server_health(
                     disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
                     psutil_module=None,
@@ -199,6 +206,70 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.recent_runs[0].fragment_count, 1)
         self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 3)
         self.assertEqual(snapshot.recent_runs[0].total_tokens, 14)
+        self.assertEqual(snapshot.recent_runs[0].eta_seconds, 120.0)
+
+    def test_recent_runs_include_current_resource_usage(self):
+        with TemporaryDirectory() as temp_dir:
+            running = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-running",
+                    order_id=None,
+                    user_id=None,
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=2,
+                ),
+            )
+            running.record_event("work_unit_started", {"total_units": 2})
+            runtime = AIProviderRuntimeStatus(
+                provider_id="deepseek",
+                source="bot",
+                status="ok",
+                reload_interval_seconds=30,
+                last_reloaded_at=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                active_channels=(
+                    AIProviderRuntimeChannel(
+                        label="key-a",
+                        weight=1,
+                        max_parallel_requests=2,
+                        active_requests=1,
+                    ),
+                    AIProviderRuntimeChannel(
+                        label="key-b",
+                        weight=1,
+                        max_parallel_requests=2,
+                        active_requests=0,
+                        health="cooling_down",
+                    ),
+                ),
+                provider_state=AIProviderRuntimeProviderState(
+                    adaptive_enabled=True,
+                    current_limit=3,
+                    max_capacity=4,
+                    active_requests=1,
+                    available_slots=2,
+                ),
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                runtime_statuses=(runtime,),
+                server=collect_local_server_health(
+                    disk_usage=lambda path: (_ for _ in ()).throw(OSError("no disk")),
+                    psutil_module=None,
+                ),
+            )
+
+        resources = snapshot.recent_runs[0].resource_usage
+        self.assertEqual(resources["provider"], "deepseek")
+        self.assertEqual(resources["active_key_channels"], 2)
+        self.assertEqual(resources["active_requests"], 1)
+        self.assertEqual(resources["parallel_capacity"], 4)
+        self.assertEqual(resources["available_provider_slots"], 2)
+        self.assertEqual(resources["cooling_down_channels"], 1)
 
     def test_recent_runs_only_include_active_or_transitioning_runs(self):
         with TemporaryDirectory() as temp_dir:

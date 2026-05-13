@@ -277,6 +277,97 @@ class TranslationRunnerTest(unittest.TestCase):
             )
         )
 
+    def test_docx_auto_translation_uses_document_level_ukrainian_for_ambiguous_blocks(self):
+        class UkrainianAutoTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                self.requests.append((text, source_language, target_language))
+                document = _parse_xml(text.encode("utf-8"))
+                translations = {
+                    "Заява": "Заявление",
+                    "Відповідно до заяви": "В соответствии с заявлением",
+                    "Прописка по паспорту": "Регистрация по паспорту",
+                }
+                for block in document:
+                    block.text = (
+                        translations.get(block.text or "", block.text or "")
+                        if source_language == "uk"
+                        else block.text
+                    )
+                return ElementTree.tostring(document, encoding="unicode")
+
+        translator = UkrainianAutoTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Заява</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Відповідно до заяви</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Прописка по паспорту</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="statement.docx",
+            content=content,
+            source_language="auto",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertEqual(
+            text,
+            "Заявление\n\nВ соответствии с заявлением\n\nРегистрация по паспорту",
+        )
+        self.assertEqual([request[1] for request in translator.requests], ["uk"])
+
+    def test_docx_translation_retries_ukrainian_residue_for_russian_target(self):
+        class UkrainianResidueRetryTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "В соответствии с заявлением прошу назначить социальную стипендию."
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">Відповідно до заяви прошу призначити соціальну стипендію.</translation_block>'
+                    "</translation_batch>"
+                )
+
+        translator = UkrainianResidueRetryTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Відповідно до заяви прошу призначити соціальну стипендію.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        result = translate_docx_document(
+            file_name="statement.docx",
+            content=content,
+            source_language="uk",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_docx(result.content)
+        self.assertEqual(
+            text,
+            "В соответствии с заявлением прошу назначить социальную стипендию.",
+        )
+        self.assertNotIn("Відповідно", text)
+        self.assertEqual([request[1] for request in translator.requests], ["uk", "auto"])
+
     def test_docx_translation_rejects_excessively_deep_xml_before_translation(self):
         content = _make_docx(_deep_docx_xml(MAX_XML_DEPTH + 1))
         translator = RecordingTranslator()
