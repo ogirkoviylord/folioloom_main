@@ -1775,7 +1775,11 @@ def _deepseek_balance_payload(settings: Settings):
             else None
         ),
         "error_code": snapshot.error_code,
-        "error_message": snapshot.error_message,
+        "error_message": (
+            _safe_runtime_text(snapshot.error_message)
+            if snapshot.error_message is not None
+            else None
+        ),
     }
 
 
