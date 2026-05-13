@@ -1613,13 +1613,26 @@ class AdminRoutesTest(unittest.TestCase):
 
             self.assertEqual(page.status_code, 200)
             self.assertIn("Live Monitor", page.text)
-            self.assertIn("Active translations", page.text)
+            self.assertIn("Active processing", page.text)
+            self.assertIn("Jobs currently running or translating.", page.text)
+            self.assertIn("Queued translations", page.text)
+            self.assertIn("Jobs waiting for worker or provider capacity.", page.text)
             self.assertIn("Tokens today", page.text)
+            self.assertIn("Provider token usage from runs started today.", page.text)
             self.assertIn("Server health", page.text)
             self.assertIn("CPU", page.text)
             self.assertIn("Memory", page.text)
             self.assertIn("Disk", page.text)
             self.assertIn("Uptime", page.text)
+            self.assertIn("What needs attention", page.text)
+            self.assertIn("Queue growing while active processing stays flat", page.text)
+            self.assertIn("no provider slots point to", page.text)
+            self.assertIn("provider capacity.", page.text)
+            self.assertIn(
+                "Failures today above zero need a recent run check",
+                page.text,
+            )
+            self.assertIn("Recent rows are metadata-only.", page.text)
             self.assertIn("Progress", page.text)
             self.assertIn("ETA", page.text)
             self.assertIn("Stage", page.text)

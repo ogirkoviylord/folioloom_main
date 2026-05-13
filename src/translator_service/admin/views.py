@@ -1777,29 +1777,76 @@ def live_body(
     beta_safety: BetaSafetyCostSummary | None = None,
 ) -> str:
     metrics = (
-        ("Active translations", snapshot.active_translations, "active_translations"),
-        ("Queued", snapshot.queued_translations, "queued_translations"),
-        ("Failed today", snapshot.failed_today, "failed_today"),
-        ("Tokens today", snapshot.tokens_today, "tokens_today"),
-        ("Tokens last hour", snapshot.tokens_last_hour, "tokens_last_hour"),
+        (
+            "Active processing",
+            snapshot.active_translations,
+            "active_translations",
+            "Jobs currently running or translating.",
+        ),
+        (
+            "Queued translations",
+            snapshot.queued_translations,
+            "queued_translations",
+            "Jobs waiting for worker or provider capacity.",
+        ),
+        (
+            "Failed today",
+            snapshot.failed_today,
+            "failed_today",
+            "Runs that ended with a failure today.",
+        ),
+        (
+            "Tokens today",
+            snapshot.tokens_today,
+            "tokens_today",
+            "Provider token usage from runs started today.",
+        ),
+        (
+            "Tokens last hour",
+            snapshot.tokens_last_hour,
+            "tokens_last_hour",
+            "Recent token usage for spotting spend spikes.",
+        ),
         (
             "Server health",
             "pending" if not snapshot.server.available else "online",
             "server_health",
+            "Local CPU, memory, disk, and uptime snapshot.",
         ),
-        ("CPU", _percent(snapshot.server.cpu_percent), "server_cpu_percent"),
-        ("Memory", _percent(snapshot.server.memory_percent), "server_memory_percent"),
-        ("Disk", _percent(snapshot.server.disk_percent), "server_disk_percent"),
-        ("Uptime", _duration(snapshot.server.uptime_seconds), "server_uptime"),
+        (
+            "CPU",
+            _percent(snapshot.server.cpu_percent),
+            "server_cpu_percent",
+            "Current server CPU load when metrics are available.",
+        ),
+        (
+            "Memory",
+            _percent(snapshot.server.memory_percent),
+            "server_memory_percent",
+            "Current server memory use when metrics are available.",
+        ),
+        (
+            "Disk",
+            _percent(snapshot.server.disk_percent),
+            "server_disk_percent",
+            "Current server disk use when metrics are available.",
+        ),
+        (
+            "Uptime",
+            _duration(snapshot.server.uptime_seconds),
+            "server_uptime",
+            "How long the local process host has been up.",
+        ),
     )
     metric_cards = "\n".join(
         f"""
         <article class="metric live-metric">
           <span>{escape(label)}</span>
           <strong data-live-field="{escape(field)}">{value}</strong>
+          <small>{escape(help_text)}</small>
         </article>
         """
-        for label, value, field in metrics
+        for label, value, field, help_text in metrics
     )
     runtime_cards = _live_runtime_cards(runtime_statuses, runtime_reload_states)
     beta_warning = _beta_safety_live_warning(beta_safety)
@@ -1808,8 +1855,8 @@ def live_body(
       <div>
         <h3>Live Monitor</h3>
         <p>
-          Keep this screen open to watch active translations, queue pressure,
-          token spend, failures, and server health.
+          Keep this screen open to separate waiting work from active processing,
+          provider capacity, token spend, failures, and server health.
         </p>
       </div>
       <a class="button-link" href="/admin/live" target="_blank" rel="noreferrer">
@@ -1818,12 +1865,39 @@ def live_body(
     </section>
     {beta_warning}
     <section class="metrics live-grid">{metric_cards}</section>
+    <section class="panel live-guidance">
+      <h3>What needs attention</h3>
+      <ul>
+        <li>Queue growing while active processing stays flat means work is waiting.</li>
+        <li>
+          Degraded channels, 429s, timeouts, or no provider slots point to
+          provider capacity.
+        </li>
+        <li>
+          Failures today above zero need a recent run check before inviting
+          more beta users.
+        </li>
+        <li>
+          High disk, memory, or CPU can explain slow workers even when the
+          queue is small.
+        </li>
+      </ul>
+    </section>
     <section class="panel">
       <h3>DeepSeek runtime</h3>
+      <p>
+        Runtime cards show existing provider status only: active request slots,
+        key channels, adaptive limit, circuit state, and reload state.
+      </p>
       <div class="metric-grid">{runtime_cards}</div>
     </section>
     <section class="panel table-panel">
       <h3>Recent runs</h3>
+      <p>
+        Recent rows are metadata-only. Progress counts translated fragments,
+        ETA is an estimate, and Resources shows active provider requests,
+        total request capacity, key channels, and available provider slots.
+      </p>
       <table class="log-table">
         <thead>
           <tr>
@@ -3528,6 +3602,18 @@ button.danger {
 }
 .live-metric strong {
   font-size: 2rem;
+}
+.live-metric small {
+  color: var(--muted);
+  display: block;
+  line-height: 1.35;
+  margin-top: 8px;
+}
+.live-guidance ul {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 12px 0 0;
+  padding-left: 20px;
 }
 .error { color: var(--warn); }
 @media (max-width: 760px) {
