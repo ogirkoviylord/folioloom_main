@@ -13,6 +13,7 @@ from translator_service.admin.integration_connections import (
 )
 from translator_service.admin.integrations import IntegrationSummary
 from translator_service.admin.provider_balance import ProviderBalanceSnapshot
+from translator_service.admin.provider_health import _redact_sensitive_text
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
@@ -261,7 +262,7 @@ def _deepseek_balance_action_items(
                 key="deepseek_balance_fetch_failed",
                 severity="warning",
                 title="DeepSeek balance check failed",
-                detail=snapshot.error_message or "The latest balance refresh failed.",
+                detail=_safe_balance_error_detail(snapshot.error_message),
                 href=href,
             )
         )
@@ -303,6 +304,13 @@ def _deepseek_balance_action_items(
                 )
             )
     return tuple(items)
+
+
+def _safe_balance_error_detail(value: str | None) -> str:
+    if value is None:
+        return "The latest balance refresh failed."
+    redacted = _redact_sensitive_text(value)
+    return redacted or "The latest balance refresh failed."
 
 
 def _beta_safety_action_items(
