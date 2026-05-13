@@ -218,6 +218,7 @@ def finish_running_translation_runs_for_job(
     *,
     job_id: str,
     status: str = "cancelled",
+    result_file_name: str | None = None,
     error_message: str | None = None,
 ) -> int:
     root_path = Path(root)
@@ -237,6 +238,8 @@ def finish_running_translation_runs_for_job(
 
         snapshot["status"] = status
         snapshot["finished_at"] = _now_iso()
+        if result_file_name is not None:
+            snapshot["result_file_name"] = result_file_name
         snapshot["error_message"] = error_message
         event_type = {
             "cancelled": "run_cancelled",
