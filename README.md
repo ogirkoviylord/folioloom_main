@@ -52,6 +52,14 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Admin console through SSH tunnel | Subscriptions, referrals, coupons, teams |
 | Backup/restore workflow | Stripe/YooKassa/card flow as immediate Telegram path |
 
+Deferred format ideas:
+
+- FB2 support is captured as GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). Owner
+  decision is TBD. FB2 remains unsupported for the next beta unless the owner
+  explicitly approves a scope change, Architect review and a separate
+  agent-ready implementation issue.
+
 ### Beta Safety / Cost Guard
 
 FolioLoom keeps beta throughput bounded with a cost-aware safety layer:
@@ -301,6 +309,10 @@ See `docs/restart/release-gates.md` for the canonical checklists.
 - Do not expose payment UI before the payment gate.
 - Do not treat beta safety reservations or usage accounting as a paid ledger.
 - Do not expand beta formats beyond TXT/DOCX/EPUB.
+- Do not implement FB2 from issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) until the
+  owner explicitly approves a scope change and an Architect reviews the format
+  safety plan.
 - Do not expose admin publicly in closed beta.
 - Do not log or show raw document text in admin/run logs.
 - Do not use global ruff cleanup as a release blocker.

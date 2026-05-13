@@ -140,6 +140,10 @@ Acceptance criteria:
 - Paid beta, Telegram Stars/XTR, payment ledger, pricing changes.
 - Public production, public admin exposure, public website/customer portal.
 - Новые форматы кроме TXT/DOCX/EPUB.
+- FB2 support from GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23); it is a
+  deferred idea only until owner approval, Architect review and a separate
+  agent-ready implementation issue exist.
 - Большие переписывания scheduler, bot state или translation core.
 
 ## 6. Phase 2 - Improve observability and admin/debugging
@@ -256,6 +260,10 @@ Acceptance criteria:
 - Stripe/YooKassa/card flow.
 - Public website/customer portal, public signup, WhatsApp/Discord/public API.
 - PDF/OCR/MOBI/FB2/batch ZIP/arbitrary parser.
+- FB2 from GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) without
+  explicit owner approval, supported-subset decision, fixture rights basis,
+  dependency review and Architect-approved safety/verification plan.
 - Public admin exposure или изменение SSH-tunnel-only модели.
 - Major rewrites of scheduler, bot runtime, provider layer or translation core.
 - New external providers or user-facing provider/model picker.

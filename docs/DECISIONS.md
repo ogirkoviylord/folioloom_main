@@ -74,6 +74,7 @@ Decision:
 - MVP для free closed beta ограничен TXT, DOCX и EPUB.
 - MVP включает upload, validation, rights confirmation, target language selection, estimate, confirmation, persistent jobs/work units, worker processing, progress/cancel, partial/final result, My Books/history/resume/delete, beta allowlist, cost caps, kill switch, admin visibility и backup/restore workflow.
 - Не делаем сейчас: paid public SaaS, public self-serve signup, PDF/OCR/MOBI/FB2/batch ZIP, arbitrary parser, public admin, subscriptions, referrals, coupons, teams, user-facing provider/model picker.
+- FB2 support from GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is a deferred idea only. It does not change the beta MVP unless the owner approves a scope change and Architect review defines the supported subset, parser/resource safety plan, fixture rights basis, dependency impact and verification plan.
 
 Evidence:
 - `README.md`: Supported / Not Supported.
@@ -87,6 +88,7 @@ Reason:
 Consequences:
 - AI-агентам нельзя расширять форматы или строить платежные/публичные функции как часть текущего MVP.
 - Gaps из Gate B остаются задачами до free closed beta, но не означают readiness.
+- Агенты не должны превращать issue #23 в implementation task без отдельного owner decision, architecture review и agent-ready issue.
 
 Human approval required to change:
 - yes; расширение MVP меняет сроки, QA matrix, security и support scope.
@@ -517,6 +519,7 @@ Human approval required to change:
 - Не считать beta safety accounting платежным ledger.
 - Не считать проект production-ready.
 - Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения.
+- Не реализовывать FB2 из GitHub issue #23 без owner approval, Architect review и отдельного agent-ready implementation issue.
 - Не переписывать архитектуру без отдельного approved plan.
 - Не трактовать historical plans/specs as current roadmap без сверки с active source of truth.
 - Не хранить и не показывать raw document text, prompts, translations или API keys в logs/admin/safety telemetry.

@@ -208,6 +208,14 @@ product yet.
 - Backups visibility page.
 - Scheduler/runtime consistency smoke as a release artifact.
 
+## Deferred ideas / not approved for implementation
+
+- FB2 support is recorded as GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). Current
+  state: idea only. Owner decision is TBD; authorized FB2 fixtures are Unknown;
+  dependency impact is Unknown. FB2 remains outside the approved TXT/DOCX/EPUB
+  closed-beta scope until explicit owner approval and Architect review.
+
 ## Paid beta blockers
 
 Paid beta is blocked until Telegram Stars/XTR flow, `pre_checkout_query`,

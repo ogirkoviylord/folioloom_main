@@ -116,6 +116,10 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 - Не ослаблять guardrails вокруг прав на документы, beta allowlist, cost caps, kill switch, secret redaction и raw document text redaction.
 - Не показывать payment UI и не запускать paid jobs до Gate C.
 - Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения владельца.
+- Не реализовывать FB2 из GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) без
+  owner approval, Architect review, supported-subset decision, safety plan,
+  rights-approved fixtures и отдельной agent-ready implementation issue.
 - Не делать большие переписывания без отдельного плана и review.
 - Не публиковать admin console в интернет до public-production hardening.
 - Не трактовать beta safety accounting как paid ledger.
@@ -137,6 +141,10 @@ TBD: формальные success metrics владельцем не зафикс
 - Stripe/YooKassa/card flow как immediate Telegram path.
 - Subscriptions, referrals, coupons, teams.
 - PDF, OCR, MOBI, FB2, batch ZIP или arbitrary file parser.
+- FB2 из GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) остается
+  deferred idea: owner decision TBD, authorized FB2 fixtures Unknown,
+  dependency impact Unknown.
 - Public website/customer portal.
 - WhatsApp, Discord, public API или другие каналы.
 - User-facing provider/model picker.
