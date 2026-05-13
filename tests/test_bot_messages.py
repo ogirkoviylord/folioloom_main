@@ -329,6 +329,56 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("cancelled", message.lower())
         self.assertIn("book.uk.partial.epub", message)
 
+    def test_translation_job_status_message_for_cancelled_job_without_result(self):
+        message = build_translation_job_status_message(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=b"book",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.CANCELLED,
+                result_file_name=None,
+            ),
+            interface_language="en",
+        )
+
+        self.assertIn("cancelled", message.lower())
+        self.assertIn("partial result is not available yet", message)
+        self.assertIn("before any passage was translated", message)
+        self.assertNotIn("Partial result:", message)
+        self.assertNotIn("partial.epub", message)
+        self.assertNotIn("DeepSeek", message)
+        self.assertNotIn("/var/", message)
+
+    def test_cancelled_without_result_message_is_localized(self):
+        expectations = {
+            "ru": "Частичный результат пока недоступен",
+            "uk": "Частковий результат ще недоступний",
+            "fr": "Aucun résultat partiel",
+            "es": "Todavía no hay un resultado parcial",
+            "nl": "geen gedeeltelijk resultaat beschikbaar",
+        }
+
+        for language_code, expected_text in expectations.items():
+            with self.subTest(language_code=language_code):
+                message = build_translation_job_status_message(
+                    TranslationJob(
+                        id="job-1",
+                        user_telegram_id=42,
+                        file_name="book.epub",
+                        content=b"book",
+                        source_language="en",
+                        target_language="uk",
+                        status=TranslationJobStatus.CANCELLED,
+                    ),
+                    interface_language=language_code,
+                )
+
+                self.assertIn(expected_text, message)
+                self.assertNotIn("partial result", message.lower())
+
     def test_translation_job_status_message_for_admin_paused_and_deleted_jobs(self):
         paused = build_translation_job_status_message(
             TranslationJob(

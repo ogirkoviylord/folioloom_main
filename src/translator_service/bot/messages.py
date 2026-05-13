@@ -176,6 +176,10 @@ MESSAGES = {
         "ready": "Your translation is ready.\n\nYou can download the translated file below: {result_name}.",
         "partial": "Translation finished with skipped passages.\n\nPartial result: {result_name}.\n\nSome problematic passages were kept in the original language. You can retry them later without uploading the file again.",
         "cancelled": "Translation cancelled.\n\nPartial result: {result_name}.",
+        "cancelled_without_result": (
+            "Translation cancelled.\n\n"
+            "A partial result is not available yet because the translation was cancelled before any passage was translated."
+        ),
         "deleted": "Translation deleted by an admin.\n\nThe job and stored files are no longer available.",
         "failed": "Something went wrong while translating.\n\nYour file is safe. Please try again, or return to the main menu.",
         "status": "Translation status: {status}",
@@ -358,6 +362,10 @@ MESSAGES = {
         "ready": "Перевод готов.\n\nВы можете скачать файл ниже: {result_name}.",
         "partial": "Перевод завершен с пропущенными отрывками.\n\nЧастичный результат: {result_name}.\n\nПроблемные отрывки оставлены в оригинале. Позже их можно будет повторить без новой загрузки файла.",
         "cancelled": "Перевод отменен.\n\nЧастичный результат: {result_name}.",
+        "cancelled_without_result": (
+            "Перевод отменен.\n\n"
+            "Частичный результат пока недоступен: перевод был отменен до того, как был переведен первый отрывок."
+        ),
         "deleted": "Администратор удалил перевод.\n\nЗадача и сохраненные файлы больше недоступны.",
         "failed": "Во время перевода что-то пошло не так.\n\nФайл не потерян. Попробуйте еще раз или вернитесь в главное меню.",
         "status": "Статус перевода: {status}",
@@ -507,6 +515,10 @@ for _language_code, _fallbacks in {
         "ready": "Переклад готовий.\n\nВи можете завантажити файл нижче: {result_name}.",
         "partial": "Переклад завершено з пропущеними уривками.\n\nЧастковий результат: {result_name}.\n\nПроблемні уривки залишено в оригіналі. Пізніше їх можна буде повторити без нового завантаження файлу.",
         "cancelled": "Переклад скасовано.\n\nЧастковий результат: {result_name}.",
+        "cancelled_without_result": (
+            "Переклад скасовано.\n\n"
+            "Частковий результат ще недоступний, бо переклад було скасовано до перекладу першого уривка."
+        ),
         "failed": "Під час перекладу щось пішло не так.\n\nФайл не втрачено. Спробуйте ще раз або поверніться до головного меню.",
         "status": "Статус перекладу: {status}",
         "unsupported_file": "Цей тип файлу поки не підтримується.\n\nБудь ласка, надішліть файл одного з цих форматів:\n{formats}",
@@ -630,6 +642,10 @@ for _language_code, _fallbacks in {
         "ready": "Votre traduction est prête.\n\nVous pouvez télécharger le fichier ci-dessous : {result_name}.",
         "partial": "La traduction est terminée avec des passages ignorés.\n\nRésultat partiel : {result_name}.\n\nLes passages problématiques ont été conservés dans la langue d'origine. Vous pourrez les relancer plus tard sans téléverser à nouveau le fichier.",
         "cancelled": "Traduction annulée.\n\nRésultat partiel : {result_name}.",
+        "cancelled_without_result": (
+            "Traduction annulée.\n\n"
+            "Aucun résultat partiel n'est encore disponible, car la traduction a été annulée avant le premier passage traduit."
+        ),
         "failed": "Un problème est survenu pendant la traduction.\n\nVotre fichier est en sécurité. Réessayez ou revenez au menu principal.",
         "status": "Statut de la traduction : {status}",
         "unsupported_file": "Ce type de fichier n’est pas encore pris en charge.\n\nVeuillez envoyer l’un de ces formats :\n{formats}",
@@ -753,6 +769,10 @@ for _language_code, _fallbacks in {
         "ready": "Tu traducción está lista.\n\nPuedes descargar el archivo abajo: {result_name}.",
         "partial": "La traducción terminó con pasajes omitidos.\n\nResultado parcial: {result_name}.\n\nLos pasajes problemáticos se conservaron en el idioma original. Más adelante podrás reintentarlos sin volver a subir el archivo.",
         "cancelled": "Traducción cancelada.\n\nResultado parcial: {result_name}.",
+        "cancelled_without_result": (
+            "Traducción cancelada.\n\n"
+            "Todavía no hay un resultado parcial disponible porque la traducción se canceló antes de traducir el primer pasaje."
+        ),
         "failed": "Algo salió mal durante la traducción.\n\nTu archivo está a salvo. Inténtalo de nuevo o vuelve al menú principal.",
         "status": "Estado de traducción: {status}",
         "unsupported_file": "Este tipo de archivo aún no es compatible.\n\nEnvía uno de estos formatos:\n{formats}",
@@ -876,6 +896,10 @@ for _language_code, _fallbacks in {
         "ready": "Je vertaling is klaar.\n\nJe kunt het bestand hieronder downloaden: {result_name}.",
         "partial": "De vertaling is voltooid met overgeslagen passages.\n\nGedeeltelijk resultaat: {result_name}.\n\nProblematische passages zijn in de oorspronkelijke taal bewaard. Je kunt ze later opnieuw proberen zonder het bestand opnieuw te uploaden.",
         "cancelled": "Vertaling geannuleerd.\n\nGedeeltelijk resultaat: {result_name}.",
+        "cancelled_without_result": (
+            "Vertaling geannuleerd.\n\n"
+            "Er is nog geen gedeeltelijk resultaat beschikbaar omdat de vertaling is geannuleerd voordat er een passage was vertaald."
+        ),
         "failed": "Er ging iets mis tijdens het vertalen.\n\nJe bestand is veilig. Probeer het opnieuw of ga terug naar het hoofdmenu.",
         "status": "Vertaalstatus: {status}",
         "unsupported_file": "Dit bestandstype wordt nog niet ondersteund.\n\nStuur een van deze formaten:\n{formats}",
@@ -1374,6 +1398,8 @@ def build_translation_job_status_message(
         return messages["failed"]
 
     if job.status is TranslationJobStatus.CANCELLED:
+        if not job.result_file_name:
+            return messages["cancelled_without_result"]
         result_name = job.result_file_name or "partial result"
         return messages["cancelled"].format(result_name=result_name)
 
