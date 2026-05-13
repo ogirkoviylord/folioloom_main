@@ -532,7 +532,10 @@ def deepseek_keys_body(
     <section class="toolbar-panel">
       <div>
         <h3>DeepSeek Keys</h3>
-        <p>Manage encrypted DeepSeek API keys without exposing raw secrets.</p>
+        <p>
+          Read the DeepSeek key inventory, adjust admin-managed key labels and
+          capacity, and keep raw secret values hidden.
+        </p>
       </div>
       <div class="toolbar-actions">
         <a class="secondary-action" href="/admin/ai-providers">Back to providers</a>
@@ -546,16 +549,55 @@ def deepseek_keys_body(
     </section>
     {reload_banner}
     <section class="metrics">
-      {_metric("Active admin keys", str(active_count))}
-      {_metric("Disabled admin keys", str(disabled_count))}
-      {_metric("Env keys", str(env_count))}
+      {_metric("Ready admin keys", str(active_count))}
+      {_metric("Paused admin keys", str(disabled_count))}
+      {_metric("Read-only env keys", str(env_count))}
     </section>
     <section class="panel table-panel">
-      <h3>Add key</h3>
+      <h3>Field guide</h3>
+      <div class="key-table">
+        <div class="key-row compact-row">
+          <strong>Ready admin keys</strong>
+          <span>encrypted keys added here and currently available for use</span>
+        </div>
+        <div class="key-row compact-row">
+          <strong>Paused admin keys</strong>
+          <span>admin-managed keys kept on record but not used while paused</span>
+        </div>
+        <div class="key-row compact-row">
+          <strong>Read-only env keys</strong>
+          <span>
+            keys supplied by the server environment; shown only as masked
+            metadata
+          </span>
+        </div>
+        <div class="key-row compact-row">
+          <strong>Weight</strong>
+          <span>
+            relative share of new requests for this key; higher means more
+            traffic
+          </span>
+        </div>
+        <div class="key-row compact-row">
+          <strong>Max parallel requests</strong>
+          <span>maximum simultaneous DeepSeek requests allowed for this key</span>
+        </div>
+      </div>
+    </section>
+    <section class="panel table-panel">
+      <h3>Add admin-managed key</h3>
+      <p class="helper-text">
+        New values are stored encrypted. After saving, this page only shows a
+        masked value.
+      </p>
       {_ai_provider_key_add_form("deepseek", csrf_token)}
     </section>
     <section class="panel table-panel">
       <h3>Key inventory</h3>
+      <p class="helper-text">
+        Admin-managed rows are editable. Server environment rows are read-only
+        and do not expose raw secrets or secret ids.
+      </p>
       <div class="key-list">{rows}</div>
     </section>
     """
@@ -635,10 +677,16 @@ def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <label>
           <span>Label</span>
+          <small class="field-help">
+            Owner-facing name, for example main or backup.
+          </small>
           <input name="label" type="text" placeholder="main" required>
         </label>
         <label>
           <span>API key</span>
+          <small class="field-help">
+            Pasted once, stored encrypted, then shown only masked.
+          </small>
           <input
             name="value"
             type="password"
@@ -649,10 +697,12 @@ def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
         </label>
         <label>
           <span>Weight</span>
+          <small class="field-help">Relative share of new DeepSeek requests.</small>
           <input name="weight" type="number" min="1" value="1" required>
         </label>
         <label>
-          <span>Max parallel</span>
+          <span>Max parallel requests</span>
+          <small class="field-help">Simultaneous requests allowed for this key.</small>
           <input
             name="max_parallel_requests"
             type="number"
@@ -1021,14 +1071,19 @@ def _ai_provider_key_row(
 ) -> str:
     if is_env_deepseek_key(key):
         return f"""
-    <div class="key-row">
+    <div class="key-row key-row-readonly">
       <div>
         <strong>{escape(key.label)}</strong>
         <code>{escape(key.masked_value or "server .env")}</code>
-        <span>configured from server environment</span>
+        <span>read-only server environment key</span>
+        <small class="field-help">
+          This key is supplied outside the admin database and cannot be edited
+          here.
+        </small>
       </div>
-      <span>read-only</span>
-      <span>{key.weight} active keys</span>
+      <span>Read-only metadata</span>
+      <span>Weight {key.weight}</span>
+      <span>Max parallel requests {key.max_parallel_requests}</span>
     </div>
     """
     remove_action = f"/admin/ai-providers/{escape(key.provider_id)}/keys/remove"
@@ -1049,7 +1104,10 @@ def _ai_provider_key_row(
       <div>
         <strong>{escape(key.label)}</strong>
         <code>{escape(key.masked_value or "missing")}</code>
-        <span>{enabled_status}</span>
+        <span>Admin-managed key is {enabled_status}</span>
+        <small class="field-help">
+          Masked value only; the raw secret and secret id stay hidden.
+        </small>
         {validation_html}
       </div>
       <form method="post" action="{update_action}">
@@ -1057,14 +1115,17 @@ def _ai_provider_key_row(
         <input type="hidden" name="key_id" value="{escape(key.key_id)}">
         <label>
           <span>Label</span>
+          <small class="field-help">Owner-facing name shown in this inventory.</small>
           <input name="label" type="text" value="{escape(key.label)}" required>
         </label>
         <label>
           <span>Weight</span>
+          <small class="field-help">Relative share of new DeepSeek requests.</small>
           <input name="weight" type="number" min="1" value="{key.weight}" required>
         </label>
         <label>
-          <span>Max parallel</span>
+          <span>Max parallel requests</span>
+          <small class="field-help">Simultaneous requests allowed for this key.</small>
           <input
             name="max_parallel_requests"
             type="number"
@@ -1080,12 +1141,13 @@ def _ai_provider_key_row(
         <input type="hidden" name="key_id" value="{escape(key.key_id)}">
         <label>
           <span>New key value</span>
+          <small class="field-help">Replaces the stored encrypted value.</small>
           <input name="value" type="password" autocomplete="new-password">
         </label>
         <button type="submit">Rotate</button>
       </form>
-      <span>weight {key.weight}</span>
-      <span>parallel {key.max_parallel_requests}</span>
+      <span>Weight {key.weight}</span>
+      <span>Max parallel requests {key.max_parallel_requests}</span>
       <form method="post" action="{toggle_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <button type="submit" value="{escape(key.key_id)}" name="key_id">
@@ -2986,6 +3048,15 @@ header {
   padding-top: 10px;
   min-width: 0;
 }
+.compact-row {
+  grid-template-columns: minmax(160px, 0.5fr) minmax(0, 1fr);
+  align-items: start;
+}
+.key-row-readonly {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+}
 .connection-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
@@ -2999,6 +3070,16 @@ header {
   font-size: 0.85rem;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+.helper-text,
+.field-help {
+  color: var(--muted);
+  font-weight: 500;
+  line-height: 1.45;
+}
+.field-help {
+  display: block;
+  font-size: 0.78rem;
 }
 .empty-state { color: var(--muted); }
 .action-center {
