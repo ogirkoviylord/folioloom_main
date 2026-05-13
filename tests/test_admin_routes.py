@@ -956,6 +956,12 @@ class AdminRoutesTest(unittest.TestCase):
             page.text,
         )
         self.assertIn("Provider health", page.text)
+        self.assertIn("Processing summary", page.text)
+        self.assertIn("Read-only diagnostics", page.text)
+        self.assertIn("Active key channels", page.text)
+        self.assertIn("Available capacity slots", page.text)
+        self.assertIn("Provider warning counts", page.text)
+        self.assertIn("Unknown", page.text)
         self.assertIn("Active keys", page.text)
         self.assertIn("Disabled keys", page.text)
         self.assertIn("Last validation", page.text)
@@ -2523,6 +2529,17 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIsNotNone(csrf)
 
             self.assertIn("Runtime status", page.text)
+            self.assertIn("Processing summary", page.text)
+            self.assertIn("Read-only diagnostics", page.text)
+            self.assertIn("they are not controls", page.text)
+            self.assertIn("production readiness guarantees", page.text)
+            self.assertIn("Active key channels", page.text)
+            self.assertIn("Available capacity slots", page.text)
+            self.assertIn("Adaptive limit", page.text)
+            self.assertIn("1/3 (on)", page.text)
+            self.assertIn("Cooling/degraded channels", page.text)
+            self.assertIn("Provider warning counts", page.text)
+            self.assertIn("429 2 / auth 1 / billing 0 / timeout 4", page.text)
             self.assertIn("admin_store", page.text)
             self.assertIn("30s", page.text)
             self.assertIn("fresh", page.text)
@@ -2622,6 +2639,63 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(event.target_id, "deepseek")
             self.assertEqual(event.outcome.value, "success")
             self.assertNotIn(".api_keys.", event.metadata_json)
+
+    def test_ai_provider_page_summarizes_healthy_runtime_read_only(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=2,
+                            active_requests=0,
+                            health="healthy",
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=2,
+                        max_capacity=2,
+                        active_requests=0,
+                        available_slots=2,
+                    ),
+                    error=None,
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/ai-providers")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Processing summary", page.text)
+            self.assertIn("Active key channels", page.text)
+            self.assertIn("Configured DeepSeek channels currently available", page.text)
+            self.assertIn("Available capacity slots", page.text)
+            self.assertIn(
+                "Open request slots after current adaptive throttling",
+                page.text,
+            )
+            self.assertIn("2/2 (on)", page.text)
+            self.assertIn("Cooling/degraded channels", page.text)
+            self.assertIn("Provider warning counts", page.text)
+            self.assertIn("429 0 / auth 0 / billing 0 / timeout 0", page.text)
+            self.assertIn("not controls", page.text)
+            self.assertIn("production readiness guarantees", page.text)
 
     def test_failed_ai_provider_key_test_is_recorded_as_audit_failure(self):
         with TemporaryDirectory() as temp_dir:
