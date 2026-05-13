@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from translator_service.admin.translation_logs import list_translation_run_summaries
 from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.beta_safety import BetaSafetyDecision, JobCostEstimate
 from translator_service.bot_translation_service import (
@@ -262,14 +263,14 @@ class MalformedSecondUnitTranslator:
 
 class BotTranslationServiceTest(unittest.TestCase):
     def test_estimate_translation_seconds_uses_effective_parallelism(self):
-        self.assertEqual(estimate_translation_seconds(8), 96)
+        self.assertEqual(estimate_translation_seconds(8), 600)
         self.assertEqual(
             estimate_translation_seconds(
                 8,
                 max_parallel_work_units=4,
                 provider_parallel_capacity=4,
             ),
-            24,
+            150,
         )
         self.assertEqual(
             estimate_translation_seconds(
@@ -277,7 +278,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_parallel_work_units=4,
                 provider_parallel_capacity=2,
             ),
-            48,
+            300,
         )
         self.assertEqual(
             estimate_translation_seconds(
@@ -285,7 +286,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_parallel_work_units=4,
                 provider_parallel_capacity=4,
             ),
-            20,
+            75,
         )
 
     def test_prepares_txt_estimate_for_uploaded_document(self):
@@ -316,7 +317,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 price_usd=0.10,
                 fragment_count=2,
                 source_language_display="ru",
-                estimated_seconds=24,
+                estimated_seconds=150,
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
@@ -340,7 +341,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(pending.fragment_count, 4)
-        self.assertEqual(pending.estimated_seconds, 20)
+        self.assertEqual(pending.estimated_seconds, 75)
 
     def test_stores_selected_interface_language_per_user(self):
         self.assertIsNotNone(
@@ -1558,7 +1559,12 @@ class BotTranslationServiceTest(unittest.TestCase):
                 )
             )
             self.assertEqual(translator.requests, [])
-            self.assertFalse(run_log_root.exists())
+            runs = list_translation_run_summaries(run_log_root)
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0].job_id, job.id)
+            self.assertEqual(runs[0].status, "running")
+            self.assertEqual(runs[0].file_name, "notes.txt")
+            self.assertEqual(runs[0].total_fragment_count, len(work_units))
 
     def test_persistent_txt_confirmation_can_run_work_units_in_parallel(self):
         with TemporaryDirectory() as temp_dir:

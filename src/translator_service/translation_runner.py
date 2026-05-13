@@ -17,7 +17,10 @@ from translator_service.extractors import (
     validate_archive_members,
     validate_epub_text_block_count,
 )
-from translator_service.language_detection import detect_languages_from_text
+from translator_service.language_detection import (
+    detect_language_from_text,
+    detect_languages_from_text,
+)
 from translator_service.output_contracts import validate_translation_batch_contract
 from translator_service.protected_text import (
     ProtectedText,
@@ -26,6 +29,7 @@ from translator_service.protected_text import (
 )
 from translator_service.security_telemetry import record_security_event
 from translator_service.russian_quality import detect_russian_quality_track
+from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.structure_optimizer import (
     PromptTier,
     StructuredTextBlock,
@@ -146,6 +150,10 @@ def translate_docx_document(
     translation_cache: TranslationCache | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_docx_blocks(content)
+    auto_source_language_fallback = _auto_source_language_fallback(
+        [block.text for block in blocks],
+        source_language=source_language,
+    )
     translation_units = _group_docx_blocks(
         blocks,
         max_fragment_chars=max_fragment_chars,
@@ -155,6 +163,7 @@ def translate_docx_document(
             units=translation_units,
             source_language=source_language,
             target_language=target_language,
+            auto_source_language_fallback=auto_source_language_fallback,
             translator=translator,
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
@@ -1568,6 +1577,7 @@ def _translate_docx_units(
     units: list[_DocxTranslationUnit],
     source_language: str,
     target_language: str,
+    auto_source_language_fallback: str | None = None,
     translator: TextTranslator,
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
@@ -1593,6 +1603,7 @@ def _translate_docx_units(
             unit.blocks,
             source_language=source_language,
             target_language=target_language,
+            auto_source_language_fallback=auto_source_language_fallback,
         ):
             if (
                 source_language.strip().lower() == "auto"
@@ -1725,6 +1736,22 @@ def _translate_docx_units(
                     strict=True,
                 )
             ]
+            residue_retry = _retry_untranslated_source_residue_docx_blocks(
+                translated_texts=parsed,
+                prepared_blocks=prepared_blocks,
+                protected_blocks=protected_blocks,
+                source_language=subgroup_source_language,
+                translator=translator,
+                target_language=target_language,
+                translation_context=context_memory,
+            )
+            parsed = residue_retry.translated_texts
+            unit_prompt_tokens += residue_retry.prompt_tokens
+            unit_completion_tokens += residue_retry.completion_tokens
+            unit_total_tokens += residue_retry.total_tokens
+            unit_cache_hit_tokens += residue_retry.prompt_cache_hit_tokens
+            unit_cache_miss_tokens += residue_retry.prompt_cache_miss_tokens
+
             cjk_retry = _retry_untranslated_cjk_docx_blocks(
                 translated_texts=parsed,
                 prepared_blocks=prepared_blocks,
@@ -2094,6 +2121,85 @@ def _retry_untranslated_cjk_docx_blocks(
     )
 
 
+def _retry_untranslated_source_residue_docx_blocks(
+    *,
+    translated_texts: list[str],
+    prepared_blocks: list[_PreparedDocxBlock],
+    protected_blocks: list[ProtectedText],
+    source_language: str,
+    translator: TextTranslator,
+    target_language: str,
+    translation_context: TranslationContextMemory | None = None,
+) -> _DocxCjkRetryResult:
+    if _language_root(target_language) != "ru":
+        return _DocxCjkRetryResult(translated_texts=translated_texts)
+
+    retry_texts = list(translated_texts)
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    prompt_cache_hit_tokens = 0
+    prompt_cache_miss_tokens = 0
+
+    for index, (translated, prepared, protected) in enumerate(
+        zip(retry_texts, prepared_blocks, protected_blocks, strict=True)
+    ):
+        quality_result = check_russian_translation_quality(
+            source_text=prepared.text,
+            translated_text=translated,
+            source_language=source_language,
+            target_language=target_language,
+            quality_track=None,
+        )
+        if not any(
+            issue.code == "untranslated_source_residue"
+            for issue in quality_result.issues
+        ):
+            continue
+
+        retried = restore_protected_text(
+            _clean_translated_text(
+                translate_with_context(
+                    translator,
+                    text=protected.text,
+                    source_language="auto",
+                    target_language=target_language,
+                    translation_context=translation_context,
+                )
+            ),
+            protected.replacements,
+        )
+        retried = _restore_prepared_docx_label(
+            translated_text=_restore_fixed_width_pseudo_table_text(
+                source_text=prepared.fixed_width_source_text,
+                translated_text=_known_orthographic_sample_translation(
+                    prepared.text,
+                    source_language="auto",
+                    target_language=target_language,
+                )
+                or retried,
+            ),
+            prepared_block=prepared,
+            target_language=target_language,
+        )
+        retry_texts[index] = retried
+        usage = _translator_usage(translator)
+        prompt_tokens += usage[0]
+        completion_tokens += usage[1]
+        total_tokens += usage[2]
+        prompt_cache_hit_tokens += usage[3]
+        prompt_cache_miss_tokens += usage[4]
+
+    return _DocxCjkRetryResult(
+        translated_texts=retry_texts,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=prompt_cache_miss_tokens,
+    )
+
+
 _LONG_CJK_TEXT_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]{4,}")
 _LONG_RTL_TEXT_RE = re.compile(r"[\u0590-\u05FF\u0600-\u06FF]{3,}")
 
@@ -2170,6 +2276,7 @@ def _docx_translation_subgroups(
     *,
     source_language: str,
     target_language: str,
+    auto_source_language_fallback: str | None = None,
 ) -> list[tuple[str, list[_DocxTextBlock]]]:
     if source_language.strip().lower() != "auto":
         return [(source_language, blocks)]
@@ -2179,7 +2286,11 @@ def _docx_translation_subgroups(
     current_blocks: list[_DocxTextBlock] = []
     for block in blocks:
         block_source_language = (
-            _source_language_code_for_text(block.text, target_language=target_language)
+            _source_language_code_for_text(
+                block.text,
+                target_language=target_language,
+                auto_source_language_fallback=auto_source_language_fallback,
+            )
             or "auto"
         )
         if current_blocks and block_source_language != current_source_language:
@@ -2198,6 +2309,7 @@ def _source_language_code_for_text(
     text: str,
     *,
     target_language: str,
+    auto_source_language_fallback: str | None = None,
 ) -> str | None:
     label_source_language = _language_label_source_code(text)
     if label_source_language is not None:
@@ -2206,7 +2318,55 @@ def _source_language_code_for_text(
     detected_languages = detect_languages_from_text(text)
     if len(detected_languages) != 1:
         return None
-    return detected_languages[0].code
+    return _resolve_auto_detected_source_language(
+        detected_languages[0].code,
+        text=text,
+        target_language=target_language,
+        auto_source_language_fallback=auto_source_language_fallback,
+    )
+
+
+def _auto_source_language_fallback(
+    texts: list[str],
+    *,
+    source_language: str,
+) -> str | None:
+    if source_language.strip().lower() != "auto":
+        return None
+
+    detected = detect_language_from_text("\n".join(texts))
+    return detected.code if detected is not None else None
+
+
+def _resolve_auto_detected_source_language(
+    detected_source_language: str,
+    *,
+    text: str,
+    target_language: str,
+    auto_source_language_fallback: str | None,
+) -> str:
+    fallback = _language_root(auto_source_language_fallback or "")
+    target = _language_root(target_language)
+    detected = _language_root(detected_source_language)
+    if (
+        fallback
+        and fallback != target
+        and detected == target
+        and _is_common_cyrillic_slavic_text(text)
+    ):
+        return fallback
+    return detected_source_language
+
+
+def _is_common_cyrillic_slavic_text(text: str) -> bool:
+    return (
+        re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", text) is not None
+        and re.search(r"[ІіЇїЄєҐґ]", text) is None
+    )
+
+
+def _language_root(language_code: str) -> str:
+    return language_code.strip().lower().replace("_", "-").split("-", 1)[0]
 
 
 def _language_label_source_code(text: str) -> str | None:

@@ -175,6 +175,7 @@ class UserBookProgress:
     status: TranslationJobStatus
     completed_fragments: int
     total_fragments: int
+    estimated_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -830,6 +831,7 @@ class BotTranslationService:
         if job is None or job.user_id != f"telegram:{user_telegram_id}":
             return None
         work_units = self._persistent_job_store.list_work_units(job_id)
+        total_fragments = len(work_units)
         return UserBookProgress(
             job_id=job.id,
             status=_translation_job_status_from_persistent_status(job.status),
@@ -842,7 +844,12 @@ class BotTranslationService:
                     PersistentWorkUnitStatus.CACHED,
                 }
             ),
-            total_fragments=len(work_units),
+            total_fragments=total_fragments,
+            estimated_seconds=estimate_translation_seconds(
+                total_fragments,
+                max_parallel_work_units=self._max_parallel_work_units,
+                provider_parallel_capacity=self._provider_parallel_capacity,
+            ),
         )
 
     def get_user_book_translation_job(
@@ -1821,29 +1828,6 @@ class BotTranslationService:
             job_id=plan.job.id,
             total_fragments=total_fragments,
         )
-        if self._defer_persistent_jobs_to_worker:
-            self._record_activity_for_user(
-                user_telegram_id=pending.user_telegram_id,
-                event_type="translation.queued",
-                action="queued",
-                target_type="document",
-                target_id=pending.file_name,
-                job_id=plan.job.id,
-                metadata={
-                    "file_name": pending.file_name,
-                    "document_kind": document_kind.value,
-                    "source_language": pending.source_language,
-                    "target_language": pending.target_language,
-                    "fragment_count": total_fragments,
-                    "persistent": True,
-                },
-            )
-            return _queued_translation_job(
-                pending=pending,
-                document_kind=document_kind,
-                job_id=plan.job.id,
-            )
-
         run_logger = self._start_translation_run_logger(
             pending=pending,
             document_kind=document_kind,
@@ -1861,6 +1845,39 @@ class BotTranslationService:
                     "fragment_count": total_fragments,
                     "source_object_key": plan.job.source_object_key,
                 },
+            )
+        if self._defer_persistent_jobs_to_worker:
+            if run_logger is not None:
+                run_logger.record_event(
+                    "job_queued",
+                    {
+                        "job_id": plan.job.id,
+                        "fragment_count": total_fragments,
+                        "persistent": True,
+                        "worker_mode": "external",
+                    },
+                )
+            self._record_activity_for_user(
+                user_telegram_id=pending.user_telegram_id,
+                event_type="translation.queued",
+                action="queued",
+                target_type="document",
+                target_id=pending.file_name,
+                job_id=plan.job.id,
+                translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+                metadata={
+                    "file_name": pending.file_name,
+                    "document_kind": document_kind.value,
+                    "source_language": pending.source_language,
+                    "target_language": pending.target_language,
+                    "fragment_count": total_fragments,
+                    "persistent": True,
+                },
+            )
+            return _queued_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                job_id=plan.job.id,
             )
         self._record_activity_for_user(
             user_telegram_id=pending.user_telegram_id,
@@ -3005,7 +3022,7 @@ def estimate_translation_seconds(
         max(1, max_parallel_work_units),
         max(1, provider_parallel_capacity),
     )
-    return max(20, math.ceil(fragment_count * 12 / effective_parallelism))
+    return max(20, math.ceil(fragment_count * 75 / effective_parallelism))
 
 
 def _can_resume_persistent_job(status: str) -> bool:

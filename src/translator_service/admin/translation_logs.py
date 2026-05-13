@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,7 @@ class TranslationRunSummary:
     total_tokens: int
     elapsed_seconds: float
     run_dir: str
+    resource_usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ def list_translation_run_summaries(
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = 100,
+    now: datetime | None = None,
 ) -> tuple[TranslationRunSummary, ...]:
     root_path = Path(root)
     if not root_path.exists():
@@ -98,9 +100,10 @@ def list_translation_run_summaries(
     wanted_status = _normalize_filter(status)
     from_date = _parse_date(date_from)
     to_date = _parse_date(date_to)
+    current_time = _aware_utc(now or datetime.now(UTC))
     rows = []
     for run_json in root_path.glob("*/run.json"):
-        summary = _read_run_summary(run_json)
+        summary = _read_run_summary(run_json, now=current_time)
         if summary is None:
             continue
         if wanted_status and summary.status != wanted_status:
@@ -177,7 +180,11 @@ def _resolve_run_dir(root: str | Path, run_id: str) -> Path | None:
     return candidate
 
 
-def _read_run_summary(run_json: Path) -> TranslationRunSummary | None:
+def _read_run_summary(
+    run_json: Path,
+    *,
+    now: datetime | None = None,
+) -> TranslationRunSummary | None:
     try:
         data = json.loads(run_json.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -197,10 +204,11 @@ def _read_run_summary(run_json: Path) -> TranslationRunSummary | None:
     last_event_at, current_stage = _latest_event_state(events_path)
     elapsed_seconds = _float(totals.get("elapsed_seconds"))
     status = _string(data.get("status"), fallback="unknown").lower()
+    started_at = _parse_datetime(data.get("started_at"))
     return TranslationRunSummary(
         job_id=_string(data.get("job_id"), fallback=run_json.parent.name),
         status=status,
-        started_at=_parse_datetime(data.get("started_at")),
+        started_at=started_at,
         finished_at=_parse_datetime(data.get("finished_at")),
         order_id=_optional_string(data.get("order_id")),
         user_id=_optional_string(data.get("user_id")),
@@ -219,6 +227,8 @@ def _read_run_summary(run_json: Path) -> TranslationRunSummary | None:
             completed_fragments=completed_fragments,
             total_fragments=total_fragments,
             elapsed_seconds=elapsed_seconds,
+            started_at=started_at,
+            now=now,
         ),
         current_stage=current_stage or status,
         last_event_at=last_event_at,
@@ -363,6 +373,8 @@ def _eta_seconds(
     completed_fragments: int,
     total_fragments: int,
     elapsed_seconds: float,
+    started_at: datetime | None,
+    now: datetime | None,
 ) -> float | None:
     if total_fragments <= 0:
         return None
@@ -370,9 +382,18 @@ def _eta_seconds(
         return 0.0
     if status not in _ACTIVE_STATUSES:
         return None
-    if completed_fragments <= 0 or elapsed_seconds <= 0:
+    if completed_fragments <= 0:
         return None
-    average_seconds = elapsed_seconds / completed_fragments
+    elapsed_for_eta = elapsed_seconds
+    if started_at is not None:
+        current_time = _aware_utc(now or datetime.now(UTC))
+        elapsed_for_eta = max(
+            elapsed_for_eta,
+            (_aware_utc(current_time) - _aware_utc(started_at)).total_seconds(),
+        )
+    if elapsed_for_eta <= 0:
+        return None
+    average_seconds = elapsed_for_eta / completed_fragments
     return round(average_seconds * (total_fragments - completed_fragments), 1)
 
 
@@ -464,6 +485,12 @@ def _parse_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _parse_date(value: str | None) -> date | None:

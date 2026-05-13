@@ -38,6 +38,7 @@ from translator_service.bot.runtime import (
     _my_books_keyboard,
     _next_heartbeat_frame,
     _next_spinner_frame,
+    _polled_progress_estimated_total_seconds,
     _print_translation_progress,
     _print_translation_progress_update,
     _print_translation_summary,
@@ -136,12 +137,16 @@ class RecordingMessage:
         self.from_user = User()
         self.answers: list[tuple[str, object | None]] = []
         self.answer_messages: list[EditableMessage] = []
+        self.documents: list[object] = []
 
     async def answer(self, text: str, reply_markup=None, **kwargs):
         self.answers.append((text, reply_markup))
         message = EditableMessage()
         self.answer_messages.append(message)
         return message
+
+    async def answer_document(self, document) -> None:
+        self.documents.append(document)
 
 
 class _RuntimeRecordingTranslator:
@@ -426,6 +431,38 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(message.answers), 1)
         self.assertIn("right to translate this document", message.answers[0][0])
         self.assertIsNotNone(service.get_pending_upload(42))
+
+    async def test_confirm_translation_edits_progress_message_to_terminal_status(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+                max_fragment_chars=5,
+            )
+        )
+        self.addCleanup(service.close)
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+        message = RecordingMessage()
+
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+        )
+
+        self.assertTrue(message.answer_messages[0].edited_texts)
+        self.assertIn(
+            "Your translation is ready",
+            message.answer_messages[0].edited_texts[-1],
+        )
+        self.assertIsNone(message.answer_messages[0].edited_reply_markups[-1])
+        self.assertEqual(len(message.documents), 1)
 
     async def test_confirm_rights_prompts_target_language_without_creating_job(self):
         service = build_translation_service(
@@ -992,6 +1029,96 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(translate_channel.total_successful_requests, 1)
         self.assertNotIn("admin-key-secret", repr(translate_channel))
 
+    def test_reloadable_deepseek_translator_ignores_runtime_status_write_failure(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ),
+            ):
+                translator = build_deepseek_translator(settings)
+                with patch(
+                    "translator_service.bot.runtime._record_deepseek_runtime_status",
+                    side_effect=RuntimeError("database is locked"),
+                ):
+                    translated = translator.translate(
+                        text="Hello",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+        self.assertEqual(translated, "admin-key-secret:uk:Hello")
+
+    def test_reloadable_deepseek_translator_uses_current_on_reload_check_failure(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+                admin_provider_runtime_reload_seconds=999.0,
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-secret",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                    )
+
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime.DeepSeekClient",
+                    _RuntimeKeyEchoDeepSeekClient,
+                ),
+            ):
+                translator = build_deepseek_translator(settings)
+                with patch(
+                    "translator_service.bot.runtime._consume_deepseek_reload_request",
+                    side_effect=RuntimeError("database is locked"),
+                ):
+                    translated = translator.translate(
+                        text="Hello",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+        self.assertEqual(translated, "admin-key-secret:uk:Hello")
+
     def test_reloadable_deepseek_translator_records_provider_adaptive_state(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "admin.sqlite3"
@@ -1475,6 +1602,24 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Прогресс перевода", text)
             self.assertIn("Осталось", text)
             self.assertIn("Последний переведенный отрывок", text)
+
+    def test_polled_progress_estimate_uses_stored_baseline(self):
+        progress = type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 1,
+                "total_fragments": 4,
+                "estimated_seconds": 300,
+            },
+        )()
+
+        estimated_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=10,
+        )
+
+        self.assertEqual(estimated_total, 235)
 
     def test_document_size_guard_uses_telegram_metadata_before_download(self):
         class Document:

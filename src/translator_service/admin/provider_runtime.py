@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+_SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
+
 
 @dataclass(frozen=True)
 class AIProviderRuntimeChannel:
@@ -127,8 +129,15 @@ class SQLiteAIProviderRuntimeStore:
     def __init__(self, db_path: str | Path) -> None:
         if str(db_path) != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._connection = sqlite3.connect(
+            str(db_path),
+            check_same_thread=False,
+            timeout=_SQLITE_BUSY_TIMEOUT_SECONDS,
+        )
         self._connection.row_factory = sqlite3.Row
+        self._connection.execute(
+            f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}"
+        )
         self._create_schema()
 
     def close(self) -> None:
