@@ -2525,6 +2525,7 @@ class BotTranslationServiceTest(unittest.TestCase):
     def test_cancel_translation_after_restart_assembles_existing_partial(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            run_log_root = Path(temp_dir) / "translation-runs"
             persistent_store = SQLiteTranslationJobStore(
                 Path(temp_dir) / "jobs.sqlite3"
             )
@@ -2581,6 +2582,18 @@ class BotTranslationServiceTest(unittest.TestCase):
                 cache_hit_tokens=0,
                 cache_miss_tokens=10,
             )
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
             restarted_service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -2588,16 +2601,19 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=5,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
             )
             self.addCleanup(restarted_service.close)
 
-            self.assertTrue(restarted_service.cancel_translation(42))
+            cancel_result = restarted_service.cancel_translation_with_result(42)
 
             cancelled = persistent_store.get_job(job.id)
             result = restarted_service.get_user_book_translation_job(
                 user_telegram_id=42,
                 job_id=job.id,
             )
+            self.assertTrue(cancel_result.cancelled)
+            self.assertIsNotNone(cancel_result.job)
             self.assertEqual(
                 cancelled.status,
                 PersistentTranslationJobStatus.CANCELLED,
@@ -2613,6 +2629,17 @@ class BotTranslationServiceTest(unittest.TestCase):
                 storage.get_bytes(cancelled.partial_object_key),
                 result.result_content,
             )
+            self.assertEqual(
+                cancel_result.job.result_file_name,
+                "book.uk.partial.txt",
+            )
+            run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
+            self.assertEqual(run_snapshot["status"], "cancelled")
+            self.assertEqual(
+                run_snapshot["result_file_name"],
+                "book.uk.partial.txt",
+            )
+            self.assertEqual(run_snapshot["error_message"], "Book cancelled by user.")
 
     def test_cancel_translation_after_restart_without_fragments_keeps_result_empty(self):
         with TemporaryDirectory() as temp_dir:

@@ -23,6 +23,7 @@ from translator_service.bot.runtime import (
     _answer_callback_if_spam,
     _CallbackSpamGuard,
     _cancel_inline_keyboard,
+    _cancel_active_translation,
     _choose_heartbeat_pattern_name,
     _confirm_pending_translation,
     _confirm_pending_upload_rights,
@@ -46,6 +47,7 @@ from translator_service.bot.runtime import (
     _resume_user_book_translation,
     _schedule_message_edit,
     _settings_keyboard,
+    _send_translation_result_document,
     _should_schedule_progress_edit,
     _UserActionInFlightGuard,
     build_beta_safety_guard,
@@ -208,6 +210,24 @@ class _QueuedThenReadyService:
             "can_resume": False,
             "can_cancel": False,
         }
+
+
+class _CancelWithResultService:
+    def __init__(self, job: TranslationJob | None) -> None:
+        self.job = job
+
+    def get_interface_language(self, user_telegram_id: int) -> str:
+        return "en"
+
+    def cancel_translation_with_result(self, user_telegram_id: int):
+        return type(
+            "CancelResult",
+            (),
+            {
+                "cancelled": True,
+                "job": self.job,
+            },
+        )()
 
 
 def _runtime_job(*, status: TranslationJobStatus) -> TranslationJob:
@@ -523,6 +543,40 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             message.answer_messages[0].edited_texts[-1],
         )
         self.assertEqual(service.progress_calls, 1)
+
+    async def test_cancel_active_translation_sends_persistent_partial_result(self):
+        message = RecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+
+        await _cancel_active_translation(
+            message=message,
+            service=_CancelWithResultService(job),
+        )
+
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("cancelled", message.answers[0][0].lower())
+        self.assertEqual(len(message.documents), 1)
+        self.assertEqual(message.documents[0].filename, "book.uk.partial.txt")
+
+    async def test_send_translation_result_document_ignores_empty_result(self):
+        message = RecordingMessage()
+
+        await _send_translation_result_document(
+            message,
+            _runtime_job(status=TranslationJobStatus.CANCELLED),
+        )
+
+        self.assertEqual(message.documents, [])
 
     def test_build_translation_service_wires_local_object_storage(self):
         with TemporaryDirectory() as temp_dir:

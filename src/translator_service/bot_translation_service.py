@@ -146,6 +146,12 @@ class PendingTranslation:
 
 
 @dataclass(frozen=True)
+class CancelTranslationResult:
+    cancelled: bool
+    job: TranslationJob | None = None
+
+
+@dataclass(frozen=True)
 class UserBookSummary:
     job_id: str
     file_name: str
@@ -1262,6 +1268,12 @@ class BotTranslationService:
         )
 
     def cancel_translation(self, user_telegram_id: int) -> bool:
+        return self.cancel_translation_with_result(user_telegram_id).cancelled
+
+    def cancel_translation_with_result(
+        self,
+        user_telegram_id: int,
+    ) -> CancelTranslationResult:
         with self._state_lock:
             active = self._active_cancellations.get(user_telegram_id)
             if active is not None:
@@ -1275,27 +1287,131 @@ class BotTranslationService:
                     cancel_requested=True,
                 )
         if active is None:
-            return self._cancel_latest_persistent_translation(user_telegram_id)
+            job = self._cancel_latest_persistent_translation(user_telegram_id)
+            return CancelTranslationResult(cancelled=job is not None, job=job)
 
         _print_translation_cancel_requested(snapshot)
-        return True
+        return CancelTranslationResult(cancelled=True)
 
-    def _cancel_latest_persistent_translation(self, user_telegram_id: int) -> bool:
+    def _cancel_latest_persistent_translation(
+        self,
+        user_telegram_id: int,
+    ) -> TranslationJob | None:
         if self._persistent_job_store is None:
-            return False
+            return None
 
         for job in self._persistent_job_store.list_jobs_for_user(
             f"telegram:{user_telegram_id}",
             limit=10,
         ):
             if _can_cancel_persistent_job(job.status.value):
-                self._cancel_persistent_job_with_partial_if_available(
+                cancelled_job = self._cancel_persistent_job_with_partial_if_available(
                     job=job,
                     user_telegram_id=user_telegram_id,
                 )
-                return True
+                if self._translation_run_log_root is not None:
+                    finish_running_translation_runs_for_job(
+                        self._translation_run_log_root,
+                        job_id=job.id,
+                        status="cancelled",
+                        result_file_name=(
+                            cancelled_job.result_file_name
+                            if cancelled_job is not None
+                            else None
+                        ),
+                        error_message="Book cancelled by user.",
+                    )
+                return cancelled_job
 
-        return False
+        return None
+
+    def _cancel_persistent_job_with_partial_if_available(
+        self,
+        *,
+        job,
+        user_telegram_id: int,
+    ) -> TranslationJob | None:
+        assert self._persistent_job_store is not None
+        cancelled = self._persistent_job_store.cancel_job(job.id)
+        if cancelled.final_object_key or cancelled.partial_object_key:
+            return self._translation_job_from_persistent_job(
+                user_telegram_id=user_telegram_id,
+                job=cancelled,
+            )
+        if self._file_storage is None:
+            return self._translation_job_from_persistent_job(
+                user_telegram_id=user_telegram_id,
+                job=cancelled,
+            )
+        if not (
+            cancelled.source_object_key
+            and self._file_storage.exists(cancelled.source_object_key)
+        ):
+            return self._translation_job_from_persistent_job(
+                user_telegram_id=user_telegram_id,
+                job=cancelled,
+            )
+
+        if not self._persistent_job_has_partial_units(cancelled.id):
+            return self._translation_job_from_persistent_job(
+                user_telegram_id=user_telegram_id,
+                job=cancelled,
+            )
+
+        work_units = self._persistent_job_store.list_work_units(cancelled.id)
+        pending = PendingTranslation(
+            user_telegram_id=user_telegram_id,
+            file_name=cancelled.file_name,
+            content=self._file_storage.get_bytes(cancelled.source_object_key),
+            source_language=cancelled.source_language,
+            target_language=cancelled.target_language,
+            price_usd=0,
+            fragment_count=len(work_units),
+            source_object_key=cancelled.source_object_key,
+            rights_confirmed=True,
+        )
+        return self._build_persistent_result_job_or_fail(
+            document_kind=DocumentKind(cancelled.document_kind),
+            pending=pending,
+            job_id=cancelled.id,
+            partial=True,
+            status=TranslationJobStatus.CANCELLED,
+        )
+
+    def _build_cancelled_persistent_result_if_available(
+        self,
+        *,
+        document_kind: DocumentKind,
+        pending: PendingTranslation,
+        job_id: str,
+        run_logger: TranslationRunLogger | None = None,
+    ) -> TranslationJob:
+        assert self._persistent_job_store is not None
+        if not self._persistent_job_has_partial_units(job_id):
+            return TranslationJob(
+                id=job_id,
+                document_kind=document_kind,
+                user_telegram_id=pending.user_telegram_id,
+                file_name=pending.file_name,
+                content=pending.content,
+                source_language=pending.source_language,
+                target_language=pending.target_language,
+                status=TranslationJobStatus.CANCELLED,
+            )
+        return self._build_persistent_result_job_or_fail(
+            document_kind=document_kind,
+            pending=pending,
+            job_id=job_id,
+            partial=True,
+            status=TranslationJobStatus.CANCELLED,
+            run_logger=run_logger,
+        )
+
+    def _persistent_job_has_partial_units(self, job_id: str) -> bool:
+        assert self._persistent_job_store is not None
+        return _has_persistent_partial_units(
+            self._persistent_job_store.list_work_units(job_id)
+        )
 
     def _cancel_persistent_job_with_partial_if_available(
         self,
