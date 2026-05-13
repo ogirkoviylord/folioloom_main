@@ -34,6 +34,9 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 
 ## Active Admin / Operations References
 
+- `docs/admin-ux-provider-processing-glossary.md` - issue #11 owner-facing
+  glossary for provider keys, provider/runtime health, processing capacity,
+  queue state and beta safety admin fields. Use before copy/layout changes.
 - `docs/superpowers/specs/2026-05-08-folioloom-admin-console-design.md` -
   active reference, partially implemented. Immediate gaps: Alerts MVP and
   Backups visibility.
