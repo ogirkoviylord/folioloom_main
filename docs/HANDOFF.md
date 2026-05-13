@@ -115,6 +115,17 @@ core flow, release gates, operational visibility and documentation.
   `tests/` contains 93 `test_*.py` files.
 - Confidence: medium.
 
+- Feature / component: Deferred worker failure run-log finalization.
+- Evidence: PR #21 / commit `a28f1b4` updates `scheduler_runner.py` and
+  `worker.py` so scheduled worker failures finish matching running translation
+  run logs as `failed` with a generic safe error message. Local verification
+  reported on 2026-05-13: focused scheduler/worker tests, worker/scheduler
+  suites, `PYTHONPATH=src python3 -m compileall src`,
+  `PYTHONPATH=src python3 -m unittest discover -s tests` with 984 tests OK and
+  13 skipped, and `git diff --check`. GitHub Actions status is Unknown until
+  PR checks are inspected.
+- Confidence: medium.
+
 ## 4. Что работает частично или нестабильно
 
 - Area: Free preview before full translation.
