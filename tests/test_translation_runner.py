@@ -1715,6 +1715,51 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertNotIn("»Воно", extract_text_from_epub(result.content))
         self.assertNotIn("заблукав«", extract_text_from_epub(result.content))
 
+    def test_epub_translation_retries_english_drop_cap_residue_for_russian(self):
+        class EnglishResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "Утром улицы Вены оживляло шествие."
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">ON THE утром '
+                    "улицы Вены оживляло шествие.</translation_block>"
+                    "</translation_batch>"
+                )
+
+        translator = EnglishResidueTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <p><span class="drop-cap">On </span><small>the </small>morning the streets of Vienna were lively.</p>
+                  </body>
+                </html>
+                """,
+            }
+        )
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertEqual(text, "Утром улицы Вены оживляло шествие.")
+        self.assertNotIn("ON THE", text)
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["en", "auto"],
+        )
+
     def test_translated_epub_keeps_mimetype_as_first_archive_item(self):
         translator = RecordingTranslator()
         content = _make_epub(

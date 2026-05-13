@@ -99,6 +99,52 @@ class RussianQualityChecksTest(unittest.TestCase):
             ["untranslated_source_residue"],
         )
 
+    def test_reports_mixed_english_residue_for_russian_target(self):
+        result = check_russian_translation_quality(
+            source_text=(
+                "Warger was to assert that he had reliable information that "
+                "Mussolini had died of a serious disease."
+            ),
+            translated_text=(
+                "Варгер должен был assert that he had reliable information that "
+                "Mussolini had died of a serious disease."
+            ),
+            source_language="en",
+            target_language="ru",
+            quality_track=RussianQualityTrack.LITERARY,
+        )
+
+        self.assertEqual(
+            [issue.code for issue in result.issues],
+            ["untranslated_source_residue"],
+        )
+
+    def test_reports_english_drop_cap_residue_for_russian_target(self):
+        result = check_russian_translation_quality(
+            source_text="On the morning the streets of Vienna were lively.",
+            translated_text="ON THE утром улицы Вены оживляло шествие.",
+            source_language="en",
+            target_language="ru",
+            quality_track=RussianQualityTrack.LITERARY,
+        )
+
+        self.assertEqual(
+            [issue.code for issue in result.issues],
+            ["untranslated_source_residue"],
+        )
+
+    def test_allows_latin_names_and_acronyms_in_russian_translation(self):
+        result = check_russian_translation_quality(
+            source_text="Otto Skorzeny reported to FHQ with Waffen-SS officers.",
+            translated_text="Отто Skorzeny доложил в FHQ вместе с офицерами Waffen-SS.",
+            source_language="en",
+            target_language="ru",
+            quality_track=RussianQualityTrack.LITERARY,
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.issues, ())
+
     def test_skips_russian_quality_checks_for_non_russian_target(self):
         result = check_russian_translation_quality(
             source_text="Send ROW-001 to https://example.com/callback with ${API_TOKEN}.",

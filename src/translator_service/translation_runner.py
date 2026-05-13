@@ -1505,7 +1505,16 @@ def _translate_epub_auxiliary_strings(
             source_language=source_language,
             target_language=target_language,
         )
-    return _restore_protected_texts(parsed, protected_texts)
+    translated_texts = _restore_protected_texts(parsed, protected_texts)
+    return _retry_untranslated_source_residue_texts(
+        source_texts=texts,
+        translated_texts=translated_texts,
+        protected_texts=protected_texts,
+        source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+        translation_context=TranslationContextMemory(),
+    )
 
 
 def _element_direct_text(element: ElementTree.Element) -> str:
@@ -2200,6 +2209,50 @@ def _retry_untranslated_source_residue_docx_blocks(
     )
 
 
+def _retry_untranslated_source_residue_texts(
+    *,
+    source_texts: list[str],
+    translated_texts: list[str],
+    protected_texts: list[ProtectedText],
+    source_language: str,
+    target_language: str,
+    translator: TextTranslator,
+    translation_context: TranslationContextMemory | None = None,
+) -> list[str]:
+    if _language_root(target_language) != "ru":
+        return translated_texts
+
+    retry_texts = list(translated_texts)
+    for index, (source, translated, protected) in enumerate(
+        zip(source_texts, retry_texts, protected_texts, strict=True)
+    ):
+        if not _has_untranslated_source_language_residue(
+            source_text=source,
+            translated_text=translated,
+            source_language=source_language,
+            target_language=target_language,
+        ):
+            continue
+
+        retried = restore_protected_text(
+            _clean_translated_text(
+                translate_with_context(
+                    translator,
+                    text=protected.text,
+                    source_language="auto",
+                    target_language=target_language,
+                    translation_context=translation_context,
+                )
+            ),
+            protected.replacements,
+        )
+        retry_texts[index] = clean_inline_formatting_artifacts(
+            retried,
+            target_language=target_language,
+        )
+    return retry_texts
+
+
 _LONG_CJK_TEXT_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]{4,}")
 _LONG_RTL_TEXT_RE = re.compile(r"[\u0590-\u05FF\u0600-\u06FF]{3,}")
 
@@ -2228,6 +2281,26 @@ def _needs_secondary_script_retry(
             translated_text=translated_text,
             protected_replacements=protected_replacements,
         )
+    )
+
+
+def _has_untranslated_source_language_residue(
+    *,
+    source_text: str,
+    translated_text: str,
+    source_language: str,
+    target_language: str,
+) -> bool:
+    quality_result = check_russian_translation_quality(
+        source_text=source_text,
+        translated_text=translated_text,
+        source_language=source_language,
+        target_language=target_language,
+        quality_track=None,
+    )
+    return any(
+        issue.code == "untranslated_source_residue"
+        for issue in quality_result.issues
     )
 
 
@@ -2840,14 +2913,27 @@ def _parse_epub_translation_unit(
         )
 
     parsed = _restore_protected_texts(parsed, protected_blocks)
+    parsed = [
+        clean_inline_formatting_artifacts(
+            translated,
+            target_language=target_language,
+        )
+        for translated in parsed
+    ]
+    parsed = _retry_untranslated_source_residue_texts(
+        source_texts=[source_block.text for source_block in source_blocks],
+        translated_texts=parsed,
+        protected_texts=protected_blocks,
+        source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+        translation_context=translation_context,
+    )
     return [
         FragmentTranslation(
             index=source_block.index,
             source_text=source_block.text,
-            translated_text=clean_inline_formatting_artifacts(
-                translated,
-                target_language=target_language,
-            ),
+            translated_text=translated,
         )
         for source_block, translated in zip(source_blocks, parsed, strict=True)
     ]
@@ -2917,6 +3003,28 @@ def _translate_epub_blocks_individually(
             translated_text,
             target_language=target_language,
         )
+        if _has_untranslated_source_language_residue(
+            source_text=source_block.text,
+            translated_text=translated_text,
+            source_language=source_language,
+            target_language=target_language,
+        ):
+            translated_text = restore_protected_text(
+                _clean_translated_text(
+                    translate_with_context(
+                        translator,
+                        text=protected_source.text,
+                        source_language="auto",
+                        target_language=target_language,
+                        translation_context=context_memory,
+                    )
+                ),
+                protected_source.replacements,
+            )
+            translated_text = clean_inline_formatting_artifacts(
+                translated_text,
+                target_language=target_language,
+            )
         translated_blocks.append(
             FragmentTranslation(
                 index=source_block.index,
@@ -2957,6 +3065,24 @@ def _translate_texts_individually(
             ),
             protected_source.replacements,
         )
+        if _has_untranslated_source_language_residue(
+            source_text=text,
+            translated_text=translated_text,
+            source_language=source_language,
+            target_language=target_language,
+        ):
+            translated_text = restore_protected_text(
+                _clean_translated_text(
+                    translate_with_context(
+                        translator,
+                        text=protected_source.text,
+                        source_language="auto",
+                        target_language=target_language,
+                        translation_context=context_memory,
+                    )
+                ),
+                protected_source.replacements,
+            )
         translated_texts.append(translated_text)
         context_memory = _updated_context_memory(
             context_memory,

@@ -15,3 +15,4 @@ dist/
 *.egg-info/
 var/
 .superpowers/
+epub_audit_output/

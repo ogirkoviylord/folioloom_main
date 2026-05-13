@@ -803,6 +803,42 @@ class WorkerTest(unittest.TestCase):
                 ["en", "auto"],
             )
 
+    def test_stored_worker_retries_single_block_with_english_residue_for_russian(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"On the morning the streets of Vienna were lively.",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(
+                store,
+                source.object_key,
+                source_language="en",
+                target_language="ru",
+            )
+            translator = EnglishResidueRetryTranslator()
+
+            completed = run_next_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                job_id=job.id,
+                worker_id="worker-a",
+                translator=translator,
+            )
+
+            self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+            self.assertEqual(
+                completed.translated_text,
+                "Утром улицы Вены оживляло шествие.",
+            )
+            self.assertEqual(
+                [call[1] for call in translator.calls],
+                ["en", "auto"],
+            )
+
     def test_stored_worker_retries_single_block_with_untranslated_rtl(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1347,6 +1383,25 @@ class UkrainianRetryTranslator:
             "Английский + украинский: пожалуйста, переведите это предложение, "
             "але не ламай український текст у середині."
         )
+
+
+class EnglishResidueRetryTranslator:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        self.last_usage: ProviderUsage | None = None
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append((text, source_language, target_language))
+        self.last_usage = ProviderUsage(prompt_tokens=10, completion_tokens=5)
+        if source_language == "auto":
+            return "Утром улицы Вены оживляло шествие."
+        return "ON THE утром улицы Вены оживляло шествие."
 
 
 class RtlRetryTranslator:
