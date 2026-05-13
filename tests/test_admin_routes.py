@@ -330,7 +330,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("DeepSeek Keys", response.text)
         self.assertIn('action="/admin/ai-providers/deepseek/keys"', response.text)
-        self.assertIn("Add key", response.text)
+        self.assertIn("Add admin-managed key", response.text)
+        self.assertIn("Field guide", response.text)
+        self.assertIn("Ready admin keys", response.text)
+        self.assertIn("Paused admin keys", response.text)
+        self.assertIn("Read-only env keys", response.text)
+        self.assertIn("Max parallel requests", response.text)
+        self.assertIn("stored encrypted", response.text)
         self.assertIn("Test all active keys", response.text)
         self.assertIn("Reload DeepSeek runtime", response.text)
 
@@ -1002,9 +1008,16 @@ class AdminRoutesTest(unittest.TestCase):
                 overview = client.get("/admin/overview")
                 integrations = client.get("/admin/integrations")
                 ai_providers = client.get("/admin/ai-providers")
+                deepseek_keys = client.get("/admin/ai-providers/deepseek/keys")
                 settings = client.get("/admin/settings")
 
-            for response in (overview, integrations, ai_providers, settings):
+            for response in (
+                overview,
+                integrations,
+                ai_providers,
+                deepseek_keys,
+                settings,
+            ):
                 self.assertEqual(response.status_code, 200)
                 self.assertNotIn("sk-env-first", response.text)
                 self.assertNotIn("sk-env-second", response.text)
@@ -1016,6 +1029,10 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("1 active connection", integrations.text)
             self.assertIn("read-only", integrations.text)
             self.assertIn("server .env (2 keys)", ai_providers.text)
+            self.assertIn("Read-only env keys", deepseek_keys.text)
+            self.assertIn("read-only server environment key", deepseek_keys.text)
+            self.assertIn("Read-only metadata", deepseek_keys.text)
+            self.assertIn("Max parallel requests", deepseek_keys.text)
             self.assertIn("server .env", settings.text)
             self.assertIn("<td>DeepSeek</td>", settings.text)
             self.assertIn("<td>Telegram / server .env</td>", settings.text)
@@ -1758,6 +1775,9 @@ class AdminRoutesTest(unittest.TestCase):
             )
             self.assertIn("<strong>main</strong>", updated.text)
             self.assertIn("sk-****alue", updated.text)
+            self.assertIn("Admin-managed key is enabled", updated.text)
+            self.assertIn("Weight 2", updated.text)
+            self.assertIn("Max parallel requests 1", updated.text)
             self.assertNotIn("sk-raw-secret-value", updated.text)
             self.assertNotIn(".api_keys.", updated.text)
 
@@ -2353,8 +2373,8 @@ class AdminRoutesTest(unittest.TestCase):
             )
             after_enable = client.get("/admin/ai-providers")
             self.assertIn("1 active keys", after_enable.text)
-            self.assertIn("weight 4", after_enable.text)
-            self.assertIn("parallel 2", after_enable.text)
+            self.assertIn("Weight 4", after_enable.text)
+            self.assertIn("Max parallel requests 2", after_enable.text)
             with SQLiteAdminAuditLog(db_path) as audit:
                 events = audit.list_events(limit=10)
             serialized_events = "\n".join(
