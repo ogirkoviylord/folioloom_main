@@ -23,7 +23,7 @@
 | R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan и human approval | Human / Architect | Open |
 | R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps | Beta может быть открыта без preview, upload safety, TTL, real-file QA, restore evidence | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
 | R-004 | Formal success criteria для beta не утверждены | Product | Medium | `docs/PROJECT_BRIEF.md` помечает formal success metrics как TBD | Команда может оптимизировать объем фич вместо beta learning и reliability | Владелец утверждает 3-5 beta metrics до go/no-go | Human / Scribe | Needs decision |
-| R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report | Architect / Reviewer | Open |
+| R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop; issue #8 reports local evidence for cancel-after-progress partial delivery; issue #9 is closed and PR #18 reports local zero-fragment messaging evidence; CI/server-smoke/release evidence remain Unknown/incomplete | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report | Architect / Reviewer | Open |
 | R-006 | Missing current full test evidence | Technical | Medium | `CURRENT_PROJECT_STATE.md` фиксирует прошлые passing runs; в этой docs-only задаче tests не запускались | Последние изменения могут иметь скрытые regression | Перед code/release changes запускать focused tests; перед release - full suite, compileall, predeploy | Reviewer | Unknown |
 | R-007 | Weak/unclear CI policy | Technical | Medium | `.github/workflows/checks.yml` exists; current run/pass status and required-vs-advisory policy are Unknown | Regression prevention can be overstated if agents claim CI without visible check evidence | Owner решает CI policy; пока Reviewer требует local verification evidence when CI status is Unknown/not visible | Human / Reviewer | Unknown |
 | R-008 | Brittle parsing/processing for DOCX/EPUB/TXT real files | Technical | High | `docs/restart/real-file-test-matrix.md`; Gate B unchecked: EPUBCheck/equivalent, DOCX openability/visual QA | Unit tests могут пройти, а реальные файлы не открываются или теряют структуру | Execute authorized real-file matrix; add negative fixtures; record release report | Reviewer / Implementer | Open |
@@ -170,6 +170,14 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Priority: High.
   Suggested owner: Reviewer.
   Acceptance criteria: pass/fail/deferral table for every Gate B item with commands, artifacts and owner decision.
+
+- Task: Завершить conservative cancel/resume/restart evidence note.
+  Risk reduced: R-005, R-011, R-020.
+  Priority: High.
+  Suggested owner: Reviewer / Implementer.
+  Acceptance criteria: record #7 owner decision, #8 local test evidence, #9
+  local test evidence from PR #18, CI status, server-smoke status and remaining
+  Unknown items without claiming Gate B/free-beta readiness.
 
 - Task: Утвердить beta success metrics.
   Risk reduced: R-004.

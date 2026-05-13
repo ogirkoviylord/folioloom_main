@@ -129,6 +129,31 @@ core flow, release gates, operational visibility and documentation.
   Reviewer verifies no full translation starts before explicit post-preview
   confirmation.
 
+- Area: Cancel partial-result behavior.
+- Current behavior: Issue #8 reports that persistent Telegram cancellation
+  after translated/cached work exists now reuses the existing partial assembly
+  path, records the partial object key, and returns a cancelled `TranslationJob`
+  with `result_file_name`/`result_content`. Issue #7 records the owner decision
+  that zero-fragment cancellation must send no file and show clear no-partial
+  messaging. Issue #9 is closed and PR #18 reports deterministic
+  cancelled-without-result messaging for zero-fragment cancellations while
+  preserving cancelled-with-partial behavior when translated work exists.
+- Evidence: GitHub issue #8 comment dated 2026-05-13 reports local checks:
+  `PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service`,
+  `PYTHONPATH=src python3 -m unittest tests.test_translation_run_logs`,
+  `PYTHONPATH=src python3 -m unittest tests.test_persistent_jobs`,
+  `PYTHONPATH=src python3 -m compileall src`, and
+  `PYTHONPATH=src python3 -m unittest discover -s tests` with 980 tests OK and
+  13 skipped. PR #18 for issue #9 reports
+  `PYTHONPATH=src python3 -m unittest tests.test_bot_messages tests.test_bot_translation_service tests.test_translation_run_logs`
+  passed with 118 tests, `PYTHONPATH=src python3 -m compileall src` passed,
+  and `PYTHONPATH=src python3 -m unittest discover -s tests` passed with 983
+  tests and 13 skipped. CI status was reported Unknown / not inspected.
+- Risk: broader cancel/resume/restart, bot restart, worker restart and server
+  smoke release evidence remain incomplete; this does not close Gate B.
+- Suggested next task: Reviewer produces Gate B cancel/resume/restart evidence
+  without claiming release readiness from #8/#9 alone.
+
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
   upload validation and document sandbox modules, but release docs do not claim
@@ -194,6 +219,18 @@ Potential issues to verify:
 - Impact: foundation readiness could be mistaken for beta approval.
 - Suggested fix task: Reviewer produces Gate B evidence report with pass/fail,
   deferrals and owner go/no-go.
+
+- Problem: Cancel-after-progress partial delivery has implementation evidence,
+  but full cancel/resume/restart release readiness remains unproven.
+- Evidence: GitHub issue #8 reports passing local targeted tests, compileall
+  and full unittest discover; issue #9 is closed and PR #18 reports focused
+  messaging/service/run-log tests, compileall and full unittest discover
+  passing. CI status is Unknown.
+- Impact: future agents may overstate Gate B status if they treat #8 as full
+  cancel/resume/restart readiness.
+- Suggested fix task: create a conservative cancel/resume/restart evidence
+  report that separates local tests, CI status, server smoke and remaining
+  Unknown items.
 
 - Problem: Full current test status is Unknown for this handoff update.
 - Evidence: this task was docs-only and did not run the full suite.

@@ -327,7 +327,10 @@ Acceptance criteria:
   Agent suitability: safe
   Suggested acceptance criteria: accepted jobs remain visible after bot/worker
   restart; cancel produces safe state and available partial result where
-  expected.
+  expected. Current evidence: issue #8 reports cancel-after-progress partial
+  delivery verified locally; issue #9 is closed and PR #18 reports
+  zero-fragment messaging verified locally. CI status, server smoke and full
+  Gate B release evidence remain Unknown/incomplete.
 
 - Task: Execute real-file TXT/DOCX/EPUB matrix.
   Phase: 3
