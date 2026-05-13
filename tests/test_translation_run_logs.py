@@ -148,6 +148,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
                 temp_dir,
                 job_id="job-1",
                 status="cancelled",
+                result_file_name="book.uk.partial.txt",
                 error_message="Book deleted by user.",
             )
 
@@ -156,7 +157,9 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertEqual(finished, 1)
             self.assertEqual(snapshot["status"], "cancelled")
             self.assertIsNotNone(snapshot["finished_at"])
+            self.assertEqual(snapshot["result_file_name"], "book.uk.partial.txt")
             self.assertEqual(snapshot["error_message"], "Book deleted by user.")
+            self.assertIn("book.uk.partial.txt", events)
             self.assertIn("run_cancelled", events)
 
 
