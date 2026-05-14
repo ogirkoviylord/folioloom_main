@@ -568,6 +568,31 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(message.documents), 1)
         self.assertEqual(message.documents[0].filename, "book.uk.partial.txt")
 
+    async def test_cancel_result_delivery_is_not_idempotent_across_runtime_paths(self):
+        message = RecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+
+        await _cancel_active_translation(
+            message=message,
+            service=_CancelWithResultService(job),
+        )
+        await _send_translation_result_document(message, job)
+
+        self.assertEqual(
+            [document.filename for document in message.documents],
+            ["book.uk.partial.txt", "book.uk.partial.txt"],
+        )
+
     async def test_send_translation_result_document_ignores_empty_result(self):
         message = RecordingMessage()
 
