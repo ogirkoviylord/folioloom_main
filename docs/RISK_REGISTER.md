@@ -20,7 +20,7 @@
 | R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is FB2 idea only | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
 | R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps | Beta может быть открыта без preview, upload safety, TTL, real-file QA, restore evidence | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
 | R-004 | Formal success criteria для beta не утверждены | Product | Medium | `docs/PROJECT_BRIEF.md` помечает formal success metrics как TBD | Команда может оптимизировать объем фич вместо beta learning и reliability | Владелец утверждает 3-5 beta metrics до go/no-go | Human / Scribe | Needs decision |
-| R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report | Architect / Reviewer | Open |
+| R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop; issue #30 child PRs #36-#39 added focused cancel/provider/admin regression coverage | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report; keep issue #30 safeguards intact | Architect / Reviewer | Open |
 | R-006 | Missing current full test evidence | Technical | Medium | `CURRENT_PROJECT_STATE.md` фиксирует прошлые passing runs; в этой docs-only задаче tests не запускались | Последние изменения могут иметь скрытые regression | Перед code/release changes запускать focused tests; перед release - full suite, compileall, predeploy | Reviewer | Unknown |
 | R-007 | Weak/unclear CI policy | Technical | Medium | `.github/workflows/checks.yml` exists; current run/pass status and required-vs-advisory policy are Unknown | Regression prevention can be overstated if agents claim CI without visible check evidence | Owner решает CI policy; пока Reviewer требует local verification evidence when CI status is Unknown/not visible | Human / Reviewer | Unknown |
 | R-008 | Brittle parsing/processing for DOCX/EPUB/TXT real files | Technical | High | `docs/restart/real-file-test-matrix.md`; Gate B unchecked: EPUBCheck/equivalent, DOCX openability/visual QA | Unit tests могут пройти, а реальные файлы не открываются или теряют структуру | Execute authorized real-file matrix; add negative fixtures; record release report | Reviewer / Implementer | Open |
@@ -45,6 +45,7 @@
 | R-028 | Monitoring/incident/support workflow incomplete | Operational | High | Gate D unchecked: monitoring/alerts, incident runbooks, support workflow | Incidents may be noticed late or handled inconsistently | Define minimal incident/support process before public production | Human / Scribe | Needs decision |
 | R-030 | AI agents hallucinating docs or release readiness | AI workflow | Medium | AGENTS documentation rules require Unknown/TBD and confirmed facts | Docs may claim CI, production readiness, features or policies that do not exist | Scribe separates confirmed facts, assumptions, Unknown/TBD; Reviewer verifies evidence | Scribe / Reviewer | Open |
 | R-031 | AI agents skipping tests or overstating verification | AI workflow | Medium | `docs/QUALITY_GATES.md`; CI status may be Unknown/not visible; local gates remain required evidence | Regressions can be merged or handoff can mislead owner | Final reports must list tests/checks run, visible CI evidence, or explain why none | Reviewer | Open |
+| R-033 | Admin/provider bulk diagnostics competing with active translation work | Admin / Provider / Cost | Medium | Issue #30 and PR #38 added a fail-closed guard for Admin -> AI Providers -> Test all active keys during active translations/provider requests | Uncontrolled diagnostics can add provider traffic during incidents or expose unsafe metadata if guardrails regress | Keep bulk key tests paused during active translations/provider requests; focused admin/provider tests and redaction review for future changes | Architect / Reviewer | Mitigated / watch |
 
 ## 4. Обязательные категории рисков
 
@@ -66,6 +67,10 @@
   inspected.
 - Brittle parsing/processing: High for DOCX/EPUB/TXT real files and unsafe containers until real-file and negative fixtures pass.
 - Background jobs: High due to leases, retries, worker loop, provider capacity and usage accounting.
+- Issue #30 reduced one focused cancel/provider/admin reliability risk with
+  in-process automatic result delivery idempotency, admin bulk-key-test guards,
+  and provider-failure safe retry metadata tests. It does not close broad Gate B
+  restart/cancel/resume evidence.
 - Storage: High due to local object storage and runtime `var/`.
 - Database migrations: migrations directory Not found; schema/state changes require approval.
 - Concurrency/race conditions: High around scheduler claims, worker capacity, provider channels and user/job caps.
@@ -96,6 +101,9 @@
 - Refunds: Gate C marks refund/support/reconciliation incomplete.
 - Paid launch: Critical; blocked until Gate C and human approval.
 - External provider costs: High; beta safety caps exist but key/concurrency/cap changes can increase spend.
+- Admin bulk key probes are paused during active translations/provider requests
+  by PR #38; future admin/provider changes must not remove that guard without
+  owner approval and focused tests.
 
 If a payment/provider/business zone is not implemented as a production-ready path, mark it Not found / Unknown rather than inventing readiness.
 

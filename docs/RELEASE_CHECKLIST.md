@@ -119,6 +119,9 @@ Checklist:
 - [ ] Persistent job/work-unit creation works.
 - [ ] Worker processing produces final or partial result.
 - [ ] Progress, cancel, status/history/My Books flows work.
+- [ ] Automatic final/partial result delivery is not duplicated for the same
+  job/result within a running bot process; durable cross-restart delivery
+  tracking remains Unknown unless separately evidenced.
 - [ ] Core workflow survives bot/worker restart.
 - [ ] User-facing errors are understandable and do not expose provider internals.
 - [ ] Onboarding / instructions are clear for trusted beta users.
@@ -126,6 +129,9 @@ Checklist:
 - [ ] Beta allowlist can be managed and enabled from SSH-tunneled admin.
 - [ ] Cost caps and kill switch are checked before release.
 - [ ] Admin/debug flow works through SSH tunnel, if applicable.
+- [ ] Admin bulk provider key tests are not run during active translations or
+  active provider requests; PR #38 guards this path and operator docs say to
+  wait until both counters return to 0.
 - [ ] Known limitations are documented.
 - [ ] Out-of-scope features are not presented as ready.
 - [ ] Free preview status is confirmed or explicitly deferred by owner. Current

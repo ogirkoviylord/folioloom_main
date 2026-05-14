@@ -101,6 +101,12 @@ Core workflow по evidence из кода и документов:
 
 Tasks:
 
+- Completed 2026-05-14: issue
+  [#30](https://github.com/ogirkoviylord/folioloom_main/issues/30) reliability
+  split closed. PRs #36-#39 documented the root cause, added in-process
+  automatic result delivery idempotency, paused admin bulk key tests during
+  active translations/provider requests, and added worker/scheduler
+  provider-failure regression coverage with safe retry metadata.
 - Закрыть или явно отложить free preview before full translation.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
@@ -133,6 +139,9 @@ Acceptance criteria:
 - Upload/retention/delete затрагивают user data handling.
 - Scheduler/worker changes затрагивают durable state machine.
 - Provider capacity changes могут увеличить cost/provider failure risk.
+- Issue #30 reduced a known cancel/provider/admin reliability risk, but it does
+  not complete broad cancel/resume/restart release evidence or durable
+  cross-restart automatic delivery tracking.
 - Free preview может изменить UX и backend job contract.
 
 Что не входит в фазу:
@@ -162,6 +171,8 @@ Tasks:
   parser rejection, quota/cap/kill switch.
 - Описать support/debug workflow для owner: какие admin pages смотреть, какие
   scripts запускать, какие artifacts сохранять.
+- Preserve the issue #30 admin guardrail: bulk provider key probes should wait
+  until active translations and active provider requests return to 0.
 
 Acceptance criteria:
 

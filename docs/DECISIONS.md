@@ -246,6 +246,49 @@ Consequences:
 Human approval required to change:
 - yes; affects cost, provider reliability and durable job processing.
 
+### 2026-05-14 - Reliability decisions: issue #30 cancel/provider safeguards
+
+Status: Active
+
+Decision:
+- Automatic Telegram result delivery from cancel/finalization paths is
+  idempotent per job/result within a running bot process. Manual My
+  Books/history downloads remain allowed after automatic delivery.
+- Admin bulk provider key testing must pause while admin metadata reports active
+  translations or active provider requests, before reading provider key secrets
+  or starting external `/models` probes.
+- Worker/scheduler provider-failure retry metadata must stay safe and generic;
+  raw provider/source/key/traceback details must not leak into retry metadata,
+  scheduler events or logs.
+
+Evidence:
+- GitHub issue [#30](https://github.com/ogirkoviylord/folioloom_main/issues/30)
+  was split into issues #32-#35 and closed after the child work completed.
+- PR #36 documented the root-cause discovery.
+- PR #37 implemented in-process automatic result delivery idempotency.
+- PR #38 guarded Admin -> AI Providers -> Test all active keys during active
+  translations/provider requests and updated operator docs.
+- PR #39 added worker/scheduler provider-failure regression coverage and safe
+  retry metadata checks.
+
+Reason:
+- The owner-reported incident combined admin bulk key tests during active
+  translation, a stalled/cancelled job, and duplicate Telegram result delivery.
+  The fix keeps each risky boundary small: bot automatic delivery idempotency,
+  admin probe guarding, and safe provider-failure metadata.
+
+Consequences:
+- Durable cross-restart automatic delivery tracking remains out of scope and
+  must not be claimed as implemented.
+- Admin bulk key testing can be unavailable during active translations or when
+  active-translation metadata is unavailable; this is intentional fail-closed
+  behavior.
+- Provider reliability follow-up issue #31 remains separate from issue #30.
+
+Human approval required to change:
+- yes; changes affect user-facing bot delivery, admin provider controls,
+  external provider behavior and scheduler/job reliability boundaries.
+
 ### 2026-05-10 - Testing approach: local gates first, minimal CI workflow present
 
 Status: Active
