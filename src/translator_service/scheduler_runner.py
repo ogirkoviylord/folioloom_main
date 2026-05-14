@@ -31,6 +31,7 @@ from translator_service.worker import (
     _fail_claimed_work_unit_or_ignore_stale,
     _is_stale_work_unit_claim,
     _job_translation_context,
+    _safe_retryable_provider_error_message,
     load_scheduled_work_unit_text,
     run_next_scheduled_stored_text_work_unit,
     translate_claimed_scheduled_stored_text_work_unit,
@@ -239,17 +240,19 @@ def _run_scheduled_parallel_once(
                 claim = active.pop(future)
                 try:
                     translation_result = future.result()
-                except Exception as error:
-                    logger.exception(
-                        "Scheduled parallel worker failed: job_id=%s work_unit_id=%s",
+                except Exception:
+                    logger.error(
+                        "Scheduled parallel worker failed safely: "
+                        "job_id=%s work_unit_id=%s error=%s",
                         claim.job_id,
                         claim.work_unit_id,
+                        _safe_retryable_provider_error_message(),
                     )
                     failed = _fail_claimed_work_unit_or_ignore_stale(
                         store=store,
                         claim=claim,
                         failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-                        error_message=str(error),
+                        error_message=_safe_retryable_provider_error_message(),
                         retry_base_delay_seconds=retry_base_delay_seconds,
                         retry_max_delay_seconds=retry_max_delay_seconds,
                     )
