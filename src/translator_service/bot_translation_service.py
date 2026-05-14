@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import math
@@ -106,6 +107,7 @@ from translator_service.worker import (
 logger = logging.getLogger(__name__)
 RIGHTS_CONFIRMATION_VERSION = "rights-v1"
 RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
+AutomaticResultDeliveryKey = tuple[int, str, str, int, str]
 
 
 class RightsConfirmationRequired(ValueError):
@@ -192,6 +194,21 @@ class UserBookResult:
     content_type: str
 
 
+def _automatic_result_delivery_key(
+    job: TranslationJob,
+) -> AutomaticResultDeliveryKey | None:
+    if not (job.result_file_name and job.result_content):
+        return None
+
+    return (
+        job.user_telegram_id,
+        job.id,
+        job.result_file_name,
+        len(job.result_content),
+        hashlib.sha256(job.result_content).hexdigest(),
+    )
+
+
 @dataclass
 class _ActiveTranslationCancellation:
     token: CancellationToken
@@ -271,6 +288,10 @@ class BotTranslationService:
         self._beta_safety_rates = beta_safety_rates or BetaSafetyRates()
         self._beta_safety_guard_owned = beta_safety_guard_owned
         self._beta_safety_denied_job_ids: set[str] = set()
+        self._automatic_result_delivered_keys: set[AutomaticResultDeliveryKey] = set()
+        self._automatic_result_delivery_in_flight: set[
+            AutomaticResultDeliveryKey
+        ] = set()
         self._state_lock = RLock()
 
     def close(self) -> None:
@@ -1122,6 +1143,35 @@ class BotTranslationService:
             return None
 
         return self._book_result_from_object_key(job)
+
+    def begin_automatic_result_delivery(self, job: TranslationJob) -> bool:
+        key = _automatic_result_delivery_key(job)
+        if key is None:
+            return False
+
+        with self._state_lock:
+            if (
+                key in self._automatic_result_delivered_keys
+                or key in self._automatic_result_delivery_in_flight
+            ):
+                return False
+            self._automatic_result_delivery_in_flight.add(key)
+            return True
+
+    def finish_automatic_result_delivery(
+        self,
+        job: TranslationJob,
+        *,
+        delivered: bool,
+    ) -> None:
+        key = _automatic_result_delivery_key(job)
+        if key is None:
+            return
+
+        with self._state_lock:
+            self._automatic_result_delivery_in_flight.discard(key)
+            if delivered:
+                self._automatic_result_delivered_keys.add(key)
 
     def delete_user_book(
         self,
