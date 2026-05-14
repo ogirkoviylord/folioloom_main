@@ -1028,6 +1028,95 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(summary.assembled_jobs, 1)
             self.assertEqual(translator.calls, ["First paragraph"])
 
+    def test_run_once_parallel_provider_failure_records_safe_retry_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            failed_job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-failing",
+                file_id="file-failing",
+                user_id="telegram:42",
+                source_text="Private source paragraph",
+            )
+            completed_job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-completed",
+                file_id="file-completed",
+                user_id="telegram:100",
+                source_text="Second paragraph",
+            )
+
+            with self.assertLogs(
+                "translator_service.scheduler_runner",
+                level="ERROR",
+            ) as log_records:
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=UnsafeProviderFailureRunnerTranslator(),
+                    limits=SchedulerLimits(
+                        max_active_units_per_job=1,
+                        max_active_units_global=2,
+                    ),
+                    lease_seconds=300,
+                    max_parallel_units=2,
+                    retry_base_delay_seconds=60,
+                    retry_max_delay_seconds=60,
+                )
+
+            [failed_unit] = store.list_work_units(failed_job.id)
+            [completed_unit] = store.list_work_units(completed_job.id)
+            attempts = store.list_work_unit_attempts(failed_unit.id)
+            scheduler_events = json.dumps(
+                [
+                    json.loads(event.payload_json)
+                    for event in store.list_scheduler_events(failed_job.id)
+                ]
+            )
+            unsafe_values = [
+                "Private source paragraph",
+                "sk-private-provider-key",
+                "/var/private/source.txt",
+                "raw provider traceback",
+                "DeepSeek provider read timeout",
+                "RuntimeError",
+                "Traceback",
+            ]
+            logs = "\n".join(log_records.output)
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(failed_unit.status.value, "failed_retryable")
+            self.assertEqual(
+                failed_unit.last_error,
+                "retryable provider failure",
+            )
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(
+                attempts[0].error_message,
+                "retryable provider failure",
+            )
+            self.assertEqual(
+                store.get_job(failed_job.id).status,
+                PersistentTranslationJobStatus.TRANSLATING,
+            )
+            self.assertEqual(
+                store.get_job(completed_job.id).status,
+                PersistentTranslationJobStatus.READY,
+            )
+            self.assertEqual(completed_unit.status.value, "translated")
+            for unsafe_value in unsafe_values:
+                self.assertNotIn(unsafe_value, failed_unit.last_error or "")
+                self.assertNotIn(unsafe_value, attempts[0].error_message or "")
+                self.assertNotIn(unsafe_value, scheduler_events)
+                self.assertNotIn(unsafe_value, logs)
+
     def test_assemble_due_jobs_reconciles_existing_final_output(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1190,6 +1279,27 @@ class FailingRunnerTranslator:
         raise RuntimeError(
             "DeepSeek provider read timeout for Private source paragraph "
             "at /var/private/source.txt"
+        )
+
+
+class UnsafeProviderFailureRunnerTranslator(RunnerTranslator):
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        if text == "Private source paragraph":
+            raise RuntimeError(
+                "DeepSeek provider read timeout for Private source paragraph "
+                "with sk-private-provider-key at /var/private/source.txt "
+                "raw provider traceback"
+            )
+        return super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
         )
 
 
