@@ -531,7 +531,7 @@ class WorkerTest(unittest.TestCase):
             store = self._store()
             job = _job_with_stored_unit(store, source.object_key)
 
-            with self.assertLogs("translator_service.worker", level="ERROR"):
+            with self.assertLogs("translator_service.worker", level="ERROR") as logs:
                 failed = run_next_scheduled_stored_text_work_unit(
                     store=store,
                     storage=storage,
@@ -543,16 +543,27 @@ class WorkerTest(unittest.TestCase):
 
             attempts = store.list_work_unit_attempts(failed.id)
             self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_RETRYABLE)
-            self.assertIn("provider validation failed", failed.last_error)
+            self.assertEqual(
+                failed.last_error,
+                "retryable provider failure",
+            )
             self.assertEqual(
                 store.get_job(job.id).status,
                 PersistentTranslationJobStatus.TRANSLATING,
             )
             self.assertEqual(len(attempts), 1)
             self.assertEqual(
+                attempts[0].error_message,
+                "retryable provider failure",
+            )
+            self.assertEqual(
                 attempts[0].error_code,
                 WorkUnitFailureKind.RETRYABLE_PROVIDER.value,
             )
+            log_output = "\n".join(logs.output)
+            self.assertNotIn("provider validation failed", log_output)
+            self.assertNotIn("ValueError", log_output)
+            self.assertNotIn("Traceback", log_output)
 
     def test_assembles_translated_text_result_into_object_storage(self):
         with TemporaryDirectory() as temp_dir:

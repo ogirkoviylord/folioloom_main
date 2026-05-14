@@ -461,17 +461,18 @@ def run_next_scheduled_stored_text_work_unit(
             translator=translator,
             job_context=job_context,
         )
-    except Exception as error:
-        logger.exception(
-            "Scheduled worker failed: job_id=%s work_unit_id=%s",
+    except Exception:
+        logger.error(
+            "Scheduled worker failed safely: job_id=%s work_unit_id=%s error=%s",
             claim.job_id,
             claim.work_unit_id,
+            _safe_retryable_provider_error_message(),
         )
         return _fail_claimed_work_unit_or_ignore_stale(
             store=store,
             claim=claim,
             failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-            error_message=str(error),
+            error_message=_safe_retryable_provider_error_message(),
             retry_base_delay_seconds=retry_base_delay_seconds,
             retry_max_delay_seconds=retry_max_delay_seconds,
         )
@@ -558,6 +559,10 @@ def _fail_claimed_work_unit_or_ignore_stale(
             )
             return None
         raise
+
+
+def _safe_retryable_provider_error_message() -> str:
+    return "retryable provider failure"
 
 
 def _is_successful_completed_work_unit(work_unit: PersistentWorkUnit) -> bool:
