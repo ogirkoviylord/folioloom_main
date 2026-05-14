@@ -149,9 +149,13 @@ SSH-tunneled `/admin/ai-providers` page can show and refresh the safe DeepSeek
 account balance snapshot without exposing real keys.
 Admin -> AI Providers -> DeepSeek Keys is the operator surface for key rotation
 and capacity changes. Add or rotate a key there, test it, then request DeepSeek
-runtime reload so bot and worker processes pick up the new key pool. Env keys
-remain read-only fallbacks; admin-managed keys are stored encrypted and only
-masked values are shown.
+runtime reload so bot and worker processes pick up the new key pool. The
+`Test all active keys` action is paused while admin metadata reports active
+translations or active provider requests, so bulk key probes do not compete
+with in-flight or between-call translation work; retry it after active
+translations and provider requests return to 0. Env keys remain read-only
+fallbacks; admin-managed keys are stored encrypted and only masked values are
+shown.
 
 Worker parallelism is beta-safe and capacity-bound. The server example uses
 `TRANSLATION_MAX_PARALLEL_UNITS=2`, but concurrency is layered:
