@@ -22,8 +22,8 @@ from translator_service.bot.runtime import (
     ReloadableDeepSeekTranslator,
     _answer_callback_if_spam,
     _CallbackSpamGuard,
-    _cancel_inline_keyboard,
     _cancel_active_translation,
+    _cancel_inline_keyboard,
     _choose_heartbeat_pattern_name,
     _confirm_pending_translation,
     _confirm_pending_upload_rights,
@@ -46,8 +46,10 @@ from translator_service.bot.runtime import (
     _progress_message_for_current_user_language,
     _resume_user_book_translation,
     _schedule_message_edit,
-    _settings_keyboard,
     _send_translation_result_document,
+    _send_translation_result_document_once,
+    _send_user_book_result,
+    _settings_keyboard,
     _should_schedule_progress_edit,
     _UserActionInFlightGuard,
     build_beta_safety_guard,
@@ -55,6 +57,7 @@ from translator_service.bot.runtime import (
     build_default_pricing_rules,
     build_translation_service,
 )
+from translator_service.bot_translation_service import UserBookResult
 from translator_service.config import Settings
 from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
@@ -151,6 +154,30 @@ class RecordingMessage:
         self.documents.append(document)
 
 
+class FailingOnceRecordingMessage(RecordingMessage):
+    def __init__(self) -> None:
+        super().__init__()
+        self._failed = False
+
+    async def answer_document(self, document) -> None:
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("telegram send failed")
+        await super().answer_document(document)
+
+
+class CancellingOnceRecordingMessage(RecordingMessage):
+    def __init__(self) -> None:
+        super().__init__()
+        self._cancelled = False
+
+    async def answer_document(self, document) -> None:
+        if not self._cancelled:
+            self._cancelled = True
+            raise asyncio.CancelledError()
+        await super().answer_document(document)
+
+
 class _RuntimeRecordingTranslator:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, str]] = []
@@ -215,9 +242,29 @@ class _QueuedThenReadyService:
 class _CancelWithResultService:
     def __init__(self, job: TranslationJob | None) -> None:
         self.job = job
+        self._automatic_result_delivered_keys: set[tuple[str, str | None]] = set()
+        self._automatic_result_delivery_in_flight: set[tuple[str, str | None]] = set()
 
     def get_interface_language(self, user_telegram_id: int) -> str:
         return "en"
+
+    def begin_automatic_result_delivery(self, job: TranslationJob) -> bool:
+        key = (job.id, job.result_file_name)
+        if not (job.result_file_name and job.result_content):
+            return False
+        if (
+            key in self._automatic_result_delivered_keys
+            or key in self._automatic_result_delivery_in_flight
+        ):
+            return False
+        self._automatic_result_delivery_in_flight.add(key)
+        return True
+
+    def finish_automatic_result_delivery(self, job: TranslationJob, *, delivered: bool):
+        key = (job.id, job.result_file_name)
+        self._automatic_result_delivery_in_flight.discard(key)
+        if delivered:
+            self._automatic_result_delivered_keys.add(key)
 
     def cancel_translation_with_result(self, user_telegram_id: int):
         return type(
@@ -568,7 +615,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(message.documents), 1)
         self.assertEqual(message.documents[0].filename, "book.uk.partial.txt")
 
-    async def test_cancel_result_delivery_is_not_idempotent_across_runtime_paths(self):
+    async def test_cancel_result_delivery_is_idempotent_across_runtime_paths(self):
         message = RecordingMessage()
         job = TranslationJob(
             id="job-1",
@@ -582,11 +629,88 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             result_content=b"[uk] First.",
         )
 
-        await _cancel_active_translation(
-            message=message,
-            service=_CancelWithResultService(job),
+        service = _CancelWithResultService(job)
+        await _cancel_active_translation(message=message, service=service)
+        await _send_translation_result_document_once(message, job, service)
+
+        self.assertEqual(
+            [document.filename for document in message.documents],
+            ["book.uk.partial.txt"],
         )
-        await _send_translation_result_document(message, job)
+
+    async def test_failed_automatic_result_delivery_can_retry(self):
+        message = FailingOnceRecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+        service = _CancelWithResultService(job)
+
+        with self.assertRaises(RuntimeError):
+            await _send_translation_result_document_once(message, job, service)
+        await _send_translation_result_document_once(message, job, service)
+
+        self.assertEqual(
+            [document.filename for document in message.documents],
+            ["book.uk.partial.txt"],
+        )
+
+    async def test_cancelled_automatic_result_delivery_can_retry(self):
+        message = CancellingOnceRecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+        service = _CancelWithResultService(job)
+
+        with self.assertRaises(asyncio.CancelledError):
+            await _send_translation_result_document_once(message, job, service)
+        await _send_translation_result_document_once(message, job, service)
+
+        self.assertEqual(
+            [document.filename for document in message.documents],
+            ["book.uk.partial.txt"],
+        )
+
+    async def test_manual_book_download_still_sends_after_automatic_delivery(self):
+        message = RecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+        service = _CancelWithResultService(job)
+
+        await _send_translation_result_document_once(message, job, service)
+        await _send_user_book_result(
+            message,
+            UserBookResult(
+                job_id=job.id,
+                file_name="book.uk.partial.txt",
+                content=b"[uk] First.",
+                content_type="text/plain; charset=utf-8",
+            ),
+        )
 
         self.assertEqual(
             [document.filename for document in message.documents],
