@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-13
+Last updated: 2026-05-14
 
 ## 1. Текущее состояние проекта
 
@@ -21,6 +21,15 @@ health/admin app, persistent job/work-unit foundation, worker/scheduler,
 TXT/DOCX/EPUB adapters, DeepSeek-compatible provider layer, admin visibility,
 beta allowlist, rights confirmation, beta cost/cap guard, Docker Compose stack
 и backup/restore scripts.
+
+Issue #30 reliability update on 2026-05-14: GitHub issues
+[#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
+are closed and PRs #36-#39 are merged. The work documented the root cause,
+made automatic cancel/partial result delivery idempotent within a running bot
+process, paused admin bulk key tests during active translations/provider
+requests, and added scheduler/worker provider-failure regression coverage with
+safe retry metadata. This does not make cancel/resume/restart Gate B fully
+complete and does not prove durable cross-restart automatic delivery tracking.
 
 Что пока нестабильно или не закрыто для beta: free preview before full
 translation, upload hardening/quarantine baseline, TTL cleanup/delete
@@ -96,14 +105,25 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/deepseek_client.py`,
   `src/translator_service/deepseek_key_pool.py`,
   `src/translator_service/ai_provider_runtime.py`,
-  `src/translator_service/provider_throttle.py`, related provider tests.
+  `src/translator_service/provider_throttle.py`, related provider tests;
+  PR #39 added worker/scheduler provider-failure regression coverage and safe
+  retry metadata checks.
 - Confidence: high.
 
 - Feature / component: SSH-tunneled FastAPI admin console.
 - Evidence: `README.md`, `docs/deployment/admin-vps-runbook.md`,
   `src/translator_service/api.py`, `src/translator_service/admin/`,
-  `tests/test_admin_*.py`.
+  `tests/test_admin_*.py`; PR #38 added a guard so Admin -> AI Providers ->
+  Test all active keys pauses during active translations or active provider
+  requests.
 - Confidence: high.
+
+- Feature / component: Automatic result delivery idempotency.
+- Evidence: PR #37 updated `src/translator_service/bot/runtime.py` and
+  `src/translator_service/bot_translation_service.py` so automatic
+  cancel/finalization result delivery is idempotent per job/result in a running
+  bot process while manual My Books/history downloads remain available.
+- Confidence: medium.
 
 - Feature / component: Operational beta safety guard.
 - Evidence: `README.md`, `CURRENT_PROJECT_STATE.md`,
@@ -208,6 +228,15 @@ Potential issues to verify:
 - Impact: foundation readiness could be mistaken for beta approval.
 - Suggested fix task: Reviewer produces Gate B evidence report with pass/fail,
   deferrals and owner go/no-go.
+
+- Problem: Provider safety-triggering output can still leave provider channels
+  degraded.
+- Evidence: GitHub issue
+  [#31](https://github.com/ogirkoviylord/folioloom_main/issues/31) remains open.
+- Impact: provider capacity/reliability may still require follow-up outside
+  issue #30.
+- Suggested fix task: handle #31 as a separate risky provider reliability bug
+  with Architect/Reviewer gates.
 
 - Problem: Full current test status is Unknown for this handoff update.
 - Evidence: this task was docs-only and did not run the full suite.
