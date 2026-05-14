@@ -272,6 +272,10 @@ def _resource_usage_from_runtime_statuses(
             if str(getattr(channel, "health", "")).lower()
             in {"cooling_down", "degraded"}
         ),
+        "unsafe_model_output_failures": sum(
+            max(0, int(getattr(channel, "total_unsafe_model_output_failures", 0) or 0))
+            for channel in channels
+        ),
         "available_provider_slots": (
             max(0, int(getattr(provider_state, "available_slots", 0) or 0))
             if provider_state is not None
