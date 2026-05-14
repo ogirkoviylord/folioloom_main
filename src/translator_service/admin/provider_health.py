@@ -14,6 +14,7 @@ _DEFAULT_ERROR_EXCERPT = "n/a"
 _MAX_ERROR_EXCERPT_LENGTH = 120
 _DEGRADED_VALIDATION_STATUSES = {"cooldown", "error", "failed", "failure"}
 _DEGRADED_RUNTIME_CHANNEL_HEALTH = {"cooling_down", "degraded"}
+_NON_DEGRADED_RUNTIME_ERROR_KINDS = {"unsafe_model_output"}
 _SENSITIVE_PATTERNS = (
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:api[_-]?key|token|secret|secret_id|value)\s*[:=]\s*[^\s,;]+"),
@@ -149,8 +150,15 @@ def _runtime_error_excerpt(runtime: AIProviderRuntimeStatus | None) -> str:
             f"reason {provider_state.last_reason or 'n/a'}"
         )
     for channel in runtime.active_channels:
+        channel_health = channel.health.lower()
+        error_kind = (channel.error_kind or "").lower()
+        if (
+            channel_health not in _DEGRADED_RUNTIME_CHANNEL_HEALTH
+            and error_kind in _NON_DEGRADED_RUNTIME_ERROR_KINDS
+        ):
+            continue
         if not (
-            channel.health.lower() in _DEGRADED_RUNTIME_CHANNEL_HEALTH
+            channel_health in _DEGRADED_RUNTIME_CHANNEL_HEALTH
             or channel.error_kind
             or channel.last_error_excerpt
         ):

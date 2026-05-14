@@ -1839,6 +1839,9 @@ def _ai_provider_runtime_channel_payload(channel):
         "total_auth_failures": channel.total_auth_failures,
         "total_billing_failures": channel.total_billing_failures,
         "total_other_provider_failures": channel.total_other_provider_failures,
+        "total_unsafe_model_output_failures": (
+            channel.total_unsafe_model_output_failures
+        ),
         "average_latency_ms": channel.average_latency_ms,
         "last_latency_ms": channel.last_latency_ms,
         "error_kind": _safe_runtime_text(channel.error_kind),

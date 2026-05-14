@@ -11,7 +11,10 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 from translator_service.model_output_safety import validate_model_output_safety
-from translator_service.output_contracts import validate_translation_batch_contract
+from translator_service.output_contracts import (
+    TranslationBatchRejectionReason,
+    validate_translation_batch_contract,
+)
 from translator_service.security_telemetry import record_security_event
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_policy import (
@@ -49,6 +52,14 @@ class DeepSeekChatResult:
 
 class DeepSeekApiError(RuntimeError):
     pass
+
+
+class DeepSeekUnsafeModelOutputError(DeepSeekApiError):
+    def __init__(self, safety_reason: str) -> None:
+        self.safety_reason = safety_reason
+        super().__init__(
+            f"DeepSeek produced unsafe model output: {safety_reason}"
+        )
 
 
 class DeepSeekClient:
@@ -235,9 +246,7 @@ class DeepSeekClient:
                     )
             self._last_usage.value = total_usage
             if safety.reason is not None:
-                raise DeepSeekApiError(
-                    f"DeepSeek produced unsafe model output: {safety.reason.value}"
-                )
+                raise DeepSeekUnsafeModelOutputError(safety.reason.value)
             if batch_expected_count is not None:
                 batch_validation = validate_translation_batch_contract(
                     result.content,
@@ -283,6 +292,13 @@ class DeepSeekClient:
                             phase="repair",
                             retry_attempt=1,
                         )
+                        if (
+                            batch_validation.rejection_reason
+                            == TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT
+                        ):
+                            raise DeepSeekUnsafeModelOutputError(
+                                batch_validation.rejection_reason.value
+                            )
                         raise DeepSeekApiError(
                             "DeepSeek produced invalid translation batch contract "
                             f"after repair: {batch_validation.rejection_reason.value}"
