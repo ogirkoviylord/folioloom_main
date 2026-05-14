@@ -2151,10 +2151,14 @@ class AdminRoutesTest(unittest.TestCase):
     def test_owner_can_test_all_active_ai_provider_keys(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
+            jobs_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "runs"
             client = TestClient(
                 create_app(
                     settings=Settings(
                         admin_db_path=db_path,
+                        persistent_jobs_db_path=str(jobs_path),
+                        translation_run_log_root=str(log_root),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                         admin_secret_master_key=MASTER_KEY,
@@ -2230,6 +2234,195 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-main-secret", event.metadata_json)
             self.assertNotIn(".api_keys.", event.metadata_json)
 
+    def test_test_all_ai_provider_keys_pauses_during_active_provider_capacity(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            jobs_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "runs"
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        persistent_jobs_db_path=str(jobs_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            added = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-main-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(added.status_code, 303)
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=1,
+                            active_requests=1,
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=2,
+                        max_capacity=3,
+                        active_requests=1,
+                        available_slots=1,
+                    ),
+                    error=None,
+                )
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                side_effect=AssertionError("test-all should pause before probes"),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test-all",
+                    data={"csrf_token": csrf.group(1)},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 409)
+            self.assertIn("paused while translations or provider", tested.text)
+            self.assertIn("Active translations: 0", tested.text)
+            self.assertIn("active provider requests: 1", tested.text)
+            self.assertIn("available provider slots: 1", tested.text)
+            probe.assert_not_called()
+            self.assertNotIn("sk-main-secret", tested.text)
+            self.assertNotIn(".api_keys.", tested.text)
+            with SQLiteAIProviderValidationStore(db_path) as validations:
+                self.assertEqual(validations.latest_by_key("deepseek"), {})
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.keys.tested"
+                )
+            self.assertEqual(event.target_id, "deepseek")
+            self.assertEqual(event.outcome.value, "failure")
+            self.assertIn('"status": "paused"', event.metadata_json)
+            self.assertIn('"active_translations": 0', event.metadata_json)
+            self.assertIn('"active_translation_state": "known"', event.metadata_json)
+            self.assertIn('"active_provider_requests": 1', event.metadata_json)
+            self.assertNotIn("sk-main-secret", event.metadata_json)
+            self.assertNotIn(".api_keys.", event.metadata_json)
+
+    def test_test_all_ai_provider_keys_pauses_during_active_translation(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            jobs_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            store = SQLiteTranslationJobStore(jobs_path)
+            try:
+                running = _persistent_job(store, order_id="order-running")
+                _add_units(store, running.id)
+                store.claim_next_work_unit(running.id, worker_id="worker-a")
+            finally:
+                store.close()
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        persistent_jobs_db_path=str(jobs_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            added = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-main-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(added.status_code, 303)
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=1,
+                            active_requests=0,
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=2,
+                        max_capacity=3,
+                        active_requests=0,
+                        available_slots=2,
+                    ),
+                    error=None,
+                )
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                side_effect=AssertionError("test-all should pause before probes"),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test-all",
+                    data={"csrf_token": csrf.group(1)},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 409)
+            self.assertIn("Active translations: 1", tested.text)
+            self.assertIn("active provider requests: 0", tested.text)
+            probe.assert_not_called()
+            self.assertNotIn("sk-main-secret", tested.text)
+            self.assertNotIn(".api_keys.", tested.text)
+            with SQLiteAIProviderValidationStore(db_path) as validations:
+                self.assertEqual(validations.latest_by_key("deepseek"), {})
+            with SQLiteAdminAuditLog(db_path) as audit:
+                event = next(
+                    event
+                    for event in audit.list_events(limit=10)
+                    if event.action == "ai_provider.keys.tested"
+                )
+            self.assertEqual(event.target_id, "deepseek")
+            self.assertEqual(event.outcome.value, "failure")
+            self.assertIn('"status": "paused"', event.metadata_json)
+            self.assertIn('"active_translations": 1', event.metadata_json)
+            self.assertIn('"active_translation_state": "known"', event.metadata_json)
+            self.assertIn('"active_provider_requests": 0', event.metadata_json)
+            self.assertNotIn("sk-main-secret", event.metadata_json)
+            self.assertNotIn(".api_keys.", event.metadata_json)
+
     def test_test_all_ai_provider_keys_skips_disabled_keys(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
@@ -2237,6 +2430,8 @@ class AdminRoutesTest(unittest.TestCase):
                 create_app(
                     settings=Settings(
                         admin_db_path=db_path,
+                        persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                        translation_run_log_root=str(Path(temp_dir) / "runs"),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                         admin_secret_master_key=MASTER_KEY,

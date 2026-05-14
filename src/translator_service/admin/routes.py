@@ -45,7 +45,10 @@ from translator_service.admin.integrations import (
     IntegrationRegistry,
 )
 from translator_service.admin.live import build_live_monitor_snapshot
-from translator_service.admin.operations import build_persistent_operations_overview
+from translator_service.admin.operations import (
+    JOB_STATE_RUNNING,
+    build_persistent_operations_overview,
+)
 from translator_service.admin.provider_balance import (
     ProviderBalanceSnapshot,
     get_cached_deepseek_balance,
@@ -119,6 +122,15 @@ from translator_service.user_activity import (
 )
 
 SESSION_COOKIE = "folioloom_admin_session"
+_ACTIVE_TRANSLATION_STATUSES = {
+    "active",
+    "cancel_requested",
+    "in_progress",
+    "processing",
+    "running",
+    "started",
+    "translating",
+}
 
 
 def create_admin_router(settings: Settings) -> APIRouter:
@@ -1282,6 +1294,25 @@ def create_admin_router(settings: Settings) -> APIRouter:
         except KeyError:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
 
+        guard = _ai_provider_test_all_guard(settings, provider_id)
+        if guard is not None:
+            message, metadata = guard
+            with SQLiteAdminAuditLog(settings.admin_db_path) as audit:
+                audit.record(
+                    actor_id=session.actor_id,
+                    role=session.role,
+                    action="ai_provider.keys.tested",
+                    target_type="ai_provider",
+                    target_id=provider_id,
+                    outcome=AuditOutcome.FAILURE,
+                    metadata={
+                        "provider_id": provider_id,
+                        "status": "paused",
+                        **metadata,
+                    },
+                )
+            return _html(message, status_code=HTTPStatus.CONFLICT)
+
         results: list[tuple[str, str, str | None]] = []
         try:
             with SQLiteEncryptedSecretStore(
@@ -1604,6 +1635,80 @@ def _ai_provider_runtime_reload_states(settings: Settings):
             if (state := runtime.get_reload_state(definition.integration_id))
             is not None
         )
+
+
+def _ai_provider_test_all_guard(
+    settings: Settings,
+    provider_id: str,
+) -> tuple[str, dict[str, int | str]] | None:
+    with SQLiteAIProviderRuntimeStore(settings.admin_db_path) as runtime:
+        status = runtime.get_status(provider_id)
+    provider_state = (
+        status.provider_state
+        if status is not None
+        else AIProviderRuntimeProviderState()
+    )
+    active_requests = max(
+        provider_state.active_requests,
+        sum(channel.active_requests for channel in status.active_channels)
+        if status is not None
+        else 0,
+    )
+    active_translations, active_translation_state = _active_translation_metadata(
+        settings
+    )
+    if (
+        active_requests <= 0
+        and active_translations <= 0
+        and active_translation_state != "unknown"
+    ):
+        return None
+    available_slots = provider_state.available_slots
+    current_limit = provider_state.current_limit
+    message = (
+        "Test all active provider keys is paused while translations or provider "
+        f"requests are active. Active translations: {active_translations}; "
+        f"active provider requests: {active_requests}; "
+        f"available provider slots: {available_slots}; "
+        f"adaptive limit: {current_limit}. Try again when active translations "
+        "and provider requests return to 0."
+    )
+    return (
+        message,
+        {
+            "active_translations": active_translations,
+            "active_translation_state": active_translation_state,
+            "active_provider_requests": active_requests,
+            "available_provider_slots": available_slots,
+            "provider_current_limit": current_limit,
+        },
+    )
+
+
+def _active_translation_metadata(settings: Settings) -> tuple[int, str]:
+    try:
+        operations = _operations_overview(settings)
+        running_job_ids = {
+            job.id for job in operations.jobs if job.state == JOB_STATE_RUNNING
+        }
+        active_run_job_ids: set[str] = set()
+        active_runs_without_job_id = 0
+        for run in list_translation_run_summaries(
+            settings.translation_run_log_root,
+            limit=200,
+        ):
+            if run.status not in _ACTIVE_TRANSLATION_STATUSES:
+                continue
+            if run.job_id:
+                active_run_job_ids.add(run.job_id)
+            else:
+                active_runs_without_job_id += 1
+        return (
+            len(running_job_ids | active_run_job_ids) + active_runs_without_job_id,
+            "known",
+        )
+    except Exception:
+        return 0, "unknown"
 
 
 def _ai_provider_runtime_payloads(settings: Settings):

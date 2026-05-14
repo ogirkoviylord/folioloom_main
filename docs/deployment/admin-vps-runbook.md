@@ -128,6 +128,11 @@ secrets or document text: active requests, per-key capacity, cooldown,
 429/503/timeout/auth/billing counters, latency and a redacted last error. A
 degraded channel does not disable the key automatically in Phase 2; it lowers
 selection priority and remains visible for operator action.
+`Test all active keys` is paused while admin metadata reports active
+translations or active provider requests. Wait until active translations and
+provider requests return to 0 before running bulk key probes during an incident;
+this avoids adding probe traffic while translations are using or about to use
+provider capacity.
 
 Adaptive provider throttling starts each worker runtime conservatively and
 ramps DeepSeek concurrency after clean successes. 429/503/timeouts decrease the
