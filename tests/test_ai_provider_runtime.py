@@ -147,6 +147,7 @@ class AIProviderRuntimeTest(unittest.TestCase):
                             total_auth_failures=1,
                             total_billing_failures=1,
                             total_other_provider_failures=1,
+                            total_unsafe_model_output_failures=2,
                             average_latency_ms=123.4,
                             last_latency_ms=234.5,
                             error_kind="temporary",
@@ -174,6 +175,7 @@ class AIProviderRuntimeTest(unittest.TestCase):
         self.assertEqual(channel.total_auth_failures, 1)
         self.assertEqual(channel.total_billing_failures, 1)
         self.assertEqual(channel.total_other_provider_failures, 1)
+        self.assertEqual(channel.total_unsafe_model_output_failures, 2)
         self.assertEqual(channel.average_latency_ms, 123.4)
         self.assertEqual(channel.last_latency_ms, 234.5)
         self.assertEqual(channel.error_kind, "temporary")

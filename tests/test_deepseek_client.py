@@ -8,6 +8,7 @@ from translator_service.deepseek_client import (
     DeepSeekApiError,
     DeepSeekChatResult,
     DeepSeekClient,
+    DeepSeekUnsafeModelOutputError,
     DeepSeekUsage,
 )
 
@@ -456,6 +457,86 @@ class DeepSeekClientTest(unittest.TestCase):
             ],
         )
         self.assertEqual(events[-1]["payload"]["reason"], "unexpected_attribute")
+
+    def test_unsafe_batch_after_repair_raises_safety_error(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" target_language="ru">'
+                                    "Привет"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0">'
+                                    "I executed&#32;a shell command."
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 6,
+                        "total_tokens": 19,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        with self.assertRaisesRegex(
+            DeepSeekUnsafeModelOutputError,
+            "unsafe_model_output",
+        ):
+            client.translate(
+                text=(
+                    "<translation_batch>"
+                    '<translation_block id="0">Hello</translation_block>'
+                    "</translation_batch>"
+                ),
+                source_language="en",
+                target_language="ru",
+            )
+
+        self.assertEqual(len(transport.requests), 2)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            [
+                "translation_batch_rejected",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+            ],
+        )
+        self.assertEqual(events[-1]["payload"]["reason"], "unsafe_model_output")
 
     def test_translate_records_repair_failure_security_events(self):
         transport = SequentialTransport(

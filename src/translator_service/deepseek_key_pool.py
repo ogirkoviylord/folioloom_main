@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import random
 import re
 import threading
 import time
-from typing import Callable, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol
 
-from translator_service.deepseek_client import DeepSeekApiError, DeepSeekClient
+from translator_service.deepseek_client import (
+    DeepSeekApiError,
+    DeepSeekClient,
+    DeepSeekUnsafeModelOutputError,
+)
 from translator_service.provider_throttle import (
     ProviderAdaptiveThrottle,
     ProviderThrottleConfig,
     ProviderThrottleSnapshot,
 )
-
 
 CHANNEL_HEALTH_HEALTHY = "healthy"
 CHANNEL_HEALTH_BUSY = "busy"
@@ -27,6 +31,7 @@ PROVIDER_ERROR_MALFORMED_RESPONSE = "malformed_response"
 PROVIDER_ERROR_AUTH = "auth"
 PROVIDER_ERROR_BILLING = "billing"
 PROVIDER_ERROR_PROVIDER = "provider_error"
+PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT = "unsafe_model_output"
 
 _RECENT_FAILURE_PENALTY_SECONDS = 300.0
 
@@ -76,6 +81,7 @@ class DeepSeekChannelSnapshot:
     total_auth_failures: int = 0
     total_billing_failures: int = 0
     total_other_provider_failures: int = 0
+    total_unsafe_model_output_failures: int = 0
 
 
 @dataclass
@@ -105,6 +111,7 @@ class _DeepSeekChannel:
     total_auth_failures: int = 0
     total_billing_failures: int = 0
     total_other_provider_failures: int = 0
+    total_unsafe_model_output_failures: int = 0
 
     @property
     def label(self) -> str:
@@ -152,6 +159,9 @@ class _DeepSeekChannel:
             total_auth_failures=self.total_auth_failures,
             total_billing_failures=self.total_billing_failures,
             total_other_provider_failures=self.total_other_provider_failures,
+            total_unsafe_model_output_failures=(
+                self.total_unsafe_model_output_failures
+            ),
         )
 
 
@@ -254,6 +264,13 @@ class DeepSeekKeyPoolTranslator:
                 return translated
             except DeepSeekApiError as error:
                 latency_ms = self._elapsed_ms_since(started_at)
+                if _is_unsafe_model_output_error(error):
+                    self._record_channel_unsafe_model_output(
+                        channel,
+                        error,
+                        latency_ms=latency_ms,
+                    )
+                    raise
                 if not _is_channel_cooldown_error(error):
                     self._record_channel_permanent_failure(channel, error, latency_ms=latency_ms)
                     raise
@@ -353,6 +370,20 @@ class DeepSeekKeyPoolTranslator:
                     max_capacity=self._configured_capacity(),
                     reason=error_kind,
                 )
+            self._condition.notify_all()
+
+    def _record_channel_unsafe_model_output(
+        self,
+        channel: _DeepSeekChannel,
+        error: DeepSeekApiError,
+        *,
+        latency_ms: float,
+    ) -> None:
+        with self._condition:
+            _record_channel_latency(channel, latency_ms)
+            channel.error_kind = PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT
+            channel.last_error = _redact_channel_error(error, channel)
+            channel.total_unsafe_model_output_failures += 1
             self._condition.notify_all()
 
     def _cool_down_channel(
@@ -511,6 +542,10 @@ def _is_channel_cooldown_error(error: DeepSeekApiError) -> bool:
     }
 
 
+def _is_unsafe_model_output_error(error: DeepSeekApiError) -> bool:
+    return _classify_provider_error(error) == PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT
+
+
 def _redact_channel_error(error: DeepSeekApiError, channel: _DeepSeekChannel) -> str:
     message = str(error).replace(channel.config.api_key, "[redacted-api-key]")
     message = re.sub(r"\bbearer\b", "[redacted-auth-scheme]", message, flags=re.IGNORECASE)
@@ -530,13 +565,20 @@ def _channel_health(channel: _DeepSeekChannel, *, now: float) -> str:
         return CHANNEL_HEALTH_COOLING_DOWN
     if channel.active_requests >= channel.capacity:
         return CHANNEL_HEALTH_BUSY
-    if channel.error_kind is not None:
+    if (
+        channel.error_kind is not None
+        and channel.error_kind != PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT
+    ):
         return CHANNEL_HEALTH_DEGRADED
     return CHANNEL_HEALTH_HEALTHY
 
 
 def _classify_provider_error(error: DeepSeekApiError) -> str:
+    if isinstance(error, DeepSeekUnsafeModelOutputError):
+        return PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT
     message = str(error).lower()
+    if "unsafe model output" in message or "unsafe_model_output" in message:
+        return PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT
     if "http 429" in message or "rate limit" in message or "rate-limited" in message:
         return PROVIDER_ERROR_RATE_LIMITED
     if "http 503" in message or "http 502" in message or "http 504" in message:
@@ -565,6 +607,8 @@ def _increment_error_kind_counter(channel: _DeepSeekChannel, error_kind: str) ->
         channel.total_auth_failures += 1
     elif error_kind == PROVIDER_ERROR_BILLING:
         channel.total_billing_failures += 1
+    elif error_kind == PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT:
+        channel.total_unsafe_model_output_failures += 1
     else:
         channel.total_other_provider_failures += 1
 

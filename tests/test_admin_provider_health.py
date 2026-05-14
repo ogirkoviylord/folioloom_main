@@ -189,6 +189,40 @@ class AdminProviderHealthTest(unittest.TestCase):
         self.assertNotIn("Bearer", health[0].last_error_excerpt)
         self.assertNotIn(".api_keys.", health[0].last_error_excerpt)
 
+    def test_unsafe_model_output_runtime_state_does_not_degrade_provider(self):
+        health = build_provider_health(
+            (_provider(),),
+            {"deepseek": (_key(),)},
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="bot_runtime",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=datetime(2026, 5, 9, tzinfo=UTC),
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=2,
+                            health="healthy",
+                            error_kind="unsafe_model_output",
+                            last_error_excerpt=(
+                                "DeepSeek produced unsafe model output: "
+                                "tool_or_execution_claim"
+                            ),
+                            total_unsafe_model_output_failures=1,
+                        ),
+                    ),
+                    error=None,
+                ),
+            ),
+        )
+
+        self.assertEqual(health[0].status, "healthy")
+        self.assertEqual(health[0].last_validation_status, "not checked")
+        self.assertEqual(health[0].last_error_excerpt, "n/a")
+
     def test_open_provider_circuit_degrades_provider_without_exposing_secret_text(self):
         health = build_provider_health(
             (_provider(),),

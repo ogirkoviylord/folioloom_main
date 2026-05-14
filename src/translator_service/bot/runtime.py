@@ -794,6 +794,9 @@ def _runtime_channel_from_snapshot(snapshot) -> AIProviderRuntimeChannel:
         total_auth_failures=snapshot.total_auth_failures,
         total_billing_failures=snapshot.total_billing_failures,
         total_other_provider_failures=snapshot.total_other_provider_failures,
+        total_unsafe_model_output_failures=(
+            snapshot.total_unsafe_model_output_failures
+        ),
         average_latency_ms=snapshot.average_latency_ms,
         last_latency_ms=snapshot.last_latency_ms,
         error_kind=snapshot.error_kind,

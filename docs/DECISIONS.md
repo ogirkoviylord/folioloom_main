@@ -290,6 +290,48 @@ Human approval required to change:
 - yes; changes affect user-facing bot delivery, admin provider controls,
   external provider behavior and scheduler/job reliability boundaries.
 
+### 2026-05-14 - Reliability decisions: issue #31 unsafe model-output classification
+
+Status: Active
+
+Decision:
+- DeepSeek/model-output safety failures such as `tool_or_execution_claim` are
+  classified as `unsafe_model_output`, separate from API key/provider
+  infrastructure failures.
+- Unsafe model-output failures remain blocked.
+- A single unsafe model-output failure must not mark the selected provider
+  channel as `degraded`, reduce the adaptive provider limit or open the
+  provider circuit.
+- Admin/runtime diagnostics use the metadata label `unsafe_model_output`.
+- Worker/scheduler retry semantics are unchanged by this decision.
+
+Evidence:
+- GitHub issue [#31](https://github.com/ogirkoviylord/folioloom_main/issues/31)
+  documents the owner-reported provider-health symptom and desired follow-up.
+- Owner approved the classification, throttle/health semantics and admin label
+  on 2026-05-14.
+- Code behavior is covered by focused provider, admin runtime/live and
+  provider-health tests.
+
+Reason:
+- The reported failure was unsafe model output for a document/work unit, not
+  evidence that an API key, quota, auth, billing, timeout or rate-limit path was
+  broken. Operator diagnostics should remain actionable without weakening
+  model-output safety.
+
+Consequences:
+- Admin can distinguish model-output safety blocks from key/provider
+  infrastructure failures.
+- Real provider outages still need to reduce capacity or degrade health through
+  their existing auth, billing, 429, timeout, unavailable or malformed-response
+  paths.
+- Repeated unsafe outputs and any chunking/repair/retry strategy changes remain
+  out of scope until separately approved.
+
+Human approval required to change:
+- yes; this affects external provider behavior, admin diagnostics and safety
+  classification.
+
 ### 2026-05-10 - Testing approach: local gates first, minimal CI workflow present
 
 Status: Active

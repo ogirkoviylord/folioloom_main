@@ -305,6 +305,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
                         max_parallel_requests=2,
                         active_requests=0,
                         health="cooling_down",
+                        total_unsafe_model_output_failures=3,
                     ),
                 ),
                 provider_state=AIProviderRuntimeProviderState(
@@ -332,6 +333,7 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(resources["parallel_capacity"], 4)
         self.assertEqual(resources["available_provider_slots"], 2)
         self.assertEqual(resources["cooling_down_channels"], 1)
+        self.assertEqual(resources["unsafe_model_output_failures"], 3)
 
     def test_recent_runs_only_include_active_or_transitioning_runs(self):
         with TemporaryDirectory() as temp_dir:

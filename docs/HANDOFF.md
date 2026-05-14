@@ -107,7 +107,9 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/ai_provider_runtime.py`,
   `src/translator_service/provider_throttle.py`, related provider tests;
   PR #39 added worker/scheduler provider-failure regression coverage and safe
-  retry metadata checks.
+  retry metadata checks; issue #31 implementation classifies unsafe
+  model-output failures as `unsafe_model_output` without degrading provider
+  channels or reducing adaptive capacity.
 - Confidence: high.
 
 - Feature / component: SSH-tunneled FastAPI admin console.
@@ -229,14 +231,16 @@ Potential issues to verify:
 - Suggested fix task: Reviewer produces Gate B evidence report with pass/fail,
   deferrals and owner go/no-go.
 
-- Problem: Provider safety-triggering output can still leave provider channels
+- Problem: Provider safety-triggering output could leave provider channels
   degraded.
 - Evidence: GitHub issue
-  [#31](https://github.com/ogirkoviylord/folioloom_main/issues/31) remains open.
-- Impact: provider capacity/reliability may still require follow-up outside
-  issue #30.
-- Suggested fix task: handle #31 as a separate risky provider reliability bug
-  with Architect/Reviewer gates.
+  [#31](https://github.com/ogirkoviylord/folioloom_main/issues/31); owner
+  approved `unsafe_model_output` semantics on 2026-05-14.
+- Impact: issue #31 separates unsafe model-output failures from key/provider
+  infrastructure failures, but repeated safety failure retry strategy remains
+  TBD.
+- Suggested fix task: Reviewer verifies issue #31 diff, focused tests, redaction
+  behavior and no worker/scheduler retry change.
 
 - Problem: Full current test status is Unknown for this handoff update.
 - Evidence: this task was docs-only and did not run the full suite.

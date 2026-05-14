@@ -900,6 +900,9 @@ def _provider_processing_summary(runtime: AIProviderRuntimeStatus | None) -> str
         auth_count = sum(channel.total_auth_failures for channel in channels)
         billing_count = sum(channel.total_billing_failures for channel in channels)
         timeout_count = sum(channel.total_timeout_failures for channel in channels)
+        unsafe_model_output_count = sum(
+            channel.total_unsafe_model_output_failures for channel in channels
+        )
         provider_state = runtime.provider_state
         adaptive_state = "on" if provider_state.adaptive_enabled else "off"
         cards = (
@@ -930,6 +933,14 @@ def _provider_processing_summary(runtime: AIProviderRuntimeStatus | None) -> str
                 "Cooling/degraded channels",
                 str(degraded_channels),
                 "Channels slowed or degraded by recent provider signals.",
+            ),
+            (
+                "Unsafe model outputs",
+                str(unsafe_model_output_count),
+                (
+                    "Model-output safety blocks from translated fragments; "
+                    "these do not mean a provider key is broken."
+                ),
             ),
             (
                 "Provider warning counts",
@@ -978,12 +989,13 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
         f"{channel.total_permanent_failures}"
     )
     failure_counters = (
-        "429/503/timeout/auth/billing "
+        "429/503/timeout/auth/billing/unsafe "
         f"{channel.total_rate_limit_failures}/"
         f"{channel.total_unavailable_failures}/"
         f"{channel.total_timeout_failures}/"
         f"{channel.total_auth_failures}/"
-        f"{channel.total_billing_failures}"
+        f"{channel.total_billing_failures}/"
+        f"{channel.total_unsafe_model_output_failures}"
     )
     return f"""
           <div class="key-row">
@@ -2075,6 +2087,7 @@ def _live_runtime_cards(
     degraded_channels = 0
     rate_limit_count = 0
     timeout_count = 0
+    unsafe_model_output_count = 0
     adaptive_limit = "n/a"
     provider_circuit = "not reporting"
     available_provider_slots = "n/a"
@@ -2089,6 +2102,10 @@ def _live_runtime_cards(
         )
         timeout_count = sum(
             channel.total_timeout_failures for channel in status.active_channels
+        )
+        unsafe_model_output_count = sum(
+            channel.total_unsafe_model_output_failures
+            for channel in status.active_channels
         )
         adaptive_limit = (
             f"{status.provider_state.current_limit}/"
@@ -2110,6 +2127,7 @@ def _live_runtime_cards(
         ("Degraded channels", str(degraded_channels)),
         ("429 count", str(rate_limit_count)),
         ("Timeout count", str(timeout_count)),
+        ("Unsafe model outputs", str(unsafe_model_output_count)),
         ("Adaptive limit", adaptive_limit),
         ("Provider circuit", provider_circuit),
         ("Available provider slots", available_provider_slots),
