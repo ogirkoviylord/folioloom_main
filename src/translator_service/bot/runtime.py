@@ -1292,7 +1292,7 @@ def create_router(
                     else None
                 ),
             )
-            await _send_translation_result_document(callback.message, job)
+            await _send_translation_result_document_once(callback.message, job, service)
         elif book is not None:
             await _edit_callback_message(
                 callback.message,
@@ -1669,7 +1669,11 @@ def create_router(
                     ),
                     reply_markup=None,
                 )
-                await _send_translation_result_document(callback.message, result.job)
+                await _send_translation_result_document_once(
+                    callback.message,
+                    result.job,
+                    service,
+                )
             return
 
         await callback.answer(
@@ -2407,7 +2411,7 @@ async def _run_confirm_pending_translation(
         reply_markup=None,
     )
     if job.result_file_name and job.result_content:
-        await _send_translation_result_document(message, job)
+        await _send_translation_result_document_once(message, job, service)
 
 
 async def _confirm_pending_upload_rights(
@@ -2642,7 +2646,7 @@ async def _resume_user_book_translation(
         ),
     )
     if job.result_file_name and job.result_content:
-        await _send_translation_result_document(message, job)
+        await _send_translation_result_document_once(message, job, service)
 
 
 async def _cancel_active_translation(
@@ -2660,12 +2664,28 @@ async def _cancel_active_translation(
                     interface_language=interface_language,
                 )
             )
-            await _send_translation_result_document(message, result.job)
+            await _send_translation_result_document_once(message, result.job, service)
         else:
             await message.answer(build_cancel_requested_message(interface_language))
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+async def _send_translation_result_document_once(
+    message,
+    job: TranslationJob,
+    service: BotTranslationService,
+) -> None:
+    if not service.begin_automatic_result_delivery(job):
+        return
+
+    delivered = False
+    try:
+        await _send_translation_result_document(message, job)
+        delivered = True
+    finally:
+        service.finish_automatic_result_delivery(job, delivered=delivered)
 
 
 async def _send_translation_result_document(message, job: TranslationJob) -> None:

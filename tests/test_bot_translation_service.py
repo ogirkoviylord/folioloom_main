@@ -33,6 +33,7 @@ from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
+    TranslationJob,
     TranslationJobStatus,
 )
 from translator_service.persistent_jobs import (
@@ -289,6 +290,80 @@ class BotTranslationServiceTest(unittest.TestCase):
             ),
             75,
         )
+
+    def test_tracks_successful_automatic_result_delivery_once_per_job_result(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+        updated_result = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.READY,
+            result_file_name="book.uk.txt",
+            result_content=b"[uk] First. Done.",
+        )
+
+        self.assertTrue(service.begin_automatic_result_delivery(job))
+        self.assertFalse(service.begin_automatic_result_delivery(job))
+        service.finish_automatic_result_delivery(job, delivered=True)
+        self.assertFalse(service.begin_automatic_result_delivery(job))
+        self.assertTrue(service.begin_automatic_result_delivery(updated_result))
+        service.finish_automatic_result_delivery(updated_result, delivered=True)
+        self.assertFalse(
+            service.begin_automatic_result_delivery(
+                TranslationJob(
+                    id="job-2",
+                    user_telegram_id=42,
+                    file_name="empty.txt",
+                    content=b"",
+                    source_language="en",
+                    target_language="uk",
+                    status=TranslationJobStatus.CANCELLED,
+                )
+            )
+        )
+
+    def test_failed_automatic_result_delivery_releases_retry(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            result_file_name="book.uk.partial.txt",
+            result_content=b"[uk] First.",
+        )
+
+        self.assertTrue(service.begin_automatic_result_delivery(job))
+        self.assertFalse(service.begin_automatic_result_delivery(job))
+        service.finish_automatic_result_delivery(job, delivered=False)
+        self.assertTrue(service.begin_automatic_result_delivery(job))
 
     def test_prepares_txt_estimate_for_uploaded_document(self):
         service = BotTranslationService(
@@ -2641,7 +2716,9 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             self.assertEqual(run_snapshot["error_message"], "Book cancelled by user.")
 
-    def test_cancel_translation_after_restart_without_fragments_keeps_result_empty(self):
+    def test_cancel_translation_after_restart_without_fragments_keeps_result_empty(
+        self,
+    ):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
             persistent_store = SQLiteTranslationJobStore(
