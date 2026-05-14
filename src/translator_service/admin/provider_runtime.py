@@ -29,6 +29,7 @@ class AIProviderRuntimeChannel:
     total_auth_failures: int = 0
     total_billing_failures: int = 0
     total_other_provider_failures: int = 0
+    total_unsafe_model_output_failures: int = 0
     average_latency_ms: float | None = None
     last_latency_ms: float | None = None
     error_kind: str | None = None
@@ -60,6 +61,8 @@ class AIProviderRuntimeChannel:
             f"total_billing_failures={self.total_billing_failures!r}, "
             "total_other_provider_failures="
             f"{self.total_other_provider_failures!r}, "
+            "total_unsafe_model_output_failures="
+            f"{self.total_unsafe_model_output_failures!r}, "
             f"average_latency_ms={self.average_latency_ms!r}, "
             f"last_latency_ms={self.last_latency_ms!r}, "
             f"error_kind={error_kind!r}, "
@@ -234,6 +237,11 @@ class SQLiteAIProviderRuntimeStore:
                     ),
                     "total_other_provider_failures": _int_at_least(
                         channel.total_other_provider_failures,
+                        minimum=0,
+                        default=0,
+                    ),
+                    "total_unsafe_model_output_failures": _int_at_least(
+                        channel.total_unsafe_model_output_failures,
                         minimum=0,
                         default=0,
                     ),
@@ -629,6 +637,11 @@ def _channel_from_payload(item: object) -> AIProviderRuntimeChannel:
         ),
         total_other_provider_failures=_int_at_least(
             payload.get("total_other_provider_failures", 0),
+            minimum=0,
+            default=0,
+        ),
+        total_unsafe_model_output_failures=_int_at_least(
+            payload.get("total_unsafe_model_output_failures", 0),
             minimum=0,
             default=0,
         ),

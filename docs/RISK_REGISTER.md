@@ -33,7 +33,7 @@
 | R-016 | Admin auth/security is sensitive and tunnel-only | Security / Auth | High | `admin/auth.py`, `admin/rbac.py`, `docker-compose.yml` binds `127.0.0.1:62062`, docs say SSH tunnel only | Public exposure or auth weakening can compromise admin/runtime data | No bind/auth/RBAC changes without approval; keep SSH tunnel model until Gate D | Human / Architect | Open |
 | R-017 | Permissions/RBAC model may be foundation-only | Security | Medium | `admin/rbac.py`, `admin/auth.py`, docs call owner/admin console closed-beta and SSH-only | Future named admins or public exposure could need stronger access policy | Treat public/named-admin changes as High; require security review | Architect / Human | Unknown |
 | R-018 | Secrets and env files exist locally | Security / Secrets | Critical | Root contains real `.env`, `.env.dev`, `.env.beta`; `.env.server.example` placeholders; `admin/secrets.py` encrypts admin secrets | Reading, logging or editing secrets can expose Telegram, DeepSeek, admin or Postgres credentials | Do not read/modify real `.env*`; use examples only; rotate if exposure suspected | Human | Open |
-| R-019 | External integrations can fail or create cost/auth/billing incidents | External integrations | High | `deepseek_client.py`, `deepseek_key_pool.py`, provider runtime/admin docs; telemetry includes auth/billing counters | Translation failures, provider circuit open, cost spikes, key leakage | Keep provider details internal; review safe diagnostics; use caps/kill switch | Architect / Reviewer | Open |
+| R-019 | External integrations can fail or create cost/auth/billing incidents | External integrations | High | `deepseek_client.py`, `deepseek_key_pool.py`, provider runtime/admin docs; telemetry includes auth/billing counters; issue #31 separates `unsafe_model_output` from key/provider failures | Translation failures, provider circuit open, cost spikes, key leakage, misleading provider health | Keep provider details internal; classify unsafe model output separately; review safe diagnostics; use caps/kill switch | Architect / Reviewer | Open |
 | R-020 | User data includes uploaded documents and generated results | Privacy / User data | Critical | README describes source/intermediate/partial/final storage; `var/`; backup/restore docs | Privacy breach or loss of user files | User-data handling/retention/backups need approval, tests and rollback | Human / Architect | Open |
 | R-021 | Legal/privacy/AUP/refund/support text is not production-ready | Privacy / Legal | High | Gate D unchecked: legal/privacy/AUP/refund docs; `docs/DECISIONS.md` says public production not ready | Agents may invent policy or public claims | Use TBD/Unknown; owner/counsel approval before public/legal copy | Human / Scribe | Needs decision |
 | R-022 | Consent/rights confirmation must not be weakened | Legal / Product | High | README and `docs/DECISIONS.md` require authorized documents and rights confirmation | Legal risk if users translate unauthorized files without explicit confirmation | Bot/upload flow changes must preserve rights confirmation and tests | Reviewer / Architect | Open |
@@ -85,6 +85,9 @@
 - Env files: Critical for real env files; example env files are documentation/config references only.
 - User data: Critical; uploaded documents, generated files, runtime DBs and logs are sensitive.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
+  Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
+  model-output failures as `unsafe_model_output` rather than auth, billing, 429,
+  timeout, unavailable or malformed provider failures.
 
 ### Privacy/legal risks
 

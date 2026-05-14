@@ -2714,6 +2714,7 @@ class AdminRoutesTest(unittest.TestCase):
                             total_timeout_failures=4,
                             total_auth_failures=1,
                             total_billing_failures=0,
+                            total_unsafe_model_output_failures=5,
                             average_latency_ms=123.45,
                             last_latency_ms=150.0,
                             error_kind="rate_limit",
@@ -2766,6 +2767,8 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Adaptive limit", page.text)
             self.assertIn("1/3 (on)", page.text)
             self.assertIn("Cooling/degraded channels", page.text)
+            self.assertIn("Unsafe model outputs", page.text)
+            self.assertIn("these do not mean a provider key is broken", page.text)
             self.assertIn("Provider warning counts", page.text)
             self.assertIn("429 2 / auth 1 / billing 0 / timeout 4", page.text)
             self.assertIn("admin_store", page.text)
@@ -2779,7 +2782,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("cooldown 9s", page.text)
             self.assertIn("latency 150.0ms", page.text)
             self.assertIn("started/ok/temp/perm 11/7/3/1", page.text)
-            self.assertIn("429/503/timeout/auth/billing 2/1/4/1/0", page.text)
+            self.assertIn("429/503/timeout/auth/billing/unsafe 2/1/4/1/0/5", page.text)
             self.assertIn("rate_limit", page.text)
             self.assertIn("Adaptive throttle", page.text)
             self.assertIn("circuit open", page.text)
@@ -2829,6 +2832,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(channel_payload["total_timeout_failures"], 4)
             self.assertEqual(channel_payload["total_auth_failures"], 1)
             self.assertEqual(channel_payload["total_billing_failures"], 0)
+            self.assertEqual(channel_payload["total_unsafe_model_output_failures"], 5)
             self.assertEqual(channel_payload["average_latency_ms"], 123.45)
             self.assertEqual(channel_payload["last_latency_ms"], 150.0)
             self.assertEqual(channel_payload["error_kind"], "rate_limit")
@@ -2853,6 +2857,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("admin_store", live_page.text)
             self.assertIn("Reload pending", live_page.text)
             self.assertIn("Degraded channels", live_page.text)
+            self.assertIn("Unsafe model outputs", live_page.text)
             self.assertIn("429 count", live_page.text)
             self.assertIn("Timeout count", live_page.text)
             self.assertIn("Adaptive limit", live_page.text)
@@ -2920,6 +2925,7 @@ class AdminRoutesTest(unittest.TestCase):
             )
             self.assertIn("2/2 (on)", page.text)
             self.assertIn("Cooling/degraded channels", page.text)
+            self.assertIn("Unsafe model outputs", page.text)
             self.assertIn("Provider warning counts", page.text)
             self.assertIn("429 0 / auth 0 / billing 0 / timeout 0", page.text)
             self.assertIn("not controls", page.text)

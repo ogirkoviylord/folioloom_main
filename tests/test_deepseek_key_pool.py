@@ -1,13 +1,18 @@
 import threading
 import unittest
 
-from translator_service.deepseek_client import DeepSeekApiError
+from translator_service.deepseek_client import (
+    DeepSeekApiError,
+    DeepSeekUnsafeModelOutputError,
+)
 from translator_service.deepseek_key_pool import (
     CHANNEL_HEALTH_COOLING_DOWN,
+    CHANNEL_HEALTH_HEALTHY,
+    PROVIDER_ERROR_RATE_LIMITED,
+    PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT,
     DeepSeekChannelConfig,
     DeepSeekChannelSnapshot,
     DeepSeekKeyPoolTranslator,
-    PROVIDER_ERROR_RATE_LIMITED,
 )
 from translator_service.provider_throttle import ProviderThrottleConfig
 
@@ -121,6 +126,107 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertIn("HTTP 400", first.last_error or "")
         self.assertNotIn("key-a", first.last_error or "")
         self.assertEqual(second.total_started_requests, 0)
+
+    def test_unsafe_model_output_does_not_degrade_channel_or_throttle(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": [DeepSeekUnsafeModelOutputError("tool_or_execution_claim")],
+                "key-b": ["should-not-run"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            throttle_config=ProviderThrottleConfig(
+                enabled=True,
+                initial_parallel=2,
+                min_parallel=1,
+                circuit_failure_threshold=1,
+                circuit_reset_seconds=60.0,
+            ),
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+
+        with self.assertRaisesRegex(
+            DeepSeekUnsafeModelOutputError,
+            "tool_or_execution_claim",
+        ):
+            pool.translate(text="source", source_language="en", target_language="uk")
+
+        first, second = pool.snapshot()
+        provider_snapshot = pool.provider_snapshot()
+        self.assertEqual(factory.calls, [("key-a", "source")])
+        self.assertEqual(first.total_started_requests, 1)
+        self.assertEqual(first.total_temporary_failures, 0)
+        self.assertEqual(first.total_permanent_failures, 0)
+        self.assertEqual(first.total_other_provider_failures, 0)
+        self.assertEqual(first.total_unsafe_model_output_failures, 1)
+        self.assertEqual(first.consecutive_temporary_failures, 0)
+        self.assertEqual(first.health, CHANNEL_HEALTH_HEALTHY)
+        self.assertEqual(first.error_kind, PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT)
+        self.assertIsNone(first.last_failure_at)
+        self.assertEqual(first.cooldown_remaining_seconds, 0.0)
+        self.assertIn("unsafe model output", first.last_error or "")
+        self.assertEqual(second.total_started_requests, 0)
+        self.assertEqual(provider_snapshot.current_limit, 2)
+        self.assertEqual(provider_snapshot.available_slots, 2)
+        self.assertEqual(provider_snapshot.circuit_state, "closed")
+        self.assertIsNone(provider_snapshot.last_reason)
+
+    def test_legacy_unsafe_output_message_does_not_degrade_or_throttle(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError(
+                        "DeepSeek produced invalid translation batch contract "
+                        "after repair: unsafe_model_output"
+                    )
+                ],
+                "key-b": ["should-not-run"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            throttle_config=ProviderThrottleConfig(
+                enabled=True,
+                initial_parallel=2,
+                min_parallel=1,
+                circuit_failure_threshold=1,
+                circuit_reset_seconds=60.0,
+            ),
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+
+        with self.assertRaisesRegex(DeepSeekApiError, "unsafe_model_output"):
+            pool.translate(text="source", source_language="en", target_language="uk")
+
+        first, second = pool.snapshot()
+        provider_snapshot = pool.provider_snapshot()
+        self.assertEqual(factory.calls, [("key-a", "source")])
+        self.assertEqual(first.total_started_requests, 1)
+        self.assertEqual(first.total_temporary_failures, 0)
+        self.assertEqual(first.total_permanent_failures, 0)
+        self.assertEqual(first.total_other_provider_failures, 0)
+        self.assertEqual(first.total_unsafe_model_output_failures, 1)
+        self.assertEqual(first.consecutive_temporary_failures, 0)
+        self.assertEqual(first.health, CHANNEL_HEALTH_HEALTHY)
+        self.assertEqual(first.error_kind, PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT)
+        self.assertIsNone(first.last_failure_at)
+        self.assertEqual(first.cooldown_remaining_seconds, 0.0)
+        self.assertEqual(second.total_started_requests, 0)
+        self.assertEqual(provider_snapshot.current_limit, 2)
+        self.assertEqual(provider_snapshot.available_slots, 2)
+        self.assertEqual(provider_snapshot.circuit_state, "closed")
+        self.assertIsNone(provider_snapshot.last_reason)
 
     def test_temporary_error_records_cooldown_and_fails_over(self):
         factory = RecordingClientFactory(

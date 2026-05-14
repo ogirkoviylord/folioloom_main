@@ -168,9 +168,12 @@ keys, separate documents can progress concurrently.
 
 The AI Providers admin page reports DeepSeek runtime channel health without
 secrets or document text: active requests, per-key capacity, cooldown,
-429/503/timeout/auth/billing counters, latency and a redacted last error. A
-degraded channel does not disable the key automatically in Phase 2; it lowers
-selection priority and remains visible for operator action.
+429/503/timeout/auth/billing counters, unsafe model-output safety blocks,
+latency and a redacted last error. Unsafe model-output failures such as
+`tool_or_execution_claim` remain blocked but are shown as `unsafe_model_output`
+instead of key/provider infrastructure failures. A degraded channel does not
+disable the key automatically in Phase 2; it lowers selection priority and
+remains visible for operator action.
 
 Phase 3 adaptive provider throttling starts each runtime conservatively and
 ramps DeepSeek concurrency after clean successes. 429/503/timeouts decrease the
