@@ -663,6 +663,33 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(pending.rights_confirmation_source, "telegram_button")
         self.assertIsNotNone(pending.rights_confirmed_at)
 
+    def test_can_restore_pending_translation_to_language_selection(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"This is an English document.",
+            source_language="auto",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        service.prepare_pending_upload(
+            user_telegram_id=42,
+            target_language="uk",
+        )
+
+        restored = service.restore_pending_translation_upload(user_telegram_id=42)
+
+        self.assertIsNotNone(restored)
+        self.assertIsNone(service.get_pending(42))
+        self.assertIsNotNone(service.get_pending_upload(42))
+        self.assertTrue(restored.rights_confirmed)
+        self.assertEqual(restored.file_name, "notes.txt")
+
     def test_upload_can_be_persisted_to_object_storage_before_estimate(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))

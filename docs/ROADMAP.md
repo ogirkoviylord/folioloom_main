@@ -107,7 +107,10 @@ Tasks:
   automatic result delivery idempotency, paused admin bulk key tests during
   active translations/provider requests, and added worker/scheduler
   provider-failure regression coverage with safe retry metadata.
-- Закрыть или явно отложить free preview before full translation.
+- Закрыть или явно отложить free preview before full translation. Confirmed
+  progress: issues #51 and #52 are merged; issue #53 branch wires Telegram
+  preview display and Continue/Back controls. Remaining blocker: issue #54 must
+  enforce preview acceptance before full translation can start.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine
@@ -319,13 +322,14 @@ Acceptance criteria:
   Suggested acceptance criteria: every Gate B item is pass/fail/deferred with
   evidence links and no production readiness claims.
 
-- Task: Decide and implement or defer free preview.
+- Task: Finish free preview guard and evidence.
   Phase: 1
   Priority: High
   Risk: Medium
   Agent suitability: needs architect
-  Suggested acceptance criteria: full translation cannot start before preview
-  and explicit confirmation, or owner signs a deferral.
+  Suggested acceptance criteria: issue #54 is implemented and reviewed so full
+  translation cannot start before preview and explicit confirmation, or owner
+  signs a deferral.
 
 - Task: Verify upload hardening/quarantine baseline.
   Phase: 1

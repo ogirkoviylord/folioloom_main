@@ -859,6 +859,39 @@ class BotTranslationService:
             removed_upload = self._pending_uploads.pop(user_telegram_id, None)
         return removed_pending is not None or removed_upload is not None
 
+    def restore_pending_translation_upload(
+        self,
+        *,
+        user_telegram_id: int,
+    ) -> PendingUpload | None:
+        with self._state_lock:
+            pending = self._pending.pop(user_telegram_id, None)
+            if pending is None:
+                return None
+            upload_info = validate_document_upload(
+                file_name=pending.file_name,
+                size_bytes=len(pending.content),
+                max_upload_mb=self._max_upload_mb,
+            )
+            upload = PendingUpload(
+                user_telegram_id=pending.user_telegram_id,
+                file_name=pending.file_name,
+                content=pending.content,
+                source_language=pending.source_language,
+                document_kind=(
+                    _document_kind_from_format(upload_info.document_format)
+                    or DocumentKind.TXT
+                ),
+                source_language_display=pending.source_language_display,
+                source_object_key=pending.source_object_key,
+                rights_confirmed=pending.rights_confirmed,
+                rights_confirmed_at=pending.rights_confirmed_at,
+                rights_confirmation_version=pending.rights_confirmation_version,
+                rights_confirmation_source=pending.rights_confirmation_source,
+            )
+            self._pending_uploads[user_telegram_id] = upload
+            return upload
+
     def set_interface_language(
         self, *, user_telegram_id: int, language_code: str
     ) -> None:

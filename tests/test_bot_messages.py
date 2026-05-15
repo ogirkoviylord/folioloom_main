@@ -2,49 +2,57 @@ import unittest
 from importlib.util import find_spec
 
 from translator_service.bot.messages import (
-    CONFIRM_TRANSLATION_TEXT,
-    build_help_message,
-    build_how_it_works_message,
     build_back_to_menu_message,
     build_cancel_requested_message,
+    build_help_message,
+    build_how_it_works_message,
     build_language_selected_message,
     build_language_selection_message,
-    build_translation_language_selection_message,
     build_main_menu,
+    build_my_book_detail_message,
+    build_my_books_message,
     build_nothing_to_cancel_message,
     build_order_estimate_message,
     build_pending_translation_message,
+    build_preview_translation_message,
     build_rights_confirmation_message,
-    build_start_message,
     build_settings_message,
-    build_my_books_message,
-    build_my_book_detail_message,
-    build_upload_prompt_message,
-    build_translation_progress_message,
+    build_start_message,
     build_translation_job_status_message,
+    build_translation_language_selection_message,
+    build_translation_progress_message,
     build_unknown_text_message,
-    get_progress_activity_phrase,
+    build_upload_prompt_message,
     get_back_text,
     get_cancel_text,
     get_confirm_rights_text,
     get_main_menu_text,
+    get_progress_activity_phrase,
     get_toggle_progress_preview_text,
-    is_my_books_text,
     is_back_text,
     is_cancel_text,
-    is_confirm_translation_text,
     is_confirm_rights_text,
+    is_confirm_translation_text,
+    is_continue_translation_text,
     is_help_text,
     is_how_it_works_text,
     is_language_menu_text,
     is_main_menu_text,
+    is_my_books_text,
     is_settings_text,
     is_toggle_progress_preview_text,
     is_translate_book_text,
 )
-from translator_service.bot_translation_service import PendingTranslation
+from translator_service.bot_translation_service import (
+    PendingTranslation,
+    PreviewTranslation,
+)
 from translator_service.documents import DocumentFormat
-from translator_service.job_runner import TranslationJob, TranslationJobStatus
+from translator_service.job_runner import (
+    DocumentKind,
+    TranslationJob,
+    TranslationJobStatus,
+)
 from translator_service.order_estimates import OrderEstimate
 
 
@@ -583,6 +591,36 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("To: French", message)
         self.assertIn("Estimated time: 24 sec", message)
         self.assertIn("Start Translation", message)
+
+    def test_preview_translation_message_shows_snippet_and_free_beta_placeholder(self):
+        message = build_preview_translation_message(
+            PreviewTranslation(
+                preview_id="preview:42:abc",
+                user_telegram_id=42,
+                file_name="notes.txt",
+                document_kind=DocumentKind.TXT,
+                source_language="en",
+                target_language="ru",
+                text="Translated <sample>",
+                prompt_tokens=10,
+                completion_tokens=5,
+                estimated_cost_usd=0.01,
+                beta_safety_reason_code=None,
+                metadata={},
+            ),
+            interface_language="ru",
+        )
+
+        self.assertIn("Предпросмотр перевода", message)
+        self.assertIn("Стоимость: ???", message)
+        self.assertIn("<blockquote>Translated &lt;sample&gt;</blockquote>", message)
+        self.assertNotIn("$", message)
+        self.assertNotIn("Оплатить", message)
+
+    def test_continue_translation_text_accepts_localized_buttons(self):
+        self.assertTrue(is_continue_translation_text("Continue Translation"))
+        self.assertTrue(is_continue_translation_text("Продолжить перевод"))
+        self.assertFalse(is_continue_translation_text("Start Translation"))
 
     def test_translation_language_selection_message_shows_detected_source_language(self):
         message = build_translation_language_selection_message(

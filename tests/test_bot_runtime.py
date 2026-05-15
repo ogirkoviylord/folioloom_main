@@ -40,6 +40,7 @@ from translator_service.bot.runtime import (
     _next_heartbeat_frame,
     _next_spinner_frame,
     _polled_progress_estimated_total_seconds,
+    _prepare_and_send_translation_preview,
     _print_translation_progress,
     _print_translation_progress_update,
     _print_translation_summary,
@@ -57,7 +58,10 @@ from translator_service.bot.runtime import (
     build_default_pricing_rules,
     build_translation_service,
 )
-from translator_service.bot_translation_service import UserBookResult
+from translator_service.bot_translation_service import (
+    PreviewTranslationError,
+    UserBookResult,
+)
 from translator_service.config import Settings
 from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
@@ -191,6 +195,21 @@ class _RuntimeRecordingTranslator:
     ) -> str:
         self.requests.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
+
+
+class _RuntimeFailingTranslator:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str, str]] = []
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.requests.append((text, source_language, target_language))
+        raise RuntimeError("provider unavailable")
 
 
 class _QueuedThenReadyService:
@@ -555,6 +574,151 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Choose the target language", message.answers[1][0])
         self.assertTrue(service.get_pending_upload(42).rights_confirmed)
         self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+
+    async def test_language_choice_shows_preview_without_creating_job(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph for preview.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+
+        await _prepare_and_send_translation_preview(
+            message=message,
+            service=service,
+            translator=translator,
+            target_language="uk",
+            interface_language="en",
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+        self.assertIsNotNone(service.get_pending(42))
+        self.assertIsNone(service.get_pending_upload(42))
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("Translation preview", message.answers[0][0])
+        self.assertIn("[uk] One meaningful paragraph", message.answers[0][0])
+        self.assertIn("Cost: ???", message.answers[0][0])
+        keyboard_texts = [
+            button.text
+            for row in message.answers[0][1].keyboard
+            for button in row
+        ]
+        self.assertEqual(keyboard_texts, ["Continue Translation", "Back"])
+
+    async def test_preview_failure_restores_language_selection_state(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph for preview.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        translator = _RuntimeFailingTranslator()
+
+        with self.assertRaises(PreviewTranslationError):
+            await _prepare_and_send_translation_preview(
+                message=RecordingMessage(),
+                service=service,
+                translator=translator,
+                target_language="uk",
+                interface_language="en",
+            )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertIsNone(service.get_pending(42))
+        restored_upload = service.get_pending_upload(42)
+        self.assertIsNotNone(restored_upload)
+        self.assertTrue(restored_upload.rights_confirmed)
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+
+    async def test_continue_after_preview_starts_translation(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph for preview.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+
+        await _prepare_and_send_translation_preview(
+            message=message,
+            service=service,
+            translator=translator,
+            target_language="uk",
+            interface_language="en",
+        )
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+        )
+
+        self.assertEqual(len(translator.requests), 2)
+        self.assertIsNone(service.get_pending(42))
+        self.assertEqual(len(message.documents), 1)
+        rendered_text = "\n".join(answer[0] for answer in message.answers)
+        self.assertNotIn("paid", rendered_text.lower())
+        self.assertNotIn("Оплатить", rendered_text)
+
+    async def test_cancel_button_discards_pending_preview_without_starting_job(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph.",
+            source_language="en",
+            target_language="uk",
+        )
+        message = RecordingMessage()
+
+        await _cancel_active_translation(message=message, service=service)
+
+        self.assertIsNone(service.get_pending(42))
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+        self.assertEqual(len(message.answers), 2)
+        self.assertIn("Returning to the Main menu", message.answers[0][0])
 
     async def test_resume_translation_sends_progress_message_for_queued_job(self):
         message = RecordingMessage()
