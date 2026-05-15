@@ -44,6 +44,7 @@ from translator_service.bot.messages import (
     build_no_pending_translation_message,
     build_nothing_to_cancel_message,
     build_pending_translation_message,
+    build_preview_translation_message,
     build_rights_confirmation_message,
     build_settings_message,
     build_settings_reset_message,
@@ -74,6 +75,7 @@ from translator_service.bot.messages import (
     is_cancel_text,
     is_confirm_rights_text,
     is_confirm_translation_text,
+    is_continue_translation_text,
     is_help_text,
     is_how_it_works_text,
     is_language_menu_text,
@@ -86,6 +88,7 @@ from translator_service.bot.messages import (
 )
 from translator_service.bot_translation_service import (
     BotTranslationService,
+    PreviewTranslationError,
     RightsConfirmationRequired,
 )
 from translator_service.config import Settings
@@ -1543,13 +1546,17 @@ def create_router(
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
             try:
-                pending = service.prepare_pending_upload(
-                    user_telegram_id=message.from_user.id,
+                await _prepare_and_send_translation_preview(
+                    message=message,
+                    service=service,
+                    translator=translator,
                     target_language=language_option.code,
+                    interface_language=interface_language,
                 )
             except (
                 BetaAccessDenied,
                 DocumentEstimationNotReadyError,
+                PreviewTranslationError,
                 RightsConfirmationRequired,
                 SecurityCooldownActive,
                 TextExtractionError,
@@ -1571,14 +1578,6 @@ def create_router(
                     build_upload_error_message(error, interface_language)
                 )
                 return
-
-            await message.answer(
-                build_pending_translation_message(
-                    pending,
-                    interface_language=interface_language,
-                ),
-                reply_markup=_confirm_keyboard(interface_language, include_back=True),
-            )
             return
 
         service.set_interface_language(
@@ -1687,6 +1686,19 @@ def create_router(
     @router.message(F.text.func(is_back_text))
     async def back_text(message: Message) -> None:
         interface_language = service.get_interface_language(message.from_user.id)
+        restored_upload = service.restore_pending_translation_upload(
+            user_telegram_id=message.from_user.id,
+        )
+        if restored_upload is not None and restored_upload.rights_confirmed:
+            await message.answer(
+                build_translation_language_selection_message(
+                    restored_upload.file_name,
+                    interface_language=interface_language,
+                    source_language_display=restored_upload.source_language_display,
+                ),
+                reply_markup=_target_language_keyboard(interface_language),
+            )
+            return
         service.discard_pending_translation(message.from_user.id)
         await message.answer(build_back_to_menu_message(interface_language))
         await message.answer(
@@ -1702,6 +1714,22 @@ def create_router(
             action="clicked",
             target_type="button",
             target_id="confirm_translation",
+        )
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=translator,
+            action_guard=user_action_guard,
+        )
+
+    @router.message(F.text.func(is_continue_translation_text))
+    async def continue_translation_text(message: Message) -> None:
+        record_message_activity(
+            message,
+            event_type="bot.button.clicked",
+            action="clicked",
+            target_type="button",
+            target_id="continue_translation",
         )
         await _confirm_pending_translation(
             message=message,
@@ -1729,7 +1757,7 @@ def create_router(
                         interface_language=interface_language,
                         source_language_display=pending_upload.source_language_display,
                     ),
-                    reply_markup=_target_language_keyboard(),
+                    reply_markup=_target_language_keyboard(interface_language),
                 )
             else:
                 await message.answer(
@@ -2061,20 +2089,46 @@ def _interface_language_keyboard():
     return _language_keyboard()
 
 
-def _target_language_keyboard():
-    return _language_keyboard()
+def _target_language_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    keyboard = _language_keyboard_rows()
+    keyboard.append([KeyboardButton(text=get_cancel_text(interface_language))])
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+    )
 
 
 def _language_keyboard():
+    from aiogram.types import ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=_language_keyboard_rows(),
+        resize_keyboard=True,
+    )
+
+
+def _preview_keyboard(interface_language: str = "en"):
     from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=language.button_text)]
-            for language in SUPPORTED_TARGET_LANGUAGES
+            [KeyboardButton(text=get_continue_translation_text(interface_language))],
+            [KeyboardButton(text=get_back_text(interface_language))],
         ],
         resize_keyboard=True,
+        one_time_keyboard=True,
     )
+
+
+def _language_keyboard_rows():
+    from aiogram.types import KeyboardButton
+
+    return [
+        [KeyboardButton(text=language.button_text)]
+        for language in SUPPORTED_TARGET_LANGUAGES
+    ]
 
 
 def _is_language_button_text(text: str | None) -> bool:
@@ -2203,6 +2257,39 @@ async def _confirm_pending_translation(
                 user_id=message.from_user.id,
                 action="translation_start",
             )
+
+
+async def _prepare_and_send_translation_preview(
+    *,
+    message,
+    service: BotTranslationService,
+    translator: TextTranslator,
+    target_language: str,
+    interface_language: str,
+) -> None:
+    service.prepare_pending_upload(
+        user_telegram_id=message.from_user.id,
+        target_language=target_language,
+    )
+    try:
+        preview = await asyncio.to_thread(
+            service.generate_preview_translation,
+            user_telegram_id=message.from_user.id,
+            translator=translator,
+        )
+    except Exception:
+        service.restore_pending_translation_upload(
+            user_telegram_id=message.from_user.id,
+        )
+        raise
+    await message.answer(
+        build_preview_translation_message(
+            preview,
+            interface_language=interface_language,
+        ),
+        reply_markup=_preview_keyboard(interface_language),
+        parse_mode="HTML",
+    )
 
 
 async def _run_confirm_pending_translation(
@@ -2455,7 +2542,7 @@ async def _confirm_pending_upload_rights(
             interface_language=interface_language,
             source_language_display=confirmed.source_language_display,
         ),
-        reply_markup=_target_language_keyboard(),
+        reply_markup=_target_language_keyboard(interface_language),
     )
 
 
@@ -2670,6 +2757,14 @@ async def _cancel_active_translation(
             await _send_translation_result_document_once(message, result.job, service)
         else:
             await message.answer(build_cancel_requested_message(interface_language))
+        return
+
+    if service.discard_pending_translation(message.from_user.id):
+        await message.answer(build_back_to_menu_message(interface_language))
+        await message.answer(
+            get_main_menu_text(interface_language=interface_language),
+            reply_markup=_main_menu_keyboard(interface_language),
+        )
         return
 
     await message.answer(build_nothing_to_cancel_message(interface_language))
