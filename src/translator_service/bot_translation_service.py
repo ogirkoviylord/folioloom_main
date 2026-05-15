@@ -86,6 +86,7 @@ from translator_service.translation_jobs import (
     CancellationToken,
     TextTranslator,
     TranslationProgress,
+    translate_text_fragments,
 )
 from translator_service.translation_policy import (
     build_translation_policy,
@@ -170,6 +171,26 @@ class PreviewCandidate:
     max_character_count: int
     adapter_version: str
     metadata: dict[str, object]
+
+
+@dataclass(frozen=True)
+class PreviewTranslation:
+    preview_id: str
+    user_telegram_id: int
+    file_name: str
+    document_kind: DocumentKind
+    source_language: str
+    target_language: str
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    estimated_cost_usd: float
+    beta_safety_reason_code: str | None
+    metadata: dict[str, object]
+
+
+class PreviewTranslationError(RuntimeError):
+    """Raised with a safe user-facing message when preview generation fails."""
 
 
 @dataclass(frozen=True)
@@ -313,6 +334,7 @@ class BotTranslationService:
         self._beta_safety_rates = beta_safety_rates or BetaSafetyRates()
         self._beta_safety_guard_owned = beta_safety_guard_owned
         self._beta_safety_denied_job_ids: set[str] = set()
+        self._generated_preview_ids: set[str] = set()
         self._automatic_result_delivered_keys: set[AutomaticResultDeliveryKey] = set()
         self._automatic_result_delivery_in_flight: set[
             AutomaticResultDeliveryKey
@@ -751,6 +773,85 @@ class BotTranslationService:
             adapter_version=plan.adapter_version,
             metadata=metadata,
         )
+
+    def generate_preview_translation(
+        self,
+        *,
+        user_telegram_id: int,
+        translator: TextTranslator,
+    ) -> PreviewTranslation:
+        candidate = self.select_preview_candidate(user_telegram_id=user_telegram_id)
+        preview_id = _preview_id(candidate)
+        estimate = _estimate_preview_cost(
+            candidate=candidate,
+            rates=self._beta_safety_rates,
+        )
+        beta_safety_reason_code = self._reserve_beta_safety_for_preview(
+            preview_id=preview_id,
+            user_id=f"telegram:{user_telegram_id}",
+            estimate=estimate,
+        )
+        progress: list[TranslationProgress] = []
+
+        try:
+            result = translate_text_fragments(
+                fragments=[candidate.source_text],
+                source_language=candidate.source_language,
+                target_language=candidate.target_language,
+                translator=translator,
+                progress_callback=progress.append,
+            )
+            translated_text = result.assembled_text.strip()
+            if not translated_text:
+                raise PreviewTranslationError("Preview translation failed.")
+
+            usage = progress[-1] if progress else None
+            prompt_tokens = usage.prompt_tokens if usage is not None else 0
+            completion_tokens = usage.completion_tokens if usage is not None else 0
+            if prompt_tokens <= 0 and completion_tokens <= 0:
+                prompt_tokens = estimate.prompt_tokens
+                completion_tokens = estimate.completion_tokens
+            self._record_beta_safety_preview_usage(
+                preview_id=preview_id,
+                user_id=f"telegram:{user_telegram_id}",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            self._mark_beta_safety_reservation_consumed(job_id=preview_id)
+            metadata = {
+                **candidate.metadata,
+                "preview_id": preview_id,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "estimated_cost_usd": estimate.estimated_cost_usd,
+                "beta_safety_reason_code": beta_safety_reason_code,
+            }
+            return PreviewTranslation(
+                preview_id=preview_id,
+                user_telegram_id=user_telegram_id,
+                file_name=candidate.file_name,
+                document_kind=candidate.document_kind,
+                source_language=candidate.source_language,
+                target_language=candidate.target_language,
+                text=translated_text,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                estimated_cost_usd=estimate.estimated_cost_usd,
+                beta_safety_reason_code=beta_safety_reason_code,
+                metadata=metadata,
+            )
+        except PreviewTranslationError:
+            self._release_beta_safety_reservation(
+                job_id=preview_id,
+                reason="preview_failed",
+            )
+            raise
+        except Exception as exc:
+            self._release_beta_safety_reservation(
+                job_id=preview_id,
+                reason="preview_failed",
+            )
+            raise PreviewTranslationError("Preview translation failed.") from exc
 
     def discard_pending_translation(self, user_telegram_id: int) -> bool:
         with self._state_lock:
@@ -2151,6 +2252,65 @@ class BotTranslationService:
 
         return record_usage
 
+    def _reserve_beta_safety_for_preview(
+        self,
+        *,
+        preview_id: str,
+        user_id: str,
+        estimate: JobCostEstimate,
+    ) -> str | None:
+        with self._state_lock:
+            if preview_id in self._generated_preview_ids:
+                raise PreviewTranslationError(
+                    "Preview has already been generated for this document."
+                )
+
+        if self._beta_safety_guard is not None:
+            start_decision = self._beta_safety_guard.can_start_new_work()
+            if not start_decision.allowed:
+                raise PreviewTranslationError(start_decision.safe_message)
+            reservation_decision = self._beta_safety_guard.reserve_job(
+                job_id=preview_id,
+                user_id=user_id,
+                estimate=estimate,
+            )
+            if not reservation_decision.allowed:
+                raise PreviewTranslationError(reservation_decision.safe_message)
+            reason_code: str | None = reservation_decision.reason_code
+        else:
+            reason_code = None
+
+        with self._state_lock:
+            if preview_id in self._generated_preview_ids:
+                if self._beta_safety_guard is not None:
+                    self._beta_safety_guard.release_job(
+                        job_id=preview_id,
+                        reason="duplicate_preview",
+                    )
+                raise PreviewTranslationError(
+                    "Preview has already been generated for this document."
+                )
+            self._generated_preview_ids.add(preview_id)
+        return reason_code
+
+    def _record_beta_safety_preview_usage(
+        self,
+        *,
+        preview_id: str,
+        user_id: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        if self._beta_safety_guard is None:
+            return
+        self._beta_safety_guard.record_work_unit_usage(
+            job_id=preview_id,
+            user_id=user_id,
+            work_unit_id=f"{preview_id}:preview",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
     def _confirm_persistent_translation(
         self,
         *,
@@ -3376,6 +3536,37 @@ def _estimate_persistent_job_cost(
     estimated_tokens = math.ceil(
         max(0, total_fragments) * max(1, max_fragment_chars) / 4
     )
+    return JobCostEstimate(
+        prompt_tokens=estimated_tokens,
+        completion_tokens=estimated_tokens,
+        estimated_cost_usd=estimate_cost_usd(
+            prompt_tokens=estimated_tokens,
+            completion_tokens=estimated_tokens,
+            rates=rates,
+        ),
+    )
+
+
+def _preview_id(candidate: PreviewCandidate) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(candidate.user_telegram_id).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(candidate.file_name.encode("utf-8", errors="replace"))
+    digest.update(b"\0")
+    digest.update(candidate.source_language.encode("utf-8", errors="replace"))
+    digest.update(b"\0")
+    digest.update(candidate.target_language.encode("utf-8", errors="replace"))
+    digest.update(b"\0")
+    digest.update(candidate.source_text.encode("utf-8", errors="replace"))
+    return f"preview:{candidate.user_telegram_id}:{digest.hexdigest()[:24]}"
+
+
+def _estimate_preview_cost(
+    *,
+    candidate: PreviewCandidate,
+    rates: BetaSafetyRates,
+) -> JobCostEstimate:
+    estimated_tokens = math.ceil(max(1, candidate.character_count) / 4)
     return JobCostEstimate(
         prompt_tokens=estimated_tokens,
         completion_tokens=estimated_tokens,

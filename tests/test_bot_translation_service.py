@@ -17,6 +17,7 @@ from translator_service.bot_translation_service import (
     BotTranslationService,
     PendingTranslation,
     PendingUpload,
+    PreviewTranslationError,
     RightsConfirmationRequired,
     UserBookResult,
     estimate_translation_seconds,
@@ -90,9 +91,39 @@ class RecordingTranslator:
         return f"[{target_language}] {text}"
 
 
+class TranslatorUsage:
+    def __init__(self, *, prompt_tokens: int, completion_tokens: int) -> None:
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = prompt_tokens + completion_tokens
+        self.prompt_cache_hit_tokens = 0
+        self.prompt_cache_miss_tokens = prompt_tokens
+
+
+class UsageRecordingTranslator(RecordingTranslator):
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
+        translated = super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        self.last_usage = TranslatorUsage(prompt_tokens=11, completion_tokens=7)
+        return translated
+
+
 class RecordingBetaSafetyGuard:
-    def __init__(self, *, allowed: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        allowed: bool = True,
+        denied_reason_code: str = "user_daily_cap",
+        denied_safe_message: str = "You have reached today's beta translation limit.",
+    ) -> None:
         self.allowed = allowed
+        self.denied_reason_code = denied_reason_code
+        self.denied_safe_message = denied_safe_message
         self.reservations: list[tuple[str, str, JobCostEstimate]] = []
         self.releases: list[tuple[str, str]] = []
         self.consumed: list[str] = []
@@ -105,11 +136,11 @@ class RecordingBetaSafetyGuard:
     def can_start_new_work(self) -> BetaSafetyDecision:
         return BetaSafetyDecision(
             allowed=self.allowed,
-            reason_code="allowed" if self.allowed else "user_daily_cap",
+            reason_code="allowed" if self.allowed else self.denied_reason_code,
             safe_message=(
                 "The translation can start."
                 if self.allowed
-                else "You have reached today's beta translation limit."
+                else self.denied_safe_message
             ),
         )
 
@@ -198,6 +229,15 @@ class FailingTranslator:
         self, *, text: str, source_language: str, target_language: str
     ) -> str:
         raise RuntimeError("network failed")
+
+
+class SensitiveFailingTranslator:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
+        raise RuntimeError(
+            f"provider traceback leaked source={text} api_key=secret-token"
+        )
 
 
 class CancellingTranslator:
@@ -914,6 +954,249 @@ class BotTranslationServiceTest(unittest.TestCase):
             "Secret preview sentence",
             json.dumps(candidate.metadata, ensure_ascii=False),
         )
+
+    def test_generates_preview_translation_with_beta_safety_accounting(self):
+        with TemporaryDirectory() as temp_dir:
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(persistent_store.close)
+            self.addCleanup(activity_store.close)
+            guard = RecordingBetaSafetyGuard()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=80,
+                persistent_job_store=persistent_store,
+                activity_store=activity_store,
+                translation_run_log_root=Path(temp_dir) / "translation-runs",
+                beta_safety_guard=guard,
+            )
+            service.prepare_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"Secret preview source is only for Telegram preview.",
+                source_language="en",
+                target_language="uk",
+            )
+            events_before_preview = activity_store.list_events(actor_id="telegram:42")
+
+            preview = service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=UsageRecordingTranslator(),
+            )
+
+            self.assertEqual(
+                preview.text,
+                "[uk] Secret preview source is only for Telegram preview.",
+            )
+            self.assertTrue(preview.preview_id.startswith("preview:42:"))
+            self.assertEqual(preview.prompt_tokens, 11)
+            self.assertEqual(preview.completion_tokens, 7)
+            self.assertEqual(len(guard.reservations), 1)
+            self.assertEqual(guard.reservations[0][0], preview.preview_id)
+            self.assertEqual(guard.reservations[0][1], "telegram:42")
+            self.assertEqual(guard.usage_events[0][0], preview.preview_id)
+            self.assertEqual(guard.usage_events[0][1], "telegram:42")
+            self.assertEqual(guard.usage_events[0][2], f"{preview.preview_id}:preview")
+            self.assertEqual(guard.usage_events[0][3:], (11, 7))
+            self.assertEqual(guard.consumed, [preview.preview_id])
+            self.assertEqual(persistent_store.list_jobs_for_user("telegram:42"), [])
+            self.assertFalse((Path(temp_dir) / "translation-runs").exists())
+            self.assertEqual(
+                activity_store.list_events(actor_id="telegram:42"),
+                events_before_preview,
+            )
+            self.assertNotIn(
+                "Secret preview source",
+                json.dumps(preview.metadata, ensure_ascii=False),
+            )
+
+    def test_preview_translation_blocks_beta_safety_denial_before_provider_call(self):
+        guard = RecordingBetaSafetyGuard(
+            allowed=False,
+            denied_reason_code="kill_switch",
+            denied_safe_message="Translations are temporarily paused.",
+        )
+        translator = RecordingTranslator()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_safety_guard=guard,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Preview source should not reach provider.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        with self.assertRaisesRegex(
+            PreviewTranslationError,
+            "Translations are temporarily paused.",
+        ):
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+        self.assertEqual(translator.requests, [])
+        self.assertEqual(guard.reservations, [])
+        self.assertEqual(guard.usage_events, [])
+
+    def test_preview_translation_requires_beta_access(self):
+        translator = RecordingTranslator()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_access_policy=BetaAccessPolicy.from_telegram_ids(
+                (42,),
+                enabled=True,
+            ),
+        )
+        pending = service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"First meaningful paragraph.",
+            source_language="en",
+            target_language="uk",
+        )
+        service._pending[100] = pending
+
+        with self.assertRaises(BetaAccessDenied):
+            service.generate_preview_translation(
+                user_telegram_id=100,
+                translator=translator,
+            )
+
+        self.assertEqual(translator.requests, [])
+
+    def test_preview_translation_blocks_duplicate_retry_for_same_pending_document(self):
+        guard = RecordingBetaSafetyGuard()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_safety_guard=guard,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful preview paragraph.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        first = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+        with self.assertRaisesRegex(
+            PreviewTranslationError,
+            "Preview has already been generated",
+        ):
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+        self.assertEqual(len(guard.reservations), 1)
+        self.assertEqual(guard.reservations[0][0], first.preview_id)
+        self.assertEqual(len(guard.usage_events), 1)
+
+    def test_preview_translation_uses_estimate_when_provider_usage_is_missing(self):
+        guard = RecordingBetaSafetyGuard()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_safety_guard=guard,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful preview paragraph.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        preview = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+
+        _job_id, _user_id, estimate = guard.reservations[0]
+        self.assertGreater(estimate.prompt_tokens, 0)
+        self.assertEqual(preview.prompt_tokens, estimate.prompt_tokens)
+        self.assertEqual(preview.completion_tokens, estimate.completion_tokens)
+        self.assertEqual(
+            guard.usage_events[0][3:],
+            (estimate.prompt_tokens, estimate.completion_tokens),
+        )
+        self.assertEqual(guard.consumed, [preview.preview_id])
+
+    def test_preview_failure_returns_safe_error_and_releases_reservation(self):
+        guard = RecordingBetaSafetyGuard()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_safety_guard=guard,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Secret source text must not leak.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        with self.assertRaises(PreviewTranslationError) as raised:
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=SensitiveFailingTranslator(),
+            )
+
+        message = str(raised.exception)
+        self.assertEqual(message, "Preview translation failed.")
+        self.assertNotIn("Secret source text", message)
+        self.assertNotIn("secret-token", message)
+        self.assertEqual(len(guard.reservations), 1)
+        self.assertEqual(guard.releases, [(guard.reservations[0][0], "preview_failed")])
+        self.assertEqual(guard.usage_events, [])
+        self.assertEqual(guard.consumed, [])
+
+    def test_preview_translation_requires_rights_confirmation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"First meaningful paragraph.",
+            source_language="en",
+            target_language="uk",
+            rights_confirmed=False,
+        )
+
+        with self.assertRaises(RightsConfirmationRequired):
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
 
     def test_confirm_pending_translation_requires_rights_confirmation(self):
         service = BotTranslationService(
