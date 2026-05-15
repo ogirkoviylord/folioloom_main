@@ -136,8 +136,10 @@ Checklist:
   wait until both counters return to 0.
 - [ ] Known limitations are documented.
 - [ ] Out-of-scope features are not presented as ready.
-- [ ] Free preview status is confirmed or explicitly deferred by owner. Current
-  Gate B status: unchecked.
+- [ ] Free preview status is confirmed or explicitly deferred by owner.
+  Current Gate B status: unchecked. Issues #51/#52 are merged and issue #53
+  branch adds Telegram preview rendering; issue #54 preview-acceptance guard and
+  release evidence are still required.
 - [ ] Real TXT/DOCX/EPUB matrix has release evidence. Current Gate B status:
   unchecked.
 

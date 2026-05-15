@@ -3,6 +3,10 @@ from pathlib import PurePath
 
 from translator_service.beta_access import BetaAccessDenied
 from translator_service.bot.activity_phrases import get_activity_phrases
+from translator_service.bot_translation_service import (
+    PendingTranslation,
+    PreviewTranslation,
+)
 from translator_service.documents import (
     EmptyDocumentError,
     FileTooLargeError,
@@ -10,7 +14,6 @@ from translator_service.documents import (
 )
 from translator_service.extractors import TextExtractionError
 from translator_service.job_runner import TranslationJob, TranslationJobStatus
-from translator_service.bot_translation_service import PendingTranslation
 from translator_service.languages import (
     SUPPORTED_TARGET_LANGUAGES,
     language_code_for_name,
@@ -18,7 +21,6 @@ from translator_service.languages import (
 )
 from translator_service.order_estimates import OrderEstimate
 from translator_service.security_telemetry import SecurityCooldownActive
-
 
 CONFIRM_TRANSLATION_TEXT = "Start Translation"
 SUPPORTED_TRANSLATION_FORMATS = ("EPUB", "DOCX", "TXT")
@@ -103,6 +105,16 @@ MESSAGES = {
         "download_book": "Download {index}",
         "download_translation": "Download Translation",
         "continue_translation": "Continue Translation",
+        "preview_title": "Translation preview",
+        "preview_body": (
+            "Here is a short translated sample. Full translation starts only "
+            "after you continue."
+        ),
+        "preview_cost_placeholder": "Cost: ???",
+        "preview_instruction": (
+            "Continue if the quality and language look right, or go back to "
+            "change the translation settings."
+        ),
         "delete_book": "Delete Book",
         "confirm_delete_book": "Yes, Delete Book",
         "keep_book": "Keep Book",
@@ -289,6 +301,16 @@ MESSAGES = {
         "download_book": "Скачать {index}",
         "download_translation": "Скачать перевод",
         "continue_translation": "Продолжить перевод",
+        "preview_title": "Предпросмотр перевода",
+        "preview_body": (
+            "Вот короткий переведенный отрывок. Полный перевод начнется только "
+            "после вашего подтверждения."
+        ),
+        "preview_cost_placeholder": "Стоимость: ???",
+        "preview_instruction": (
+            "Продолжайте, если качество и язык подходят, или вернитесь назад, "
+            "чтобы изменить настройки перевода."
+        ),
         "delete_book": "Удалить книгу",
         "confirm_delete_book": "Да, удалить книгу",
         "keep_book": "Оставить книгу",
@@ -1172,6 +1194,23 @@ def build_pending_translation_message(
     )
 
 
+def build_preview_translation_message(
+    preview: PreviewTranslation,
+    interface_language: str = "en",
+) -> str:
+    messages = _messages(interface_language)
+    safe_preview = html.escape(preview.text.strip())
+    return (
+        f"{messages['preview_title']}\n\n"
+        f"{messages['book']}: {preview.file_name}\n"
+        f"{messages['to']}: {localized_language_name_for_code(preview.target_language, interface_language)}\n"
+        f"{messages['preview_cost_placeholder']}\n\n"
+        f"{messages['preview_body']}\n\n"
+        f"<blockquote>{safe_preview}</blockquote>\n\n"
+        f"{messages['preview_instruction']}"
+    )
+
+
 def is_confirm_translation_text(text: str | None) -> bool:
     if text is None:
         return False
@@ -1189,6 +1228,10 @@ def is_confirm_translation_text(text: str | None) -> bool:
         "bevestigen",
     }
     return normalized in localized_confirm_texts | legacy_confirm_texts | {"/confirm"}
+
+
+def is_continue_translation_text(text: str | None) -> bool:
+    return _matches_localized_text(text, "continue_translation")
 
 
 def get_confirm_rights_text(interface_language: str = "en") -> str:

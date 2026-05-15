@@ -154,16 +154,19 @@ core flow, release gates, operational visibility and documentation.
 ## 4. Что работает частично или нестабильно
 
 - Area: Free preview before full translation.
-- Current behavior: Required closed-beta flow includes preview, but Gate B marks
-  it unchecked.
+- Current behavior: Required closed-beta flow includes preview, and preview work
+  is partially implemented. PR #57/#58 merged bounded preview selection and
+  provider-backed preview translation; issue #53 branch adds Telegram preview
+  rendering with Continue/Back controls. Gate B remains unchecked until issue
+  #54 enforces that full translation cannot start before preview acceptance and
+  Reviewer records release evidence.
 - Evidence: `docs/restart/release-gates.md`,
   `docs/restart/two-week-engineering-plan.md`,
-  `docs/restart/folioloom-restart-spec.md`.
+  `docs/restart/folioloom-restart-spec.md`, GitHub issues #51-#54.
 - Risk: пользователи могут запускать полный перевод без предварительной оценки
-  качества результата.
-- Suggested next task: Implementer adds a minimal preview work-unit route and
-  Reviewer verifies no full translation starts before explicit post-preview
-  confirmation.
+  качества результата, пока #54 не закрыт.
+- Suggested next task: Implementer completes issue #54 and Reviewer verifies no
+  full translation starts before explicit post-preview confirmation.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
@@ -280,11 +283,12 @@ Potential issues to verify:
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
 
-- Задача: implement or explicitly defer free preview.
+- Задача: finish free preview guard and evidence.
   Почему важно: preview is part of the required closed-beta flow.
   Риск: provider cost and user trust risk if full translation starts blindly.
   Кто должен делать: Orchestrator / Implementer / Reviewer.
-  Можно ли отдавать агенту: yes, with focused scope.
+  Можно ли отдавать агенту: yes, with focused scope; next implementation slice
+  is GitHub issue #54.
 
 - Задача: verify upload hardening/quarantine baseline.
   Почему важно: unsafe files must not reach workers.
