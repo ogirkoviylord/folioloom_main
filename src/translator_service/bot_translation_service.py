@@ -32,6 +32,11 @@ from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
     EPUB_ADAPTER_VERSION,
     TXT_ADAPTER_VERSION,
+    FormatAdapterPlan,
+    FormatTextBlock,
+    plan_docx_translation,
+    plan_epub_translation,
+    plan_txt_translation,
 )
 from translator_service.job_runner import (
     DocumentKind,
@@ -72,6 +77,7 @@ from translator_service.security_telemetry import (
     SecurityThresholdPolicy,
     normalize_security_event,
 )
+from translator_service.structure_optimizer import TextBlockKind
 from translator_service.translation_cache import (
     MemoryTranslationCache,
     TranslationCache,
@@ -107,6 +113,8 @@ from translator_service.worker import (
 logger = logging.getLogger(__name__)
 RIGHTS_CONFIRMATION_VERSION = "rights-v1"
 RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
+PREVIEW_CANDIDATE_MAX_BLOCKS = 3
+PREVIEW_CANDIDATE_MAX_CHARS = 2_000
 AutomaticResultDeliveryKey = tuple[int, str, str, int, str]
 
 
@@ -145,6 +153,23 @@ class PendingTranslation:
     rights_confirmed_at: str | None = None
     rights_confirmation_version: str | None = None
     rights_confirmation_source: str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewCandidate:
+    user_telegram_id: int
+    file_name: str
+    document_kind: DocumentKind
+    source_language: str
+    target_language: str
+    source_text: str
+    source_block_ids: tuple[str, ...]
+    selected_block_count: int
+    selected_unit_sequences: tuple[int, ...]
+    character_count: int
+    max_character_count: int
+    adapter_version: str
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -653,6 +678,79 @@ class BotTranslationService:
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
         with self._state_lock:
             return self._pending.get(user_telegram_id)
+
+    def select_preview_candidate(self, *, user_telegram_id: int) -> PreviewCandidate:
+        self._assert_beta_access_allows(user_telegram_id)
+        self._assert_security_cooldown_allows(user_telegram_id)
+        with self._state_lock:
+            pending = self._pending.get(user_telegram_id)
+            if pending is None:
+                raise ValueError(
+                    "No uploaded document is waiting for preview selection"
+                )
+            if not pending.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before preview selection"
+                )
+
+        upload = validate_document_upload(
+            file_name=pending.file_name,
+            size_bytes=len(pending.content),
+            max_upload_mb=self._max_upload_mb,
+        )
+        document_kind = _document_kind_from_format(upload.document_format)
+        if document_kind is None:
+            raise ValueError("Preview is available for TXT, DOCX, and EPUB only")
+
+        plan = _preview_adapter_plan(
+            document_format=upload.document_format,
+            content=pending.content,
+            max_fragment_chars=self._max_fragment_chars,
+            document_sandbox=self._document_sandbox,
+        )
+        selected = _select_preview_blocks(plan)
+        if not selected:
+            raise ValueError(
+                "Document does not contain text suitable for a preview"
+            )
+
+        source_text = _bounded_preview_text(
+            [block.text for _sequence, block in selected],
+            max_chars=PREVIEW_CANDIDATE_MAX_CHARS,
+        )
+        if not source_text.strip():
+            raise ValueError(
+                "Document does not contain text suitable for a preview"
+            )
+
+        source_block_ids = tuple(block.source_block_id for _sequence, block in selected)
+        unit_sequences = tuple(dict.fromkeys(sequence for sequence, _block in selected))
+        metadata: dict[str, object] = {
+            "document_kind": document_kind.value,
+            "document_format": upload.document_format.value,
+            "adapter_version": plan.adapter_version,
+            "source_block_ids": list(source_block_ids),
+            "selected_block_count": len(selected),
+            "selected_unit_sequences": list(unit_sequences),
+            "character_count": len(source_text),
+            "max_character_count": PREVIEW_CANDIDATE_MAX_CHARS,
+            "sampling_policy": "first_meaningful_translatable_blocks",
+        }
+        return PreviewCandidate(
+            user_telegram_id=user_telegram_id,
+            file_name=pending.file_name,
+            document_kind=document_kind,
+            source_language=pending.source_language,
+            target_language=pending.target_language,
+            source_text=source_text,
+            source_block_ids=source_block_ids,
+            selected_block_count=len(selected),
+            selected_unit_sequences=unit_sequences,
+            character_count=len(source_text),
+            max_character_count=PREVIEW_CANDIDATE_MAX_CHARS,
+            adapter_version=plan.adapter_version,
+            metadata=metadata,
+        )
 
     def discard_pending_translation(self, user_telegram_id: int) -> bool:
         with self._state_lock:
@@ -2735,6 +2833,111 @@ def _create_persistent_job_plan(
     if document_kind is DocumentKind.EPUB:
         return create_persistent_epub_job_plan(**common)
     raise ValueError(f"Unsupported persistent document kind: {document_kind}")
+
+
+def _preview_adapter_plan(
+    *,
+    document_format: DocumentFormat,
+    content: bytes,
+    max_fragment_chars: int,
+    document_sandbox: DocumentSandbox | None,
+) -> FormatAdapterPlan:
+    if document_sandbox is not None:
+        return document_sandbox.plan_translation(
+            document_format=document_format,
+            content=content,
+            max_fragment_chars=max_fragment_chars,
+        )
+    if document_format is DocumentFormat.TXT:
+        return plan_txt_translation(
+            content=content,
+            max_fragment_chars=max_fragment_chars,
+        )
+    if document_format is DocumentFormat.DOCX:
+        return plan_docx_translation(
+            content=content,
+            max_fragment_chars=max_fragment_chars,
+        )
+    if document_format is DocumentFormat.EPUB:
+        return plan_epub_translation(
+            content=content,
+            max_fragment_chars=max_fragment_chars,
+        )
+    raise ValueError("Preview is available for TXT, DOCX, and EPUB only")
+
+
+def _select_preview_blocks(
+    plan: FormatAdapterPlan,
+) -> tuple[tuple[int, FormatTextBlock], ...]:
+    selected: list[tuple[int, FormatTextBlock]] = []
+    for unit in plan.units:
+        for block in unit.blocks:
+            if not _is_meaningful_preview_block(block):
+                continue
+            selected.append((unit.sequence, block))
+            if len(selected) >= PREVIEW_CANDIDATE_MAX_BLOCKS:
+                return tuple(selected)
+    return tuple(selected)
+
+
+def _is_meaningful_preview_block(block: FormatTextBlock) -> bool:
+    text = block.text.strip()
+    if not text:
+        return False
+    if block.source_block_id.startswith("epub:aux:"):
+        return False
+    if block.kind is not TextBlockKind.PLAIN:
+        return False
+    if _looks_like_preview_boilerplate(text):
+        return False
+    return _letter_count(text) >= 12
+
+
+def _bounded_preview_text(texts: list[str], *, max_chars: int) -> str:
+    parts: list[str] = []
+    remaining = max_chars
+    for text in texts:
+        normalized = text.strip()
+        if not normalized or remaining <= 0:
+            continue
+        separator = "\n\n" if parts else ""
+        available = remaining - len(separator)
+        if available <= 0:
+            break
+        if len(normalized) > available:
+            normalized = normalized[:available].rstrip()
+        parts.append(f"{separator}{normalized}")
+        remaining = max_chars - sum(len(part) for part in parts)
+    return "".join(parts).strip()
+
+
+def _letter_count(text: str) -> int:
+    return sum(1 for character in text if character.isalpha())
+
+
+def _looks_like_preview_boilerplate(text: str) -> bool:
+    normalized = " ".join(text.strip().lower().split())
+    if normalized in {
+        "contents",
+        "table of contents",
+        "оглавление",
+        "содержание",
+        "зміст",
+        "title page",
+    }:
+        return True
+    if len(normalized) <= 80 and normalized.startswith(
+        (
+            "chapter ",
+            "part ",
+            "глава ",
+            "часть ",
+            "розділ ",
+            "частина ",
+        )
+    ):
+        return True
+    return False
 
 
 def _progress_callback_with_run_logging(
