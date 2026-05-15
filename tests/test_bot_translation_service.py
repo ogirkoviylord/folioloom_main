@@ -709,6 +709,212 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertIsNone(service.get_pending_upload(42))
         self.assertEqual(service.get_pending(42), pending)
 
+    def test_selects_bounded_txt_preview_candidate_without_creating_job(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=80,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=(
+                    b"# Contents\n\n"
+                    b"First meaningful paragraph for preview quality.\n\n"
+                    b"Second meaningful paragraph for language.\n\n"
+                    b"Third meaningful paragraph for parameters.\n\n"
+                    b"Fourth paragraph stays outside the preview candidate."
+                ),
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            candidate = service.select_preview_candidate(user_telegram_id=42)
+
+            self.assertEqual(candidate.document_kind, DocumentKind.TXT)
+            self.assertEqual(candidate.target_language, "uk")
+            self.assertEqual(candidate.selected_block_count, 3)
+            self.assertEqual(candidate.character_count, len(candidate.source_text))
+            self.assertLessEqual(
+                candidate.character_count,
+                candidate.max_character_count,
+            )
+            self.assertIn("First meaningful paragraph", candidate.source_text)
+            self.assertNotIn("Contents", candidate.source_text)
+            self.assertNotIn("Fourth paragraph", candidate.source_text)
+            self.assertEqual(
+                persistent_store.list_jobs_for_user("telegram:42"),
+                [],
+            )
+
+    def test_selects_docx_preview_candidate(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="contract.docx",
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r>
+                      <w:t>First meaningful contract paragraph.</w:t>
+                    </w:r></w:p>
+                    <w:p><w:r>
+                      <w:t>Second meaningful contract paragraph.</w:t>
+                    </w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(candidate.document_kind, DocumentKind.DOCX)
+        self.assertEqual(
+            candidate.source_block_ids,
+            ("docx:word/document.xml:0", "docx:word/document.xml:1"),
+        )
+        self.assertIn("First meaningful contract paragraph.", candidate.source_text)
+
+    def test_selects_epub_preview_candidate_after_navigation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="book.epub",
+            content=_make_epub(
+                {
+                    "OPS/nav.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><nav><p>Contents</p><p>Chapter 1</p></nav></body>
+                    </html>
+                    """,
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Chapter 1</h1>
+                        <p>First meaningful book paragraph for preview.</p>
+                        <p>Second meaningful book paragraph for preview.</p>
+                      </body>
+                    </html>
+                    """,
+                }
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(candidate.document_kind, DocumentKind.EPUB)
+        self.assertIn("First meaningful book paragraph", candidate.source_text)
+        self.assertNotIn("Contents", candidate.source_text)
+        self.assertFalse(
+            any(
+                block_id.startswith("epub:aux:")
+                for block_id in candidate.source_block_ids
+            )
+        )
+
+    def test_preview_candidate_requires_pending_translation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "No uploaded document is waiting for preview selection",
+        ):
+            service.select_preview_candidate(user_telegram_id=42)
+
+    def test_preview_candidate_requires_rights_confirmation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"First meaningful paragraph.",
+            source_language="en",
+            target_language="uk",
+            rights_confirmed=False,
+        )
+
+        with self.assertRaises(RightsConfirmationRequired):
+            service.select_preview_candidate(user_telegram_id=42)
+
+    def test_preview_candidate_rejects_no_previewable_text(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"# Contents\n\n- Chapter 1",
+            source_language="en",
+            target_language="uk",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Document does not contain text suitable for a preview",
+        ):
+            service.select_preview_candidate(user_telegram_id=42)
+
+    def test_preview_candidate_metadata_does_not_include_raw_text(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Secret preview sentence stays in payload only.",
+            source_language="en",
+            target_language="uk",
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertIn("Secret preview sentence", candidate.source_text)
+        self.assertNotIn(
+            "Secret preview sentence",
+            json.dumps(candidate.metadata, ensure_ascii=False),
+        )
+
     def test_confirm_pending_translation_requires_rights_confirmation(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
