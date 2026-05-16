@@ -44,6 +44,7 @@ from translator_service.bot.messages import (
     build_no_pending_translation_message,
     build_nothing_to_cancel_message,
     build_pending_translation_message,
+    build_preview_required_message,
     build_preview_translation_message,
     build_rights_confirmation_message,
     build_settings_message,
@@ -88,6 +89,7 @@ from translator_service.bot.messages import (
 )
 from translator_service.bot_translation_service import (
     BotTranslationService,
+    PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
 )
@@ -1731,7 +1733,7 @@ def create_router(
             target_type="button",
             target_id="continue_translation",
         )
-        await _confirm_pending_translation(
+        await _continue_pending_translation_after_preview(
             message=message,
             service=service,
             translator=translator,
@@ -2290,6 +2292,56 @@ async def _prepare_and_send_translation_preview(
         reply_markup=_preview_keyboard(interface_language),
         parse_mode="HTML",
     )
+    service.mark_pending_translation_preview_shown(
+        user_telegram_id=message.from_user.id,
+        preview_id=preview.preview_id,
+    )
+
+
+async def _continue_pending_translation_after_preview(
+    *,
+    message,
+    service: BotTranslationService,
+    translator: TextTranslator,
+    action_guard: _UserActionInFlightGuard | None = None,
+) -> None:
+    interface_language = service.get_interface_language(message.from_user.id)
+    try:
+        service.accept_pending_translation_preview(
+            user_telegram_id=message.from_user.id,
+        )
+    except PreviewAcceptanceRequired:
+        await message.answer(build_preview_required_message(interface_language))
+        return
+    except RightsConfirmationRequired:
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        pending = service.get_pending(message.from_user.id)
+        file_name = (
+            pending_upload.file_name
+            if pending_upload is not None
+            else (pending.file_name if pending is not None else "document")
+        )
+        await message.answer(
+            build_rights_confirmation_message(
+                file_name,
+                interface_language=interface_language,
+            ),
+            reply_markup=_rights_confirmation_keyboard(interface_language),
+        )
+        return
+    except (BetaAccessDenied, SecurityCooldownActive) as error:
+        await message.answer(build_upload_error_message(error, interface_language))
+        return
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    await _confirm_pending_translation(
+        message=message,
+        service=service,
+        translator=translator,
+        action_guard=action_guard,
+    )
 
 
 async def _run_confirm_pending_translation(
@@ -2318,6 +2370,9 @@ async def _run_confirm_pending_translation(
             ),
             reply_markup=_rights_confirmation_keyboard(interface_language),
         )
+        return
+    if pending is not None and not pending.preview_accepted:
+        await message.answer(build_preview_required_message(interface_language))
         return
     total_fragments = pending.fragment_count if pending else 0
     heartbeat_pattern = _choose_heartbeat_pattern_name(
@@ -2449,6 +2504,11 @@ async def _run_confirm_pending_translation(
             ),
             reply_markup=_rights_confirmation_keyboard(interface_language),
         )
+        return
+    except PreviewAcceptanceRequired:
+        stop_heartbeat.set()
+        await heartbeat_task
+        await message.answer(build_preview_required_message(interface_language))
         return
     except BetaAccessDenied as error:
         stop_heartbeat.set()
