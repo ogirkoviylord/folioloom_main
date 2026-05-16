@@ -16,6 +16,7 @@ from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.beta_safety import BetaSafetyDecision, JobCostEstimate
 from translator_service.bot_translation_service import (
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     BotTranslationService,
     PendingTranslation,
     PendingUpload,
@@ -1901,10 +1902,9 @@ class BotTranslationServiceTest(unittest.TestCase):
 
     def test_persistent_txt_confirmation_uses_stored_work_units(self):
         with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
-            persistent_store = SQLiteTranslationJobStore(
-                Path(temp_dir) / "jobs.sqlite3"
-            )
+            persistent_store = SQLiteTranslationJobStore(db_path)
             self.addCleanup(persistent_store.close)
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
@@ -1922,7 +1922,10 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
-            self._select_default_translation_mode(service)
+            self._select_default_translation_mode(
+                service,
+                translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+            )
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -1961,6 +1964,17 @@ class BotTranslationServiceTest(unittest.TestCase):
                 },
             )
             self.assertEqual(
+                translation_policy["translation_mode"],
+                TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+            reopened_store = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(reopened_store.close)
+            reopened_job = reopened_store.get_job(job.id)
+            self.assertEqual(
+                json.loads(reopened_job.translation_policy)["translation_mode"],
+                TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+            self.assertEqual(
                 [unit.status for unit in work_units],
                 [
                     PersistentWorkUnitStatus.TRANSLATED,
@@ -1997,6 +2011,10 @@ class BotTranslationServiceTest(unittest.TestCase):
                     "source": "telegram_button",
                     "version": "rights-v1",
                 },
+            )
+            self.assertEqual(
+                json.loads(snapshot["translation_policy"])["translation_mode"],
+                TRANSLATION_MODE_DOCUMENT_FORM,
             )
 
     def test_persistent_confirmation_reserves_beta_safety_before_deferred_queue(self):
