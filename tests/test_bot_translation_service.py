@@ -35,7 +35,11 @@ from translator_service.document_sandbox import (
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import extract_text_from_docx, extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
-from translator_service.format_adapters import TXT_ADAPTER_VERSION
+from translator_service.format_adapters import (
+    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+    DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
+    TXT_ADAPTER_VERSION,
+)
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
@@ -527,7 +531,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(pending.fragment_count, 1)
         self.assertEqual(
             sandbox.plan_calls,
-            [(DocumentFormat.TXT, b"One.", 20)],
+            [(DocumentFormat.TXT, b"One.", 20, None)],
         )
         self.assertEqual(
             sandbox.extract_calls,
@@ -918,6 +922,14 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(candidate.document_kind, DocumentKind.TXT)
             self.assertEqual(candidate.target_language, "uk")
             self.assertEqual(candidate.selected_block_count, 3)
+            self.assertEqual(
+                candidate.translation_mode,
+                TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            self.assertEqual(
+                candidate.metadata["translation_mode"],
+                TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
             self.assertEqual(candidate.character_count, len(candidate.source_text))
             self.assertLessEqual(
                 candidate.character_count,
@@ -967,6 +979,133 @@ class BotTranslationServiceTest(unittest.TestCase):
             ("docx:word/document.xml:0", "docx:word/document.xml:1"),
         )
         self.assertIn("First meaningful contract paragraph.", candidate.source_text)
+        self.assertIsNone(candidate.translation_mode)
+        self.assertNotIn("translation_mode", candidate.metadata)
+
+    def test_docx_preview_candidate_uses_selected_document_form_mode(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="application.docx",
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r>
+                      <w:t>Structured application text for preview.</w:t>
+                    </w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            source_language="uk",
+            target_language="ru",
+            translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(candidate.translation_mode, TRANSLATION_MODE_DOCUMENT_FORM)
+        self.assertEqual(
+            candidate.metadata["translation_mode"],
+            TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+        self.assertEqual(
+            candidate.metadata["docx_translation_mode_profile"],
+            DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
+        )
+
+    def test_docx_preview_candidate_uses_selected_book_manuscript_mode(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="chapter.docx",
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r>
+                      <w:t>Natural prose paragraph text for preview.</w:t>
+                    </w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            source_language="uk",
+            target_language="ru",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(candidate.translation_mode, TRANSLATION_MODE_BOOK_MANUSCRIPT)
+        self.assertEqual(
+            candidate.metadata["translation_mode"],
+            TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+        self.assertEqual(
+            candidate.metadata["docx_translation_mode_profile"],
+            DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+        )
+
+    def test_docx_preview_candidate_passes_selected_mode_to_sandbox(self):
+        sandbox = RecordingDocumentSandbox()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r>
+                  <w:t>Structured application text for sandbox preview.</w:t>
+                </w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+            document_sandbox=sandbox,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="application.docx",
+            content=content,
+            source_language="uk",
+            target_language="ru",
+            translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+
+        service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(
+            sandbox.plan_calls,
+            [
+                (
+                    DocumentFormat.DOCX,
+                    content,
+                    1_000,
+                    TRANSLATION_MODE_DOCUMENT_FORM,
+                ),
+                (
+                    DocumentFormat.DOCX,
+                    content,
+                    1_000,
+                    TRANSLATION_MODE_DOCUMENT_FORM,
+                ),
+            ],
+        )
 
     def test_selects_epub_preview_candidate_after_navigation(self):
         service = BotTranslationService(
@@ -1147,6 +1286,32 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "Secret preview source",
                 json.dumps(preview.metadata, ensure_ascii=False),
             )
+
+    def test_preview_translation_metadata_includes_selected_mode(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"Meaningful preview source for selected mode.",
+            source_language="en",
+            target_language="uk",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+
+        preview = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=UsageRecordingTranslator(),
+        )
+
+        self.assertEqual(
+            preview.metadata["translation_mode"],
+            TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
 
     def test_preview_translation_blocks_beta_safety_denial_before_provider_call(self):
         guard = RecordingBetaSafetyGuard(
@@ -3905,7 +4070,7 @@ def _pricing_rules() -> PricingRules:
 
 class RecordingDocumentSandbox(DocumentSandbox):
     def __init__(self) -> None:
-        self.plan_calls: list[tuple[DocumentFormat, bytes, int]] = []
+        self.plan_calls: list[tuple[DocumentFormat, bytes, int, str | None]] = []
         self.extract_calls: list[tuple[DocumentFormat, bytes]] = []
         self.assemble_calls: list[
             tuple[DocumentFormat, bytes, list[SandboxTranslationUnit]]
@@ -3919,7 +4084,9 @@ class RecordingDocumentSandbox(DocumentSandbox):
         max_fragment_chars: int,
         translation_mode: str | None = None,
     ):
-        self.plan_calls.append((document_format, content, max_fragment_chars))
+        self.plan_calls.append(
+            (document_format, content, max_fragment_chars, translation_mode)
+        )
         from translator_service.format_adapters import (
             plan_docx_translation,
             plan_epub_translation,
@@ -3935,6 +4102,7 @@ class RecordingDocumentSandbox(DocumentSandbox):
             return plan_docx_translation(
                 content=content,
                 max_fragment_chars=max_fragment_chars,
+                translation_mode=translation_mode,
             )
         if document_format is DocumentFormat.EPUB:
             return plan_epub_translation(
