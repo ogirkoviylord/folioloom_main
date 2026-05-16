@@ -115,6 +115,10 @@ MESSAGES = {
             "Continue if the quality and language look right, or go back to "
             "change the translation settings."
         ),
+        "preview_required": (
+            "Review the translation preview first, then choose Continue "
+            "Translation to start the full translation."
+        ),
         "delete_book": "Delete Book",
         "confirm_delete_book": "Yes, Delete Book",
         "keep_book": "Keep Book",
@@ -310,6 +314,10 @@ MESSAGES = {
         "preview_instruction": (
             "Продолжайте, если качество и язык подходят, или вернитесь назад, "
             "чтобы изменить настройки перевода."
+        ),
+        "preview_required": (
+            "Сначала посмотрите предпросмотр, затем нажмите "
+            "«Продолжить перевод», чтобы начать полный перевод."
         ),
         "delete_book": "Удалить книгу",
         "confirm_delete_book": "Да, удалить книгу",
@@ -1209,6 +1217,10 @@ def build_preview_translation_message(
         f"<blockquote>{safe_preview}</blockquote>\n\n"
         f"{messages['preview_instruction']}"
     )
+
+
+def build_preview_required_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["preview_required"]
 
 
 def is_confirm_translation_text(text: str | None) -> bool:

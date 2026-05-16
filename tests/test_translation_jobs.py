@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -246,6 +247,15 @@ class TranslationJobsTest(unittest.TestCase):
                 user_telegram_id=42,
                 target_language="uk",
             )
+            with service._state_lock:
+                pending = service._pending[42]
+                service._pending[42] = replace(
+                    pending,
+                    preview_id="preview:42:test",
+                    preview_shown=True,
+                    preview_accepted=True,
+                    preview_accepted_at="2026-05-16T00:00:00+00:00",
+                )
 
             job = service.confirm_pending_translation(
                 user_telegram_id=42,
