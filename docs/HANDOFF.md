@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-14
+Last updated: 2026-05-16
 
 ## 1. Текущее состояние проекта
 
@@ -31,11 +31,11 @@ requests, and added scheduler/worker provider-failure regression coverage with
 safe retry metadata. This does not make cancel/resume/restart Gate B fully
 complete and does not prove durable cross-restart automatic delivery tracking.
 
-Что пока нестабильно или не закрыто для beta: free preview before full
-translation, upload hardening/quarantine baseline, TTL cleanup/delete
-verification, real-file TXT/DOCX/EPUB release matrix, EPUBCheck/equivalent,
-DOCX openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal
-artifact, cancel/resume/restart release evidence и server smoke evidence.
+Что пока нестабильно или не закрыто для beta: free preview release evidence,
+upload hardening/quarantine baseline, TTL cleanup/delete verification, real-file
+TXT/DOCX/EPUB release matrix, EPUBCheck/equivalent, DOCX openability/visual QA,
+Alerts MVP, Backups visibility, restore rehearsal artifact,
+cancel/resume/restart release evidence и server smoke evidence.
 
 Что неизвестно: актуальный полный test-suite status на 2026-05-13 в этой задаче
 не запускался; `.github/workflows/checks.yml` существует, но текущий GitHub
@@ -154,19 +154,20 @@ core flow, release gates, operational visibility and documentation.
 ## 4. Что работает частично или нестабильно
 
 - Area: Free preview before full translation.
-- Current behavior: Required closed-beta flow includes preview, and preview work
-  is partially implemented. PR #57/#58 merged bounded preview selection and
-  provider-backed preview translation; issue #53 branch adds Telegram preview
-  rendering with Continue/Back controls. Gate B remains unchecked until issue
-  #54 enforces that full translation cannot start before preview acceptance and
-  Reviewer records release evidence.
+- Current behavior: Required closed-beta flow includes preview. PR #57/#58
+  merged bounded preview selection and provider-backed preview translation; PR
+  #59 merged Telegram preview rendering with Continue/Back controls. This branch
+  implements issue #54 by adding an in-memory/service-level guard so full
+  translation cannot start until preview is shown and explicitly accepted with
+  Continue. Gate B remains unchecked until Reviewer records release evidence.
 - Evidence: `docs/restart/release-gates.md`,
   `docs/restart/two-week-engineering-plan.md`,
   `docs/restart/folioloom-restart-spec.md`, GitHub issues #51-#54.
-- Risk: пользователи могут запускать полный перевод без предварительной оценки
-  качества результата, пока #54 не закрыт.
-- Suggested next task: Implementer completes issue #54 and Reviewer verifies no
-  full translation starts before explicit post-preview confirmation.
+- Risk: release readiness can still be overstated if #54 is merged without
+  Reviewer evidence and Gate B report.
+- Suggested next task: Reviewer verifies issue #54 diff, focused/full local
+  tests and no full translation starts before explicit post-preview
+  confirmation.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
@@ -283,12 +284,11 @@ Potential issues to verify:
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
 
-- Задача: finish free preview guard and evidence.
+- Задача: review free preview guard and record evidence.
   Почему важно: preview is part of the required closed-beta flow.
-  Риск: provider cost and user trust risk if full translation starts blindly.
-  Кто должен делать: Orchestrator / Implementer / Reviewer.
-  Можно ли отдавать агенту: yes, with focused scope; next implementation slice
-  is GitHub issue #54.
+  Риск: release readiness can be overstated without reviewer evidence.
+  Кто должен делать: Reviewer.
+  Можно ли отдавать агенту: yes, as review/evidence work after issue #54.
 
 - Задача: verify upload hardening/quarantine baseline.
   Почему важно: unsafe files must not reach workers.
