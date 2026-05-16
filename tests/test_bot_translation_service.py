@@ -15,12 +15,14 @@ from translator_service.admin.translation_logs import list_translation_run_summa
 from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.beta_safety import BetaSafetyDecision, JobCostEstimate
 from translator_service.bot_translation_service import (
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
     BotTranslationService,
     PendingTranslation,
     PendingUpload,
     PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
+    TranslationModeRequired,
     UserBookResult,
     estimate_translation_seconds,
 )
@@ -306,6 +308,18 @@ class MalformedSecondUnitTranslator:
 
 
 class BotTranslationServiceTest(unittest.TestCase):
+    def _select_default_translation_mode(
+        self,
+        service: BotTranslationService,
+        *,
+        user_telegram_id: int = 42,
+        translation_mode: str = TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    ) -> PendingUpload:
+        return service.select_pending_upload_translation_mode(
+            user_telegram_id=user_telegram_id,
+            translation_mode=translation_mode,
+        )
+
     def _accept_pending_preview(
         self,
         service: BotTranslationService,
@@ -320,6 +334,8 @@ class BotTranslationServiceTest(unittest.TestCase):
                 preview_shown=True,
                 preview_accepted=True,
                 preview_accepted_at="2026-05-16T00:00:00+00:00",
+                translation_mode=pending.translation_mode
+                or TRANSLATION_MODE_BOOK_MANUSCRIPT,
             )
             service._pending[user_telegram_id] = accepted
             return accepted
@@ -656,7 +672,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertIsNotNone(service.get_pending_upload(42))
         self.assertIsNone(service.get_pending(42))
 
-    def test_rights_confirmation_allows_language_choice_and_is_idempotent(self):
+    def test_rights_confirmation_allows_mode_choice_and_is_idempotent(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
             pricing_rules=_pricing_rules(),
@@ -672,16 +688,81 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         first = service.confirm_pending_upload_rights(user_telegram_id=42)
         second = service.confirm_pending_upload_rights(user_telegram_id=42)
+        selected = self._select_default_translation_mode(service)
         pending = service.prepare_pending_upload(
             user_telegram_id=42,
             target_language="uk",
         )
 
         self.assertEqual(first, second)
+        self.assertEqual(selected.translation_mode, TRANSLATION_MODE_BOOK_MANUSCRIPT)
         self.assertTrue(pending.rights_confirmed)
+        self.assertEqual(pending.translation_mode, TRANSLATION_MODE_BOOK_MANUSCRIPT)
         self.assertEqual(pending.rights_confirmation_version, "rights-v1")
         self.assertEqual(pending.rights_confirmation_source, "telegram_button")
         self.assertIsNotNone(pending.rights_confirmed_at)
+
+    def test_translation_mode_is_required_before_language_choice(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"This is an English document.",
+            source_language="auto",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+
+        with self.assertRaises(TranslationModeRequired):
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+        self.assertIsNotNone(service.get_pending_upload(42))
+        self.assertIsNone(service.get_pending(42))
+
+    def test_translation_mode_requires_rights_confirmation(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"This is an English document.",
+            source_language="auto",
+        )
+
+        with self.assertRaises(RightsConfirmationRequired):
+            self._select_default_translation_mode(service)
+
+    def test_translation_mode_rejects_unsupported_identifier(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"This is an English document.",
+            source_language="auto",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+
+        with self.assertRaises(ValueError):
+            service.select_pending_upload_translation_mode(
+                user_telegram_id=42,
+                translation_mode="provider_magic",
+            )
 
     def test_can_restore_pending_translation_to_language_selection(self):
         service = BotTranslationService(
@@ -697,6 +778,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             source_language="auto",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         service.prepare_pending_upload(
             user_telegram_id=42,
             target_language="uk",
@@ -708,6 +790,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertIsNone(service.get_pending(42))
         self.assertIsNotNone(service.get_pending_upload(42))
         self.assertTrue(restored.rights_confirmed)
+        self.assertEqual(restored.translation_mode, TRANSLATION_MODE_BOOK_MANUSCRIPT)
         self.assertEqual(restored.file_name, "notes.txt")
 
     def test_upload_can_be_persisted_to_object_storage_before_estimate(self):
@@ -728,6 +811,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="auto",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             pending = service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -785,6 +869,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             source_language="auto",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
 
         pending = service.prepare_pending_upload(
             user_telegram_id=42,
@@ -824,6 +909,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
 
             candidate = service.select_preview_candidate(user_telegram_id=42)
@@ -1245,6 +1331,31 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translator=RecordingTranslator(),
             )
 
+    def test_confirm_pending_translation_requires_translation_mode(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=5,
+        )
+        pending = service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+            target_language="uk",
+        )
+        translator = RecordingTranslator()
+
+        with self.assertRaises(TranslationModeRequired):
+            service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+        self.assertEqual(translator.requests, [])
+        self.assertEqual(service.get_pending(42), pending)
+
     def test_confirm_pending_translation_requires_preview_acceptance(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
@@ -1258,6 +1369,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             content=b"One.",
             source_language="en",
             target_language="uk",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
         )
         translator = RecordingTranslator()
 
@@ -1283,6 +1395,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             content=b"One meaningful paragraph.",
             source_language="en",
             target_language="uk",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
         )
         preview = service.generate_preview_translation(
             user_telegram_id=42,
@@ -1809,6 +1922,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -1911,6 +2025,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -1958,6 +2073,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2009,6 +2125,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2056,6 +2173,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2105,6 +2223,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2171,6 +2290,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2218,6 +2338,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2275,6 +2396,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2319,6 +2441,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
@@ -2376,6 +2499,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -2437,6 +2561,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -2499,6 +2624,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -2557,6 +2683,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -2608,6 +2735,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -2670,6 +2798,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
             self._accept_pending_preview(service)
 
@@ -3605,6 +3734,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         service.prepare_pending_upload(user_telegram_id=42, target_language="fr")
         self._accept_pending_preview(service)
 
@@ -3685,6 +3815,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         service.prepare_pending_upload(user_telegram_id=42, target_language="es")
         self._accept_pending_preview(service)
 
