@@ -3166,6 +3166,7 @@ def _create_persistent_job_plan(
         "target_language": pending.target_language,
         "max_fragment_chars": max_fragment_chars,
         "rights_confirmation": _rights_confirmation_payload(pending),
+        "translation_mode": pending.translation_mode,
     }
     if document_kind is DocumentKind.TXT:
         return create_persistent_txt_job_plan(**common)
@@ -3454,6 +3455,7 @@ def _translation_policy_snapshot_for_pending(
     return _translation_policy_with_rights_confirmation(
         translation_policy_signature(policy),
         rights_confirmation=_rights_confirmation_payload(pending),
+        translation_mode=pending.translation_mode,
     )
 
 
@@ -3515,6 +3517,7 @@ def _translation_policy_with_rights_confirmation(
     translation_policy: str | None,
     *,
     rights_confirmation: dict,
+    translation_mode: str | None = None,
 ) -> str | None:
     if not translation_policy:
         return None
@@ -3522,6 +3525,8 @@ def _translation_policy_with_rights_confirmation(
     if not payload:
         return translation_policy
     payload["rights_confirmation"] = rights_confirmation
+    if translation_mode is not None:
+        payload["translation_mode"] = translation_mode
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
