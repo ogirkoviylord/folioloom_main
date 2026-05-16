@@ -114,9 +114,9 @@ Tasks:
   the preview-acceptance guard before full translation can start. Remaining
   blocker: Reviewer evidence and Gate B report.
 - Wire translation modes through the closed-beta flow in small follow-up slices.
-  Issue #44 adds required Telegram pending-state selection before target
-  language; durable persistence, adapter routing and preview-mode integration
-  remain follow-up scope in issues #45/#46/#55.
+  Issues #44 and #45 are merged, and this branch implements issue #46 for DOCX
+  full-translation routing/profile behavior. Preview-mode integration remains
+  follow-up scope in issue #55.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine

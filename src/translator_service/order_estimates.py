@@ -2,12 +2,12 @@ from dataclasses import dataclass
 
 from translator_service.document_sandbox import DocumentSandbox
 from translator_service.documents import DocumentFormat, DocumentUpload
-from translator_service.format_adapters.contracts import FormatAdapterPlan
 from translator_service.format_adapters import (
     plan_docx_translation,
     plan_epub_translation,
     plan_txt_translation,
 )
+from translator_service.format_adapters.contracts import FormatAdapterPlan
 from translator_service.pricing import PricingRules, estimate_price
 from translator_service.text_analysis import TextAnalysis
 
@@ -34,6 +34,7 @@ def estimate_order(
     pricing_rules: PricingRules,
     max_fragment_chars: int,
     document_sandbox: DocumentSandbox | None = None,
+    translation_mode: str | None = None,
 ) -> OrderEstimate:
     if document_sandbox is not None and upload.document_format in {
         DocumentFormat.TXT,
@@ -46,6 +47,7 @@ def estimate_order(
                 document_format=upload.document_format,
                 content=content,
                 max_fragment_chars=max_fragment_chars,
+                translation_mode=translation_mode,
             ),
             pricing_rules=pricing_rules,
         )
@@ -63,6 +65,7 @@ def estimate_order(
             content=content,
             pricing_rules=pricing_rules,
             max_fragment_chars=max_fragment_chars,
+            translation_mode=translation_mode,
         )
     if upload.document_format is DocumentFormat.EPUB:
         return estimate_epub_order(
@@ -106,6 +109,7 @@ def estimate_docx_order(
     content: bytes,
     pricing_rules: PricingRules,
     max_fragment_chars: int,
+    translation_mode: str | None = None,
 ) -> OrderEstimate:
     if upload.document_format is not DocumentFormat.DOCX:
         raise ValueError("DOCX estimator can only process DOCX uploads")
@@ -113,6 +117,7 @@ def estimate_docx_order(
     plan = plan_docx_translation(
         content=content,
         max_fragment_chars=max_fragment_chars,
+        translation_mode=translation_mode,
     )
     return _estimate_adapter_plan(
         upload=upload,

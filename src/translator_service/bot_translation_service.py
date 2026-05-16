@@ -699,6 +699,7 @@ class BotTranslationService:
             pricing_rules=self._pricing_rules,
             max_fragment_chars=self._max_fragment_chars,
             document_sandbox=self._document_sandbox,
+            translation_mode=normalized_mode,
         )
         pending = PendingTranslation(
             user_telegram_id=user_telegram_id,
