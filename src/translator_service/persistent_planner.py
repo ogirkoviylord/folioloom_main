@@ -49,6 +49,7 @@ def create_persistent_txt_job_plan(
     prompt_version: str = "plain-v1",
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
+    translation_mode: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_txt_translation(
@@ -76,6 +77,7 @@ def create_persistent_txt_job_plan(
             source_language=source_language,
             target_language=target_language,
             rights_confirmation=rights_confirmation,
+            translation_mode=translation_mode,
         ),
     )
     plans = [
@@ -113,6 +115,7 @@ def create_persistent_docx_job_plan(
     prompt_version: str = "plain-v1",
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
+    translation_mode: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_docx_translation(
@@ -140,6 +143,7 @@ def create_persistent_docx_job_plan(
             source_language=source_language,
             target_language=target_language,
             rights_confirmation=rights_confirmation,
+            translation_mode=translation_mode,
         ),
     )
     plans = [
@@ -174,6 +178,7 @@ def create_persistent_epub_job_plan(
     prompt_version: str = "plain-v1",
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
+    translation_mode: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_epub_translation(
@@ -201,6 +206,7 @@ def create_persistent_epub_job_plan(
             source_language=source_language,
             target_language=target_language,
             rights_confirmation=rights_confirmation,
+            translation_mode=translation_mode,
         ),
     )
     plans = [
@@ -248,6 +254,7 @@ def _translation_policy_snapshot(
     source_language: str,
     target_language: str,
     rights_confirmation: dict | None = None,
+    translation_mode: str | None = None,
 ) -> str:
     source_text = "\n\n".join(unit.source_text for unit in units if unit.source_text)
     translation_context = build_initial_translation_context_memory(
@@ -266,6 +273,8 @@ def _translation_policy_snapshot(
     )
     if rights_confirmation is not None:
         snapshot["rights_confirmation"] = rights_confirmation
+    if translation_mode is not None:
+        snapshot["translation_mode"] = translation_mode
     return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
 
 
