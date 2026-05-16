@@ -20,6 +20,7 @@ from translator_service.bot.messages import (
     build_start_message,
     build_translation_job_status_message,
     build_translation_language_selection_message,
+    build_translation_mode_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
     build_upload_prompt_message,
@@ -42,8 +43,11 @@ from translator_service.bot.messages import (
     is_settings_text,
     is_toggle_progress_preview_text,
     is_translate_book_text,
+    translation_mode_for_button_text,
 )
 from translator_service.bot_translation_service import (
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     PendingTranslation,
     PreviewTranslation,
 )
@@ -570,6 +574,66 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Choose the target language", message)
         self.assertIn("notes.txt", message)
 
+    def test_translation_mode_selection_message_localizes_labels_help_and_scope(self):
+        expectations = {
+            "en": ("Document / form", "Book / manuscript", "statements"),
+            "ru": (
+                "Документ / форма",
+                "Книга / рукопись",
+                "заявлений",
+            ),
+            "uk": (
+                "Документ / форма",
+                "Книга / рукопис",
+                "заяв",
+            ),
+            "fr": (
+                "Document / formulaire",
+                "Livre / manuscrit",
+                "déclarations",
+            ),
+            "es": (
+                "Documento / formulario",
+                "Libro / manuscrito",
+                "declaraciones",
+            ),
+            "nl": (
+                "Document / formulier",
+                "Boek / manuscript",
+                "verklaringen",
+            ),
+        }
+
+        for (
+            language_code,
+            (document_label, book_label, help_marker),
+        ) in expectations.items():
+            with self.subTest(language_code=language_code):
+                message = build_translation_mode_selection_message(
+                    "application.docx",
+                    interface_language=language_code,
+                    source_language_display="Ukrainian",
+                )
+
+                self.assertIn(document_label, message)
+                self.assertIn(book_label, message)
+                self.assertIn(help_marker, message)
+                self.assertIn("EPUB, DOCX, TXT", message)
+                self.assertNotIn("PDF", message)
+                self.assertNotIn("FB2", message)
+                self.assertNotIn("MOBI", message)
+                self.assertNotIn("OCR", message)
+                self.assertNotIn("DeepSeek", message)
+                self.assertNotIn("provider", message.lower())
+                self.assertEqual(
+                    translation_mode_for_button_text(document_label),
+                    TRANSLATION_MODE_DOCUMENT_FORM,
+                )
+                self.assertEqual(
+                    translation_mode_for_button_text(book_label),
+                    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+                )
+
     def test_pending_translation_message_uses_localized_confirm_button(self):
         message = build_pending_translation_message(
             PendingTranslation(
@@ -591,6 +655,55 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("To: French", message)
         self.assertIn("Estimated time: 24 sec", message)
         self.assertIn("Start Translation", message)
+
+    def test_pending_translation_message_summarizes_selected_document_form_mode(self):
+        message = build_pending_translation_message(
+            PendingTranslation(
+                user_telegram_id=42,
+                file_name="application.docx",
+                content=b"notes",
+                source_language="uk",
+                target_language="ru",
+                price_usd=0.10,
+                fragment_count=2,
+                source_language_display="Ukrainian",
+                estimated_seconds=24,
+                translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+            ),
+            interface_language="en",
+        )
+
+        self.assertIn("Mode: Document / form", message)
+        self.assertIn("structure, labels, tables", message)
+        self.assertIn("protected fields", message)
+        self.assertNotIn("$0.10", message)
+        self.assertNotIn("Price", message)
+        self.assertNotIn("PDF", message)
+        self.assertNotIn("FB2", message)
+        self.assertNotIn("DeepSeek", message)
+
+    def test_pending_translation_message_summarizes_selected_book_mode_locally(self):
+        message = build_pending_translation_message(
+            PendingTranslation(
+                user_telegram_id=42,
+                file_name="manuscript.txt",
+                content=b"notes",
+                source_language="en",
+                target_language="ru",
+                price_usd=0.10,
+                fragment_count=2,
+                source_language_display="English",
+                estimated_seconds=24,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            ),
+            interface_language="ru",
+        )
+
+        self.assertIn("Режим: Книга / рукопись", message)
+        self.assertIn("авторский голос", message)
+        self.assertNotIn("PDF", message)
+        self.assertNotIn("FB2", message)
+        self.assertNotIn("DeepSeek", message)
 
     def test_preview_translation_message_shows_snippet_and_free_beta_placeholder(self):
         message = build_preview_translation_message(
