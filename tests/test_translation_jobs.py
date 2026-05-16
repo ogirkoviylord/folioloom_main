@@ -4,7 +4,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from translator_service.beta_safety import BETA_SAFETY_ALLOWED, BetaSafetyDecision
-from translator_service.bot_translation_service import BotTranslationService
+from translator_service.bot_translation_service import (
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    BotTranslationService,
+)
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
@@ -243,6 +246,10 @@ class TranslationJobsTest(unittest.TestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.select_pending_upload_translation_mode(
+                user_telegram_id=42,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",

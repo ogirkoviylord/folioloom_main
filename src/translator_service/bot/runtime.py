@@ -52,6 +52,8 @@ from translator_service.bot.messages import (
     build_start_message,
     build_translation_job_status_message,
     build_translation_language_selection_message,
+    build_translation_mode_required_message,
+    build_translation_mode_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
     build_upload_error_message,
@@ -72,6 +74,8 @@ from translator_service.bot.messages import (
     get_open_book_text,
     get_reset_settings_text,
     get_toggle_progress_preview_text,
+    get_translation_mode_book_manuscript_text,
+    get_translation_mode_document_form_text,
     is_back_text,
     is_cancel_text,
     is_confirm_rights_text,
@@ -86,12 +90,15 @@ from translator_service.bot.messages import (
     is_settings_text,
     is_toggle_progress_preview_text,
     is_translate_book_text,
+    is_translation_mode_button_text,
+    translation_mode_for_button_text,
 )
 from translator_service.bot_translation_service import (
     BotTranslationService,
     PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
+    TranslationModeRequired,
 )
 from translator_service.config import Settings
 from translator_service.deepseek_client import DeepSeekClient
@@ -1531,6 +1538,47 @@ def create_router(
             reply_markup=_interface_language_keyboard(),
         )
 
+    @router.message(F.text.func(is_translation_mode_button_text))
+    async def translation_mode_text(message: Message) -> None:
+        translation_mode = translation_mode_for_button_text(message.text)
+        interface_language = service.get_interface_language(message.from_user.id)
+        if translation_mode is None:
+            await message.answer(
+                build_translation_mode_required_message(interface_language)
+            )
+            return
+
+        try:
+            selected = service.select_pending_upload_translation_mode(
+                user_telegram_id=message.from_user.id,
+                translation_mode=translation_mode,
+            )
+        except RightsConfirmationRequired:
+            pending_upload = service.get_pending_upload(message.from_user.id)
+            await message.answer(
+                build_rights_confirmation_message(
+                    pending_upload.file_name if pending_upload else "document",
+                    interface_language=interface_language,
+                ),
+                reply_markup=_rights_confirmation_keyboard(interface_language),
+            )
+            return
+        except (BetaAccessDenied, SecurityCooldownActive) as error:
+            await message.answer(build_upload_error_message(error, interface_language))
+            return
+        except ValueError as error:
+            await message.answer(str(error))
+            return
+
+        await message.answer(
+            build_translation_language_selection_message(
+                selected.file_name,
+                interface_language=interface_language,
+                source_language_display=selected.source_language_display,
+            ),
+            reply_markup=_target_language_keyboard(interface_language),
+        )
+
     @router.message(F.text.func(_is_language_button_text))
     async def language_text(message: Message) -> None:
         language_option = find_language_by_button_text(message.text)
@@ -1561,6 +1609,7 @@ def create_router(
                 PreviewTranslationError,
                 RightsConfirmationRequired,
                 SecurityCooldownActive,
+                TranslationModeRequired,
                 TextExtractionError,
                 UnsupportedDocumentError,
                 ValueError,
@@ -1574,6 +1623,18 @@ def create_router(
                         reply_markup=_rights_confirmation_keyboard(
                             interface_language,
                         ),
+                    )
+                    return
+                if isinstance(error, TranslationModeRequired):
+                    await message.answer(
+                        build_translation_mode_selection_message(
+                            pending_upload.file_name,
+                            interface_language=interface_language,
+                            source_language_display=(
+                                pending_upload.source_language_display
+                            ),
+                        ),
+                        reply_markup=_translation_mode_keyboard(interface_language),
                     )
                     return
                 await message.answer(
@@ -1692,6 +1753,18 @@ def create_router(
             user_telegram_id=message.from_user.id,
         )
         if restored_upload is not None and restored_upload.rights_confirmed:
+            if restored_upload.translation_mode is None:
+                await message.answer(
+                    build_translation_mode_selection_message(
+                        restored_upload.file_name,
+                        interface_language=interface_language,
+                        source_language_display=(
+                            restored_upload.source_language_display
+                        ),
+                    ),
+                    reply_markup=_translation_mode_keyboard(interface_language),
+                )
+                return
             await message.answer(
                 build_translation_language_selection_message(
                     restored_upload.file_name,
@@ -1753,14 +1826,28 @@ def create_router(
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
             if pending_upload.rights_confirmed:
-                await message.answer(
-                    build_translation_language_selection_message(
-                        pending_upload.file_name,
-                        interface_language=interface_language,
-                        source_language_display=pending_upload.source_language_display,
-                    ),
-                    reply_markup=_target_language_keyboard(interface_language),
-                )
+                if pending_upload.translation_mode is None:
+                    await message.answer(
+                        build_translation_mode_selection_message(
+                            pending_upload.file_name,
+                            interface_language=interface_language,
+                            source_language_display=(
+                                pending_upload.source_language_display
+                            ),
+                        ),
+                        reply_markup=_translation_mode_keyboard(interface_language),
+                    )
+                else:
+                    await message.answer(
+                        build_translation_language_selection_message(
+                            pending_upload.file_name,
+                            interface_language=interface_language,
+                            source_language_display=(
+                                pending_upload.source_language_display
+                            ),
+                        ),
+                        reply_markup=_target_language_keyboard(interface_language),
+                    )
             else:
                 await message.answer(
                     build_rights_confirmation_message(
@@ -2102,6 +2189,28 @@ def _target_language_keyboard(interface_language: str = "en"):
     )
 
 
+def _translation_mode_keyboard(interface_language: str = "en"):
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text=get_translation_mode_document_form_text(interface_language)
+                )
+            ],
+            [
+                KeyboardButton(
+                    text=get_translation_mode_book_manuscript_text(interface_language)
+                )
+            ],
+            [KeyboardButton(text=get_back_text(interface_language))],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
 def _language_keyboard():
     from aiogram.types import ReplyKeyboardMarkup
 
@@ -2329,6 +2438,30 @@ async def _continue_pending_translation_after_preview(
             reply_markup=_rights_confirmation_keyboard(interface_language),
         )
         return
+    except TranslationModeRequired:
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        pending = service.get_pending(message.from_user.id)
+        await message.answer(
+            build_translation_mode_selection_message(
+                (
+                    pending_upload.file_name
+                    if pending_upload is not None
+                    else (pending.file_name if pending is not None else "document")
+                ),
+                interface_language=interface_language,
+                source_language_display=(
+                    pending_upload.source_language_display
+                    if pending_upload is not None
+                    else (
+                        pending.source_language_display
+                        if pending is not None
+                        else None
+                    )
+                ),
+            ),
+            reply_markup=_translation_mode_keyboard(interface_language),
+        )
+        return
     except (BetaAccessDenied, SecurityCooldownActive) as error:
         await message.answer(build_upload_error_message(error, interface_language))
         return
@@ -2361,6 +2494,16 @@ async def _run_confirm_pending_translation(
             reply_markup=_rights_confirmation_keyboard(interface_language),
         )
         return
+    if pending_upload is not None and pending_upload.translation_mode is None:
+        await message.answer(
+            build_translation_mode_selection_message(
+                pending_upload.file_name,
+                interface_language=interface_language,
+                source_language_display=pending_upload.source_language_display,
+            ),
+            reply_markup=_translation_mode_keyboard(interface_language),
+        )
+        return
     pending = service.get_pending(message.from_user.id)
     if pending is not None and not pending.rights_confirmed:
         await message.answer(
@@ -2369,6 +2512,11 @@ async def _run_confirm_pending_translation(
                 interface_language=interface_language,
             ),
             reply_markup=_rights_confirmation_keyboard(interface_language),
+        )
+        return
+    if pending is not None and pending.translation_mode is None:
+        await message.answer(
+            build_translation_mode_required_message(interface_language)
         )
         return
     if pending is not None and not pending.preview_accepted:
@@ -2505,6 +2653,32 @@ async def _run_confirm_pending_translation(
             reply_markup=_rights_confirmation_keyboard(interface_language),
         )
         return
+    except TranslationModeRequired:
+        stop_heartbeat.set()
+        await heartbeat_task
+        pending_upload = service.get_pending_upload(message.from_user.id)
+        pending = service.get_pending(message.from_user.id)
+        await message.answer(
+            build_translation_mode_selection_message(
+                (
+                    pending_upload.file_name
+                    if pending_upload is not None
+                    else (pending.file_name if pending is not None else "document")
+                ),
+                interface_language=interface_language,
+                source_language_display=(
+                    pending_upload.source_language_display
+                    if pending_upload is not None
+                    else (
+                        pending.source_language_display
+                        if pending is not None
+                        else None
+                    )
+                ),
+            ),
+            reply_markup=_translation_mode_keyboard(interface_language),
+        )
+        return
     except PreviewAcceptanceRequired:
         stop_heartbeat.set()
         await heartbeat_task
@@ -2597,12 +2771,12 @@ async def _confirm_pending_upload_rights(
         return
 
     await message.answer(
-        build_translation_language_selection_message(
+        build_translation_mode_selection_message(
             confirmed.file_name,
             interface_language=interface_language,
             source_language_display=confirmed.source_language_display,
         ),
-        reply_markup=_target_language_keyboard(interface_language),
+        reply_markup=_translation_mode_keyboard(interface_language),
     )
 
 

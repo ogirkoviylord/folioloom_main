@@ -115,7 +115,8 @@ scope for the next beta.
 Checklist:
 
 - [ ] Telegram upload -> validation -> rights confirmation works.
-- [ ] Target language selection, estimate and explicit confirmation work.
+- [ ] Translation mode selection, target language selection, estimate and
+  explicit confirmation work.
 - [ ] Persistent job/work-unit creation works.
 - [ ] Worker processing produces final or partial result.
 - [ ] Progress, cancel, status/history/My Books flows work.

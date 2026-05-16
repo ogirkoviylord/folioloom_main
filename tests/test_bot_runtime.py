@@ -62,6 +62,8 @@ from translator_service.bot.runtime import (
     create_router,
 )
 from translator_service.bot_translation_service import (
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     PreviewTranslationError,
     UserBookResult,
 )
@@ -353,7 +355,21 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 preview_shown=True,
                 preview_accepted=True,
                 preview_accepted_at="2026-05-16T00:00:00+00:00",
+                translation_mode=pending.translation_mode
+                or TRANSLATION_MODE_BOOK_MANUSCRIPT,
             )
+
+    def _select_default_translation_mode(
+        self,
+        service,
+        *,
+        user_telegram_id: int = 42,
+        translation_mode: str = TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    ) -> None:
+        service.select_pending_upload_translation_mode(
+            user_telegram_id=user_telegram_id,
+            translation_mode=translation_mode,
+        )
 
     def test_default_pricing_rules_match_mvp_tariff(self):
         rules = build_default_pricing_rules()
@@ -571,7 +587,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(message.answer_messages[0].edited_reply_markups[-1])
         self.assertEqual(len(message.documents), 1)
 
-    async def test_confirm_rights_prompts_target_language_without_creating_job(self):
+    async def test_confirm_rights_prompts_translation_mode_without_creating_job(self):
         service = build_translation_service(
             BotRuntimeConfig(
                 persistent_jobs_db_path=":memory:",
@@ -591,10 +607,78 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await _confirm_pending_upload_rights(message=message, service=service)
 
         self.assertEqual(len(message.answers), 2)
-        self.assertIn("Choose the target language", message.answers[0][0])
-        self.assertIn("Choose the target language", message.answers[1][0])
+        self.assertIn("Choose how to translate this document", message.answers[0][0])
+        self.assertIn("Choose how to translate this document", message.answers[1][0])
         self.assertTrue(service.get_pending_upload(42).rights_confirmed)
+        self.assertIsNone(service.get_pending_upload(42).translation_mode)
         self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+
+    async def test_mode_choice_prompts_target_language_without_creating_job(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        message = RecordingMessage()
+        message.text = "Document / form"
+        router = create_router(
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            config=BotRuntimeConfig(),
+        )
+
+        handler = self._router_message_handler(router, "translation_mode_text")
+        await handler(message)
+
+        pending_upload = service.get_pending_upload(42)
+        self.assertIsNotNone(pending_upload)
+        self.assertEqual(
+            pending_upload.translation_mode,
+            TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+        self.assertIn("Choose the target language", message.answers[0][0])
+
+    async def test_language_choice_before_mode_prompts_mode_without_preview(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph for preview.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+        message.text = "🇺🇦 Українська"
+        router = create_router(
+            service=service,
+            translator=translator,
+            config=BotRuntimeConfig(),
+        )
+
+        handler = self._router_message_handler(router, "language_text")
+        await handler(message)
+
+        self.assertEqual(len(translator.requests), 0)
+        self.assertIsNone(service.get_pending(42))
+        self.assertIsNotNone(service.get_pending_upload(42))
+        self.assertIn("Choose how to translate this document", message.answers[0][0])
 
     async def test_language_choice_shows_preview_without_creating_job(self):
         temp_dir = TemporaryDirectory()
@@ -614,6 +698,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeRecordingTranslator()
         message = RecordingMessage()
 
@@ -658,6 +743,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeFailingTranslator()
 
         with self.assertRaises(PreviewTranslationError):
@@ -674,6 +760,10 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         restored_upload = service.get_pending_upload(42)
         self.assertIsNotNone(restored_upload)
         self.assertTrue(restored_upload.rights_confirmed)
+        self.assertEqual(
+            restored_upload.translation_mode,
+            TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
         self.assertEqual(service.list_user_books(user_telegram_id=42), [])
 
     async def test_continue_after_preview_starts_translation(self):
@@ -694,6 +784,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeRecordingTranslator()
         message = RecordingMessage()
 
@@ -735,6 +826,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeRecordingTranslator()
         message = RecordingMessage()
 
@@ -773,6 +865,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeRecordingTranslator()
         message = RecordingMessage()
         await _prepare_and_send_translation_preview(
@@ -809,6 +902,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             source_language="en",
         )
         service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
         translator = _RuntimeRecordingTranslator()
         message = RecordingMessage()
         await _prepare_and_send_translation_preview(
@@ -1165,6 +1259,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",

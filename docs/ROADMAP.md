@@ -41,9 +41,9 @@ evidence, а не создание документов с нуля.
 ## 3. Roadmap principles
 
 - Сначала стабилизировать core flow: Telegram upload -> validation -> rights
-  confirmation -> language/estimate -> explicit confirmation -> persistent
-  job/work units -> worker/provider execution -> progress/cancel/status/history
-  -> final or partial result.
+  confirmation -> translation mode -> language/estimate -> explicit
+  confirmation -> persistent job/work units -> worker/provider execution ->
+  progress/cancel/status/history -> final or partial result.
 - Делать маленькие PR с понятным scope и ближайшими тестами.
 - Расширять тесты и release evidence до расширения продукта.
 - Не делать production deployment без explicit human approval.
@@ -91,7 +91,8 @@ Core workflow по evidence из кода и документов:
 
 - Telegram bot принимает TXT/DOCX/EPUB upload.
 - Upload проходит validation и rights confirmation.
-- Пользователь выбирает target language, получает estimate и подтверждает job.
+- Пользователь выбирает translation mode and target language, получает estimate
+  и подтверждает job.
 - Backend создает persistent job/work units и хранит source/intermediate/result
   objects.
 - Worker/scheduler выполняет work units через DeepSeek-compatible provider
@@ -112,6 +113,10 @@ Tasks:
   display and Continue/Back controls; the issue #54 implementation branch adds
   the preview-acceptance guard before full translation can start. Remaining
   blocker: Reviewer evidence and Gate B report.
+- Wire translation modes through the closed-beta flow in small follow-up slices.
+  Issue #44 adds required Telegram pending-state selection before target
+  language; durable persistence, adapter routing and preview-mode integration
+  remain follow-up scope in issues #45/#46/#55.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine
