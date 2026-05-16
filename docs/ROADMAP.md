@@ -112,15 +112,15 @@ Tasks:
   automatic result delivery idempotency, paused admin bulk key tests during
   active translations/provider requests, and added worker/scheduler
   provider-failure regression coverage with safe retry metadata.
-- Закрыть или явно отложить free preview before full translation. Confirmed
-  progress: issues #51 and #52 are merged; PR #59 merged Telegram preview
-  display and Continue/Back controls; the issue #54 implementation branch adds
-  the preview-acceptance guard before full translation can start. Remaining
-  blocker: Reviewer evidence and Gate B report.
+- Completed 2026-05-16: free preview before full translation is evidenced for
+  the implementation slice. PRs #57/#58/#59/#61/#67 are merged, issue #56 local
+  verification passed focused preview/bot/service tests, full unittest suite and
+  compileall plus `scripts/predeploy_check.sh`, and
+  `docs/restart/release-gates.md` checks only the preview item. Gate B overall
+  remains incomplete.
 - Wire translation modes through the closed-beta flow in small follow-up slices.
-  Issues #44 and #45 are merged, and this branch implements issue #46 for DOCX
-  full-translation routing/profile behavior. Preview-mode integration remains
-  follow-up scope in issue #55.
+  Issues #44, #45, #46 and #55 are merged for mode selection, metadata,
+  DOCX routing/profile behavior and preview-mode propagation.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine
@@ -133,8 +133,9 @@ Tasks:
 Acceptance criteria:
 
 - Gate B blockers либо закрыты, либо явно deferred с owner go/no-go note.
-- Full translation не стартует без required confirmation path; free preview
-  статус явно confirmed или deferred.
+- Full translation не стартует без required confirmation path; free preview is
+  confirmed for the implementation slice, while broader Gate B readiness remains
+  open.
 - Accepted jobs не теряются при worker/bot restart по release evidence.
 - Provider failures дают safe user messaging и diagnosable metadata.
 - Logs/admin не содержат raw document text, prompts, translations или keys.
@@ -331,15 +332,6 @@ Acceptance criteria:
   Agent suitability: safe
   Suggested acceptance criteria: every Gate B item is pass/fail/deferred with
   evidence links and no production readiness claims.
-
-- Task: Review free preview guard and record evidence.
-  Phase: 1
-  Priority: High
-  Risk: Medium
-  Agent suitability: reviewer
-  Suggested acceptance criteria: issue #54 is reviewed with focused/full local
-  verification evidence showing full translation cannot start before preview
-  and explicit confirmation, or owner signs a deferral.
 
 - Task: Verify upload hardening/quarantine baseline.
   Phase: 1

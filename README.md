@@ -26,7 +26,8 @@ deployment, backup/restore workflow и широкий unittest suite.
 ## What FolioLoom Does
 
 - Принимает upload документов в Telegram и ведет пользователя через выбор
-  языка, estimate, confirmation, progress, cancel/status/history flows.
+  translation mode, языка, free preview, explicit Continue, progress,
+  cancel/status/history flows.
 - Поддерживает invite-only beta allowlist по Telegram ID: owner может заранее
   добавлять/удалять ID в admin settings и включить enforcement отдельной
   кнопкой, когда список готов.
@@ -43,6 +44,7 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Supported for beta foundation | Not supported for next beta |
 | --- | --- |
 | Telegram upload/translate flow | Paid public SaaS |
+| Free preview before full translation | Payment UI or paid jobs |
 | Admin-managed beta allowlist toggle | Public self-serve signup |
 | TXT/DOCX/EPUB | PDF/OCR/MOBI/FB2/batch ZIP |
 | DeepSeek-compatible internal providers | User-facing provider/model picker |

@@ -7,9 +7,10 @@ Last updated: 2026-05-16
 FolioLoom сейчас описан как Telegram-first сервис перевода авторизованных
 длинных документов. Текущий подтвержденный формат продукта: доверенный
 beta-пользователь загружает TXT/DOCX/EPUB в Telegram, подтверждает права,
-выбирает translation mode и target language, получает
-estimate/progress/cancel/status/history flow и финальный или частичный результат
-через backend-first workflow.
+выбирает translation mode и target language, получает free preview, явно
+нажимает Continue перед полным переводом, получает
+progress/cancel/status/history flow и финальный или частичный результат через
+backend-first workflow.
 
 Стадия: active development / working closed-beta foundation. Репозиторий прямо
 говорит, что это уже не in-memory prototype: есть persistent jobs/work units,
@@ -32,16 +33,15 @@ requests, and added scheduler/worker provider-failure regression coverage with
 safe retry metadata. This does not make cancel/resume/restart Gate B fully
 complete and does not prove durable cross-restart automatic delivery tracking.
 
-Что пока нестабильно или не закрыто для beta: free preview release evidence,
+Что пока нестабильно или не закрыто для beta:
 upload hardening/quarantine baseline, TTL cleanup/delete verification, real-file
 TXT/DOCX/EPUB release matrix, EPUBCheck/equivalent, DOCX openability/visual QA,
 Alerts MVP, Backups visibility, restore rehearsal artifact,
 cancel/resume/restart release evidence и server smoke evidence.
 
-Что неизвестно: актуальный полный test-suite status на 2026-05-13 в этой задаче
-не запускался; `.github/workflows/checks.yml` существует, но текущий GitHub
-Actions run/pass status Unknown; formal beta success metrics TBD; public
-production readiness не подтверждена.
+Что неизвестно: `.github/workflows/checks.yml` существует, но current branch
+GitHub Actions run/pass status Unknown until a PR check exists; formal beta
+success metrics TBD; public production readiness не подтверждена.
 
 ## 2. Текущий фокус
 
@@ -72,6 +72,16 @@ core flow, release gates, operational visibility and documentation.
 - Feature / component: Rights confirmation before full processing.
 - Evidence: `CURRENT_PROJECT_STATE.md`, `docs/restart/folioloom-restart-spec.md`,
   bot message/runtime modules and related bot tests.
+- Confidence: high.
+
+- Feature / component: Free preview before full translation.
+- Evidence: PRs #57, #58, #59, #61 and #67 are merged. Local issue #56
+  verification on 2026-05-16: focused preview/bot/service suite
+  `Ran 237 tests`, `OK`; full unittest suite `Ran 1046 tests`, `OK`,
+  `skipped=13`; `PYTHONPATH=src python3 -m compileall src` passed;
+  `scripts/predeploy_check.sh` passed. Visible GitHub `Python checks` for PRs
+  #57/#58/#59/#61/#67 were successful. This checks the preview slice only and
+  does not complete Gate B.
 - Confidence: high.
 
 - Feature / component: Invite-only beta allowlist with admin toggle.
@@ -154,32 +164,14 @@ core flow, release gates, operational visibility and documentation.
 
 ## 4. Что работает частично или нестабильно
 
-- Area: Free preview before full translation.
-- Current behavior: Required closed-beta flow includes preview. PR #57/#58
-  merged bounded preview selection and provider-backed preview translation; PR
-  #59 merged Telegram preview rendering with Continue/Back controls. This branch
-  implements issue #54 by adding an in-memory/service-level guard so full
-  translation cannot start until preview is shown and explicitly accepted with
-  Continue. Gate B remains unchecked until Reviewer records release evidence.
-- Evidence: `docs/restart/release-gates.md`,
-  `docs/restart/two-week-engineering-plan.md`,
-  `docs/restart/folioloom-restart-spec.md`, GitHub issues #51-#54.
-- Risk: release readiness can still be overstated if #54 is merged without
-  Reviewer evidence and Gate B report.
-- Suggested next task: Reviewer verifies issue #54 diff, focused/full local
-  tests and no full translation starts before explicit post-preview
-  confirmation.
-
 - Area: Translation modes.
-- Current behavior: Issues #44 and #45 are merged: after upload validation and
-  rights confirmation, the bot requires a mode choice before target language
-  selection, and created persistent jobs retain the selected mode in safe
-  translation-policy metadata. This branch implements issue #46 for DOCX
-  full-translation routing: `document_form` uses a strict DOCX planning/profile
-  route with safe prompt-context metadata for structure, labels, tables,
-  addresses, dates, numbers, signatures and non-translatable fields;
-  `book_manuscript` preserves the existing prose-oriented DOCX route while
-  recording the book/manuscript profile.
+- Current behavior: Issues #44, #45, #46 and #55 are merged: after upload
+  validation and rights confirmation, the bot requires a mode choice before
+  target language selection; created persistent jobs retain selected mode in
+  safe translation-policy metadata; DOCX full-translation planning routes
+  `document_form` and `book_manuscript` differently; preview generation consumes
+  selected mode metadata when available and keeps safe default behavior when it
+  is absent.
 - Evidence: `src/translator_service/bot/runtime.py`,
   `src/translator_service/bot/messages.py`,
   `src/translator_service/bot_translation_service.py`,
@@ -187,11 +179,11 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/persistent_planner.py`,
   `tests/test_bot_runtime.py`, `tests/test_bot_translation_service.py`,
   `tests/test_translation_jobs.py`, `tests/test_format_adapters.py`,
-  `tests/test_persistent_planner.py`.
-- Risk: preview-mode wiring remains follow-up scope in issue #55, so preview
-  behavior must not yet be claimed to match DOCX full-translation routing.
-- Suggested next task: Implement issue #55 before treating translation modes as
-  fully wired through preview and backend processing.
+  `tests/test_persistent_planner.py`, PR #67.
+- Risk: translation mode behavior still needs real-file release validation before
+  beta readiness claims.
+- Suggested next task: include mode-specific preview/full-translation scenarios
+  in the real-file matrix or Gate B evidence report where relevant.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
@@ -270,12 +262,15 @@ Potential issues to verify:
 - Suggested fix task: Reviewer verifies issue #31 diff, focused tests, redaction
   behavior and no worker/scheduler retry change.
 
-- Problem: Full current test status is Unknown for this handoff update.
-- Evidence: this task was docs-only and did not run the full suite.
-- Impact: recent commits may have changed behavior since the last documented
-  successful runs.
-- Suggested fix task: run common verification commands before any release or
-  code handoff.
+- Problem: Full release status is not proven by preview verification alone.
+- Evidence: issue #56 local verification ran the focused preview suite, full
+  unittest suite, compileall and predeploy check for the preview evidence slice,
+  but did not run server smoke, real-file matrix, restore rehearsal or every
+  Gate B release check.
+- Impact: preview behavior can be evidenced while broader free closed beta
+  readiness remains incomplete.
+- Suggested fix task: run the remaining Gate B checks before any release
+  go/no-go.
 
 - Problem: Upload safety and TTL policies are documented but not fully gate-checked.
 - Evidence: `docs/restart/upload-safety-and-retention.md` and unchecked Gate B
@@ -308,12 +303,6 @@ Potential issues to verify:
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
 
-- Задача: review free preview guard and record evidence.
-  Почему важно: preview is part of the required closed-beta flow.
-  Риск: release readiness can be overstated without reviewer evidence.
-  Кто должен делать: Reviewer.
-  Можно ли отдавать агенту: yes, as review/evidence work after issue #54.
-
 - Задача: verify upload hardening/quarantine baseline.
   Почему важно: unsafe files must not reach workers.
   Риск: parser, storage and raw-text leakage risk.
@@ -321,9 +310,11 @@ Potential issues to verify:
   Можно ли отдавать агенту: needs approval if behavior changes user data
   handling or quarantine retention.
 
-- Задача: run common verification commands before any go/no-go.
-  Почему важно: last full documented suite is not current to this task.
-  Риск: hidden regressions.
+- Задача: run release-scoped verification before any go/no-go.
+  Почему важно: issue #56 recorded current preview-slice tests, but Gate B still
+  needs release evidence for server smoke, real files, restore/backups and
+  restart scenarios.
+  Риск: preview evidence could be mistaken for full beta readiness.
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
 
