@@ -3917,6 +3917,7 @@ class RecordingDocumentSandbox(DocumentSandbox):
         document_format: DocumentFormat,
         content: bytes,
         max_fragment_chars: int,
+        translation_mode: str | None = None,
     ):
         self.plan_calls.append((document_format, content, max_fragment_chars))
         from translator_service.format_adapters import (

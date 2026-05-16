@@ -1,13 +1,16 @@
+import json
 from dataclasses import dataclass
 from hashlib import sha256
-import json
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
+    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+    DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     EPUB_ADAPTER_VERSION,
     TXT_ADAPTER_VERSION,
     FormatTranslationUnit,
+    docx_translation_mode_profile_signature,
     plan_docx_translation,
     plan_epub_translation,
     plan_txt_translation,
@@ -18,13 +21,14 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
+from translator_service.translation_context import (
+    TranslationContextMemory,
+    build_initial_translation_context_memory,
+    translation_context_to_payload,
+)
 from translator_service.translation_policy import (
     build_translation_policy,
     translation_policy_signature,
-)
-from translator_service.translation_context import (
-    build_initial_translation_context_memory,
-    translation_context_to_payload,
 )
 
 
@@ -122,6 +126,7 @@ def create_persistent_docx_job_plan(
         content=content,
         max_fragment_chars=max_fragment_chars,
         adapter_version=adapter_version,
+        translation_mode=translation_mode,
     )
     if not adapter_plan.units:
         raise ValueError("DOCX document does not contain translatable text")
@@ -144,6 +149,9 @@ def create_persistent_docx_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            translation_mode_profile=_docx_translation_mode_profile(
+                translation_mode
+            ),
         ),
     )
     plans = [
@@ -255,12 +263,18 @@ def _translation_policy_snapshot(
     target_language: str,
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    translation_mode_profile: "_TranslationModeProfile | None" = None,
 ) -> str:
     source_text = "\n\n".join(unit.source_text for unit in units if unit.source_text)
     translation_context = build_initial_translation_context_memory(
         source_text,
         target_language=target_language,
     )
+    if translation_mode_profile is not None:
+        translation_context = _translation_context_with_mode_profile(
+            translation_context,
+            translation_mode_profile,
+        )
     policy = build_translation_policy(
         text=source_text,
         source_language=source_language,
@@ -275,7 +289,62 @@ def _translation_policy_snapshot(
         snapshot["rights_confirmation"] = rights_confirmation
     if translation_mode is not None:
         snapshot["translation_mode"] = translation_mode
+    if translation_mode_profile is not None:
+        snapshot["translation_mode_profile"] = translation_mode_profile.signature
     return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+
+@dataclass(frozen=True)
+class _TranslationModeProfile:
+    signature: str
+    style_summary: str
+
+
+def _docx_translation_mode_profile(
+    translation_mode: str | None,
+) -> _TranslationModeProfile | None:
+    signature = docx_translation_mode_profile_signature(translation_mode)
+    if signature == DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE:
+        return _TranslationModeProfile(
+            signature=signature,
+            style_summary=(
+                "DOCX document/form mode: preserve structure, labels, tables, "
+                "addresses, dates, numbers, signatures, and non-translatable "
+                "fields; use conservative wording and avoid prose-style "
+                "paraphrase."
+            ),
+        )
+    if signature == DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE:
+        return _TranslationModeProfile(
+            signature=signature,
+            style_summary=(
+                "DOCX book/manuscript mode: preserve document structure while "
+                "allowing natural prose continuity, paragraph flow, and "
+                "editorial style where the source supports it."
+            ),
+        )
+    return None
+
+
+def _translation_context_with_mode_profile(
+    translation_context: TranslationContextMemory | None,
+    profile: _TranslationModeProfile,
+) -> TranslationContextMemory:
+    if translation_context is None:
+        return TranslationContextMemory(style_summary=profile.style_summary)
+    style_summary = translation_context.style_summary
+    if profile.style_summary not in style_summary:
+        style_summary = (
+            f"{style_summary} {profile.style_summary}".strip()
+            if style_summary
+            else profile.style_summary
+        )
+    return TranslationContextMemory(
+        style_summary=style_summary,
+        term_choices=translation_context.term_choices,
+        entity_choices=translation_context.entity_choices,
+        recent_quality_issues=translation_context.recent_quality_issues,
+    )
 
 
 def _stored_text_work_unit_plan(
