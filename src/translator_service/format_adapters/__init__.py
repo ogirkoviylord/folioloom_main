@@ -5,6 +5,11 @@ from translator_service.format_adapters.contracts import (
 )
 from translator_service.format_adapters.docx import (
     DOCX_ADAPTER_VERSION,
+    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+    DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
+    docx_translation_mode_profile_signature,
     plan_docx_translation,
 )
 from translator_service.format_adapters.epub import (
@@ -14,16 +19,24 @@ from translator_service.format_adapters.epub import (
     epub_body_block_id,
     plan_epub_translation,
 )
-from translator_service.format_adapters.txt import TXT_ADAPTER_VERSION, plan_txt_translation
+from translator_service.format_adapters.txt import (
+    TXT_ADAPTER_VERSION,
+    plan_txt_translation,
+)
 
 __all__ = [
     "DOCX_ADAPTER_VERSION",
+    "DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE",
+    "DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE",
     "EPUB_ADAPTER_VERSION",
     "FormatAdapterPlan",
     "FormatTextBlock",
     "FormatTranslationUnit",
+    "TRANSLATION_MODE_BOOK_MANUSCRIPT",
+    "TRANSLATION_MODE_DOCUMENT_FORM",
     "TXT_ADAPTER_VERSION",
     "assemble_epub_content_from_block_translations",
+    "docx_translation_mode_profile_signature",
     "epub_aux_block_id",
     "epub_body_block_id",
     "plan_docx_translation",

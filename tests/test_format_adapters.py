@@ -5,7 +5,11 @@ from translator_service.documents import DocumentFormat
 from translator_service.extractors import TextExtractionError, extract_text_from_epub
 from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
+    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+    DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     EPUB_ADAPTER_VERSION,
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     TXT_ADAPTER_VERSION,
     assemble_epub_content_from_block_translations,
     epub_aux_block_id,
@@ -125,6 +129,82 @@ class DocxFormatAdapterTest(unittest.TestCase):
             [block.kind for block in plan.units[1].blocks],
             [TextBlockKind.TABLE, TextBlockKind.TABLE],
         )
+
+    def test_plans_docx_document_form_mode_as_strict_structure_route(self):
+        plan = plan_docx_translation(
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r><w:t>Заява</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Адреса: Київ</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Дата: 16.05.2026</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Підпис: __________</w:t></w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            max_fragment_chars=1_000,
+            translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+
+        self.assertEqual(plan.fragment_count, 1)
+        self.assertEqual(plan.units[0].prompt_tier, PromptTier.STRICT)
+        self.assertEqual(
+            dict(plan.units[0].blocks[0].metadata)["translation_mode"],
+            TRANSLATION_MODE_DOCUMENT_FORM,
+        )
+        self.assertEqual(
+            dict(plan.units[0].blocks[0].metadata)[
+                "docx_translation_mode_profile"
+            ],
+            DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
+        )
+
+    def test_plans_docx_book_manuscript_mode_with_existing_prose_route(self):
+        plan = plan_docx_translation(
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r><w:t>Quiet chapter opening.</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>The same voice continued.</w:t></w:r></w:p>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            max_fragment_chars=1_000,
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+
+        self.assertEqual(plan.fragment_count, 1)
+        self.assertEqual(plan.units[0].prompt_tier, PromptTier.PLAIN)
+        self.assertEqual(
+            dict(plan.units[0].blocks[0].metadata)["translation_mode"],
+            TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+        self.assertEqual(
+            dict(plan.units[0].blocks[0].metadata)[
+                "docx_translation_mode_profile"
+            ],
+            DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+        )
+
+    def test_rejects_unknown_docx_translation_mode(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported DOCX translation mode"):
+            plan_docx_translation(
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Text</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+                max_fragment_chars=1_000,
+                translation_mode="spreadsheet",
+            )
 
 
 class EpubFormatAdapterTest(unittest.TestCase):

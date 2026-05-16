@@ -170,21 +170,28 @@ core flow, release gates, operational visibility and documentation.
   tests and no full translation starts before explicit post-preview
   confirmation.
 
-- Area: Translation mode selection.
-- Current behavior: This branch implements GitHub issue #44 for Telegram pending
-  state. After upload validation and rights confirmation, the bot requires a
-  mode choice before target language selection. Supported internal mode IDs are
-  `document_form` and `book_manuscript`; full translation confirmation is
-  blocked if mode is missing.
+- Area: Translation modes.
+- Current behavior: Issues #44 and #45 are merged: after upload validation and
+  rights confirmation, the bot requires a mode choice before target language
+  selection, and created persistent jobs retain the selected mode in safe
+  translation-policy metadata. This branch implements issue #46 for DOCX
+  full-translation routing: `document_form` uses a strict DOCX planning/profile
+  route with safe prompt-context metadata for structure, labels, tables,
+  addresses, dates, numbers, signatures and non-translatable fields;
+  `book_manuscript` preserves the existing prose-oriented DOCX route while
+  recording the book/manuscript profile.
 - Evidence: `src/translator_service/bot/runtime.py`,
   `src/translator_service/bot/messages.py`,
   `src/translator_service/bot_translation_service.py`,
+  `src/translator_service/format_adapters/docx.py`,
+  `src/translator_service/persistent_planner.py`,
   `tests/test_bot_runtime.py`, `tests/test_bot_translation_service.py`,
-  `tests/test_translation_jobs.py`.
-- Risk: mode is intentionally pending-flow metadata only in this issue; durable
-  persistence, adapter routing and preview-mode wiring remain follow-up scope.
-- Suggested next task: Implement follow-up issues #45/#46/#55 before treating
-  translation modes as fully wired through backend processing.
+  `tests/test_translation_jobs.py`, `tests/test_format_adapters.py`,
+  `tests/test_persistent_planner.py`.
+- Risk: preview-mode wiring remains follow-up scope in issue #55, so preview
+  behavior must not yet be claimed to match DOCX full-translation routing.
+- Suggested next task: Implement issue #55 before treating translation modes as
+  fully wired through preview and backend processing.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has

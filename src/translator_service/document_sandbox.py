@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import json
 import math
 import os
@@ -9,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from translator_service.documents import DocumentFormat
@@ -86,15 +86,17 @@ class DocumentSandbox:
         document_format: DocumentFormat,
         content: bytes,
         max_fragment_chars: int,
+        translation_mode: str | None = None,
     ) -> FormatAdapterPlan:
-        result = self._request(
-            {
-                "operation": "plan_translation",
-                "document_format": document_format.value,
-                "content_b64": _encode_content(content),
-                "max_fragment_chars": max_fragment_chars,
-            }
-        )
+        request = {
+            "operation": "plan_translation",
+            "document_format": document_format.value,
+            "content_b64": _encode_content(content),
+            "max_fragment_chars": max_fragment_chars,
+        }
+        if translation_mode is not None:
+            request["translation_mode"] = translation_mode
+        result = self._request(request)
         return _adapter_plan_from_json(result)
 
     def assemble_document(

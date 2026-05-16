@@ -1,13 +1,17 @@
-from pathlib import Path
-from hashlib import sha256
 import json
-from tempfile import TemporaryDirectory
 import unittest
+from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
+    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+    DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     EPUB_ADAPTER_VERSION,
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     TXT_ADAPTER_VERSION,
 )
 from translator_service.persistent_jobs import (
@@ -191,6 +195,124 @@ class PersistentPlannerTest(unittest.TestCase):
                 sha256("Source\n\nTarget".encode("utf-8")).hexdigest(),
             )
             self.assertEqual(plan.work_units, persisted_units)
+
+    def test_docx_document_form_mode_persists_strict_profile_route(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="application.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Заява</w:t></w:r></w:p>
+                        <w:p><w:r><w:t>Адреса: Київ</w:t></w:r></w:p>
+                        <w:p><w:r><w:t>Дата: 16.05.2026</w:t></w:r></w:p>
+                        <w:p><w:r><w:t>Підпис: __________</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+            )
+
+            plan = create_persistent_docx_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-form",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="application.docx",
+                source_language="uk",
+                target_language="ru",
+                max_fragment_chars=1_000,
+                translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            persisted_units = store.list_work_units(plan.job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+
+            self.assertEqual(
+                [unit.prompt_tier for unit in persisted_units],
+                ["strict"],
+            )
+            self.assertEqual(
+                translation_policy["translation_mode"],
+                TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+            self.assertEqual(
+                translation_policy["translation_mode_profile"],
+                DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
+            )
+            self.assertIn(
+                "preserve structure, labels, tables, addresses, dates, numbers",
+                translation_policy["translation_context_memory"]["style_summary"],
+            )
+
+    def test_docx_book_manuscript_mode_preserves_existing_prose_route(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="chapter.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Quiet chapter opening.</w:t></w:r></w:p>
+                        <w:p><w:r><w:t>The same voice continued.</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+            )
+
+            plan = create_persistent_docx_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-book",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="chapter.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            persisted_units = store.list_work_units(plan.job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+
+            self.assertEqual(
+                [unit.prompt_tier for unit in persisted_units],
+                ["plain"],
+            )
+            self.assertEqual(
+                translation_policy["translation_mode"],
+                TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            self.assertEqual(
+                translation_policy["translation_mode_profile"],
+                DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+            )
+            self.assertIn(
+                "allowing natural prose continuity",
+                translation_policy["translation_context_memory"]["style_summary"],
+            )
 
     def test_creates_epub_job_and_stored_work_units_from_adapter_plan(self):
         with TemporaryDirectory() as temp_dir:

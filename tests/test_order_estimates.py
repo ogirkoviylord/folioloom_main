@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
 
-from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.document_sandbox import DocumentSandbox
+from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.order_estimates import (
     DocumentEstimationNotReadyError,
     estimate_epub_order,
@@ -10,7 +10,6 @@ from translator_service.order_estimates import (
     estimate_txt_order,
 )
 from translator_service.pricing import PricingRules
-
 
 TEST_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_samples"
 
@@ -515,6 +514,7 @@ class RecordingPlanSandbox(DocumentSandbox):
         document_format: DocumentFormat,
         content: bytes,
         max_fragment_chars: int,
+        translation_mode: str | None = None,
     ):
         self.calls.append((document_format, content, max_fragment_chars))
         from translator_service.format_adapters import plan_txt_translation
