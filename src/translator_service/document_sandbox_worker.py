@@ -7,8 +7,8 @@ import socket
 import sys
 from typing import Any
 
-from translator_service.documents import DocumentFormat
 from translator_service.document_sandbox import SandboxTranslationUnit
+from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     TextExtractionError,
     extract_text_from_docx,
@@ -60,11 +60,15 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any]:
 
     if operation == "plan_translation":
         max_fragment_chars = int(request["max_fragment_chars"])
+        translation_mode = request.get("translation_mode")
         return _adapter_plan_to_json(
             _plan_translation(
                 document_format=document_format,
                 content=content,
                 max_fragment_chars=max_fragment_chars,
+                translation_mode=(
+                    str(translation_mode) if translation_mode is not None else None
+                ),
             )
         )
 
@@ -118,6 +122,7 @@ def _plan_translation(
     document_format: DocumentFormat,
     content: bytes,
     max_fragment_chars: int,
+    translation_mode: str | None = None,
 ) -> FormatAdapterPlan:
     if document_format is DocumentFormat.TXT:
         return plan_txt_translation(
@@ -128,6 +133,7 @@ def _plan_translation(
         return plan_docx_translation(
             content=content,
             max_fragment_chars=max_fragment_chars,
+            translation_mode=translation_mode,
         )
     if document_format is DocumentFormat.EPUB:
         return plan_epub_translation(
