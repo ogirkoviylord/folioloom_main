@@ -126,10 +126,27 @@ MESSAGES = {
             "Title: {file_name}\n"
             "Format: {file_format}\n"
             "{source_language_line}\n"
-            "Choose how to translate this document."
+            "Choose how to translate this document.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
         ),
         "translation_mode_document_form": "Document / form",
         "translation_mode_book_manuscript": "Book / manuscript",
+        "translation_mode_document_form_help": (
+            "Document / form: for statements, applications, forms, and structured "
+            "documents. I’ll prioritize layout cues, labels, tables, numbers, dates, "
+            "addresses, signatures, and fields that should stay unchanged."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Book / manuscript: for books, chapters, long manuscripts, and editorial "
+            "text. I’ll prioritize chapters, paragraphs, continuity, and author "
+            "voice."
+        ),
+        "translation_mode_format_scope_note": (
+            "This choice affects translation behavior only; it does not add new file "
+            "formats. Use {formats}."
+        ),
         "translation_mode_required": (
             "Choose how to translate this document before selecting the "
             "target language."
@@ -191,6 +208,7 @@ MESSAGES = {
         "estimate_title": "Translation estimate",
         "document_ready": "Ready to begin.",
         "book": "Book",
+        "mode": "Mode",
         "file": "File",
         "format": "Format",
         "characters": "Characters",
@@ -198,6 +216,14 @@ MESSAGES = {
         "price": "Price",
         "from": "From",
         "to": "To",
+        "translation_mode_document_form_summary": (
+            "Document/form mode: structure, labels, tables, numbers, dates, "
+            "addresses, signatures, and protected fields stay the priority."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Book/manuscript mode: chapters, paragraphs, continuity, and author "
+            "voice stay the priority."
+        ),
         "preservation_note": "I’ll preserve chapters, paragraphs, and as much formatting as the current file allows.",
         "confirm_instruction": "Press “{confirm_text}” to start translation.",
         "queue_instruction": "Press “{confirm_text}” to queue translation.",
@@ -339,10 +365,28 @@ MESSAGES = {
             "Название: {file_name}\n"
             "Формат: {file_format}\n"
             "{source_language_line}\n"
-            "Выберите, как переводить этот документ."
+            "Выберите, как переводить этот документ.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
         ),
         "translation_mode_document_form": "Документ / форма",
         "translation_mode_book_manuscript": "Книга / рукопись",
+        "translation_mode_document_form_help": (
+            "Документ / форма: для заявлений, анкет, форм и "
+            "структурированных документов. Я буду беречь разметку, подписи, "
+            "таблицы, числа, даты, адреса, места для подписи и поля, которые "
+            "не нужно переводить."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Книга / рукопись: для книг, глав, длинных рукописей и "
+            "редакторских текстов. Я буду беречь главы, абзацы, связность и "
+            "авторский голос."
+        ),
+        "translation_mode_format_scope_note": (
+            "Этот выбор влияет только на поведение перевода; он не добавляет "
+            "новые форматы файлов. Используйте {formats}."
+        ),
         "translation_mode_required": (
             "Выберите, как переводить этот документ, прежде чем выбирать "
             "язык перевода."
@@ -404,6 +448,7 @@ MESSAGES = {
         "estimate_title": "Оценка перевода",
         "document_ready": "Всё готово к переводу.",
         "book": "Книга",
+        "mode": "Режим",
         "file": "Файл",
         "format": "Формат",
         "characters": "Символов",
@@ -411,6 +456,15 @@ MESSAGES = {
         "price": "Цена",
         "from": "С языка",
         "to": "На язык",
+        "translation_mode_document_form_summary": (
+            "Режим документа/формы: в приоритете структура, подписи, "
+            "таблицы, числа, даты, адреса, места для подписи и защищенные "
+            "поля."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Режим книги/рукописи: в приоритете главы, абзацы, связность "
+            "и авторский голос."
+        ),
         "preservation_note": "Я сохраню главы, абзацы и форматирование настолько, насколько позволяет исходный файл.",
         "confirm_instruction": "Нажмите «{confirm_text}», чтобы начать перевод.",
         "queue_instruction": "Нажмите «{confirm_text}», чтобы поставить перевод в очередь.",
@@ -505,6 +559,36 @@ for _language_code, _fallbacks in {
         "download_book": "Завантажити {index}",
         "download_translation": "Завантажити переклад",
         "continue_translation": "Продовжити переклад",
+        "translation_mode_prompt": (
+            "Файл отримано.\n\n"
+            "Назва: {file_name}\n"
+            "Формат: {file_format}\n"
+            "{source_language_line}\n"
+            "Виберіть, як перекладати цей документ.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
+        ),
+        "translation_mode_document_form": "Документ / форма",
+        "translation_mode_book_manuscript": "Книга / рукопис",
+        "translation_mode_document_form_help": (
+            "Документ / форма: для заяв, анкет, форм і структурованих "
+            "документів. Я зберігатиму розмітку, підписи, таблиці, числа, "
+            "дати, адреси, місця для підпису й поля, які не треба перекладати."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Книга / рукопис: для книг, розділів, довгих рукописів і "
+            "редакторських текстів. Я зберігатиму розділи, абзаци, "
+            "послідовність і авторський голос."
+        ),
+        "translation_mode_format_scope_note": (
+            "Цей вибір впливає лише на поведінку перекладу; він не додає "
+            "нові формати файлів. Використовуйте {formats}."
+        ),
+        "translation_mode_required": (
+            "Виберіть, як перекладати цей документ, перш ніж вибирати "
+            "мову перекладу."
+        ),
         "delete_book": "Видалити книгу",
         "confirm_delete_book": "Так, видалити книгу",
         "keep_book": "Залишити книгу",
@@ -560,11 +644,20 @@ for _language_code, _fallbacks in {
         "no_pending_translation": "Немає перекладу, який очікує підтвердження.",
         "estimate_title": "Оцінка перекладу",
         "book": "Книга",
+        "mode": "Режим",
         "file": "Файл",
         "format": "Формат",
         "characters": "Символів",
         "tokens": "Орієнтовні токени",
         "price": "Ціна",
+        "translation_mode_document_form_summary": (
+            "Режим документа/форми: в пріоритеті структура, підписи, "
+            "таблиці, числа, дати, адреси, місця для підпису й захищені поля."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Режим книги/рукопису: в пріоритеті розділи, абзаци, "
+            "послідовність і авторський голос."
+        ),
         "preservation_note": "Я збережу розділи, абзаци й форматування настільки, наскільки це дозволяє початковий файл.",
         "confirm_instruction": "Натисніть «{confirm_text}», щоб почати переклад.",
         "queue_instruction": "Натисніть «{confirm_text}», щоб поставити переклад у чергу.",
@@ -631,6 +724,36 @@ for _language_code, _fallbacks in {
         "download_book": "Télécharger {index}",
         "download_translation": "Télécharger la traduction",
         "continue_translation": "Continuer la traduction",
+        "translation_mode_prompt": (
+            "Fichier reçu.\n\n"
+            "Titre : {file_name}\n"
+            "Format : {file_format}\n"
+            "{source_language_line}\n"
+            "Choisissez comment traduire ce document.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
+        ),
+        "translation_mode_document_form": "Document / formulaire",
+        "translation_mode_book_manuscript": "Livre / manuscrit",
+        "translation_mode_document_form_help": (
+            "Document / formulaire : pour les déclarations, demandes, formulaires "
+            "et documents structurés. Je privilégierai la mise en page, les "
+            "libellés, les tableaux, les nombres, les dates, les adresses, les "
+            "signatures et les champs à conserver."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Livre / manuscrit : pour les livres, chapitres, longs manuscrits et "
+            "textes éditoriaux. Je privilégierai les chapitres, paragraphes, la "
+            "continuité et la voix de l’auteur."
+        ),
+        "translation_mode_format_scope_note": (
+            "Ce choix modifie seulement le comportement de traduction ; il n’ajoute "
+            "pas de nouveaux formats de fichier. Utilisez {formats}."
+        ),
+        "translation_mode_required": (
+            "Choisissez comment traduire ce document avant de choisir la langue cible."
+        ),
         "delete_book": "Supprimer le livre",
         "confirm_delete_book": "Oui, supprimer",
         "keep_book": "Garder le livre",
@@ -687,11 +810,21 @@ for _language_code, _fallbacks in {
         "no_pending_translation": "Aucune traduction n’attend de confirmation.",
         "estimate_title": "Estimation de traduction",
         "book": "Livre",
+        "mode": "Mode",
         "file": "Fichier",
         "format": "Format",
         "characters": "Caractères",
         "tokens": "Jetons estimés",
         "price": "Prix",
+        "translation_mode_document_form_summary": (
+            "Mode document/formulaire : la structure, les libellés, les tableaux, "
+            "les nombres, les dates, les adresses, les signatures et les champs "
+            "protégés restent prioritaires."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Mode livre/manuscrit : les chapitres, les paragraphes, la continuité "
+            "et la voix de l’auteur restent prioritaires."
+        ),
         "preservation_note": "Je préserverai les chapitres, paragraphes et autant de mise en forme que le fichier le permet.",
         "confirm_instruction": "Appuyez sur « {confirm_text} » pour lancer la traduction.",
         "queue_instruction": "Appuyez sur « {confirm_text} » pour mettre la traduction en file d’attente.",
@@ -758,6 +891,36 @@ for _language_code, _fallbacks in {
         "download_book": "Descargar {index}",
         "download_translation": "Descargar traducción",
         "continue_translation": "Continuar traducción",
+        "translation_mode_prompt": (
+            "Archivo recibido.\n\n"
+            "Título: {file_name}\n"
+            "Formato: {file_format}\n"
+            "{source_language_line}\n"
+            "Elige cómo traducir este documento.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
+        ),
+        "translation_mode_document_form": "Documento / formulario",
+        "translation_mode_book_manuscript": "Libro / manuscrito",
+        "translation_mode_document_form_help": (
+            "Documento / formulario: para declaraciones, solicitudes, formularios "
+            "y documentos estructurados. Daré prioridad al diseño, las etiquetas, "
+            "las tablas, los números, las fechas, las direcciones, las firmas y los "
+            "campos que deben conservarse."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Libro / manuscrito: para libros, capítulos, manuscritos largos y textos "
+            "editoriales. Daré prioridad a capítulos, párrafos, continuidad "
+            "y voz autoral."
+        ),
+        "translation_mode_format_scope_note": (
+            "Esta elección solo cambia el comportamiento de traducción; no añade "
+            "nuevos formatos de archivo. Usa {formats}."
+        ),
+        "translation_mode_required": (
+            "Elige cómo traducir este documento antes de elegir el idioma de destino."
+        ),
         "delete_book": "Eliminar libro",
         "confirm_delete_book": "Sí, eliminar libro",
         "keep_book": "Conservar libro",
@@ -814,11 +977,21 @@ for _language_code, _fallbacks in {
         "no_pending_translation": "No hay ninguna traducción esperando confirmación.",
         "estimate_title": "Estimación de traducción",
         "book": "Libro",
+        "mode": "Modo",
         "file": "Archivo",
         "format": "Formato",
         "characters": "Caracteres",
         "tokens": "Tokens estimados",
         "price": "Precio",
+        "translation_mode_document_form_summary": (
+            "Modo documento/formulario: la estructura, las etiquetas, las tablas, "
+            "los números, las fechas, las direcciones, las firmas y los campos "
+            "protegidos son la prioridad."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Modo libro/manuscrito: los capítulos, párrafos, continuidad y voz "
+            "autoral son la prioridad."
+        ),
         "preservation_note": "Conservaré capítulos, párrafos y tanto formato como permita el archivo actual.",
         "confirm_instruction": "Pulsa «{confirm_text}» para iniciar la traducción.",
         "queue_instruction": "Pulsa «{confirm_text}» para poner la traducción en cola.",
@@ -885,6 +1058,37 @@ for _language_code, _fallbacks in {
         "download_book": "Download {index}",
         "download_translation": "Vertaling downloaden",
         "continue_translation": "Vertaling hervatten",
+        "translation_mode_prompt": (
+            "Bestand ontvangen.\n\n"
+            "Titel: {file_name}\n"
+            "Formaat: {file_format}\n"
+            "{source_language_line}\n"
+            "Kies hoe dit document moet worden vertaald.\n\n"
+            "{document_form_help}\n\n"
+            "{book_manuscript_help}\n\n"
+            "{format_scope_note}"
+        ),
+        "translation_mode_document_form": "Document / formulier",
+        "translation_mode_book_manuscript": "Boek / manuscript",
+        "translation_mode_document_form_help": (
+            "Document / formulier: voor verklaringen, aanvragen, formulieren en "
+            "gestructureerde documenten. Ik geef voorrang aan opmaak, labels, "
+            "tabellen, nummers, datums, adressen, handtekeningen en velden die "
+            "behouden moeten blijven."
+        ),
+        "translation_mode_book_manuscript_help": (
+            "Boek / manuscript: voor boeken, hoofdstukken, lange manuscripten en "
+            "redactionele tekst. Ik geef voorrang aan hoofdstukken, alinea’s, "
+            "continuïteit en auteursstem."
+        ),
+        "translation_mode_format_scope_note": (
+            "Deze keuze verandert alleen het vertaalgedrag; er komen geen nieuwe "
+            "bestandsformaten bij. Gebruik {formats}."
+        ),
+        "translation_mode_required": (
+            "Kies hoe dit document moet worden vertaald voordat je de "
+            "doeltaal kiest."
+        ),
         "delete_book": "Boek verwijderen",
         "confirm_delete_book": "Ja, boek verwijderen",
         "keep_book": "Boek bewaren",
@@ -941,11 +1145,20 @@ for _language_code, _fallbacks in {
         "no_pending_translation": "Er wacht geen vertaling op bevestiging.",
         "estimate_title": "Vertaalinschatting",
         "book": "Boek",
+        "mode": "Modus",
         "file": "Bestand",
         "format": "Formaat",
         "characters": "Tekens",
         "tokens": "Geschatte tokens",
         "price": "Prijs",
+        "translation_mode_document_form_summary": (
+            "Document/formulier-modus: structuur, labels, tabellen, nummers, datums, "
+            "adressen, handtekeningen en beschermde velden blijven de prioriteit."
+        ),
+        "translation_mode_book_manuscript_summary": (
+            "Boek/manuscript-modus: hoofdstukken, alinea’s, continuïteit en "
+            "auteursstem blijven de prioriteit."
+        ),
         "preservation_note": "Ik behoud hoofdstukken, alinea’s en zoveel opmaak als het huidige bestand toelaat.",
         "confirm_instruction": "Druk op “{confirm_text}” om de vertaling te starten.",
         "queue_instruction": "Druk op “{confirm_text}” om de vertaling in de wachtrij te zetten.",
@@ -1207,6 +1420,11 @@ def build_translation_mode_selection_message(
         file_name=file_name,
         file_format=_file_format_label(file_name),
         source_language_line=source_language_line,
+        document_form_help=messages["translation_mode_document_form_help"],
+        book_manuscript_help=messages["translation_mode_book_manuscript_help"],
+        format_scope_note=messages["translation_mode_format_scope_note"].format(
+            formats=_supported_formats_text()
+        ),
     )
 
 
@@ -1241,16 +1459,48 @@ def build_pending_translation_message(
 ) -> str:
     messages = _messages(interface_language)
     confirm_text = get_confirm_translation_text(interface_language)
-    return (
-        f"{messages['document_ready']}\n\n"
-        f"{messages['book']}: {pending.file_name}\n"
-        f"{messages['from']}: {_localized_source_language_display_text(pending.source_language_display, pending.source_language, interface_language)}\n"
-        f"{messages['to']}: {localized_language_name_for_code(pending.target_language, interface_language)}\n"
-        f"{messages['estimated_time']}: {_format_duration(pending.estimated_seconds or 0, interface_language)}\n"
-        "\n"
-        f"{messages['preservation_note']}\n\n"
-        f"{messages['confirm_instruction'].format(confirm_text=confirm_text)}"
+    source_text = _localized_source_language_display_text(
+        pending.source_language_display,
+        pending.source_language,
+        interface_language,
     )
+    target_text = localized_language_name_for_code(
+        pending.target_language,
+        interface_language,
+    )
+    duration_text = _format_duration(
+        pending.estimated_seconds or 0,
+        interface_language,
+    )
+    lines = [
+        messages["document_ready"],
+        "",
+        f"{messages['book']}: {pending.file_name}",
+        f"{messages['from']}: {source_text}",
+        f"{messages['to']}: {target_text}",
+    ]
+    mode_display = _translation_mode_display(
+        pending.translation_mode,
+        interface_language,
+    )
+    if mode_display is not None:
+        mode_label, mode_summary = mode_display
+        lines.extend(
+            [
+                f"{messages['mode']}: {mode_label}",
+                mode_summary,
+            ]
+        )
+    lines.extend(
+        [
+            f"{messages['estimated_time']}: {duration_text}",
+            "",
+            messages["preservation_note"],
+            "",
+            messages["confirm_instruction"].format(confirm_text=confirm_text),
+        ]
+    )
+    return "\n".join(lines)
 
 
 def build_preview_translation_message(
@@ -1284,6 +1534,24 @@ def get_translation_mode_document_form_text(interface_language: str = "en") -> s
 
 def get_translation_mode_book_manuscript_text(interface_language: str = "en") -> str:
     return _messages(interface_language)["translation_mode_book_manuscript"]
+
+
+def _translation_mode_display(
+    translation_mode: str | None,
+    interface_language: str,
+) -> tuple[str, str] | None:
+    messages = _messages(interface_language)
+    if translation_mode == TRANSLATION_MODE_DOCUMENT_FORM:
+        return (
+            messages["translation_mode_document_form"],
+            messages["translation_mode_document_form_summary"],
+        )
+    if translation_mode == TRANSLATION_MODE_BOOK_MANUSCRIPT:
+        return (
+            messages["translation_mode_book_manuscript"],
+            messages["translation_mode_book_manuscript_summary"],
+        )
+    return None
 
 
 def translation_mode_for_button_text(text: str | None) -> str | None:
