@@ -183,6 +183,7 @@ class PreviewCandidate:
     document_kind: DocumentKind
     source_language: str
     target_language: str
+    translation_mode: str | None
     source_text: str
     source_block_ids: tuple[str, ...]
     selected_block_count: int
@@ -804,6 +805,7 @@ class BotTranslationService:
             content=pending.content,
             max_fragment_chars=self._max_fragment_chars,
             document_sandbox=self._document_sandbox,
+            translation_mode=pending.translation_mode,
         )
         selected = _select_preview_blocks(plan)
         if not selected:
@@ -833,12 +835,19 @@ class BotTranslationService:
             "max_character_count": PREVIEW_CANDIDATE_MAX_CHARS,
             "sampling_policy": "first_meaningful_translatable_blocks",
         }
+        metadata.update(
+            _preview_translation_mode_metadata(
+                selected=selected,
+                translation_mode=pending.translation_mode,
+            )
+        )
         return PreviewCandidate(
             user_telegram_id=user_telegram_id,
             file_name=pending.file_name,
             document_kind=document_kind,
             source_language=pending.source_language,
             target_language=pending.target_language,
+            translation_mode=pending.translation_mode,
             source_text=source_text,
             source_block_ids=source_block_ids,
             selected_block_count=len(selected),
@@ -3184,12 +3193,14 @@ def _preview_adapter_plan(
     content: bytes,
     max_fragment_chars: int,
     document_sandbox: DocumentSandbox | None,
+    translation_mode: str | None,
 ) -> FormatAdapterPlan:
     if document_sandbox is not None:
         return document_sandbox.plan_translation(
             document_format=document_format,
             content=content,
             max_fragment_chars=max_fragment_chars,
+            translation_mode=translation_mode,
         )
     if document_format is DocumentFormat.TXT:
         return plan_txt_translation(
@@ -3200,6 +3211,7 @@ def _preview_adapter_plan(
         return plan_docx_translation(
             content=content,
             max_fragment_chars=max_fragment_chars,
+            translation_mode=translation_mode,
         )
     if document_format is DocumentFormat.EPUB:
         return plan_epub_translation(
@@ -3221,6 +3233,25 @@ def _select_preview_blocks(
             if len(selected) >= PREVIEW_CANDIDATE_MAX_BLOCKS:
                 return tuple(selected)
     return tuple(selected)
+
+
+def _preview_translation_mode_metadata(
+    *,
+    selected: tuple[tuple[int, FormatTextBlock], ...],
+    translation_mode: str | None,
+) -> dict[str, object]:
+    if translation_mode is None:
+        return {}
+
+    metadata: dict[str, object] = {"translation_mode": translation_mode}
+    docx_profiles = {
+        dict(block.metadata).get("docx_translation_mode_profile")
+        for _sequence, block in selected
+    }
+    docx_profiles.discard(None)
+    if len(docx_profiles) == 1:
+        metadata["docx_translation_mode_profile"] = next(iter(docx_profiles))
+    return metadata
 
 
 def _is_meaningful_preview_block(block: FormatTextBlock) -> bool:
@@ -3750,6 +3781,8 @@ def _preview_id(candidate: PreviewCandidate) -> str:
     digest.update(candidate.source_language.encode("utf-8", errors="replace"))
     digest.update(b"\0")
     digest.update(candidate.target_language.encode("utf-8", errors="replace"))
+    digest.update(b"\0")
+    digest.update((candidate.translation_mode or "").encode("utf-8", errors="replace"))
     digest.update(b"\0")
     digest.update(candidate.source_text.encode("utf-8", errors="replace"))
     return f"preview:{candidate.user_telegram_id}:{digest.hexdigest()[:24]}"
