@@ -116,6 +116,12 @@ RIGHTS_CONFIRMATION_VERSION = "rights-v1"
 RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
 PREVIEW_CANDIDATE_MAX_BLOCKS = 3
 PREVIEW_CANDIDATE_MAX_CHARS = 2_000
+TRANSLATION_MODE_DOCUMENT_FORM = "document_form"
+TRANSLATION_MODE_BOOK_MANUSCRIPT = "book_manuscript"
+SUPPORTED_TRANSLATION_MODES = (
+    TRANSLATION_MODE_DOCUMENT_FORM,
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+)
 AutomaticResultDeliveryKey = tuple[int, str, str, int, str]
 
 
@@ -125,6 +131,10 @@ class RightsConfirmationRequired(ValueError):
 
 class PreviewAcceptanceRequired(ValueError):
     """Raised when full translation starts before preview acceptance."""
+
+
+class TranslationModeRequired(ValueError):
+    """Raised when a translation mode is required before continuing."""
 
 
 @dataclass(frozen=True)
@@ -140,6 +150,7 @@ class PendingUpload:
     rights_confirmed_at: str | None = None
     rights_confirmation_version: str | None = None
     rights_confirmation_source: str | None = None
+    translation_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +173,7 @@ class PendingTranslation:
     preview_shown: bool = False
     preview_accepted: bool = False
     preview_accepted_at: str | None = None
+    translation_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -563,6 +575,45 @@ class BotTranslationService:
         )
         return confirmed
 
+    def select_pending_upload_translation_mode(
+        self,
+        *,
+        user_telegram_id: int,
+        translation_mode: str,
+    ) -> PendingUpload:
+        self._assert_beta_access_allows(user_telegram_id)
+        self._assert_security_cooldown_allows(user_telegram_id)
+        normalized_mode = _normalize_translation_mode(translation_mode)
+        with self._state_lock:
+            pending_upload = self._pending_uploads.get(user_telegram_id)
+            if pending_upload is None:
+                raise ValueError(
+                    "No uploaded document is waiting for translation mode"
+                )
+            if not pending_upload.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before choosing "
+                    "translation mode"
+                )
+            if pending_upload.translation_mode == normalized_mode:
+                return pending_upload
+            selected = replace(pending_upload, translation_mode=normalized_mode)
+            self._pending_uploads[user_telegram_id] = selected
+
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="translation.mode.selected",
+            action="selected",
+            target_type="translation_mode",
+            target_id=normalized_mode,
+            metadata={
+                "translation_mode": normalized_mode,
+                "file_name": selected.file_name,
+                "document_kind": selected.document_kind.value,
+            },
+        )
+        return selected
+
     def prepare_pending_upload(
         self,
         *,
@@ -582,6 +633,11 @@ class BotTranslationService:
                     "Document rights must be confirmed before choosing "
                     "translation language"
                 )
+            if pending_upload.translation_mode is None:
+                raise TranslationModeRequired(
+                    "Choose how this document should be translated before "
+                    "choosing translation language"
+                )
 
         pending = self.prepare_document(
             user_telegram_id=user_telegram_id,
@@ -595,6 +651,7 @@ class BotTranslationService:
             rights_confirmed_at=pending_upload.rights_confirmed_at,
             rights_confirmation_version=pending_upload.rights_confirmation_version,
             rights_confirmation_source=pending_upload.rights_confirmation_source,
+            translation_mode=pending_upload.translation_mode,
         )
         with self._state_lock:
             self._pending_uploads.pop(user_telegram_id, None)
@@ -614,9 +671,15 @@ class BotTranslationService:
         rights_confirmed_at: str | None = None,
         rights_confirmation_version: str | None = None,
         rights_confirmation_source: str | None = None,
+        translation_mode: str | None = None,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
+        normalized_mode = (
+            _normalize_translation_mode(translation_mode)
+            if translation_mode is not None
+            else None
+        )
         upload = validate_document_upload(
             file_name=file_name,
             size_bytes=len(content),
@@ -669,6 +732,7 @@ class BotTranslationService:
                 rights_confirmation_source
                 or (RIGHTS_CONFIRMATION_SOURCE_TELEGRAM if rights_confirmed else None)
             ),
+            translation_mode=normalized_mode,
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -682,6 +746,7 @@ class BotTranslationService:
                 "target_language": target_language,
                 "file_name": file_name,
                 "source_language": source_language,
+                "translation_mode": normalized_mode,
             },
         )
         self._record_activity_for_user(
@@ -697,6 +762,7 @@ class BotTranslationService:
                 ).value,
                 "source_language": source_language,
                 "target_language": target_language,
+                "translation_mode": pending.translation_mode,
                 "source_language_display": pending.source_language_display,
                 "fragment_count": pending.fragment_count,
                 "price_usd": pending.price_usd,
@@ -905,6 +971,11 @@ class BotTranslationService:
                 raise RightsConfirmationRequired(
                     "Document rights must be confirmed before translation starts"
                 )
+            if pending.translation_mode is None:
+                raise TranslationModeRequired(
+                    "Choose how this document should be translated before "
+                    "translation starts"
+                )
             if not pending.preview_id or not pending.preview_shown:
                 raise PreviewAcceptanceRequired(
                     "Review the translation preview before continuing."
@@ -954,6 +1025,7 @@ class BotTranslationService:
                 rights_confirmed_at=pending.rights_confirmed_at,
                 rights_confirmation_version=pending.rights_confirmation_version,
                 rights_confirmation_source=pending.rights_confirmation_source,
+                translation_mode=pending.translation_mode,
             )
             self._pending_uploads[user_telegram_id] = upload
             return upload
@@ -1936,6 +2008,11 @@ class BotTranslationService:
                 raise RightsConfirmationRequired(
                     "Document rights must be confirmed before translation starts"
                 )
+            if pending.translation_mode is None:
+                raise TranslationModeRequired(
+                    "Choose how this document should be translated before "
+                    "translation starts"
+                )
             if not pending.preview_accepted:
                 raise PreviewAcceptanceRequired(
                     "Review the translation preview before continuing."
@@ -1963,6 +2040,7 @@ class BotTranslationService:
                 "document_kind": document_kind.value,
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
+                "translation_mode": pending.translation_mode,
                 "fragment_count": pending.fragment_count,
                 "rights_confirmation": _rights_confirmation_payload(pending),
             },
@@ -3455,6 +3533,13 @@ def _rights_confirmation_payload(
         "source": pending.rights_confirmation_source,
         "version": pending.rights_confirmation_version,
     }
+
+
+def _normalize_translation_mode(translation_mode: str) -> str:
+    normalized = translation_mode.strip().lower()
+    if normalized not in SUPPORTED_TRANSLATION_MODES:
+        raise ValueError("Unsupported translation mode")
+    return normalized
 
 
 def _now_iso() -> str:

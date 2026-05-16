@@ -7,8 +7,9 @@ Last updated: 2026-05-16
 FolioLoom сейчас описан как Telegram-first сервис перевода авторизованных
 длинных документов. Текущий подтвержденный формат продукта: доверенный
 beta-пользователь загружает TXT/DOCX/EPUB в Telegram, подтверждает права,
-получает estimate/progress/cancel/status/history flow и финальный или частичный
-результат через backend-first workflow.
+выбирает translation mode и target language, получает
+estimate/progress/cancel/status/history flow и финальный или частичный результат
+через backend-first workflow.
 
 Стадия: active development / working closed-beta foundation. Репозиторий прямо
 говорит, что это уже не in-memory prototype: есть persistent jobs/work units,
@@ -168,6 +169,22 @@ core flow, release gates, operational visibility and documentation.
 - Suggested next task: Reviewer verifies issue #54 diff, focused/full local
   tests and no full translation starts before explicit post-preview
   confirmation.
+
+- Area: Translation mode selection.
+- Current behavior: This branch implements GitHub issue #44 for Telegram pending
+  state. After upload validation and rights confirmation, the bot requires a
+  mode choice before target language selection. Supported internal mode IDs are
+  `document_form` and `book_manuscript`; full translation confirmation is
+  blocked if mode is missing.
+- Evidence: `src/translator_service/bot/runtime.py`,
+  `src/translator_service/bot/messages.py`,
+  `src/translator_service/bot_translation_service.py`,
+  `tests/test_bot_runtime.py`, `tests/test_bot_translation_service.py`,
+  `tests/test_translation_jobs.py`.
+- Risk: mode is intentionally pending-flow metadata only in this issue; durable
+  persistence, adapter routing and preview-mode wiring remain follow-up scope.
+- Suggested next task: Implement follow-up issues #45/#46/#55 before treating
+  translation modes as fully wired through backend processing.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
