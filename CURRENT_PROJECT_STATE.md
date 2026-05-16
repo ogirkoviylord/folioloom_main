@@ -74,6 +74,20 @@ scripts/predeploy_check.sh
 
 Результат targeted suite: `Ran 71 tests`, `OK`.
 
+После issue #56 preview evidence/docs sync были пройдены:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service tests.test_bot_runtime tests.test_bot_messages tests.test_translation_jobs
+PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m compileall src
+scripts/predeploy_check.sh
+```
+
+Результаты: focused preview/bot/service suite `Ran 237 tests`, `OK`;
+full unittest suite `Ran 1046 tests`, `OK`, `skipped=13`; compileall passed.
+`scripts/predeploy_check.sh` passed. This is local verification evidence for the
+preview slice, not a free closed beta go/no-go.
+
 Важная оговорка: repo-wide `python3 -m ruff check --no-cache src tests scripts`
 пока не является release blocker. Он падает на исторических style/import/line
 length issues. Текущий gate - targeted lint внутри `scripts/predeploy_check.sh`.
@@ -92,6 +106,10 @@ length issues. Текущий gate - targeted lint внутри `scripts/predepl
 - Rights confirmation gate after document upload/validation and before target
   language/estimate/full processing. Confirmation stores safe metadata only:
   boolean, timestamp, version and source.
+- Free preview before full translation: after rights confirmation, translation
+  mode and target language selection, the bot generates a bounded translated
+  preview, shows Continue/Back controls, and full translation cannot start
+  until the user explicitly continues after seeing the preview.
 - TXT/DOCX/EPUB upload and translation path.
 - Cooperative cancellation with partial output.
 - My Books/history foundations: ownership checks, download, resume/cancel
@@ -198,7 +216,6 @@ product yet.
 
 ## Main gaps against closed beta
 
-- Free preview before full translation.
 - Upload hardening/quarantine baseline.
 - TTL cleanup/delete verification.
 - Real-file TXT/DOCX/EPUB matrix and release report.
