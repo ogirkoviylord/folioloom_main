@@ -4,6 +4,8 @@ from pathlib import PurePath
 from translator_service.beta_access import BetaAccessDenied
 from translator_service.bot.activity_phrases import get_activity_phrases
 from translator_service.bot_translation_service import (
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
+    TRANSLATION_MODE_DOCUMENT_FORM,
     PendingTranslation,
     PreviewTranslation,
 )
@@ -118,6 +120,19 @@ MESSAGES = {
         "preview_required": (
             "Review the translation preview first, then choose Continue "
             "Translation to start the full translation."
+        ),
+        "translation_mode_prompt": (
+            "File received.\n\n"
+            "Title: {file_name}\n"
+            "Format: {file_format}\n"
+            "{source_language_line}\n"
+            "Choose how to translate this document."
+        ),
+        "translation_mode_document_form": "Document / form",
+        "translation_mode_book_manuscript": "Book / manuscript",
+        "translation_mode_required": (
+            "Choose how to translate this document before selecting the "
+            "target language."
         ),
         "delete_book": "Delete Book",
         "confirm_delete_book": "Yes, Delete Book",
@@ -318,6 +333,19 @@ MESSAGES = {
         "preview_required": (
             "Сначала посмотрите предпросмотр, затем нажмите "
             "«Продолжить перевод», чтобы начать полный перевод."
+        ),
+        "translation_mode_prompt": (
+            "Файл получен.\n\n"
+            "Название: {file_name}\n"
+            "Формат: {file_format}\n"
+            "{source_language_line}\n"
+            "Выберите, как переводить этот документ."
+        ),
+        "translation_mode_document_form": "Документ / форма",
+        "translation_mode_book_manuscript": "Книга / рукопись",
+        "translation_mode_required": (
+            "Выберите, как переводить этот документ, прежде чем выбирать "
+            "язык перевода."
         ),
         "delete_book": "Удалить книгу",
         "confirm_delete_book": "Да, удалить книгу",
@@ -1159,6 +1187,29 @@ def build_translation_language_selection_message(
     )
 
 
+def build_translation_mode_selection_message(
+    file_name: str,
+    interface_language: str = "en",
+    source_language_display: str | None = None,
+) -> str:
+    messages = _messages(interface_language)
+    source_language_line = ""
+    if source_language_display:
+        localized_source_language = _localized_source_language_display_text(
+            source_language_display,
+            "auto",
+            interface_language,
+        )
+        source_language_line = (
+            f"{messages['original_language']}: {localized_source_language}\n"
+        )
+    return messages["translation_mode_prompt"].format(
+        file_name=file_name,
+        file_format=_file_format_label(file_name),
+        source_language_line=source_language_line,
+    )
+
+
 def build_rights_confirmation_message(
     file_name: str,
     interface_language: str = "en",
@@ -1221,6 +1272,35 @@ def build_preview_translation_message(
 
 def build_preview_required_message(interface_language: str = "en") -> str:
     return _messages(interface_language)["preview_required"]
+
+
+def build_translation_mode_required_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["translation_mode_required"]
+
+
+def get_translation_mode_document_form_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["translation_mode_document_form"]
+
+
+def get_translation_mode_book_manuscript_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["translation_mode_book_manuscript"]
+
+
+def translation_mode_for_button_text(text: str | None) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    for messages in MESSAGES.values():
+        if normalized == messages["translation_mode_document_form"].lower():
+            return TRANSLATION_MODE_DOCUMENT_FORM
+        if normalized == messages["translation_mode_book_manuscript"].lower():
+            return TRANSLATION_MODE_BOOK_MANUSCRIPT
+    return None
+
+
+def is_translation_mode_button_text(text: str | None) -> bool:
+    return translation_mode_for_button_text(text) is not None
 
 
 def is_confirm_translation_text(text: str | None) -> bool:
