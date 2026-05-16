@@ -41,7 +41,11 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [x] Invite-only allowlist is editable from SSH-tunneled admin and can be
   enabled or disabled with an admin toggle.
 - [x] Rights confirmation is shown before full processing.
-- [ ] Free preview exists before full translation.
+- [x] Free preview exists before full translation. Evidence: PRs #57/#58/#59/#61
+  and #67 are merged; issue #56 local verification passed focused
+  preview/bot/service tests, full unittest suite, compileall and predeploy check
+  on 2026-05-16. This checks only the preview item, not overall Gate B
+  readiness.
 - [x] Per-user cost caps/job limits are enforced by the Phase 4 operational
   beta safety guard.
 - [x] Global cost caps are enforced by reservation-at-enqueue and scheduler

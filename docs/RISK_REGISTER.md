@@ -18,10 +18,10 @@
 |---|---|---|---|---|---|---|---|---|
 | R-001 | Potential: целевая аудитория будущих paid users не зафиксирована | Product | Medium | `docs/PROJECT_BRIEF.md` помечает будущих платных пользователей как TBD | Агенты могут строить не тот paid/public продукт | Держать paid/public вне scope до решения; фиксировать ICP перед Gate C/D | Human / Orchestrator | Needs decision |
 | R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is FB2 idea only | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
-| R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps | Beta может быть открыта без preview, upload safety, TTL, real-file QA, restore evidence | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
+| R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps; issue #56 verifies only the free-preview slice | Beta может быть открыта без upload safety, TTL, real-file QA, restore evidence or other Gate B checks | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
 | R-004 | Formal success criteria для beta не утверждены | Product | Medium | `docs/PROJECT_BRIEF.md` помечает formal success metrics как TBD | Команда может оптимизировать объем фич вместо beta learning и reliability | Владелец утверждает 3-5 beta metrics до go/no-go | Human / Scribe | Needs decision |
 | R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop; issue #30 child PRs #36-#39 added focused cancel/provider/admin regression coverage | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report; keep issue #30 safeguards intact | Architect / Reviewer | Open |
-| R-006 | Missing current full test evidence | Technical | Medium | `CURRENT_PROJECT_STATE.md` фиксирует прошлые passing runs; в этой docs-only задаче tests не запускались | Последние изменения могут иметь скрытые regression | Перед code/release changes запускать focused tests; перед release - full suite, compileall, predeploy | Reviewer | Unknown |
+| R-006 | Incomplete release verification evidence | Technical | Medium | issue #56 recorded local focused preview tests, full unittest, compileall and predeploy passing on 2026-05-16; real-file/server-smoke/restore/restart evidence remains incomplete | Preview evidence can be mistaken for full beta readiness if remaining release checks are skipped | Перед code/release changes запускать focused tests; перед release - full suite, compileall, predeploy, server smoke and release-specific evidence where applicable | Reviewer | Open |
 | R-007 | Weak/unclear CI policy | Technical | Medium | `.github/workflows/checks.yml` exists; current run/pass status and required-vs-advisory policy are Unknown | Regression prevention can be overstated if agents claim CI without visible check evidence | Owner решает CI policy; пока Reviewer требует local verification evidence when CI status is Unknown/not visible | Human / Reviewer | Unknown |
 | R-008 | Brittle parsing/processing for DOCX/EPUB/TXT real files | Technical | High | `docs/restart/real-file-test-matrix.md`; Gate B unchecked: EPUBCheck/equivalent, DOCX openability/visual QA | Unit tests могут пройти, а реальные файлы не открываются или теряют структуру | Execute authorized real-file matrix; add negative fixtures; record release report | Reviewer / Implementer | Open |
 | R-009 | Upload hardening/quarantine baseline не подтвержден как active | Security / Technical | High | `docs/restart/upload-safety-and-retention.md`; Gate B unchecked; `documents.py` validates mostly extension/size; `document_sandbox.py` adds resource limits | Unsafe containers, traversal or zip-bomb-like inputs могут попасть в parser path | Architect defines safe baseline; Implementer adds negative fixtures; Reviewer checks no raw text leak | Architect / Reviewer | Open |
@@ -55,13 +55,18 @@
 - Scope creep: High risk, потому что active docs ограничивают текущий продукт Telegram-first closed beta и TXT/DOCX/EPUB.
   FB2 из GitHub issue #23 остается deferred idea: owner decision TBD,
   authorized fixtures Unknown, dependency impact Unknown.
-- Unclear MVP: Medium/High risk; MVP scope описан, но readiness не подтвержден, пока Gate B не закрыт.
+- Unclear MVP: Medium/High risk; MVP scope описан, and free-preview evidence
+  exists for the implementation slice, but readiness не подтвержден, пока Gate B
+  не закрыт.
 - Unclear success criteria: formal beta metrics - TBD; draft criteria есть в `docs/PROJECT_BRIEF.md`.
 
 ### Technical risks
 
 - Core workflow instability: Potential/High для cancel/resume/restart/worker recovery до Gate B evidence.
-- Missing tests: broad unittest suite exists, but current full status is Unknown for this task; real-file/release tests remain gaps.
+- Release verification gaps: broad unittest suite exists and issue #56 recorded
+  local focused/full unittest, compileall and predeploy passes for preview
+  evidence, but real-file/server-smoke/restore/restart release evidence remains
+  incomplete.
 - Weak/unclear CI: `.github/workflows/checks.yml` exists, but current run/pass
   status and required-vs-advisory policy are Unknown unless PR/check evidence is
   inspected.
@@ -210,7 +215,7 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Suggested owner: Architect / Human.
   Acceptance criteria: approved data-retention plan, idempotent cleanup behavior, tests, backup/restore impact note.
 
-- Task: Запустить current full verification before release decisions.
+- Task: Запустить release-scoped verification before release decisions.
   Risk reduced: R-006, R-031.
   Priority: High.
   Suggested owner: Reviewer.
