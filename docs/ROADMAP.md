@@ -108,9 +108,10 @@ Tasks:
   active translations/provider requests, and added worker/scheduler
   provider-failure regression coverage with safe retry metadata.
 - Закрыть или явно отложить free preview before full translation. Confirmed
-  progress: issues #51 and #52 are merged; issue #53 branch wires Telegram
-  preview display and Continue/Back controls. Remaining blocker: issue #54 must
-  enforce preview acceptance before full translation can start.
+  progress: issues #51 and #52 are merged; PR #59 merged Telegram preview
+  display and Continue/Back controls; the issue #54 implementation branch adds
+  the preview-acceptance guard before full translation can start. Remaining
+  blocker: Reviewer evidence and Gate B report.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine
@@ -322,14 +323,14 @@ Acceptance criteria:
   Suggested acceptance criteria: every Gate B item is pass/fail/deferred with
   evidence links and no production readiness claims.
 
-- Task: Finish free preview guard and evidence.
+- Task: Review free preview guard and record evidence.
   Phase: 1
   Priority: High
   Risk: Medium
-  Agent suitability: needs architect
-  Suggested acceptance criteria: issue #54 is implemented and reviewed so full
-  translation cannot start before preview and explicit confirmation, or owner
-  signs a deferral.
+  Agent suitability: reviewer
+  Suggested acceptance criteria: issue #54 is reviewed with focused/full local
+  verification evidence showing full translation cannot start before preview
+  and explicit confirmation, or owner signs a deferral.
 
 - Task: Verify upload hardening/quarantine baseline.
   Phase: 1

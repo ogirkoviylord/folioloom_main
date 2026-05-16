@@ -123,6 +123,10 @@ class RightsConfirmationRequired(ValueError):
     """Raised when document rights have not been confirmed for processing."""
 
 
+class PreviewAcceptanceRequired(ValueError):
+    """Raised when full translation starts before preview acceptance."""
+
+
 @dataclass(frozen=True)
 class PendingUpload:
     user_telegram_id: int
@@ -154,6 +158,10 @@ class PendingTranslation:
     rights_confirmed_at: str | None = None
     rights_confirmation_version: str | None = None
     rights_confirmation_source: str | None = None
+    preview_id: str | None = None
+    preview_shown: bool = False
+    preview_accepted: bool = False
+    preview_accepted_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -826,7 +834,7 @@ class BotTranslationService:
                 "estimated_cost_usd": estimate.estimated_cost_usd,
                 "beta_safety_reason_code": beta_safety_reason_code,
             }
-            return PreviewTranslation(
+            preview = PreviewTranslation(
                 preview_id=preview_id,
                 user_telegram_id=user_telegram_id,
                 file_name=candidate.file_name,
@@ -840,6 +848,17 @@ class BotTranslationService:
                 beta_safety_reason_code=beta_safety_reason_code,
                 metadata=metadata,
             )
+            with self._state_lock:
+                pending = self._pending.get(user_telegram_id)
+                if pending is not None:
+                    self._pending[user_telegram_id] = replace(
+                        pending,
+                        preview_id=preview_id,
+                        preview_shown=False,
+                        preview_accepted=False,
+                        preview_accepted_at=None,
+                    )
+            return preview
         except PreviewTranslationError:
             self._release_beta_safety_reservation(
                 job_id=preview_id,
@@ -852,6 +871,53 @@ class BotTranslationService:
                 reason="preview_failed",
             )
             raise PreviewTranslationError("Preview translation failed.") from exc
+
+    def mark_pending_translation_preview_shown(
+        self,
+        *,
+        user_telegram_id: int,
+        preview_id: str,
+    ) -> PendingTranslation:
+        with self._state_lock:
+            pending = self._pending.get(user_telegram_id)
+            if pending is None:
+                raise ValueError("No pending translation for this user")
+            if pending.preview_id != preview_id:
+                raise PreviewAcceptanceRequired(
+                    "Review the translation preview before continuing."
+                )
+            if pending.preview_shown:
+                return pending
+            shown = replace(pending, preview_shown=True)
+            self._pending[user_telegram_id] = shown
+            return shown
+
+    def accept_pending_translation_preview(
+        self,
+        *,
+        user_telegram_id: int,
+    ) -> PendingTranslation:
+        with self._state_lock:
+            pending = self._pending.get(user_telegram_id)
+            if pending is None:
+                raise ValueError("No pending translation for this user")
+            if not pending.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before translation starts"
+                )
+            if not pending.preview_id or not pending.preview_shown:
+                raise PreviewAcceptanceRequired(
+                    "Review the translation preview before continuing."
+                )
+            if pending.preview_accepted:
+                return pending
+            accepted = replace(
+                pending,
+                preview_accepted=True,
+                preview_accepted_at=_now_iso(),
+            )
+            self._pending[user_telegram_id] = accepted
+            return accepted
 
     def discard_pending_translation(self, user_telegram_id: int) -> bool:
         with self._state_lock:
@@ -1869,6 +1935,10 @@ class BotTranslationService:
             if not pending.rights_confirmed:
                 raise RightsConfirmationRequired(
                     "Document rights must be confirmed before translation starts"
+                )
+            if not pending.preview_accepted:
+                raise PreviewAcceptanceRequired(
+                    "Review the translation preview before continuing."
                 )
             pending = self._pending.pop(user_telegram_id)
 
