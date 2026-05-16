@@ -55,6 +55,12 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 ## Active Quality / Profile Docs
 
 - `docs/superpowers/specs/translation-language-quality-methodology.md`
+- `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
+  Architect design for GitHub issue #43. It defines explicit document/form and
+  book/manuscript translation modes, Telegram flow placement, adapter-routing
+  contract, tests/fixture plan and out-of-scope boundaries. It is design only;
+  current implementation status lives in `docs/HANDOFF.md`, `docs/ROADMAP.md`
+  and the linked GitHub issues.
 - `docs/superpowers/specs/russian-translation-profile.md`
 - `docs/superpowers/specs/russian-mqm-eval-rubric.md`
 - `docs/superpowers/specs/ukrainian-translation-profile.md`
