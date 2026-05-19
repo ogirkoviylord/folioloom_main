@@ -30,8 +30,10 @@ Evidence:
   Docker Compose deployment и backup/restore workflow.
 - `docs/restart/release-gates.md` показывает, что Gate B для free closed beta
   еще не закрыт.
-- `.github/workflows/checks.yml` exists, but current GitHub Actions run/pass
-  status is **Unknown** unless checked on a PR/checks page.
+- `.github/workflows/checks.yml` exists. Owner decision on 2026-05-17:
+  GitHub Actions Python checks are advisory for now, local gates remain
+  required, and current run/pass status is **Unknown** unless checked on a
+  PR/checks page.
 
 Текущая предполагаемая roadmap-фаза: **Phase 0 -> Phase 1 transition**. Базовые
 документы для AI-агентов уже существуют; Phase 0 теперь означает поддержание их
@@ -172,9 +174,10 @@ Acceptance criteria:
 
 Tasks:
 
-- Закрыть Alerts MVP для provider, queue/worker, disk, backup и failed jobs.
-- Добавить или документировать backups visibility: последняя backup export,
-  verify status, restore rehearsal artifact.
+- Закрыть Alerts MVP для provider, queue/worker, disk, backup и failed jobs
+  через metadata-only owner runbook/report for Gate B; admin UI later.
+- Добавить backups visibility в owner runbook/report: последняя backup export,
+  verify status, restore rehearsal artifact. Admin UI is a later follow-up.
 - Улучшить status tracking для jobs/work units, если release evidence покажет
   blind spots.
 - Улучшить safe error reasons: provider auth/billing/rate-limit/timeout,
@@ -191,10 +194,11 @@ Acceptance criteria:
 - Backup/restore состояние видно через admin или documented owner report.
 - Любые новые debug surfaces проходят redaction review.
 
-Optional/TBD:
+Later:
 
-- Форма admin UX для backups visibility: admin page/card или owner runbook
-  report. Требует решения владельца.
+- Admin UI для backups/alerts visibility remains a follow-up. Issue #71 chose
+  metadata-only owner report for Gate B so new bot features do not force broad
+  admin console rewrites.
 
 ## 7. Phase 3 - Testing and reliability
 
@@ -208,13 +212,16 @@ Tasks:
 - Добавить release report с commit, env, commands, fixture manifest,
   pass/fail table и known failures.
 - Проверить DOCX openability/visual QA.
-- Проверить EPUBCheck или equivalent validation.
+- Проверить EPUB через local/offline EPUBCheck. Online validators are not
+  approved; EPUBCheck is a release verification tool, not a production
+  dependency.
 - Проверить negative fixtures: corrupt ZIP, wrong extension, oversize,
   traversal, zip-bomb-like, unsupported formats.
 - Проверить regression scenarios: cancel, resume, worker restart, bot restart,
   provider failure, delete, backup/restore.
-- Решить CI policy: current GitHub Actions workflow advisory/required status,
-  and whether local gates remain required.
+- Preserve CI policy: current GitHub Actions workflow is advisory for now,
+  local gates remain required, and CI pass status must not be claimed without
+  visible PR/check evidence.
 
 Acceptance criteria:
 
@@ -222,7 +229,7 @@ Acceptance criteria:
 - Real-file matrix имеет сохраненный release artifact.
 - Known failures явно перечислены и не маскируются как passed.
 - CI pass status is not claimed unless visible PR/check evidence is inspected;
-  local gates remain required until owner records a different policy.
+  local gates remain required.
 
 ## 8. Phase 4 - User experience and product polish
 
@@ -352,24 +359,27 @@ Acceptance criteria:
   Risk: Medium
   Agent suitability: safe
   Suggested acceptance criteria: release report records authorized fixtures,
-  commands, pass/fail results, DOCX openability notes and EPUB validation.
+  commands, pass/fail results, DOCX openability notes and local/offline
+  EPUBCheck validation.
 
-- Task: Add Alerts MVP or document owner report alternative.
+- Task: Add metadata-only Alerts/Backups owner report.
   Phase: 2
   Priority: Medium
   Risk: Medium
-  Agent suitability: needs architect
+  Agent suitability: safe if metadata-only; needs architect for new admin UI
   Suggested acceptance criteria: owner can see provider, queue/worker, disk,
-  backup and failed-job alerts without raw text/secrets.
+  failed-job and backup/restore status without raw text/secrets, stack traces,
+  backup archives or restored files. Admin UI expansion is later.
 
 - Task: Decide CI policy.
   Phase: 3
   Priority: Medium
   Risk: Medium
-  Agent suitability: needs human approval
-  Suggested acceptance criteria: owner chooses whether the existing GitHub
-  Actions workflow is advisory or required, and whether to expand it; docs keep
-  run/pass status Unknown until PR/check evidence exists.
+  Agent suitability: done / monitor
+  Status: Done 2026-05-17.
+  Suggested acceptance criteria: GitHub Actions Python checks are advisory for
+  now, local gates remain required, and docs keep run/pass status Unknown until
+  PR/check evidence exists.
 
 ## 12. How Orchestrator should use this roadmap
 

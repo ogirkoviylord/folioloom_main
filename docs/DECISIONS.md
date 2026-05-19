@@ -42,6 +42,343 @@ Consequences:
 Human approval required to change:
 - yes; это меняет продуктовую стадию, риски, релизные gate-ы и ожидания пользователей.
 
+### 2026-05-16 - Release decisions: complete Gate B before free closed beta
+
+Status: Active
+
+Decision:
+- Free closed beta must wait until every Gate B item has recorded evidence.
+- No implicit Gate B deferrals are approved.
+- Any future exception requires a new explicit owner decision naming the affected
+  Gate B item and accepted risk.
+
+Evidence:
+- Owner selected "complete Gate B first" during GitHub issue #71 implementation
+  on 2026-05-16.
+- `docs/restart/release-gates.md`: Gate B still contains unchecked blockers.
+- `docs/restart/gate-b-evidence-report.md`: issue #71 owner decision register.
+
+Reason:
+- The repository evidence shows a working closed-beta foundation, but not full
+  free closed beta readiness. Preview evidence does not prove upload/TTL,
+  real-file, restart, backup/restore, server smoke or other Gate B items.
+
+Consequences:
+  recorded for every item.
+- Unchecked Gate B items remain release blockers.
+- Later deferrals are not assumed; they require another explicit owner approval.
+
+Human approval required to change:
+- yes; this changes release threshold and accepted release risk.
+
+### 2026-05-17 - Release decisions: free beta success metrics
+
+Status: Active
+
+Decision:
+- Free beta success metrics are split into hard launch guardrails and
+  translation-quality learning metrics.
+- Hard launch guardrails:
+  - Gate B must be complete before free beta.
+  - Recovery reliability: `0` lost accepted jobs in Gate B
+    cancel/resume/bot-restart/worker-restart checks.
+  - Safety/privacy: `0` known raw document text, prompt, translation or API key
+    leaks in logs, admin views, telemetry or artifacts.
+  - Cost/control: `0` cap or kill-switch breaches.
+- Translation-quality learning metrics:
+  - For every completed beta document, collect per-target-language human
+    feedback: `usable`, `not usable` or `needs review`, plus short reason tags.
+  - Existing automated Russian/Ukrainian quality metrics may be used as
+    regression diagnostics where reference samples exist.
+  - Automated Russian/Ukrainian scores are not a universal success metric for
+    every target language.
+
+Evidence:
+- Owner approved this split during GitHub issue #71 implementation on
+  2026-05-17.
+- `src/translator_service/translation_metrics.py` provides reference-based
+  `meteor_core` and `chrf` scoring.
+- `src/translator_service/admin/quality.py` aggregates Russian and Ukrainian
+  reference sample scores.
+- `src/translator_service/admin/quality_runner.py` currently writes Russian
+  regression candidate runs.
+- `docs/superpowers/specs/translation-language-quality-methodology.md` defines
+  per-language quality profile methodology.
+
+Reason:
+- Project readiness and translation quality are different questions.
+- Current automated quality scoring is useful for languages with reference
+  suites, but it does not cover every target language equally.
+- Early free beta should keep reliability/privacy/cost guardrails strict while
+  using real user/document feedback to learn where translation quality fails by
+  language and document type.
+
+Consequences:
+  all target languages.
+- Russian/Ukrainian automated scores can support regression review, but free
+  beta success also requires per-target-language human feedback.
+- Learning metrics do not relax hard Gate B guardrails.
+
+Human approval required to change:
+- yes; this changes beta success criteria and release evidence expectations.
+
+### 2026-05-17 - Release decisions: Gate B real-file corpus policy
+
+Status: Active
+
+Decision:
+- Gate B real-file testing may use public-domain and clearly
+  permissive-licensed documents from free libraries and other internet sources.
+- Random internet documents are allowed only when the corpus manifest records a
+  clear rights basis, source/license URL and why the file is authorized for
+  testing.
+- "Free to read online" alone is not a sufficient rights basis.
+- Synthetic/generated fixtures may live in the repository when they contain no
+  sensitive or questionable copyrighted text.
+- Real source documents and translated outputs stay out of git by default.
+- Release artifacts default to metadata-only reports: fixture id, source/license
+  URL, format, size, language pair, command, pass/fail, safe error class and
+  validation/openability notes.
+- Raw source documents or translated outputs may be retained only in approved
+  local/test artifacts and should be deleted after Gate B review unless the
+  owner explicitly approves retention for that fixture.
+
+Evidence:
+- Owner approved free libraries and random documents as test material during
+  GitHub issue #71 implementation on 2026-05-17, with the repository guardrail
+  that authorized/public-domain/permissive-license basis must be recorded.
+- `docs/restart/real-file-test-matrix.md` already requires authorized files and
+  a manifest with source and rights basis.
+
+Reason:
+- Gate B needs real TXT/DOCX/EPUB files that resemble user documents, not only
+  synthetic unit fixtures.
+- The project must not weaken rights, privacy or raw-text guardrails by treating
+  any free-to-read document as safe to store or translate as a release artifact.
+
+Consequences:
+- Agents may build a real-file corpus from Project Gutenberg-like public-domain
+  sources and other clearly permissive sources.
+  outputs without explicit per-fixture approval.
+
+Human approval required to change:
+- yes; this affects legal/privacy guardrails and release evidence handling.
+
+### 2026-05-17 - Release decisions: retention/delete verification scope
+
+Status: Active
+
+Decision:
+- TTL/delete verification may run on synthetic test data by default.
+- A second verification pass may run only on an owner-approved disposable copy of
+  beta/runtime data.
+- Passing evidence requires idempotent lifecycle checks for source, final,
+  partial and quarantine objects; safe metadata-only logs/admin output; no raw
+  text exposure; and no impact on live runtime data.
+
+Evidence:
+- Owner approved this recommendation during GitHub issue #71 implementation on
+  2026-05-17.
+- `docs/restart/upload-safety-and-retention.md` defines proposed TTL defaults
+  and requires idempotent TTL jobs.
+- `docs/restart/release-gates.md` marks TTL cleanup as an unchecked Gate B item.
+
+Reason:
+- Delete/TTL verification is destructive-adjacent user-data work.
+- Synthetic data and disposable copies allow agents to gather evidence without
+  risking real user documents, runtime databases, object storage or backups.
+
+Consequences:
+- Agents may design and run retention/delete tests against synthetic fixtures
+  without additional approval when no live/runtime data is touched.
+- Any disposable-copy verification must name the approved copy/environment and
+  must not operate on live beta/server data.
+- Live data deletion, runtime `var/` cleanup, backup mutation or destructive
+  server operations remain forbidden without separate explicit approval.
+
+Human approval required to change:
+- yes; this affects user-data handling, destructive-adjacent verification and
+  release evidence.
+
+### 2026-05-17 - Release decisions: Gate B backup/restore evidence policy
+
+Status: Active
+
+Decision:
+- Backup exists to restore accepted beta work after server/runtime failure:
+  jobs/work units, user-visible history, source/intermediate/partial/final
+  files, admin/beta settings and privacy-safe operational metadata.
+- Gate B backup/restore evidence may be collected on an owner-approved
+  disposable local compose environment, disposable VPS/test server, disposable
+  copy of beta runtime data or owner-approved beta environment.
+- Running backup/restore checks on live beta/server data requires explicit owner
+  approval for that exact run.
+- Passing evidence requires:
+  - backup manifest verification passes with `scripts/verify_backup_export.py`;
+  - restore rehearsal follows `docs/deployment/restore-runbook.md`;
+  - restored jobs/work units, user-visible history, files and admin/beta
+    settings are usable enough for beta recovery;
+  - no raw document text, prompts, translations, API keys, real `.env*` files or
+    secrets appear in evidence;
+  - admin remains SSH-tunnel-only.
+- Release artifacts must be metadata-only reports. Do not commit backup
+  archives, restored files, real env files, secrets or translated outputs.
+
+Evidence:
+- Owner approved this policy during GitHub issue #71 implementation on
+  2026-05-17.
+- `README.md` documents backup export and manifest verification commands.
+- `docs/deployment/restore-runbook.md` documents restore rehearsal and already
+  says to use a test server or disposable copy first.
+- `docs/restart/release-gates.md` marks backup verify and restore rehearsal as
+  unchecked Gate B items.
+
+Reason:
+- Backup scripts alone do not prove recoverability.
+- Backup archives may contain user documents and operational state, so they are
+  sensitive artifacts rather than public PR evidence.
+
+Consequences:
+- Agents may collect metadata-only backup/restore evidence in approved
+  disposable or explicitly approved beta environments.
+  exact-run owner approval.
+- Existing backups do not imply user erasure from backups unless a separate
+  backup retention/deletion policy says so.
+
+Human approval required to change:
+- yes; this affects user data, backups/restore, deployment-adjacent operations
+  and release evidence.
+
+### 2026-05-17 - Release decisions: Gate B DOCX visual QA threshold
+
+Status: Active
+
+Decision:
+- Gate B DOCX openability/visual QA uses local LibreOffice Writer as the
+  approved reader/tool.
+- A DOCX fixture passes the visual QA threshold only when it opens without a
+  repair/recovery prompt and has no blocker visual issues.
+- Blocker visual issues include unreadable or missing translated content,
+  broken document structure that makes the file unusable, corrupted tables or
+  lists that materially harm readability, visible placeholders/debug strings,
+  provider tracebacks, raw errors or other unsafe text.
+- Pixel-perfect matching with the source document is not required for free
+  closed beta.
+- Minor and major visual issues may be recorded as notes, but only blocker
+  issues block the fixture by default.
+
+Evidence:
+- Owner selected the recommended local LibreOffice Writer threshold during
+  GitHub issue #71 implementation on 2026-05-17.
+- `docs/restart/real-file-test-matrix.md` requires DOCX openability/visual QA
+  notes.
+- `docs/restart/release-gates.md` marks DOCX openability/visual QA as a Gate B
+  evidence item.
+
+Reason:
+- DOCX can be technically produced but still unusable for readers if opening,
+  structure, tables, lists or visible debug/error text fail.
+- Local LibreOffice Writer gives agents a reproducible offline reader without
+  sending documents to online services.
+- Free closed beta needs practical usability evidence, not pixel-perfect layout
+  parity.
+
+Consequences:
+- Agents may collect DOCX Gate B visual QA evidence using local LibreOffice
+  Writer and metadata-only notes.
+- DOCX Gate B remains blocked until approved fixtures are actually checked and
+  results are recorded.
+- Using Microsoft Word as an additional reviewer spot-check is allowed later but
+  is not required by this decision.
+
+Human approval required to change:
+- yes; this changes Gate B pass/fail criteria for DOCX release evidence.
+
+### 2026-05-17 - Release decisions: Gate B Alerts/Backups visibility approach
+
+Status: Active
+
+Decision:
+- For Gate B free closed beta evidence, Alerts MVP and Backups visibility may be
+  satisfied by a metadata-only owner runbook/report instead of new admin UI.
+- The owner report must summarize provider, queue/worker, disk/storage,
+  failed-job and backup/restore status without raw document text, prompts,
+  translations, API keys, stack traces, backup archives or restored files.
+- Admin UI expansion for these signals is deferred to a later follow-up task.
+- Future admin UI should be additive and should not require redesigning the
+  whole admin console whenever bot functionality changes.
+
+Evidence:
+- Owner selected the owner runbook/report option during GitHub issue #71
+  implementation on 2026-05-17.
+- Owner noted that prior admin-system work created maintenance pressure because
+  new bot features often required admin rewrites.
+- `docs/restart/release-gates.md` allows admin visibility or documented owner
+  report evidence for Gate B.
+- `docs/ROADMAP.md` lists Alerts MVP and Backups visibility as operational
+  visibility gaps.
+
+Reason:
+- A metadata-only owner report is smaller, lower-risk and faster for free
+  closed beta than expanding the admin console now.
+- It avoids increasing admin routes/RBAC/security surface before Gate B evidence
+  is collected.
+- The owner still needs operational visibility before beta, but not necessarily
+  a full UI for the first free closed beta.
+
+Consequences:
+  an owner runbook/report first.
+- Gate B remains blocked until the report exists and covers the required
+  signals.
+- Admin UI for alerts/backups remains a later roadmap item, not a Gate B
+  requirement unless the owner changes this decision.
+
+Human approval required to change:
+- yes; this changes operational visibility scope and release evidence
+  expectations.
+
+### 2026-05-17 - Release decisions: Gate B EPUB validation approach
+
+Status: Active
+
+Decision:
+- Gate B EPUB validation uses local/offline EPUBCheck as the required validation
+  tool.
+- Online EPUB validation services are not approved.
+- EPUBCheck is a release verification tool, not a production dependency.
+- EPUBCheck errors block the fixture by default.
+- EPUBCheck warnings must be recorded and triaged, but do not automatically
+  block the fixture unless the warning indicates a beta-relevant usability,
+  safety or compatibility risk.
+- If EPUBCheck is unavailable in the approved verification environment, EPUB
+- EPUB validation remains blocked until approved EPUB fixtures pass EPUBCheck or
+  failures receive explicit owner triage.
+
+Evidence:
+- Owner selected the recommended local EPUBCheck option during GitHub issue #71
+  implementation on 2026-05-17.
+- Local exploratory tool check on 2026-05-17 ran EPUBCheck v5.3.0 using a local
+  Temurin JRE and confirmed the tool starts locally.
+- The same exploratory run found validation errors in selected existing EPUB
+  fixtures, so current EPUB evidence is blocked rather than passing.
+
+Reason:
+- EPUB files can open in some readers while still being structurally invalid or
+  brittle across readers.
+- EPUBCheck is the clearest local/offline standard for EPUB release validation.
+- Keeping EPUBCheck outside production dependencies avoids expanding runtime
+  deploy scope.
+
+Consequences:
+- Gate B EPUB evidence must include local EPUBCheck command/output summaries for
+  approved EPUB fixtures.
+- Current failing EPUB fixtures require fixes or explicit owner triage before
+  EPUB Gate B can pass.
+
+Human approval required to change:
+- yes; this changes Gate B pass/fail criteria and tool policy for EPUB release
+  evidence.
+
 ### 2026-05-10 - Product decisions: Telegram-first для авторизованных длинных документов
 
 Status: Active
@@ -339,7 +676,11 @@ Decision:
 - Основные verification commands: `PYTHONPATH=src python3 -m unittest discover -s tests`, `PYTHONPATH=src python3 -m compileall src`, `scripts/predeploy_check.sh`.
 - `scripts/predeploy_check.sh` является текущим predeploy gate.
 - Repo-wide ruff cleanup не является free closed-beta release blocker.
-- `.github/workflows/checks.yml` exists as a minimal GitHub Actions workflow for compile and unit tests on PRs and pushes to `main`; current run/pass status remains Unknown unless checked on a PR/checks page.
+- `.github/workflows/checks.yml` exists as a minimal GitHub Actions workflow for compile and unit tests on PRs and pushes to `main`.
+- GitHub Actions Python checks are advisory for now, not the sole source of truth.
+- Local gates remain required for PR-ready work: focused tests for touched areas, plus full unittest/compileall/predeploy when scope is broad or release-adjacent.
+- If CI is not inspected, report CI status as `Unknown`.
+- Expanding CI or making it required is a later owner-approved task.
 
 Evidence:
 - `README.md`: Verification Commands.
@@ -347,15 +688,19 @@ Evidence:
 - `CURRENT_PROJECT_STATE.md`: Последняя зафиксированная проверка.
 - `pyproject.toml`: dev dependencies and ruff config.
 - `.github/workflows/checks.yml`: Python 3.13 compile and unit test workflow.
+- Owner approved the advisory-CI/local-gates policy during GitHub issue #71
+  implementation on 2026-05-17.
 
 Reason:
 - Репозиторий фиксирует local verification gates and now contains a minimal
-  GitHub Actions workflow, but active release/readiness docs still require
-  explicit evidence before claiming tests or CI passed.
+  GitHub Actions workflow.
+- Several Gate B checks are not covered by CI: server smoke, backup/restore,
+  real-file matrix, EPUB validation, DOCX visual QA and manual owner decisions.
 
 Consequences:
 - AI-агентам нельзя утверждать, что CI passed, без видимого PR/check evidence.
 - Для code changes нужно запускать focused tests и релевантные local gates; для docs-only changes можно не запускать test suite, если это явно указано в отчете.
+- Passing GitHub Actions does not imply release readiness or Gate B completion.
 
 Human approval required to change:
 - no for adding evidence to this decision; yes for changing release gates or CI policy.
@@ -551,11 +896,68 @@ Human approval required to change:
 
 ## Decisions that still need human approval
 
-- Decision needed: формальный go/no-go для free closed beta.
-  Why it matters: Gate B still has unchecked release blockers.
-  Suggested options: hold; limited trusted beta with signed deferrals; complete all Gate B items first.
-  Recommended default: complete/record Gate B evidence before opening beta.
-  Risk if left undecided: agents may confuse foundation readiness with beta approval.
+- Decision recorded: free closed beta waits for complete Gate B evidence.
+  Current status: Active decision recorded on 2026-05-16.
+  Consequence: unchecked Gate B items block beta; no implicit deferrals are approved.
+  Human approval required to change: yes.
+
+- Decision recorded: free beta success metrics.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: hard guardrails block beta; translation-quality feedback is
+  collected per target language, while Russian/Ukrainian automated quality
+  scores remain regression diagnostics rather than universal launch metrics.
+  Human approval required to change: yes.
+
+- Decision recorded: approved real-file TXT/DOCX/EPUB corpus and artifact retention policy.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: public-domain/permissive-license free-library and internet
+  documents may be used when the rights basis is recorded; raw source documents
+  and translated outputs stay out of git by default.
+  Human approval required to change: yes.
+
+- Decision recorded: retention/delete verification scope.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: agents may run TTL/delete verification on synthetic data by
+  default, may run a second pass only on an owner-approved disposable
+  beta/runtime copy, and must not run cleanup/delete checks on live beta/server
+  data.
+  Human approval required to change: yes.
+
+- Decision recorded: Gate B backup/restore evidence policy.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: backup/restore evidence may be collected only in owner-approved
+  disposable/local/test/copy environments or an explicitly approved beta
+  environment; live beta/server data requires exact-run owner approval; release
+  artifacts are metadata-only.
+  Human approval required to change: yes.
+
+- Decision recorded: CI policy.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: GitHub Actions Python checks are advisory for now; local gates
+  unless visible PR/check evidence was inspected.
+  Human approval required to change: yes.
+
+- Decision recorded: EPUB validation approach for Gate B.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: Gate B EPUB validation requires local/offline EPUBCheck. Online
+  EPUB validation services are not approved. EPUBCheck is a release verification
+  tool, not a production dependency. Errors block fixtures; warnings are
+  recorded and triaged.
+  Human approval required to change: yes.
+
+- Decision recorded: DOCX visual/openability QA threshold.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: Gate B DOCX QA uses local LibreOffice Writer; pass means the
+  fixture opens without repair/recovery prompt and has no blocker visual issues.
+  Pixel-perfect source parity is not required for free closed beta.
+  Human approval required to change: yes.
+
+- Decision recorded: Alerts/Backups visibility approach for free beta.
+  Current status: Active decision recorded on 2026-05-17.
+  Consequence: Gate B may use a metadata-only owner runbook/report for provider,
+  queue/worker, disk/storage, failed-job and backup/restore status. Admin UI
+  expansion is deferred to a later follow-up task.
+  Human approval required to change: yes.
 
 - Decision needed: support/refund/reconciliation policy for paid beta.
   Why it matters: paid launch is blocked until Gate C.
@@ -580,18 +982,6 @@ Human approval required to change:
   Suggested options: manual owner runbook; scheduled offsite backups; managed backup service.
   Recommended default: require restore rehearsal evidence before beta and offsite backups before public production.
   Risk if left undecided: backup existence may be mistaken for recoverability.
-
-- Decision needed: exact success metrics for beta.
-  Why it matters: `docs/PROJECT_BRIEF.md` marks formal success metrics as `TBD`.
-  Suggested options: quality threshold; completion/cancel/restart reliability; cost cap adherence; user feedback target.
-  Recommended default: define a small metrics set before beta go/no-go.
-  Risk if left undecided: agents optimize for implementation volume instead of beta learning.
-
-- Decision needed: CI policy.
-  Why it matters: `.github/workflows/checks.yml` exists, but required-vs-advisory PR policy and expansion scope are not recorded.
-  Suggested options: keep current workflow advisory; require the existing checks for PRs; expand GitHub Actions only after owner-approved scope.
-  Recommended default: keep local gates as required and treat CI status as Unknown unless visible PR/check evidence is inspected.
-  Risk if left undecided: agents may overstate CI coverage or merge expectations.
 
 
 - Не менять production deployment без явного человека.

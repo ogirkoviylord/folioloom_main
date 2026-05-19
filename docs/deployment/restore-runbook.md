@@ -29,6 +29,18 @@ python3 scripts/verify_backup_export.py ~/folioloom_exports/folioloom-backup-YYY
 Use a test server or disposable copy first. Do not rehearse destructive restore
 on the only live beta host.
 
+For Gate B evidence, approved rehearsal environments are an owner-approved
+disposable local Compose environment, disposable VPS/test server, disposable
+copy of beta runtime data, or an explicitly approved beta environment. Running
+backup/restore checks on live beta/server data requires explicit owner approval
+for that exact run.
+
+Release evidence must be metadata-only: manifest path/name or redacted manifest
+summary, command output summary, pass/fail table, restore environment
+description and known failures. Do not commit backup archives, restored files,
+real `.env*` files, secrets, raw document text, prompts, translations or API
+keys.
+
 1. Stop FolioLoom:
 
 ```bash

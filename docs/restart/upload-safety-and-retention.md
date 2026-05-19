@@ -119,6 +119,16 @@ Do not show stack traces, parser internals or extracted raw document text.
 TTL jobs should be idempotent. A failed cleanup pass must be retryable and
 visible to owner/admin as metadata.
 
+## Verification Scope
+
+Retention/delete verification may run on synthetic test data by default. A
+second verification pass may run only on an owner-approved disposable copy of
+beta/server data.
+
+Passing evidence requires idempotent lifecycle checks for source, final, partial
+and quarantine objects; safe metadata-only logs/admin output; no raw text
+exposure; and no impact on live runtime data.
+
 ## Release Checks
 
 - [ ] TXT/DOCX/EPUB only.

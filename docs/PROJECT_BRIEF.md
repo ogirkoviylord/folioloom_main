@@ -127,12 +127,27 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 
 ## 8. Что считается успехом проекта
 
-TBD: формальные success metrics владельцем не зафиксированы. Черновые критерии из репозитория:
+Формальные free beta success metrics утверждены владельцем 2026-05-17 в рамках
+GitHub issue #71. Метрики разделены на hard launch guardrails и
+translation-quality learning metrics.
 
-- Продуктовые: доверенные пользователи free closed beta переводят реальные авторизованные TXT/DOCX/EPUB документы и получают полезный final или partial result.
-- Технические: common verification commands проходят; worker/bot restart не теряет принятые jobs; scheduler/runtime consistency подтверждена; DOCX/EPUB/TXT проходят real-file matrix.
-- Пользовательские: Telegram-flow понятен, ошибки безопасны, progress/cancel/history работают, raw provider details не видны пользователю.
-- Операционные: admin остается SSH-tunnel-only, caps/kill switch работают, provider failures diagnosable, backup/restore rehearsal проходит, secrets и raw document text не утекли в admin/logs.
+Hard launch guardrails:
+
+- Gate B complete before free beta.
+- Recovery reliability: `0` lost accepted jobs in Gate B
+  cancel/resume/bot-restart/worker-restart checks.
+- Safety/privacy: `0` known raw document text, prompt, translation or API key
+  leaks in logs, admin views, telemetry or artifacts.
+- Cost/control: `0` cap or kill-switch breaches.
+
+Translation-quality learning metrics:
+
+- For every completed beta document, collect per-target-language human
+  feedback: `usable`, `not usable` or `needs review`, plus short reason tags.
+- Existing automated Russian/Ukrainian quality metrics may be used as
+  regression diagnostics where reference samples exist.
+- Automated Russian/Ukrainian quality scores are not a universal success metric
+  for every target language.
 
 ## 9. Что не является целью сейчас
 
