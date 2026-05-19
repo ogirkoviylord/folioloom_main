@@ -216,10 +216,10 @@ Checklist:
 - [ ] Backup export exists and passes `scripts/verify_backup_export.py`.
 - [ ] Restore rehearsal passed from a backup artifact.
 - [ ] Monitoring/logging reviewed.
-- [ ] Admin Alerts MVP or owner runbook report exists. Current Gate B status:
-  unchecked.
-- [ ] Backup visibility exists in admin or owner runbook report. Current Gate B
-  status: unchecked.
+- [ ] Metadata-only owner runbook/report for Alerts MVP exists. Current Gate B
+  status: unchecked; issue #71 chose owner report now and admin UI later.
+- [ ] Metadata-only owner runbook/report for backup visibility exists. Current
+  Gate B status: unchecked; issue #71 chose owner report now and admin UI later.
 - [ ] Backup plan reviewed, if applicable.
 - [ ] Incident response/contact path defined. Current public-production status:
   TBD / Unknown.

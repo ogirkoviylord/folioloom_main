@@ -34,7 +34,7 @@
 
 ## 4. Gate для code changes
 
-Confirmed: репозиторий является Python 3.13 проектом с `pyproject.toml`, пакет лежит в `src/translator_service/`, тесты лежат в `tests/`. Найдено 93 файла `tests/test_*.py`. `.github/workflows/checks.yml` exists and runs compile plus unit tests on pull requests and pushes to `main`; current GitHub run/pass status is Unknown unless checked on the PR/checks page.
+Confirmed: репозиторий является Python 3.13 проектом с `pyproject.toml`, пакет лежит в `src/translator_service/`, тесты лежат в `tests/`. Найдено 93 файла `tests/test_*.py`. `.github/workflows/checks.yml` exists and runs compile plus unit tests on pull requests and pushes to `main`. Owner decision on 2026-05-17: GitHub Actions Python checks are advisory for now, local gates remain required for PR-ready work, and current GitHub run/pass status is Unknown unless checked on the PR/checks page.
 
 ### Python
 
@@ -140,7 +140,7 @@ Recommended:
 - [ ] Tests run указаны.
 - [ ] Reviewer Agent проверил diff.
 - [ ] CI status reviewed; если CI absent/Unknown/not visible, local verification
-  evidence recorded.
+  evidence recorded. GitHub Actions Python checks are advisory for now.
 - [ ] Docs updated if needed.
 - [ ] No direct push to main.
 - [ ] Human approval obtained if required.

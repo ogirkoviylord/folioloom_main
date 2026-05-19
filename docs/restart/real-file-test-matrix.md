@@ -4,8 +4,15 @@ The unittest suite is strong, but closed beta needs a real-file corpus. The
 purpose is to prove that FolioLoom can process authorized files that resemble
 real user documents, not only synthetic unit fixtures.
 
-Use only public-domain, self-authored, synthetic, licensed, or otherwise
-authorized files. Do not add questionable copyrighted sources to the repo.
+Use only public-domain, self-authored, synthetic, clearly permissive-licensed,
+or otherwise authorized files. Free-library and random internet documents are
+allowed only when the manifest records a clear rights basis and source/license
+URL. "Free to read online" alone is not a sufficient rights basis.
+
+Do not add questionable copyrighted sources to the repo. Synthetic/generated
+fixtures may live in the repo. Real source documents and translated outputs stay
+out of git by default unless the owner explicitly approves retention for that
+fixture.
 
 ## Manifest Idea
 
@@ -28,8 +35,9 @@ fixtures:
       - no_raw_text_in_logs
 ```
 
-The manifest should record source, rights basis, format, language pair, size,
-expected route, expected validation tools and manual QA notes.
+The manifest should record source, source/license URL, rights basis, format,
+language pair, size, expected route, expected validation tools and manual QA
+notes.
 
 ## Fixture Categories
 
@@ -40,8 +48,8 @@ expected route, expected validation tools and manual QA notes.
 | TXT poetry/line-break/Cyrillic | Poetry-like line breaks, RU/UK Cyrillic, mixed language | Layout-sensitive line breaks preserved enough for beta, Cyrillic not corrupted |
 | DOCX simple manuscript | Plain manuscript with headings/paragraphs | Opens in LibreOffice/Word-equivalent, text translated, structure preserved |
 | DOCX complex | Tables, headers, footers, footnotes, comments, hyperlinks, formatting | Opens cleanly, major structures remain present, no broken relationships |
-| EPUB simple | Simple spine/nav XHTML | EPUB validates or passes equivalent checks, spine order preserved |
-| EPUB complex | ToC/nav, images, footnotes, anchors, mixed XHTML | EPUBCheck/equivalent passes or failures are explicitly triaged |
+| EPUB simple | Simple spine/nav XHTML | Local/offline EPUBCheck passes, spine order preserved |
+| EPUB complex | ToC/nav, images, footnotes, anchors, mixed XHTML | Local/offline EPUBCheck passes or failures are explicitly triaged |
 | RU/UK Cyrillic and mixed-language | Russian/Ukrainian source-pair behavior | No mojibake, quality profile checks pass where applicable |
 | Negative: corrupt ZIP | Broken DOCX/EPUB container | Rejected safely, no traceback to user, no raw text in logs |
 | Negative: wrong extension | Extension/content mismatch | Rejected or quarantined safely |
@@ -67,8 +75,14 @@ For every beta release candidate, create a short report with:
 - fixture manifest version;
 - pass/fail table;
 - links to generated final/partial artifacts where safe;
-- manual DOCX visual QA notes;
-- EPUBCheck/equivalent output;
+- metadata-only artifact summary by default; raw source documents and translated
+  outputs should stay in approved local/test artifacts and be deleted after Gate
+  B review unless the owner explicitly approves retention for that fixture;
+- manual DOCX visual QA notes using the owner-approved Gate B threshold: local
+  LibreOffice Writer opens the file without repair/recovery prompt and no
+  blocker visual issues are present; pixel-perfect source parity is not
+  required;
+- local/offline EPUBCheck output;
 - known failures and go/no-go decision.
 
 ## Pass / Fail Criteria
@@ -81,6 +95,8 @@ A fixture passes only when:
 - progress can be derived from work units;
 - final or partial artifact exists where expected;
 - output opens in the target reader/tool;
+- EPUB output passes local/offline EPUBCheck. EPUBCheck errors block fixtures by
+  default; warnings are recorded and triaged.
 - no raw document text appears in admin/logs;
 - cancellation/restart/delete behavior leaves no stuck active job;
 - any provider failure is visible as safe metadata, not as silent data loss.
