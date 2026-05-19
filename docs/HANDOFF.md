@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-16
+Last updated: 2026-05-19
 
 ## 1. Текущее состояние проекта
 
@@ -35,13 +35,51 @@ complete and does not prove durable cross-restart automatic delivery tracking.
 
 Что пока нестабильно или не закрыто для beta:
 upload hardening/quarantine baseline, TTL cleanup/delete verification, real-file
-TXT/DOCX/EPUB release matrix, EPUBCheck/equivalent, DOCX openability/visual QA,
-Alerts MVP, Backups visibility, restore rehearsal artifact,
+TXT/DOCX/EPUB release matrix, local/offline EPUBCheck validation, DOCX
+openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal artifact,
 cancel/resume/restart release evidence и server smoke evidence.
 
 Что неизвестно: `.github/workflows/checks.yml` существует, но current branch
-GitHub Actions run/pass status Unknown until a PR check exists; formal beta
-success metrics TBD; public production readiness не подтверждена.
+GitHub Actions run/pass status Unknown until a PR check exists; public
+production readiness не подтверждена.
+
+Owner decisions recorded during issue #71:
+
+- 2026-05-16: free closed beta waits for complete Gate B evidence; no implicit
+  Gate B deferrals are approved.
+- 2026-05-17: free beta success metrics split hard launch guardrails from
+  translation-quality learning metrics. Hard guardrails are Gate B complete,
+  `0` lost accepted jobs, `0` known raw text/prompt/translation/API key leaks
+  and `0` cap or kill-switch breaches. Translation quality is collected as
+  per-target-language human feedback; existing Russian/Ukrainian automated
+  scores remain regression diagnostics, not universal launch metrics.
+- 2026-05-17: Gate B real-file corpus may use public-domain or clearly
+  permissive-licensed documents from free libraries and other internet sources
+  when the manifest records source/license URL and rights basis. "Free to read
+  online" alone is not sufficient. Synthetic fixtures may live in repo; raw real
+  source documents and translated outputs stay out of git by default.
+- 2026-05-17: retention/delete verification may run on synthetic test data by
+  default and on an owner-approved disposable beta/runtime copy only. Agents
+  must not run TTL cleanup/delete checks on live beta/server data.
+- 2026-05-17: Gate B backup/restore evidence may be collected only in
+  owner-approved disposable local compose, disposable VPS/test server,
+  disposable beta-runtime copy or explicitly approved beta environment. Running
+  backup/restore checks on live beta/server data requires exact-run owner
+  approval. Release artifacts must be metadata-only.
+- 2026-05-17: GitHub Actions Python checks are advisory for now. Local gates
+  remain required for PR-ready work, and agents must report CI status as
+  `Unknown` unless visible PR/check evidence was inspected.
+- 2026-05-17: Gate B DOCX visual QA uses local LibreOffice Writer. A DOCX
+  fixture passes only if it opens without repair/recovery prompt and has no
+  blocker visual issues; pixel-perfect source parity is not required.
+- 2026-05-17: Gate B Alerts/Backups visibility should be collected as a
+  metadata-only owner runbook/report for free beta. New admin UI for these
+  signals is deferred to a later follow-up so the admin console does not need a
+  broad redesign for each bot feature.
+- 2026-05-17: Gate B EPUB validation uses local/offline EPUBCheck as the
+  required validation tool. Online EPUB validators are not approved. EPUBCheck
+  is a release verification tool, not a production dependency; errors block
+  fixtures and warnings are recorded/triaged.
 
 ## 2. Текущий фокус
 
@@ -205,7 +243,8 @@ core flow, release gates, operational visibility and documentation.
 - Risk: source/final/partial/quarantine objects may be retained longer than
   intended or delete behavior may be unproven.
 - Suggested next task: Implementer adds idempotent cleanup/delete verification
-  only after human approval because this touches user data handling.
+  on synthetic test data by default; a second pass may use only an
+  owner-approved disposable beta/runtime copy, never live beta/server data.
 
 - Area: Real-file release validation.
 - Current behavior: Matrix document exists, but execution/report artifact is
@@ -215,7 +254,8 @@ core flow, release gates, operational visibility and documentation.
 - Risk: unit tests may pass while real DOCX/EPUB/TXT documents fail to open,
   preserve structure or survive restart/cancel scenarios.
 - Suggested next task: Scribe/Reviewer create a release report template and run
-  authorized fixtures after owner approves the corpus.
+  authorized public-domain/permissive-license fixtures with recorded source and
+  rights basis.
 
 - Area: Admin operational visibility.
 - Current behavior: Admin has many surfaces, but Alerts MVP and Backups
@@ -232,12 +272,12 @@ core flow, release gates, operational visibility and documentation.
   GitHub Actions workflow exists for PRs and pushes to `main`.
 - Evidence: `.github/workflows/checks.yml`, `docs/CONTEXT_MAP.md`,
   `docs/PROJECT_BRIEF.md`, local filesystem check.
+- Owner decision: GitHub Actions Python checks are advisory for now; local gates
+  remain required for PR-ready work.
 - Risk: current run/pass status remains Unknown unless a PR/checks page is
-  inspected; deploy/server-smoke/release evidence still depends on local or
-  approved-environment checks.
-- Suggested next task: Orchestrator asks owner whether the current GitHub
-  Actions workflow is required for PRs or remains advisory alongside local
-  gates.
+  inspected; passing CI does not prove release readiness because
+  deploy/server-smoke/real-file/backup-restore evidence still depends on local
+  or approved-environment checks.
 
 ## 5. Известные проблемы
 
@@ -324,7 +364,8 @@ Potential issues to verify:
   Почему важно: unit tests do not replace real-file openability and structure QA.
   Риск: outputs fail in real readers.
   Кто должен делать: Reviewer / Scribe.
-  Можно ли отдавать агенту: yes, with authorized fixtures only.
+  Можно ли отдавать агенту: yes, with public-domain/permissive-license fixtures
+  and recorded rights basis only.
 
 - Задача: validate cancel/resume/restart and scheduler/runtime consistency.
   Почему важно: backend is source of truth and beta users need recoverability.
@@ -332,33 +373,24 @@ Potential issues to verify:
   Кто должен делать: Reviewer / Implementer.
   Можно ли отдавать агенту: yes.
 
-- Задача: add Alerts MVP and Backups visibility.
+- Задача: add metadata-only owner runbook/report for Alerts MVP and Backups
+  visibility.
   Почему важно: owner needs operational visibility without manual log reading.
   Риск: missed provider/queue/backup failures.
   Кто должен делать: Implementer / Reviewer.
   Можно ли отдавать агенту: yes, but backup/user-data surfaces may need approval.
+  Notes: issue #71 approved owner report first and admin UI later; keep
+  metadata-only with no raw docs/prompts/translations/API keys, stack traces,
+  backup archives or restored files.
 
 - Задача: verify backup export and restore rehearsal.
   Почему важно: backup existence is not the same as recoverability.
   Риск: beta data cannot be restored.
   Кто должен делать: Reviewer / Architect.
-  Можно ли отдавать агенту: needs approval for real runtime/server data.
+  Можно ли отдавать агенту: yes in owner-approved disposable/local/test/copy
+  environments; live beta/server data requires exact-run owner approval.
 
 ### Later
-
-- Задача: define beta success metrics.
-  Почему важно: `docs/PROJECT_BRIEF.md` marks formal success metrics as TBD.
-  Риск: work optimizes for volume instead of learning/reliability.
-  Кто должен делать: Orchestrator / Scribe.
-  Можно ли отдавать агенту: yes, but owner must decide.
-
-- Задача: decide CI policy.
-  Почему важно: `.github/workflows/checks.yml` exists, but required-vs-advisory
-  CI policy and current run status are not recorded.
-  Риск: unclear regression workflow.
-  Кто должен делать: Orchestrator / Architect.
-  Можно ли отдавать агенту: needs owner decision before making CI required or
-  expanding workflow scope.
 
 - Задача: paid beta planning.
   Почему важно: Gate C is blocked by payment ledger, Stars/XTR, refunds and
@@ -479,27 +511,6 @@ Potential issues to verify:
   deferrals; hold until real-file matrix and restore rehearsal pass.
 - Recommended default: require Gate B evidence or explicit owner deferral before
   inviting users.
-
-- Question: What beta success metrics should agents optimize for?
-- Why it matters: formal success metrics are TBD.
-- Suggested options: completion rate, successful real-file artifacts, restart
-  recovery, cost cap adherence, user feedback score.
-- Recommended default: define 3-5 metrics before go/no-go.
-
-- Question: Should the existing GitHub Actions workflow be required for PRs, or
-  should local gates remain the source of truth?
-- Why it matters: `.github/workflows/checks.yml` exists, but no current
-  PR/checks evidence was inspected in this handoff.
-- Suggested options: keep current GitHub Actions workflow advisory; require it
-  for PRs; expand it later only after owner approval.
-- Recommended default: keep local gates required now; treat GitHub Actions
-  status as Unknown unless visible PR/check evidence is checked.
-
-- Question: What is the approved backup/restore policy for beta?
-- Why it matters: restore rehearsal and backup visibility remain Gate B items.
-- Suggested options: manual owner runbook; admin-visible latest backup status;
-  scheduled offsite backup later.
-- Recommended default: require a manual restore rehearsal artifact before beta.
 
 - Question: What is the approved path for upload quarantine inspection?
 - Why it matters: quarantine can involve suspicious user files and privacy risk.

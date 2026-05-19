@@ -22,18 +22,18 @@
 | R-001 | Potential: целевая аудитория будущих paid users не зафиксирована | Product | Medium | `docs/PROJECT_BRIEF.md` помечает будущих платных пользователей как TBD | Агенты могут строить не тот paid/public продукт | Держать paid/public вне scope до решения; фиксировать ICP перед Gate C/D | Human / Orchestrator | Needs decision |
 | R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is FB2 idea only | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
 | R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps; issue #56 verifies only the free-preview slice | Beta может быть открыта без upload safety, TTL, real-file QA, restore evidence or other Gate B checks | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
-| R-004 | Formal success criteria для beta не утверждены | Product | Medium | `docs/PROJECT_BRIEF.md` помечает formal success metrics как TBD | Команда может оптимизировать объем фич вместо beta learning и reliability | Владелец утверждает 3-5 beta metrics до go/no-go | Human / Scribe | Needs decision |
+| R-004 | Formal success criteria для beta могли быть неясными | Product | Medium | `docs/DECISIONS.md` and `docs/PROJECT_BRIEF.md` record owner-approved free beta success metrics from 2026-05-17 | Метрики могут быть забыты или смешаны с language-specific translation-quality scores | Keep hard guardrails separate from translation-quality learning metrics; Reviewer checks release evidence against the approved metrics | Human / Scribe | Mitigated / watch |
 | R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop; issue #30 child PRs #36-#39 added focused cancel/provider/admin regression coverage | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report; keep issue #30 safeguards intact | Architect / Reviewer | Open |
 | R-006 | Incomplete release verification evidence | Technical | Medium | issue #56 recorded local focused preview tests, full unittest, compileall and predeploy passing on 2026-05-16; real-file/server-smoke/restore/restart evidence remains incomplete | Preview evidence can be mistaken for full beta readiness if remaining release checks are skipped | Перед code/release changes запускать focused tests; перед release - full suite, compileall, predeploy, server smoke and release-specific evidence where applicable | Reviewer | Open |
-| R-007 | Weak/unclear CI policy | Technical | Medium | `.github/workflows/checks.yml` exists; current run/pass status and required-vs-advisory policy are Unknown | Regression prevention can be overstated if agents claim CI without visible check evidence | Owner решает CI policy; пока Reviewer требует local verification evidence when CI status is Unknown/not visible | Human / Reviewer | Unknown |
-| R-008 | Brittle parsing/processing for DOCX/EPUB/TXT real files | Technical | High | `docs/restart/real-file-test-matrix.md`; Gate B unchecked: EPUBCheck/equivalent, DOCX openability/visual QA | Unit tests могут пройти, а реальные файлы не открываются или теряют структуру | Execute authorized real-file matrix; add negative fixtures; record release report | Reviewer / Implementer | Open |
+| R-007 | CI policy can be overstated | Technical | Medium | `.github/workflows/checks.yml` exists; issue #71 records GitHub Actions Python checks as advisory and local gates as required | Regression prevention can be overstated if agents claim CI without visible check evidence or treat advisory CI as release readiness | Agents must report CI as Unknown unless visible PR/check evidence was inspected; Reviewer still requires local verification evidence | Human / Reviewer | Mitigated / watch |
+| R-008 | Brittle parsing/processing for DOCX/EPUB/TXT real files | Technical | High | `docs/restart/real-file-test-matrix.md`; Gate B unchecked: EPUB validation and DOCX openability/visual QA; issue #71 approved local/offline EPUBCheck for EPUB and local LibreOffice Writer threshold for DOCX visual QA | Unit tests могут пройти, а реальные файлы не открываются или теряют структуру | Execute authorized real-file matrix; add negative fixtures; record release report; for EPUB use local/offline EPUBCheck; for DOCX use local LibreOffice Writer and require opens without repair plus no blocker visual issues | Reviewer / Implementer | Open |
 | R-009 | Upload hardening/quarantine baseline не подтвержден как active | Security / Technical | High | `docs/restart/upload-safety-and-retention.md`; Gate B unchecked; `documents.py` validates mostly extension/size; `document_sandbox.py` adds resource limits | Unsafe containers, traversal or zip-bomb-like inputs могут попасть в parser path | Architect defines safe baseline; Implementer adds negative fixtures; Reviewer checks no raw text leak | Architect / Reviewer | Open |
-| R-010 | TTL cleanup/delete verification не подтверждены | Privacy / User data | High | Gate B unchecked; retention policy is proposed in `docs/restart/upload-safety-and-retention.md`; `LocalObjectStorage.delete()` exists | Source/final/partial/quarantine data may remain longer than intended | Implement idempotent cleanup only after human approval; test delete/retention behavior | Human / Architect | Open |
+| R-010 | TTL cleanup/delete verification не подтверждены | Privacy / User data | High | Gate B unchecked; retention policy is proposed in `docs/restart/upload-safety-and-retention.md`; `LocalObjectStorage.delete()` exists; issue #71 approved synthetic/disposable-copy verification scope | Source/final/partial/quarantine data may remain longer than intended | Implement idempotent cleanup verification on synthetic data by default; use only owner-approved disposable beta/runtime copy for second pass; never live beta/server data | Human / Architect | Open |
 | R-011 | Background jobs and scheduler concurrency/race conditions | Technical | High | `worker.py`, `scheduler.py`, `postgres_scheduler.py`; docs mention leases, capacity, fairness, provider caps | Duplicate claims, stuck leases, over-capacity provider calls, inconsistent usage accounting | Changes require targeted scheduler/worker/Postgres tests and Architect review | Architect / Reviewer | Open |
 | R-012 | Storage/runtime data under `var/` and local object storage are high-risk | User data / Operational | High | `docker-compose.yml` mounts `./var`; `file_storage.py`; `docs/CONTEXT_MAP.md` marks `var/` as user/runtime data | Accidental edits/deletes can affect uploaded docs, results, DBs, logs | Do not edit runtime data without approval; backup before destructive operations | Human / Reviewer | Open |
 | R-013 | Database/schema changes have no migrations directory | Database | High | `postgres_scheduler.py` contains schema SQL; no `migrations/`, `database/`, `db/` directories found | Manual schema drift or incompatible runtime state | Any schema/state change needs plan, tests, backup/restore impact review | Architect / Human | Unknown |
 | R-014 | Error handling can leak unsafe details if new paths bypass redaction | Security / Privacy | High | `security_telemetry.py` safe payload allowlist; `admin/translation_logs.py` redacts sensitive keys; docs forbid raw text | Raw document text, prompts, translations, secrets or tracebacks could appear in logs/admin/user messages | Reviewer checks redaction tests and admin/log outputs for touched path | Reviewer / Implementer | Open |
-| R-015 | Observability gaps: Alerts MVP and Backups visibility incomplete | Operational | Medium | `CURRENT_PROJECT_STATE.md`, `DOCUMENT_INDEX.md`, Gate B unchecked | Owner may miss provider, queue, worker, disk, backup or restore problems | Add metadata-only alerts/backups visibility or documented owner report | Implementer / Reviewer | Open |
+| R-015 | Observability gaps: Alerts MVP and Backups visibility incomplete | Operational | Medium | `CURRENT_PROJECT_STATE.md`, `DOCUMENT_INDEX.md`, Gate B unchecked; issue #71 approved metadata-only owner runbook/report for Gate B with admin UI later | Owner may miss provider, queue, worker, disk, backup or restore problems | Add metadata-only owner runbook/report covering provider, queue/worker, disk/storage, failed jobs and backup/restore; defer admin UI expansion | Implementer / Reviewer | Open |
 | R-016 | Admin auth/security is sensitive and tunnel-only | Security / Auth | High | `admin/auth.py`, `admin/rbac.py`, `docker-compose.yml` binds `127.0.0.1:62062`, docs say SSH tunnel only | Public exposure or auth weakening can compromise admin/runtime data | No bind/auth/RBAC changes without approval; keep SSH tunnel model until Gate D | Human / Architect | Open |
 | R-017 | Permissions/RBAC model may be foundation-only | Security | Medium | `admin/rbac.py`, `admin/auth.py`, docs call owner/admin console closed-beta and SSH-only | Future named admins or public exposure could need stronger access policy | Treat public/named-admin changes as High; require security review | Architect / Human | Unknown |
 | R-018 | Secrets and env files exist locally | Security / Secrets | Critical | Root contains real `.env`, `.env.dev`, `.env.beta`; `.env.server.example` placeholders; `admin/secrets.py` encrypts admin secrets | Reading, logging or editing secrets can expose Telegram, DeepSeek, admin or Postgres credentials | Do not read/modify real `.env*`; use examples only; rotate if exposure suspected | Human | Open |
@@ -45,7 +45,7 @@
 | R-024 | Payment/pricing launch is gated and incomplete | Payment / Business | Critical | `docs/restart/release-gates.md` Gate C unchecked; `billing.py` and `order_payments.py` are in-memory; pricing spec is draft | Money handling, refunds, reconciliation and support could be unsafe | No payment UI/paid jobs/pricing changes without Gate C plan and approval | Human / Architect | Open |
 | R-025 | External provider costs can exceed beta budget if caps/keys changed casually | Business / Cost | High | README beta safety caps; `beta_safety.py`; provider/key/concurrency settings | Unexpected spend or provider throttling | Keep conservative caps; concurrency/key changes require review and owner approval | Human / Reviewer | Open |
 | R-026 | Deployment and rollback are not routine agent actions | Deployment | Critical | `docker-compose.yml`, deploy scripts, VPS runbooks; AGENTS forbids production deployment without approval | Service downtime, data loss, public admin exposure | Deploy only with explicit approval, predeploy/server smoke, backup and rollback notes | Human / Architect | Open |
-| R-027 | Backup/restore recoverability not fully evidenced for beta | Operational | High | Backup scripts/runbook exist; Gate B unchecked: backup verify, restore rehearsal, backups visibility | Backups may exist but not restore usable jobs/files/admin state | Run backup verification and restore rehearsal before beta | Human / Reviewer | Open |
+| R-027 | Backup/restore recoverability not fully evidenced for beta | Operational | High | Backup scripts/runbook exist; Gate B unchecked: backup verify, restore rehearsal, backups visibility; issue #71 approved metadata-only evidence policy and disposable/approved environment scope | Backups may exist but not restore usable jobs/files/admin state | Run backup verification and restore rehearsal before beta in owner-approved disposable/local/test/copy environment; live beta/server data requires exact-run owner approval | Human / Reviewer | Open |
 | R-028 | Monitoring/incident/support workflow incomplete | Operational | High | Gate D unchecked: monitoring/alerts, incident runbooks, support workflow | Incidents may be noticed late or handled inconsistently | Define minimal incident/support process before public production | Human / Scribe | Needs decision |
 | R-029 | AI agents changing too much or touching high-risk files | AI workflow | High | `AGENTS.md`, `docs/CONTEXT_MAP.md`, `docs/QUALITY_GATES.md` list guardrails | Broad diffs can weaken safety, auth, payments, deployment or user-data handling | Orchestrator splits tasks; Reviewer checks scope and high-risk files | Orchestrator / Reviewer | Open |
 | R-030 | AI agents hallucinating docs or release readiness | AI workflow | Medium | AGENTS documentation rules require Unknown/TBD and confirmed facts | Docs may claim CI, production readiness, features or policies that do not exist | Scribe separates confirmed facts, assumptions, Unknown/TBD; Reviewer verifies evidence | Scribe / Reviewer | Open |
@@ -64,7 +64,9 @@
 - Unclear MVP: Medium/High risk; MVP scope описан, and free-preview evidence
   exists for the implementation slice, but readiness не подтвержден, пока Gate B
   не закрыт.
-- Unclear success criteria: formal beta metrics - TBD; draft criteria есть в `docs/PROJECT_BRIEF.md`.
+- Success criteria: formal free beta metrics are recorded in `docs/DECISIONS.md`
+  and `docs/PROJECT_BRIEF.md`. Keep hard launch guardrails separate from
+  language-specific translation-quality learning metrics.
 
 ### Technical risks
 
@@ -73,9 +75,9 @@
   local focused/full unittest, compileall and predeploy passes for preview
   evidence, but real-file/server-smoke/restore/restart release evidence remains
   incomplete.
-- Weak/unclear CI: `.github/workflows/checks.yml` exists, but current run/pass
-  status and required-vs-advisory policy are Unknown unless PR/check evidence is
-  inspected.
+- CI policy: `.github/workflows/checks.yml` exists and is advisory for now.
+  Local gates remain required. Current run/pass status is Unknown unless
+  PR/check evidence is inspected.
 - Brittle parsing/processing: High for DOCX/EPUB/TXT real files and unsafe containers until real-file and negative fixtures pass.
 - Background jobs: High due to leases, retries, worker loop, provider capacity and usage accounting.
 - Issue #30 reduced one focused cancel/provider/admin reliability risk with
@@ -86,7 +88,9 @@
 - Database migrations: migrations directory Not found; schema/state changes require approval.
 - Concurrency/race conditions: High around scheduler claims, worker capacity, provider channels and user/job caps.
 - Error handling: Medium/High; safe redaction exists but new paths must be reviewed.
-- Observability: Medium; provider/admin visibility exists, but Alerts MVP and Backups visibility remain gaps.
+- Observability: Medium; provider/admin visibility exists, but Alerts MVP and
+  Backups visibility remain gaps until the issue #71-approved metadata-only
+  owner report exists.
 
 ### Security risks
 
@@ -193,13 +197,17 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Risk reduced: R-004.
   Priority: Medium.
   Suggested owner: Human / Scribe.
+  Status: Done 2026-05-17.
   Acceptance criteria: 3-5 metrics recorded in active docs, with Unknown/TBD removed where decided.
 
 - Task: Выполнить authorized real-file TXT/DOCX/EPUB matrix.
   Risk reduced: R-008, R-014.
   Priority: High.
   Suggested owner: Reviewer.
-  Acceptance criteria: fixture manifest with rights basis, pass/fail report, DOCX openability notes, EPUBCheck/equivalent output, no raw text in logs/admin.
+  Acceptance criteria: fixture manifest with rights basis, pass/fail report,
+  DOCX openability notes using local LibreOffice Writer and the approved
+  no-repair/no-blocker threshold, local/offline EPUBCheck output, no raw text in
+  logs/admin.
 
 - Task: Добавить или проверить negative upload fixtures.
   Risk reduced: R-009, R-014.
@@ -220,6 +228,9 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Priority: High.
   Suggested owner: Architect / Human.
   Acceptance criteria: approved data-retention plan, idempotent cleanup behavior, tests, backup/restore impact note.
+  Decision status: issue #71 approved verification on synthetic data by default
+  and only owner-approved disposable beta/runtime copies for any second pass; no
+  live beta/server cleanup checks.
 
 - Task: Запустить release-scoped verification before release decisions.
   Risk reduced: R-006, R-031.
@@ -231,6 +242,7 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Risk reduced: R-007, R-031.
   Priority: Medium.
   Suggested owner: Human / Architect.
+  Status: Done 2026-05-17.
   Acceptance criteria: decision recorded: current GitHub Actions workflow is advisory or required, expansion scope is approved if needed, and agents keep CI pass status Unknown unless visible check evidence exists.
 
 - Task: Restore rehearsal from a real backup artifact.
@@ -238,12 +250,20 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Priority: High.
   Suggested owner: Human / Reviewer.
   Acceptance criteria: `scripts/verify_backup_export.py` passes, restore runbook acceptance criteria are recorded, no raw document text appears in logs/admin.
+  Decision status: issue #71 approved backup/restore evidence only in
+  owner-approved disposable/local/test/copy environments or explicitly approved
+  beta environment; live beta/server data requires exact-run owner approval;
+  artifacts are metadata-only.
 
-- Task: Add metadata-only Alerts MVP or owner runbook report.
+- Task: Add metadata-only Alerts/Backups owner runbook report.
   Risk reduced: R-015, R-028.
   Priority: Medium.
   Suggested owner: Implementer / Reviewer.
-  Acceptance criteria: provider/queue/worker/disk/backup signals visible or documented; no secrets/raw text.
+  Decision status: issue #71 approved owner report for Gate B and admin UI
+  later.
+  Acceptance criteria: provider, queue/worker, disk/storage, failed-job and
+  backup/restore status visible or documented; no raw document text, prompts,
+  translations, API keys, stack traces, backup archives or restored files.
 
 - Task: Define paid-beta plan only when owner chooses Gate C work.
   Risk reduced: R-024.
