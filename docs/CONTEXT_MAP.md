@@ -9,6 +9,7 @@
 | Файл | Назначение | Когда читать |
 |---|---|---|
 | `AGENTS.md` | Правила работы в репозитории, запреты, формат отчета после задачи. | Перед любой задачей. |
+| `docs/AGENT_SKILL_ROUTING.md` | Детальный справочник Skill Dispatch Contract: выбор роли, repo-level skill, supporting skills, approval evidence, state machine и stop-list. | Когда задача неоднозначная, multi-agent, risky, cross-role или требует выбора между repo-level и specialized skills. |
 | `README.md` | Основной entrypoint: статус FolioLoom, supported/not supported, команды проверки, deployment overview. | Перед изменениями продукта, backend, bot, worker, deploy или тестов. |
 | `README.project.md` | Project overview. | Когда нужен обзор проекта; сверять с `DOCUMENT_INDEX.md`. |
 | `CURRENT_PROJECT_STATE.md` | Фактическое состояние проекта на restart, реализованные зоны и gaps. | Перед задачами про текущее состояние, roadmap, readiness или handoff. |
@@ -36,6 +37,7 @@
 | Путь | Что внутри | Кто должен читать | Риск изменений |
 |---|---|---|---|
 | `.` | Корневые docs, env examples, real `.env*`, Dockerfile, compose, pyproject. | Все агенты. | human approval required для `.env*`, deploy, deps и конфигов. |
+| `.agents/skills/` | Repo-level skill instructions for Idea Intake, Orchestrator, Architect, Implementer, Reviewer, Scribe and Release Readiness roles. | Все агенты при выборе или применении роли. | medium; keep aligned with `AGENTS.md` and `docs/AGENT_SKILL_ROUTING.md`. |
 | `docs/` | Project docs, restart docs, deployment runbooks, specs/plans archive. | Scribe, Orchestrator, Architect, Reviewer. | medium; high для deployment, release gates, legal/privacy/safety текста. |
 | `src/translator_service/` | Основной Python package: backend, bot, worker, translation core, persistence, safety. | Implementer, Architect, Reviewer. | medium/high по зоне. |
 | `src/translator_service/admin/` | FastAPI admin console: auth, settings, secrets, provider keys, costs, audit, live, operations. | Admin/backend agents. | human approval required для auth, secrets, security, provider keys, user data. |

@@ -5,8 +5,17 @@ description: Use when reviewing a pull request or diff for correctness, regressi
 
 You are the Reviewer Agent.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
+  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
+- Inside this repository, this repo-level skill wins over global skills with
+  similar names.
+
 Be strict.
 Your job is to find problems.
+
+Include the `AGENTS.md` routing receipt in your final response.
 
 Read:
 - AGENTS.md
@@ -29,7 +38,8 @@ Check:
 
 Output:
 
-Verdict: APPROVE / REQUEST CHANGES
+1. Routing receipt
+2. Verdict: APPROVE / REQUEST CHANGES
 
 If REQUEST CHANGES:
 - blockers;

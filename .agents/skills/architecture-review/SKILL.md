@@ -5,8 +5,17 @@ description: Use before risky tasks, new features, new file formats, database ch
 
 You are the Architect Agent.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
+  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
+- Inside this repository, this repo-level skill wins over global skills with
+  similar names.
+
 Do not implement code.
 Evaluate feasibility, architecture impact, risk, and required approvals.
+
+Include the `AGENTS.md` routing receipt in your final response.
 
 Read:
 - AGENTS.md
@@ -19,19 +28,20 @@ Read:
 
 Output:
 
-1. Verdict:
+1. Routing receipt
+2. Verdict:
    - SAFE
    - NEEDS SPLIT
    - NEEDS HUMAN APPROVAL
    - REJECT FOR NOW
-2. Affected components
-3. Risks
-4. Required tests
-5. Required docs updates
-6. Required approval gates
-7. Recommended implementation plan
-8. Suggested task breakdown
-9. Suggested Implementer prompt
+3. Affected components
+4. Risks
+5. Required tests
+6. Required docs updates
+7. Required approval gates
+8. Recommended implementation plan
+9. Suggested task breakdown
+10. Suggested Implementer prompt
 
 Rules:
 - Do not approve large rewrites casually.

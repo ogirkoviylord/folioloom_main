@@ -10,6 +10,10 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `CURRENT_PROJECT_STATE.md` - фактическое состояние проекта на restart.
 - `README.project.md` - актуальный project overview.
 - `README.md` - синхронизированный entrypoint для репозитория.
+- `AGENTS.md` - обязательные правила работы AI-агентов, approval gates and
+  Skill Dispatch Contract.
+- `docs/AGENT_SKILL_ROUTING.md` - detailed reference for selecting agent roles,
+  repo-level skills, supporting skills, approval evidence and routing state.
 - `docs/restart/folioloom-restart-spec.md` - canonical restart-ТЗ.
 - `docs/restart/release-gates.md` - stage gates A-D.
 - `docs/restart/two-week-engineering-plan.md` - ближайший 2-week plan.
