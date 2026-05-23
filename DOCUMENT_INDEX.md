@@ -10,6 +10,8 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `CURRENT_PROJECT_STATE.md` - фактическое состояние проекта на restart.
 - `README.project.md` - актуальный project overview.
 - `README.md` - синхронизированный entrypoint для репозитория.
+  Skill Dispatch Contract.
+  repo-level skills, supporting skills, approval evidence and routing state.
 - `docs/restart/folioloom-restart-spec.md` - canonical restart-ТЗ.
 - `docs/restart/release-gates.md` - stage gates A-D.
 - `docs/restart/two-week-engineering-plan.md` - ближайший 2-week plan.
