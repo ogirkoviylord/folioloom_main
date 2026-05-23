@@ -121,6 +121,10 @@ Tasks:
   DOCX routing/profile behavior and preview-mode propagation.
 - Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
   fixtures.
+- Добавить local malware/AV scanning gate как часть upload hardening: quarantine
+  first, scan before parsing, fail closed for beta scanner errors unless owner
+  approves otherwise, and keep public VirusTotal-style submission out of the
+  default path.
 - Проверить TTL cleanup/delete behavior для source/final/partial/quarantine
   только после approval, потому что это user data handling.
 - Подтвердить cancel/resume/restart и worker/bot restart behavior release
@@ -149,6 +153,9 @@ Acceptance criteria:
 Риски:
 
 - Upload/retention/delete затрагивают user data handling.
+- Local malware/AV scanning затрагивает security, privacy, deployment,
+  dependencies and runtime user-data boundaries; implementation requires
+  Architect review and owner approval for deployment/new dependency slices.
 - Scheduler/worker changes затрагивают durable state machine.
 - Provider capacity changes могут увеличить cost/provider failure risk.
 - Issue #30 reduced a known cancel/provider/admin reliability risk, but it does
@@ -343,6 +350,39 @@ Acceptance criteria:
   Agent suitability: needs architect
   Suggested acceptance criteria: negative fixtures reject/quarantine safely,
   quarantined files never reach workers, logs/admin show metadata only.
+
+- Task: Design local malware/AV scanning gate for uploads
+  ([#91](https://github.com/ogirkoviylord/folioloom_main/issues/91)).
+  Phase: 1
+  Priority: High
+  Risk: High
+  Agent suitability: needs architect and human approval
+  Suggested acceptance criteria: design records scanner contract, verdict
+  taxonomy, fail-closed beta behavior, quarantine state transitions, metadata
+  redaction rules, ClamAV/local-scanner deployment implications and explicit
+  out-of-scope default public VirusTotal-style submission.
+
+- Task: Implement scanner contract and fake scanner tests
+  ([#92](https://github.com/ogirkoviylord/folioloom_main/issues/92)).
+  Phase: 1
+  Priority: High
+  Risk: Medium
+  Agent suitability: needs review
+  Suggested acceptance criteria: upload flow can require a scanner verdict
+  before accepted storage/parser/worker access; tests prove clean/infected/error
+  verdicts route safely without adding production dependencies or deployment
+  changes.
+
+- Task: Add local ClamAV scanner adapter after approval
+  ([#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)).
+  Phase: 1
+  Priority: High
+  Risk: High
+  Agent suitability: needs architect and human approval
+  Suggested acceptance criteria: adapter supports local daemon/socket or CLI
+  mode, records safe scanner metadata, handles timeout/unavailable/error
+  fail-closed for beta, passes EICAR or equivalent safe AV fixture tests and
+  does not expose raw document text.
 
 - Task: Validate cancel/resume/restart behavior.
   Phase: 1

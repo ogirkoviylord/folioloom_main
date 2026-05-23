@@ -14,7 +14,7 @@ website or user-facing provider selection in this window.
 | Quotas / cost cap / kill switch | Bound provider cost during free beta | Per-user quota, global cap, admin kill switch behavior | Quota/cap/kill switch stop new full translations safely |
 | Rights confirmation | Make authorization explicit | Rights confirmation screen/copy before full processing | User must confirm they own rights, have permission, or use public-domain/authorized text |
 | Free preview | Let users see quality before full job | Preview work-unit route and UX copy | Full translation cannot start before preview and explicit confirmation |
-| Upload hardening baseline | Prevent unsafe containers from reaching workers | TXT/DOCX/EPUB validation, ZIP inspection, quarantine/rejection metadata | Negative fixtures reject/quarantine safely and do not leak raw text |
+| Upload hardening baseline | Prevent unsafe containers from reaching workers | TXT/DOCX/EPUB validation, ZIP inspection, quarantine/rejection metadata, local malware/AV scanner design | Negative fixtures reject/quarantine safely, scanner behavior is designed or explicitly deferred, and no raw text leaks |
 
 Week 1 exit: Gate A candidate plus implemented or explicitly scoped Gate B
 foundation items.
@@ -24,6 +24,7 @@ foundation items.
 | Slice | Goal | Deliverables | Acceptance criteria |
 | --- | --- | --- | --- |
 | TTL cleanup / delete verification | Bound retained source/result data | TTL cleanup job/process, delete verification, admin metadata | Source/final/partial/quarantine retention follows restart policy |
+| Local malware/AV scanning implementation | Scan uploads before parsing without sending user files to public scanners by default | Scanner contract, safe verdict metadata, local scanner adapter after approval, EICAR/equivalent test fixture | Clean files may proceed; infected/unscanned/error files do not reach parser or workers; scanner errors fail closed for beta unless owner-approved otherwise |
 | Alerts MVP | Surface owner-actionable operational failures | Minimal alert rules for provider, queue/worker, disk, backup, failed jobs | Admin owner can see current alerts without reading logs manually |
 | Backups visibility | Make backup health visible | Admin page/card or explicit owner report showing latest backup/verify status | Owner can answer when last backup was created and verified |
 | Real-file corpus / release report | Validate real TXT/DOCX/EPUB behavior | `real_corpus_manifest.yml` or equivalent, fixture run report | Real-file matrix covers happy path, negative fixtures and ops scenarios |

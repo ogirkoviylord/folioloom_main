@@ -53,6 +53,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [x] Admin kill switch exists in Settings/Live visibility and stops new
   uploads/jobs and new scheduler claims without restart.
 - [ ] Upload hardening/quarantine baseline is active.
+- [ ] Local malware/AV scanning gate is active before parsing, or explicitly
+  deferred by owner in the Gate B evidence report. Public multi-engine services
+  must not receive user documents by default.
 - [ ] TTL cleanup is active for sources, finals, partials and quarantine.
 - [ ] Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact.
 - [ ] Cancel/resume/restart scenarios pass.
@@ -106,7 +109,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   MFA/named admin accounts or equivalent, and an explicit access policy.
 - [ ] Admin is no longer exposed only by accident or implicit network behavior.
 - [ ] Public parser hardening is complete.
-- [ ] Stronger AV/quarantine flow is complete.
+- [ ] Stronger public-production AV/quarantine flow is complete, including
+  resource limits, scanner update visibility, quarantine retention evidence and
+  an approved policy for any external scanning service.
 - [ ] Offsite backups are configured.
 - [ ] Scheduled restore rehearsals are documented and recent.
 - [ ] Legal/privacy/AUP/refund docs are ready.
