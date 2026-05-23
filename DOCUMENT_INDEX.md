@@ -15,7 +15,7 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/restart/two-week-engineering-plan.md` - ближайший 2-week plan.
 - `docs/restart/real-file-test-matrix.md` - real-file corpus/release matrix.
 - `docs/restart/upload-safety-and-retention.md` - upload hardening, quarantine,
-  TTL and retention rules.
+  local malware scanning, TTL and retention rules.
 
 ## Active Deployment Docs
 

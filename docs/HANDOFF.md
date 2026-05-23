@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-19
+Last updated: 2026-05-23
 
 ## 1. Текущее состояние проекта
 
@@ -34,7 +34,8 @@ safe retry metadata. This does not make cancel/resume/restart Gate B fully
 complete and does not prove durable cross-restart automatic delivery tracking.
 
 Что пока нестабильно или не закрыто для beta:
-upload hardening/quarantine baseline, TTL cleanup/delete verification, real-file
+upload hardening/quarantine baseline, local malware/AV scanning gate,
+TTL cleanup/delete verification, real-file
 TXT/DOCX/EPUB release matrix, local/offline EPUBCheck validation, DOCX
 openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal artifact,
 cancel/resume/restart release evidence и server smoke evidence.
@@ -90,6 +91,9 @@ core flow, release gates, operational visibility and documentation.
 
 - закрыть Gate B blockers для free closed beta;
 - улучшить upload safety, TTL/delete verification и real-file QA;
+- добавить local malware/AV scanning gate как часть upload safety; owner
+  accepted this direction on 2026-05-22, but implementation evidence is still
+  Unknown;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
 - держать payments, public production, public admin и новые форматы вне
@@ -226,14 +230,18 @@ core flow, release gates, operational visibility and documentation.
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
   upload validation and document sandbox modules, but release docs do not claim
-  complete quarantine baseline.
+  complete quarantine baseline. Owner accepted adding a local malware/AV
+  scanning gate on 2026-05-22; implementation is not yet confirmed.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
   `docs/restart/release-gates.md`, `src/translator_service/documents.py`,
   `src/translator_service/document_sandbox.py`.
-- Risk: unsafe ZIP/container inputs could reach parser/worker paths if hardening
-  is incomplete.
+- Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
+  paths if hardening/scanning is incomplete; public external scanning could leak
+  rights-sensitive documents if used as the default.
 - Suggested next task: Architect defines exact safe baseline from the policy,
-  Implementer adds missing negative fixtures, Reviewer checks no raw text leaks.
+  including scanner contract, verdict taxonomy and fail-closed beta behavior;
+  Implementer adds missing negative/AV fixtures; Reviewer checks no raw text
+  leaks.
 
 - Area: TTL cleanup and delete verification.
 - Current behavior: Retention policy is documented, but Gate B marks cleanup
@@ -349,6 +357,21 @@ Potential issues to verify:
   Кто должен делать: Architect / Implementer / Reviewer.
   Можно ли отдавать агенту: needs approval if behavior changes user data
   handling or quarantine retention.
+
+- Задача: design and implement local malware/AV scanning gate in split issues.
+  Почему важно: untrusted uploads must be scanned before parsing without sending
+  private books/manuscripts to public scanning services by default.
+  Риск: security, privacy, deployment, dependency and runtime user-data risk.
+  Кто должен делать: Architect / Implementer / Reviewer.
+  Можно ли отдавать агенту: yes only as split issues; deployment/new dependency,
+  external scanning, retention or runtime-data behavior needs explicit owner
+  approval.
+  Issues: [#91](https://github.com/ogirkoviylord/folioloom_main/issues/91)
+  design, [#92](https://github.com/ogirkoviylord/folioloom_main/issues/92)
+  scanner contract, [#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)
+  ClamAV adapter, [#94](https://github.com/ogirkoviylord/folioloom_main/issues/94)
+  upload-flow wiring, [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
+  Gate B evidence.
 
 - Задача: run release-scoped verification before any go/no-go.
   Почему важно: issue #56 recorded current preview-slice tests, but Gate B still

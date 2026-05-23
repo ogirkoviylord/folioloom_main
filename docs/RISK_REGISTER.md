@@ -52,6 +52,7 @@
 | R-031 | AI agents skipping tests or overstating verification | AI workflow | Medium | `docs/QUALITY_GATES.md`; CI status may be Unknown/not visible; local gates remain required evidence | Regressions can be merged or handoff can mislead owner | Final reports must list tests/checks run, visible CI evidence, or explain why none | Reviewer | Open |
 | R-032 | Conflicting PRs/parallel agents in shared state machines | AI workflow | Medium | `docs/CONTEXT_MAP.md` lists conflict zones: scheduler/worker, bot/backend, provider/admin, auth/admin, deployment | Concurrent changes can create inconsistent contracts | Assign disjoint ownership; Architect coordinates cross-component work | Orchestrator / Architect | Open |
 | R-033 | Admin/provider bulk diagnostics competing with active translation work | Admin / Provider / Cost | Medium | Issue #30 and PR #38 added a fail-closed guard for Admin -> AI Providers -> Test all active keys during active translations/provider requests | Uncontrolled diagnostics can add provider traffic during incidents or expose unsafe metadata if guardrails regress | Keep bulk key tests paused during active translations/provider requests; focused admin/provider tests and redaction review for future changes | Architect / Reviewer | Mitigated / watch |
+| R-034 | Malware/AV scanning not yet implemented or implemented with unsafe disclosure | Security / Privacy / User data / Deployment | High | Owner accepted local malware scanning on 2026-05-22; Gate B now requires local malware/AV scanning or explicit owner deferral; `docs/restart/upload-safety-and-retention.md` defines planned baseline | Unsafe files may reach parsers/workers, or private books/manuscripts may be submitted to inappropriate public scanning services | Split into design, scanner contract, local ClamAV adapter and release evidence issues; default to local scanning, quarantine-first flow, fail-closed beta errors and metadata-only logs/admin | Human / Architect / Reviewer | Open |
 
 ## 4. Обязательные категории рисков
 
@@ -210,10 +211,28 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   logs/admin.
 
 - Task: Добавить или проверить negative upload fixtures.
-  Risk reduced: R-009, R-014.
+  Risk reduced: R-009, R-014, R-034.
   Priority: High.
   Suggested owner: Architect / Implementer / Reviewer.
   Acceptance criteria: tests for wrong extension, traversal, oversize, corrupt ZIP and zip-bomb-like fixture; safe user errors; quarantine/files do not reach workers.
+
+- Task: Design local malware/AV scanning gate.
+  Risk reduced: R-009, R-014, R-020, R-034.
+  Priority: High.
+  Suggested owner: Architect / Human.
+  Acceptance criteria: scanner contract, verdict taxonomy, quarantine state
+  transitions, fail-closed beta behavior, safe metadata fields, ClamAV/local
+  deployment implications and public-external-scanning guardrails are recorded
+  before implementation.
+
+- Task: Implement scanner contract and local scanner adapter in separate PRs.
+  Risk reduced: R-009, R-014, R-020, R-034.
+  Priority: High.
+  Suggested owner: Implementer / Reviewer.
+  Acceptance criteria: unscanned/infected/error files never reach parser or
+  translation workers; EICAR or equivalent safe fixture is detected; scanner
+  timeout/unavailable/error behavior is tested; logs/admin contain metadata
+  only.
 
 - Task: Run FB2 idea intake only if owner wants to revisit issue #23.
   Risk reduced: R-002, R-008, R-009, R-014.
