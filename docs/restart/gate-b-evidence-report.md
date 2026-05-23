@@ -64,6 +64,7 @@ documents.
 | Global cost caps are enforced by reservation-at-enqueue and scheduler claim guards. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` and `docs/DECISIONS.md` describe reservation-at-enqueue and scheduler claim guards. | Current release run against beta config not recorded. | Existing beta safety and scheduler tests referenced in docs. | Yes for cap/provider/scheduler changes. | Verify with release-scoped cap tests before go/no-go. |
 | Admin kill switch exists in Settings/Live visibility and stops new uploads/jobs and new scheduler claims without restart. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` documents `BETA_TRANSLATIONS_PAUSED`; `CURRENT_PROJECT_STATE.md` describes admin/live visibility. | Current beta-server admin smoke not run in this task. | Existing admin/live/bot/scheduler tests referenced in docs. | Yes for admin/provider/scheduler behavior changes. | Include kill-switch check in server smoke evidence. |
 | Upload hardening/quarantine baseline is active. | Blocked | Policy exists in `docs/restart/upload-safety-and-retention.md`; Gate B item is unchecked. | No evidence that negative fixtures pass, quarantine never reaches workers, parser/container limits are active for release. | Needed: negative fixture tests for wrong extension, traversal, oversize, corrupt ZIP, zip-bomb-like input; release artifact. | Yes if behavior changes upload safety, quarantine, user-data handling or retention. | Follow-up: upload hardening/quarantine baseline issue. |
+| Local malware/AV scanning gate is active before parsing, or explicitly deferred by owner in the Gate B evidence report. | Blocked | Owner accepted the local scanning direction on 2026-05-22. Design for issue #91 is recorded in `docs/restart/local-malware-scanning-design.md`; public VirusTotal-style submission is not the default path. | No implementation evidence yet: scanner contract code, local adapter, EICAR/equivalent fixture, upload-flow guard and Gate B release evidence are missing. | Needed: focused follow-up issues for scanner contract, local ClamAV adapter, upload-flow wiring and release evidence; tests for clean, infected, timeout, unavailable, error, unsupported and suspicious container verdicts. | Approved for design only. Yes for production dependency, Docker/deployment, scanner service config, external scanning, retention/runtime data behavior or changing fail-closed beta policy. | Follow-up: issues #92-#95. Until then, Gate B remains blocked or needs explicit owner deferral. |
 | TTL cleanup is active for sources, finals, partials and quarantine. | Blocked | Retention defaults are proposed in `docs/restart/upload-safety-and-retention.md`; `docs/DECISIONS.md` marks baseline as Proposed; Gate B item is unchecked. | No idempotent cleanup/delete verification, no evidence for source/final/partial/quarantine object lifecycle. | Needed: retention/delete tests and release report; avoid real user data unless approved. | Yes; this is user-data handling/destructive-adjacent. | Follow-up: TTL cleanup/delete verification issue. |
 | Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact. | Blocked | Matrix template exists in `docs/restart/real-file-test-matrix.md`; Gate B item is unchecked. Issue #71 approved public-domain/permissive-license corpus policy. | No corpus manifest, no execution report, no artifact links, no pass/fail table. | Needed: fixture manifest with source/license URL and rights basis, commands, metadata-only artifact summary by default, release report. | No for public-domain/permissive-license metadata-only corpus policy; yes for raw source/output retention in git or use of private/runtime data. | Follow-up: real-file TXT/DOCX/EPUB matrix issue. |
 | Cancel/resume/restart scenarios pass. | Blocked | Issue #30 PRs #36-#39 reduced one focused cancel/provider/admin reliability risk; docs state this does not complete Gate B. | No stored release evidence for cancel/resume/restart matrix across bot/worker/server restarts. | Needed: real-file or integration-style scenario report. | Usually no for synthetic/local tests; yes if using beta server/user data. | Follow-up: cancel/resume/restart evidence issue. |
@@ -108,6 +109,8 @@ Only the following are confirmed by repository evidence:
 These block free closed beta unless the owner explicitly approves deferral:
 
 - Upload hardening/quarantine baseline evidence.
+- Local malware/AV scanning implementation and release evidence, or explicit
+  owner deferral.
 - TTL cleanup/delete verification for source/final/partial/quarantine objects.
 - Authorized real-file TXT/DOCX/EPUB matrix and stored release report.
 - Cancel/resume/restart, worker restart and bot restart release evidence.
@@ -180,11 +183,17 @@ Recorded owner decisions:
   validation tool. Online EPUB validators are not approved. EPUBCheck is a
   release verification tool, not a production dependency. Errors block fixtures;
   warnings are recorded and triaged.
+- Local malware/AV scanning direction: owner accepted adding local scanning on
+  2026-05-22. Design is recorded in
+  `docs/restart/local-malware-scanning-design.md`; implementation, deployment,
+  dependency, retention/runtime operation and release evidence are still missing.
 
 Remaining required human decisions:
 
 - Any future Gate B deferral: no deferrals are currently approved; any later
   exception must name the owner approver and affected Gate B item.
+- Exact malware scanner implementation/deployment path and any change to
+  fail-closed beta behavior remain `TBD`.
 
 ## 8.1 Issue #71 Owner Decision Register
 

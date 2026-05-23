@@ -32,6 +32,14 @@ Owner decision on 2026-05-22: FolioLoom should add a local malware/AV scanning
 gate for uploaded files. This is planned work, not confirmed implemented
 behavior until a focused issue/PR provides tests and release evidence.
 
+Detailed design for issue
+[#91](https://github.com/ogirkoviylord/folioloom_main/issues/91) lives in
+`docs/restart/local-malware-scanning-design.md`. That design records the scanner
+contract, verdict taxonomy, quarantine-to-accepted state transitions, fail-closed
+beta behavior, safe metadata fields and approval gates. Exact implementation,
+deployment shape, production dependency, quarantine retention and runtime
+operations remain `TBD`.
+
 Default design direction:
 
 - prefer local scanning before parsing, such as a ClamAV daemon/sidecar, so
