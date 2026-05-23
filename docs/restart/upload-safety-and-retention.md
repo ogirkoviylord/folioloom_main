@@ -4,6 +4,11 @@ Closed beta accepts only authorized `.txt`, `.docx` and `.epub` files. This
 document defines the safety, malware scanning and retention baseline for the
 restart phase.
 
+Implementation note: issue #92 adds an optional pluggable scanner contract,
+safe scanner metadata shape and fake scanner tests for clean/fail-closed
+verdict routing. This does not by itself make local ClamAV scanning, quarantine
+retention or Gate B malware scanning evidence complete.
+
 ## Accept / Reject Policy
 
 Accept:
