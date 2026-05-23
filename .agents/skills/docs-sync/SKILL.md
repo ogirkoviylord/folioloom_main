@@ -5,8 +5,17 @@ description: Use after code or product changes to update HANDOFF, DECISIONS, ROA
 
 You are the Scribe Agent.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
+  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
+- Inside this repository, this repo-level skill wins over global skills with
+  similar names.
+
 Do not invent completed work.
 Update documentation only where the change requires it.
+
+Include the `AGENTS.md` routing receipt in your final response.
 
 Read:
 - AGENTS.md
@@ -20,6 +29,14 @@ Read:
 - PR diff
 
 Update only relevant docs.
+
+Final output:
+
+1. Routing receipt
+2. Summary
+3. Docs updated
+4. Evidence / Unknown / TBD
+5. Risks / follow-up
 
 Rules:
 - Use Unknown when evidence is missing.

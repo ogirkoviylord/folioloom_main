@@ -53,6 +53,7 @@
 | R-032 | Conflicting PRs/parallel agents in shared state machines | AI workflow | Medium | `docs/CONTEXT_MAP.md` lists conflict zones: scheduler/worker, bot/backend, provider/admin, auth/admin, deployment | Concurrent changes can create inconsistent contracts | Assign disjoint ownership; Architect coordinates cross-component work | Orchestrator / Architect | Open |
 | R-033 | Admin/provider bulk diagnostics competing with active translation work | Admin / Provider / Cost | Medium | Issue #30 and PR #38 added a fail-closed guard for Admin -> AI Providers -> Test all active keys during active translations/provider requests | Uncontrolled diagnostics can add provider traffic during incidents or expose unsafe metadata if guardrails regress | Keep bulk key tests paused during active translations/provider requests; focused admin/provider tests and redaction review for future changes | Architect / Reviewer | Mitigated / watch |
 | R-034 | Malware/AV scanning not yet implemented or implemented with unsafe disclosure | Security / Privacy / User data / Deployment | High | Owner accepted local malware scanning on 2026-05-22; Gate B now requires local malware/AV scanning or explicit owner deferral; `docs/restart/upload-safety-and-retention.md` defines planned baseline | Unsafe files may reach parsers/workers, or private books/manuscripts may be submitted to inappropriate public scanning services | Split into design, scanner contract, local ClamAV adapter and release evidence issues; default to local scanning, quarantine-first flow, fail-closed beta errors and metadata-only logs/admin | Human / Architect / Reviewer | Open |
+| R-035 | Skill dispatch bypass or docs drift | AI workflow | Medium | `AGENTS.md` defines Skill Dispatch Contract; `docs/AGENT_SKILL_ROUTING.md` defines primary routing plus supporting skill domain catalog; `.agents/skills/*` must stay aligned | Agents may choose the wrong role/skill, skip approval evidence, overuse supporting skills, or read excessive docs if routing guidance drifts | Keep dispatcher compact in `AGENTS.md`, use 0-2 supporting skills by default, require routing receipts in final reports, and have Reviewer check route/approval consistency | Reviewer / Scribe | Open |
 
 ## 4. Обязательные категории рисков
 
@@ -142,6 +143,10 @@ If a payment/provider/business zone is not implemented as a production-ready pat
 - Agents hallucinating docs: Medium; docs must separate confirmed facts, assumptions, TBD and Unknown.
 - Agents skipping tests: Medium; final reports must list tests run or explain docs-only/no tests.
 - Agents creating conflicting PRs: Medium; avoid parallel edits to shared state machines and contracts.
+- Agents bypassing or drifting from skill dispatch: Medium; final reports should
+  include routing receipts, supporting skills should stay minimal and justified,
+  and Reviewer should check route/approval consistency against `AGENTS.md` and
+  `docs/AGENT_SKILL_ROUTING.md`.
 - Agents weakening guardrails: High; Reviewer must check safety/privacy/payment/deployment guardrails explicitly.
 
 ## 5. Human approval required

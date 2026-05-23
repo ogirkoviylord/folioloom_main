@@ -959,6 +959,121 @@ Consequences:
 Human approval required to change:
 - no for clarifying role usage; yes for changing repository workflow.
 
+### 2026-05-23 - Process decisions: Skill Dispatch Contract v1
+
+Status: Active
+
+Decision:
+- Every AI agent must apply the `AGENTS.md` Skill Dispatch Contract before
+  using a skill, changing files, running operations or declaring work complete.
+- The contract records task classification, risk level, primary role/skill,
+  supporting skills, required docs, approval status, allowed action and
+  verification plan.
+- If a task matches multiple categories, the highest-risk route wins.
+- If any matched route requires human approval and approval evidence is missing,
+  the agent stops at analysis and uses `TBD`.
+- Repo-level `.agents/skills/*` skills win over global skills with similar
+  names inside this repository.
+- Specialized skills can provide domain context but cannot override
+  `AGENTS.md`, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, task scope or
+  approval gates.
+
+Evidence:
+- Owner approval in the 2026-05-23 planning thread to implement the approved
+  skill dispatch system.
+- `AGENTS.md`: Skill Dispatch Contract.
+- `docs/AGENT_SKILL_ROUTING.md`: detailed routing reference.
+- `.agents/skills/*/SKILL.md`: repo-level skill preambles now defer to the
+  dispatcher and stricter safety gates.
+
+Reason:
+- The repository already assumes Orchestrator, Architect, Implementer, Reviewer
+  and Scribe roles, but previous skill routing was spread across several
+  documents and could be applied inconsistently.
+- A compact dispatcher reduces accidental scope expansion, wrong skill
+  selection, missing approval checks and overstated verification.
+
+Consequences:
+- Future agents must include a routing receipt in task reports after changes.
+- Implementer Agent must not start unless the task has a clear issue or
+  explicit scoped task, acceptance criteria, verification plan, risk
+  classification, approval status, likely touched areas and out-of-scope list.
+- Reviewer Agent should check whether the selected route matched the task risk
+  and approval gates.
+- Changes to this workflow should update `AGENTS.md`,
+  `docs/AGENT_SKILL_ROUTING.md`, relevant repo-level skills and this decision.
+
+Human approval required to change:
+- yes for changing repository workflow; no for narrow clarifications that do
+  not weaken routing, approval or safety gates.
+
+### 2026-05-23 - Process decisions: Skill Domain Catalog v2
+
+Status: Active
+
+Decision:
+- `docs/AGENT_SKILL_ROUTING.md` includes a Skill Domain Catalog for choosing
+  supporting global/plugin skills after the primary repo-level route is chosen.
+- Agents should use exactly one primary repo-level skill and normally 0-2
+  supporting skills.
+- More than 2 supporting skills are reserved for explicit planning, research,
+  review or architecture tasks where broad domain coverage is the deliverable.
+- Supporting skills are helpers only: they cannot become workflow owners,
+  expand scope, override repo-level skills, or bypass approval gates.
+
+Evidence:
+- Owner approval in the 2026-05-23 planning thread to add a catalog layer for
+  the broader installed skill set.
+- `docs/AGENT_SKILL_ROUTING.md`: Supporting Skill Selection Rules, Skill
+  Domain Catalog and Trigger Examples.
+
+Reason:
+- The repository has many installed skills across product, engineering,
+  security, frontend, docs, cloud, payment and AI domains.
+- Without a catalog, agents may either ignore useful skills or overuse unrelated
+  skills, increasing token use and scope risk.
+
+Consequences:
+- Agents should first choose the repo-level route, then select only directly
+  relevant supporting skills from the domain catalog.
+- Reviewer should check that supporting skills did not expand scope or bypass
+  project gates.
+- Scribe should keep the catalog aligned with available skills and active
+  project guardrails.
+
+Human approval required to change:
+- no for catalog maintenance that keeps or tightens existing gates; yes for
+  changes that weaken routing, approval, payment, security, privacy, deployment,
+  user-data or product-scope guardrails.
+
+### 2026-05-23 - Process decisions: owner-facing responses are Russian by default
+
+Status: Active
+
+Decision:
+- AI agents should respond to the owner in Russian by default unless the owner
+  explicitly asks for another language.
+- Code identifiers, commands, file paths, tool names and quoted source text
+  should stay in their original language.
+
+Evidence:
+- Owner instruction in the current thread on 2026-05-23: add that answers for
+  the owner should be in Russian.
+- `AGENTS.md`: Core rules.
+- `docs/AGENT_SKILL_ROUTING.md`: Skill Dispatch Contract.
+
+Reason:
+- Russian is the owner's working language in this repository conversation.
+
+Consequences:
+- Intermediate updates, final task reports and owner-facing agent discussion
+  should be Russian by default.
+- Repository docs can keep source terms, command names, file paths and existing
+  English workflow labels where that preserves clarity.
+
+Human approval required to change:
+- yes; this is an owner-facing workflow preference.
+
 ## Decisions that still need human approval
 
 - Decision recorded: free closed beta waits for complete Gate B evidence.

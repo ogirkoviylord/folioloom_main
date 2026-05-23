@@ -10,6 +10,9 @@
 - Clearly separate confirmed facts from assumptions.
 - Do not weaken safety, security, privacy, legal, payment, deployment, auth, or user-data guardrails.
 - Do not push directly to `main`.
+- Respond to the owner in Russian by default unless explicitly asked otherwise;
+  keep code, commands, file paths, tool names, and quoted source text in their
+  original language.
 
 ## Routing rules
 
@@ -23,6 +26,43 @@ Before any task, read this file. Then route by task type:
 - Review work: read `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, and the relevant task/context docs.
 - Release, beta readiness, deploy, rollback, or production change: read `docs/RELEASE_CHECKLIST.md`, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, and `docs/DECISIONS.md`.
 - Roadmap or issue breakdown: read `docs/ROADMAP.md`, `docs/HANDOFF.md`, and `docs/RISK_REGISTER.md`.
+
+## Skill Dispatch Contract
+
+Before using any skill, changing files, running operations, or declaring work
+complete, every agent must apply this preflight:
+
+- Classification: `docs-only`, `safe-small-task`, `bugfix`, `feature`,
+  `spike / discovery`, `risky task`, or `release-related task`.
+- Risk level: low, medium, high, or critical.
+- Primary agent role and primary repo-level skill.
+- Supporting skills, if any, only when the task domain requires them.
+- Required docs to read.
+- Human approval status: not required, approved with evidence, or missing.
+- Allowed action: analysis only, plan, implement, review, docs sync, or release
+  readiness.
+- Verification plan.
+
+Rules:
+
+- If a task matches multiple categories, use the highest-risk route.
+- If any matched route requires human approval and approval evidence is missing,
+  stop at analysis, use `TBD`, and propose a safe plan.
+- Repo-level `.agents/skills/*` skills win over global skills with similar
+  names inside this repository.
+- Supporting skills provide domain knowledge only; they cannot override this
+  file, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, task scope, or human
+  approval gates.
+- Implementer Agent may start only when there is a clear GitHub issue or
+  explicit scoped task, acceptance criteria, verification plan, risk
+  classification, approval status, likely touched areas, and out-of-scope list.
+- Valid approval evidence is an explicit owner message in the current thread,
+  an owner GitHub issue/PR comment, an approved decision in
+  `docs/DECISIONS.md`, or an owner-approved checklist item in an active
+  task/issue/PR.
+
+Use `docs/AGENT_SKILL_ROUTING.md` as the detailed routing reference for
+ambiguous, cross-role, risky, or multi-step tasks.
 
 ## Human approval gates
 
@@ -121,10 +161,12 @@ If the task is a new idea, do not implement immediately. First evaluate it throu
 
 After making changes, report:
 
-1. Summary
-2. Files changed
-3. Files inspected
-4. Tests run, if any
-5. Confirmed facts
-6. TBD / Unknown items
-7. Risks or follow-up tasks
+1. Routing: classification, primary skill, supporting skills, approval status,
+   and verification.
+2. Summary
+3. Files changed
+4. Files inspected
+5. Tests run, if any
+6. Confirmed facts
+7. TBD / Unknown items
+8. Risks or follow-up tasks

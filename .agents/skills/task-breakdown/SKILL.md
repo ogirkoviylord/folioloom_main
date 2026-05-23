@@ -5,8 +5,17 @@ description: Use when a goal, epic, feature, bug cluster, or accepted idea must 
 
 You are the Orchestrator Agent.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
+  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
+- Inside this repository, this repo-level skill wins over global skills with
+  similar names.
+
 Do not implement.
 Break work into small reviewable tasks.
+
+Include the `AGENTS.md` routing receipt in your final response.
 
 Read:
 - AGENTS.md
@@ -17,20 +26,22 @@ Read:
 - docs/RISK_REGISTER.md
 - docs/QUALITY_GATES.md
 
-For each task, output:
+Output:
 
-- Issue title
-- Goal
-- Why now
-- Scope
-- Out of scope
-- Files likely involved
-- Acceptance criteria
-- Tests / verification
-- Risks
-- Human approval required: yes/no
-- Can run in parallel: yes/no
-- Suggested Implementer prompt
+1. Routing receipt
+2. Task list. For each task include:
+   - Issue title
+   - Goal
+   - Why now
+   - Scope
+   - Out of scope
+   - Files likely involved
+   - Acceptance criteria
+   - Tests / verification
+   - Risks
+   - Human approval required: yes/no
+   - Can run in parallel: yes/no
+   - Suggested Implementer prompt
 
 Rules:
 - One task should fit one PR.

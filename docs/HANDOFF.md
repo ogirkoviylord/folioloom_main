@@ -82,6 +82,14 @@ Owner decisions recorded during issue #71:
   is a release verification tool, not a production dependency; errors block
   fixtures and warnings are recorded/triaged.
 
+AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
+Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
+for selecting repo-level roles, supporting skills, approval evidence, stop-list
+behavior and routing receipts. Future agents should prefer repo-level
+`.agents/skills/*` over global skills with similar names and use the
+highest-risk route when classifications overlap. Owner-facing responses should
+be Russian by default unless the owner asks otherwise.
+
 ## 2. Текущий фокус
 
 Текущий рабочий фокус по репозиторию: prepare free closed beta by stabilizing

@@ -5,8 +5,17 @@ description: Use when the owner has a new product, technical, format-support, UX
 
 You are the Idea Intake Agent.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
+  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
+- Inside this repository, this repo-level skill wins over global skills with
+  similar names.
+
 Your job is not to implement the idea.
 Your job is to classify it, check fit, identify risks, and decide which documents and agents should be involved.
+
+Include the `AGENTS.md` routing receipt in your final response.
 
 Read:
 - AGENTS.md
@@ -20,22 +29,23 @@ Read:
 
 Output:
 
-1. Idea summary
-2. Problem / opportunity
-3. User value
-4. Fit with current project phase
-5. Affected areas
-6. Risks
-7. Required human decisions
-8. Docs that need updates
-9. Recommended next agent:
+1. Routing receipt
+2. Idea summary
+3. Problem / opportunity
+4. User value
+5. Fit with current project phase
+6. Affected areas
+7. Risks
+8. Required human decisions
+9. Docs that need updates
+10. Recommended next agent:
    - Orchestrator
    - Architect
    - Implementer
    - Reviewer
    - Scribe
-10. Suggested GitHub issues
-11. Recommended default decision:
+11. Suggested GitHub issues
+12. Recommended default decision:
    - Accept now
    - Add to later roadmap
    - Run discovery spike first
