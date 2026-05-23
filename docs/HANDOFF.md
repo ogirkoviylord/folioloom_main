@@ -44,6 +44,14 @@ cancel/resume/restart release evidence и server smoke evidence.
 GitHub Actions run/pass status Unknown until a PR check exists; public
 production readiness не подтверждена.
 
+Issue #72 verification update on 2026-05-23: dedicated local Gate B common
+verification passed on branch `codex/issue-72-gate-b-baseline`:
+`PYTHONPATH=src python3 -m unittest discover -s tests` ran 1046 tests with
+`OK (skipped=13)`, `PYTHONPATH=src python3 -m compileall src` passed, and
+`scripts/predeploy_check.sh` passed. This is local evidence only; it does not
+prove CI, server smoke, real-file matrix, restart, backup/restore or other Gate
+B blockers.
+
 Owner decisions recorded during issue #71:
 
 - 2026-05-16: free closed beta waits for complete Gate B evidence; no implicit
@@ -388,6 +396,9 @@ Potential issues to verify:
   Риск: preview evidence could be mistaken for full beta readiness.
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
+  Status: issue #72 recorded the dedicated local common verification baseline on
+  2026-05-23; server smoke, real files, restore/backups and restart scenarios
+  remain separate Gate B blockers.
 
 ### Next
 
@@ -509,6 +520,18 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-05-23.
+- Change: Recorded dedicated local Gate B common verification baseline for issue
+  #72.
+- Evidence: `docs/restart/gate-b-evidence-report.md` records full unittest
+  `Ran 1046 tests`, `OK (skipped=13)`, compileall passed, and
+  `scripts/predeploy_check.sh` passed. `docs/restart/release-gates.md` now
+  marks only the Gate B common verification item as checked. CI status remains
+  Unknown because no PR/check evidence was inspected.
+- Follow-up: collect remaining Gate B blocker evidence, especially server smoke,
+  real-file matrix, restart/cancel/resume, upload/TTL, backup/restore and
+  redaction evidence.
 
 - Date: 2026-05-13.
 - Change: Harden translation QA and live monitoring.
