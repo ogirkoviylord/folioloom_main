@@ -88,7 +88,7 @@ Telegram Stars/XTR and a payment ledger remain a separate release gate.
 - `docs/restart/two-week-engineering-plan.md` - ближайший engineering plan.
 - `docs/restart/real-file-test-matrix.md` - real-file corpus and QA matrix.
 - `docs/restart/upload-safety-and-retention.md` - upload safety, quarantine,
-  TTL and retention rules.
+  local malware scanning, TTL and retention rules.
 
 ## Verification Commands
 

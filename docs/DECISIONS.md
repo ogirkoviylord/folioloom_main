@@ -824,6 +824,54 @@ Consequences:
 Human approval required to change:
 - yes; user data retention and parser safety require owner approval.
 
+### 2026-05-22 - Risk / safety decisions: local malware scanning is planned
+
+Status: Active
+
+Decision:
+- FolioLoom should add a local malware/AV scanning gate for uploaded
+  TXT/DOCX/EPUB files as part of upload hardening.
+- Uploaded files should enter quarantine before parsing or translation.
+- The default direction is local scanning, such as a ClamAV daemon/sidecar,
+  before parser/container checks.
+- Public VirusTotal-style file submission must not be used as the default path
+  for user documents because uploaded books/manuscripts can be rights-sensitive
+  and private.
+- Scanner verdicts and metadata may be stored for owner/admin diagnostics, but
+  raw document text, extracted snippets, prompts, translations and secrets must
+  remain out of logs/admin/release artifacts.
+
+Evidence:
+- Owner decision in planning conversation on 2026-05-22: "мы эту темку сто
+  процентов добавим".
+- `docs/restart/upload-safety-and-retention.md`: Malware Scanning Baseline.
+- `docs/restart/release-gates.md`: Gate B now includes a local malware/AV
+  scanning gate or explicit owner deferral.
+- GitHub issues [#91](https://github.com/ogirkoviylord/folioloom_main/issues/91)
+  through [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
+  split the design, scanner contract, ClamAV adapter, upload-flow wiring and
+  release evidence work.
+
+Reason:
+- User uploads are untrusted input and may include private or rights-sensitive
+  documents.
+- Local scanning reduces third-party disclosure risk compared with automatic
+  public multi-engine scanning.
+- Scanning complements, but does not replace, extension allowlists, magic bytes,
+  ZIP/container inspection, parser sandboxing, size limits and redaction.
+
+Consequences:
+- Implementation must be split into small issues and reviewed by Architect
+  before code changes.
+- Any ClamAV sidecar, Docker/deployment change, new production dependency,
+  scanner socket/service configuration, retention behavior or runtime data
+  handling requires explicit owner approval in the relevant issue.
+  Gate B evidence exist.
+
+Human approval required to change:
+- yes; this touches security, privacy, user data, deployment and dependency
+  boundaries.
+
 ### 2026-05-10 - Risk / safety decisions: payments and pricing are gated
 
 Status: Active
@@ -983,6 +1031,17 @@ Human approval required to change:
   Recommended default: require restore rehearsal evidence before beta and offsite backups before public production.
   Risk if left undecided: backup existence may be mistaken for recoverability.
 
+- Decision needed: exact malware scanner implementation and failure policy.
+  Why it matters: upload scanning affects security, privacy, user-data
+  handling, deployment, dependencies and beta release gates.
+  Suggested options: local ClamAV daemon/sidecar; pluggable scanner contract
+  with fake/local implementation first; paid/private external scanning only
+  after privacy/legal review.
+  Recommended default: implement a scanner contract first, then local ClamAV
+  with fail-closed beta behavior for timeout/unavailable/error verdicts.
+  Risk if left undecided: agents may either skip scanning or send private user
+  documents to an inappropriate external scanning service.
+
 
 - Не менять production deployment без явного человека.
 - Не менять payment/pricing без явного человека.
@@ -995,6 +1054,9 @@ Human approval required to change:
 - Не считать проект production-ready.
 - Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения.
 - Не реализовывать FB2 из GitHub issue #23 без owner approval, Architect review и отдельного agent-ready implementation issue.
+- Не отправлять user documents в public malware scanning services по умолчанию.
+- Не считать malware/AV scanning implemented без focused issue, tests and Gate
+  B evidence.
 - Не переписывать архитектуру без отдельного approved plan.
 - Не трактовать historical plans/specs as current roadmap без сверки с active source of truth.
 - Не хранить и не показывать raw document text, prompts, translations или API keys в logs/admin/safety telemetry.

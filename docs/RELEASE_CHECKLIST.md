@@ -193,6 +193,11 @@ Checklist:
   admin views, telemetry or release artifacts.
 - [ ] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
   Current Gate B status: unchecked.
+- [ ] Local malware/AV scanning gate is confirmed before parsing or explicitly
+  deferred by owner. Current Gate B status: unchecked.
+- [ ] Public malware scanning services do not receive user documents by default.
+- [ ] Scanner errors/timeouts/unavailable verdicts fail closed for beta unless
+  owner-approved otherwise.
 
 ## 8. Operations readiness
 
