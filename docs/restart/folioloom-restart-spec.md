@@ -23,7 +23,8 @@ Paid beta is blocked because the repo does not yet have a production-ready
 Telegram Stars/XTR flow, persistent payment ledger, refund/support path,
 reconciliation, formal rights confirmation, free preview flow, full real-file
 eval corpus, EPUBCheck/equivalent gate, DOCX visual QA, TTL cleanup,
-quarantine/AV/public parser hardening, Alerts MVP or Backups visibility page.
+local malware/AV scanning, quarantine/public parser hardening, Alerts MVP or
+Backups visibility page.
 
 Before paid beta, FolioLoom must have:
 
@@ -55,7 +56,7 @@ allowlist check (Telegram ID allowlist, editable in admin settings, enforced
 only when the admin toggle is on; non-allowlisted users receive an invite-only
 message and upload files are not downloaded)
 -> upload TXT/DOCX/EPUB
--> validation/quarantine
+-> validation/quarantine/local malware scan
 -> rights confirmation
 -> target language selection
 -> estimate
@@ -146,6 +147,12 @@ path traversal, entry count, uncompressed size, compression ratio and suspicious
 paths. Rejected or suspicious files go through user-facing rejection/quarantine
 behavior without leaking raw text into logs.
 
+Owner decision on 2026-05-22: local malware/AV scanning is planned as part of
+upload safety. The default direction is quarantine first, local scan before
+parsing, fail-closed beta behavior for scanner errors unless owner-approved
+otherwise, and no automatic public VirusTotal-style file submission for user
+documents.
+
 Detailed rules live in `docs/restart/upload-safety-and-retention.md`.
 
 ### TTL and retention
@@ -180,7 +187,7 @@ EPUB fixtures plus negative and ops scenarios. See
 
 | Stage | Goal | Key work |
 | --- | --- | --- |
-| Immediate stabilization | Make beta foundation coherent and gated | Docs cleanup, deploy smoke, allowlist, quotas/caps, rights confirmation, preview, upload safety baseline |
+| Immediate stabilization | Make beta foundation coherent and gated | Docs cleanup, deploy smoke, allowlist, quotas/caps, rights confirmation, preview, upload safety baseline and local malware scan design |
 | Free closed beta | Validate real authorized documents with trusted users | Real-file matrix, cancel/resume/restart, TTL, alerts, backup visibility, restore rehearsal, no payment UI |
 | Paid beta | Charge safely inside Telegram | Stars/XTR flow, ledger, idempotency, refunds, `/paysupport`, reconciliation, payment admin traceability |
 | Public production | Expose broader service responsibly | Public admin hardening, legal/privacy/AUP/refund docs, support workflow, stronger parser/AV, offsite backups, incident runbooks |
@@ -196,6 +203,7 @@ EPUB fixtures plus negative and ops scenarios. See
 - [ ] Admin kill switch.
 - [ ] Free preview.
 - [ ] Upload hardening/quarantine.
+- [ ] Local malware/AV scanning gate or explicit owner deferral.
 - [ ] TTL cleanup.
 - [ ] Real-file matrix.
 - [ ] EPUBCheck or equivalent gate.

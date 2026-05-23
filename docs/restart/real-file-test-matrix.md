@@ -56,6 +56,8 @@ notes.
 | Negative: oversize | File above configured size limit | Rejected with clear user message |
 | Negative: traversal | ZIP entries such as `../evil` | Rejected/quarantined, no filesystem escape |
 | Negative: zip-bomb-like | High ratio or extreme entry count synthetic fixture | Rejected before heavy extraction |
+| Negative: AV test fixture | EICAR or equivalent safe malware-test file | Detected by local scanner; rejected/quarantined; never reaches parser/worker; no raw text in logs |
+| Negative: scanner failure | Simulated timeout/unavailable/error verdict | Fails closed for beta unless owner-approved otherwise; safe user/admin metadata |
 | Ops: cancel | Cancel during active processing | Partial result or safe cancelled state, no stuck work units |
 | Ops: resume | Resume from history/My Books | Existing job/result visible after interruption |
 | Ops: worker restart | Restart worker mid-job | Lease/retry recovers or fails safely with metadata |

@@ -1,7 +1,8 @@
 # Upload Safety And Data Retention
 
 Closed beta accepts only authorized `.txt`, `.docx` and `.epub` files. This
-document defines the safety and retention baseline for the restart phase.
+document defines the safety, malware scanning and retention baseline for the
+restart phase.
 
 ## Accept / Reject Policy
 
@@ -24,6 +25,41 @@ Reject:
 
 Do not trust filename or `content-type` alone. Use extension, size, signature
 and parser/container checks where possible.
+
+## Malware Scanning Baseline
+
+Owner decision on 2026-05-22: FolioLoom should add a local malware/AV scanning
+gate for uploaded files. This is planned work, not confirmed implemented
+behavior until a focused issue/PR provides tests and release evidence.
+
+Default design direction:
+
+- prefer local scanning before parsing, such as a ClamAV daemon/sidecar, so
+  rights-sensitive user documents are not sent to public multi-engine scanning
+  services by default;
+- store uploads in quarantine first, then scan and validate before moving them
+  into accepted source storage;
+- do not submit user files to public VirusTotal-style services automatically;
+- record only safe scan metadata: generated object key, sha256, size, format,
+  verdict, scanner name/version, signature database version and safe error
+  class;
+- keep raw document text, extracted snippets, prompts, translations and secrets
+  out of logs, admin views and release artifacts.
+
+Suggested verdict handling for closed beta:
+
+- `clean`: proceed to signature/container checks and the normal upload flow;
+- `infected`: reject or retain in quarantine according to the approved
+  quarantine policy; never parse or translate;
+- `scanner_timeout`, `scanner_unavailable`, `scanner_error` or `unsupported`:
+  fail closed for beta unless the owner explicitly approves a different
+  policy;
+- `suspicious_container`: quarantine/reject and do not pass to workers.
+
+TBD: exact scanner implementation, resource limits, quarantine retention for
+infected files, admin visibility and deployment shape. Any production
+dependency, Docker/deployment change, retention behavior or runtime
+user-data operation requires explicit owner approval.
 
 ## Signature And Container Checks
 
@@ -79,6 +115,8 @@ Use quarantine for suspicious but useful-to-debug uploads:
 - keep for a short TTL;
 - expose metadata to admin, not raw text;
 - never pass quarantined files to translation workers;
+- never pass unscanned files to translation workers once the malware scanning
+  gate is enabled;
 - allow owner to inspect only through an explicit safe operational process;
 - delete quarantine objects after TTL.
 
@@ -91,6 +129,7 @@ Rejection messages should be specific enough to help, but not expose internals:
 - file looks damaged;
 - file contents do not match the extension;
 - document container looks unsafe;
+- file could not pass safety scanning;
 - try TXT, DOCX or EPUB from a trusted source.
 
 Do not show stack traces, parser internals or extracted raw document text.
@@ -139,7 +178,15 @@ exposure; and no impact on live runtime data.
 - [ ] DOCX/EPUB high compression ratio fixture is rejected.
 - [ ] Oversize fixture is rejected.
 - [ ] Wrong extension fixture is rejected.
+- [ ] Malware scanning gate is active before parsing, or explicitly deferred by
+  owner in Gate B evidence.
+- [ ] EICAR or equivalent safe AV test fixture is detected by the scanner in
+  local verification.
+- [ ] Scanner timeout/unavailable/error verdicts fail closed for beta unless
+  owner-approved otherwise.
 - [ ] Quarantined file never reaches translation.
+- [ ] Unscanned file never reaches translation after the scanning gate is
+  enabled.
 - [ ] Explicit delete removes or schedules removal of source/final/partial
   objects according to policy.
 - [ ] Logs/admin contain metadata only, no raw document text.

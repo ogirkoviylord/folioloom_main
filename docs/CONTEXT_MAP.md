@@ -24,7 +24,7 @@
 | `docs/restart/release-gates.md` | Gate A-D для stabilization, free beta, paid beta, public production. | Перед release/readiness задачами. |
 | `docs/restart/two-week-engineering-plan.md` | Ближайший engineering plan. | Перед планированием следующей работы. |
 | `docs/restart/real-file-test-matrix.md` | Real-file corpus и QA matrix для TXT/DOCX/EPUB. | Перед задачами про качество файлов, fixtures и release evidence. |
-| `docs/restart/upload-safety-and-retention.md` | Upload hardening, quarantine, TTL и retention rules. | Перед задачами про загрузки, хранение, удаление и user data. |
+| `docs/restart/upload-safety-and-retention.md` | Upload hardening, quarantine, local malware scanning, TTL и retention rules. | Перед задачами про загрузки, malware scanning, хранение, удаление и user data. |
 | `docs/deployment/admin-vps-runbook.md` | VPS/admin/tunnel deployment model. | Перед ops/deployment/admin access задачами. |
 | `docs/deployment/restore-runbook.md` | Backup verification и restore rehearsal. | Перед backup/restore задачами. |
 | `docs/deployment/server-beta.md` | Historical/superseded deployment note. | Читать только как архив, если активные runbooks не отвечают на вопрос. |
