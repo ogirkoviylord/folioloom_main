@@ -21,6 +21,8 @@
 
 ## 3. Gate для любой задачи
 
+- [ ] Skill Dispatch Contract applied: classification, primary skill, approval
+  status and verification plan are known before work starts.
 - [ ] Задача соответствует acceptance criteria.
 - [ ] Diff минимальный и понятный.
 - [ ] Нет изменений вне scope.

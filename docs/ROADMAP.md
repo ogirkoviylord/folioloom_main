@@ -66,6 +66,9 @@ Tasks:
 
   `docs/RISK_REGISTER.md`, `docs/RELEASE_CHECKLIST.md` и этот roadmap в
   согласованном состоянии.
+- Поддерживать Skill Dispatch Contract: repo-level skills должны выбирать
+  минимальный безопасный route, фиксировать approval status и не обходить
+  high-risk gates через specialized/global skills.
 - Синхронизировать `docs/QUALITY_GATES.md` с `docs/restart/release-gates.md`
   без заявления CI или release readiness без evidence.
 - Синхронизировать `docs/RISK_REGISTER.md` с owner decisions, high-risk zones и
@@ -79,6 +82,8 @@ Acceptance criteria:
 
 - Новый агент за 5-10 минут понимает текущую стадию, core flow, ограничения,
   текущую фазу и next tasks.
+- Новый агент применяет Skill Dispatch Contract до выбора skill, а Reviewer
+  может проверить routing receipt в финальном отчете.
 - Документы не обещают CI, production readiness, paid launch или новые форматы.
 - Quality gates, risk register и release checklist ссылаются на confirmed
   evidence или явно используют TBD/Unknown.

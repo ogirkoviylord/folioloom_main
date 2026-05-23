@@ -135,6 +135,8 @@ If a payment/provider/business zone is not implemented as a production-ready pat
 - Agents hallucinating docs: Medium; docs must separate confirmed facts, assumptions, TBD and Unknown.
 - Agents skipping tests: Medium; final reports must list tests run or explain docs-only/no tests.
 - Agents creating conflicting PRs: Medium; avoid parallel edits to shared state machines and contracts.
+- Agents bypassing or drifting from skill dispatch: Medium; final reports should
+  include routing receipts, supporting skills should stay minimal and justified,
 - Agents weakening guardrails: High; Reviewer must check safety/privacy/payment/deployment guardrails explicitly.
 
 ## 5. Human approval required

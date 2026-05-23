@@ -942,6 +942,66 @@ Consequences:
 Human approval required to change:
 - no for clarifying role usage; yes for changing repository workflow.
 
+### 2026-05-23 - Process decisions: Skill Domain Catalog v2
+
+Status: Active
+
+Decision:
+  supporting global/plugin skills after the primary repo-level route is chosen.
+  supporting skills.
+- More than 2 supporting skills are reserved for explicit planning, research,
+  review or architecture tasks where broad domain coverage is the deliverable.
+- Supporting skills are helpers only: they cannot become workflow owners,
+  expand scope, override repo-level skills, or bypass approval gates.
+
+Evidence:
+- Owner approval in the 2026-05-23 planning thread to add a catalog layer for
+  the broader installed skill set.
+  Domain Catalog and Trigger Examples.
+
+Reason:
+- The repository has many installed skills across product, engineering,
+  security, frontend, docs, cloud, payment and AI domains.
+- Without a catalog, agents may either ignore useful skills or overuse unrelated
+  skills, increasing token use and scope risk.
+
+Consequences:
+  relevant supporting skills from the domain catalog.
+- Reviewer should check that supporting skills did not expand scope or bypass
+  project gates.
+- Scribe should keep the catalog aligned with available skills and active
+  project guardrails.
+
+Human approval required to change:
+- no for catalog maintenance that keeps or tightens existing gates; yes for
+  changes that weaken routing, approval, payment, security, privacy, deployment,
+  user-data or product-scope guardrails.
+
+### 2026-05-23 - Process decisions: owner-facing responses are Russian by default
+
+Status: Active
+
+Decision:
+  explicitly asks for another language.
+- Code identifiers, commands, file paths, tool names and quoted source text
+  should stay in their original language.
+
+Evidence:
+- Owner instruction in the current thread on 2026-05-23: add that answers for
+  the owner should be in Russian.
+
+Reason:
+- Russian is the owner's working language in this repository conversation.
+
+Consequences:
+- Intermediate updates, final task reports and owner-facing agent discussion
+  should be Russian by default.
+- Repository docs can keep source terms, command names, file paths and existing
+  English workflow labels where that preserves clarity.
+
+Human approval required to change:
+- yes; this is an owner-facing workflow preference.
+
 ## Decisions that still need human approval
 
 - Decision recorded: free closed beta waits for complete Gate B evidence.
