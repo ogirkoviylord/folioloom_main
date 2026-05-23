@@ -20,6 +20,11 @@ from translator_service.beta_safety import (
     estimate_cost_usd,
 )
 from translator_service.document_sandbox import DocumentSandbox
+from translator_service.document_scanner import (
+    DocumentScanner,
+    ScannerVerdict,
+    ScanResult,
+)
 from translator_service.documents import DocumentFormat, validate_document_upload
 from translator_service.extractors import (
     TextExtractionError,
@@ -137,6 +142,21 @@ class TranslationModeRequired(ValueError):
     """Raised when a translation mode is required before continuing."""
 
 
+class DocumentScanRejectedError(ValueError):
+    """Raised with a safe user-facing message when upload scanning fails closed."""
+
+    def __init__(
+        self,
+        message: str = "Document could not pass safety scanning.",
+        *,
+        verdict: ScannerVerdict | None = None,
+        scan_result: ScanResult | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.verdict = verdict
+        self.scan_result = scan_result
+
+
 @dataclass(frozen=True)
 class PendingUpload:
     user_telegram_id: int
@@ -151,6 +171,7 @@ class PendingUpload:
     rights_confirmation_version: str | None = None
     rights_confirmation_source: str | None = None
     translation_mode: str | None = None
+    scan_result: ScanResult | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +195,7 @@ class PendingTranslation:
     preview_accepted: bool = False
     preview_accepted_at: str | None = None
     translation_mode: str | None = None
+    scan_result: ScanResult | None = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +332,8 @@ class BotTranslationService:
         document_sandbox: DocumentSandbox | None = None,
         security_threshold_policy: SecurityThresholdPolicy | None = None,
         security_cooldown_policy: SecurityCooldownPolicy | None = None,
+        document_scanner: DocumentScanner | None = None,
+        require_upload_scan: bool = False,
         activity_store: SQLiteUserActivityStore | None = None,
         beta_access_policy: (
             BetaAccessPolicy | SQLiteBackedBetaAccessPolicy | None
@@ -341,6 +365,8 @@ class BotTranslationService:
         self._use_scheduler_runner = use_scheduler_runner
         self._defer_persistent_jobs_to_worker = defer_persistent_jobs_to_worker
         self._document_sandbox = document_sandbox
+        self._document_scanner = document_scanner
+        self._require_upload_scan = require_upload_scan
         self._security_threshold_policy = (
             security_threshold_policy or SecurityThresholdPolicy()
         )
@@ -509,6 +535,11 @@ class BotTranslationService:
             raise ValueError(
                 "Prototype bot currently supports TXT, DOCX, and EPUB translation only"
             )
+        scan_result = self._scan_upload_or_raise(
+            file_name=file_name,
+            content=content,
+            document_format=upload.document_format,
+        )
 
         source_object_key = None
         if self._file_storage is not None:
@@ -532,10 +563,53 @@ class BotTranslationService:
                 document_sandbox=self._document_sandbox,
             ),
             source_object_key=source_object_key,
+            scan_result=scan_result,
         )
         with self._state_lock:
             self._pending_uploads[user_telegram_id] = pending_upload
         return pending_upload
+
+    def _scan_upload_or_raise(
+        self,
+        *,
+        file_name: str,
+        content: bytes,
+        document_format: DocumentFormat,
+    ) -> ScanResult | None:
+        if self._document_scanner is None:
+            if self._require_upload_scan:
+                raise DocumentScanRejectedError()
+            return None
+
+        try:
+            result = self._document_scanner.scan(
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
+        except Exception as error:
+            digest = hashlib.sha256(content).hexdigest()
+            result = ScanResult(
+                verdict=ScannerVerdict.SCANNER_ERROR,
+                scanner_name=self._document_scanner.__class__.__name__,
+                scanner_version=None,
+                signature_database_version=None,
+                content_sha256=digest,
+                size_bytes=len(content),
+                document_format=document_format,
+                safe_error_class=error.__class__.__name__,
+            )
+            raise DocumentScanRejectedError(
+                verdict=result.verdict,
+                scan_result=result,
+            ) from error
+
+        if result.verdict is not ScannerVerdict.CLEAN:
+            raise DocumentScanRejectedError(
+                verdict=result.verdict,
+                scan_result=result,
+            )
+        return result
 
     def get_pending_upload(self, user_telegram_id: int) -> PendingUpload | None:
         with self._state_lock:
@@ -653,6 +727,7 @@ class BotTranslationService:
             rights_confirmation_version=pending_upload.rights_confirmation_version,
             rights_confirmation_source=pending_upload.rights_confirmation_source,
             translation_mode=pending_upload.translation_mode,
+            scan_result=pending_upload.scan_result,
         )
         with self._state_lock:
             self._pending_uploads.pop(user_telegram_id, None)
@@ -673,6 +748,7 @@ class BotTranslationService:
         rights_confirmation_version: str | None = None,
         rights_confirmation_source: str | None = None,
         translation_mode: str | None = None,
+        scan_result: ScanResult | None = None,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -693,6 +769,11 @@ class BotTranslationService:
                     "Prototype bot currently supports TXT, DOCX, and EPUB "
                     "translation only"
                 )
+        resolved_scan_result = scan_result or self._scan_upload_or_raise(
+            file_name=file_name,
+            content=content,
+            document_format=upload.document_format,
+        )
 
         estimate = estimate_order(
             upload=upload,
@@ -735,6 +816,7 @@ class BotTranslationService:
                 or (RIGHTS_CONFIRMATION_SOURCE_TELEGRAM if rights_confirmed else None)
             ),
             translation_mode=normalized_mode,
+            scan_result=resolved_scan_result,
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -1036,6 +1118,7 @@ class BotTranslationService:
                 rights_confirmation_version=pending.rights_confirmation_version,
                 rights_confirmation_source=pending.rights_confirmation_source,
                 translation_mode=pending.translation_mode,
+                scan_result=pending.scan_result,
             )
             self._pending_uploads[user_telegram_id] = upload
             return upload
