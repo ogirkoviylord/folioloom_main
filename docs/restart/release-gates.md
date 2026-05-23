@@ -79,7 +79,13 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [x] Beta safety telemetry stores safe budget metadata only: job/user ids,
   reservations, usage counts, costs, statuses and reason codes. It does not
   store raw document text, prompts, translations or API keys.
-- [ ] The common verification commands pass.
+- [x] The common verification commands pass. Evidence: issue #72 local
+  verification on 2026-05-23 passed `PYTHONPATH=src python3 -m unittest
+  discover -s tests` (`Ran 1046 tests`, `OK (skipped=13)`),
+  `PYTHONPATH=src python3 -m compileall src`, and
+  `scripts/predeploy_check.sh`. This is local evidence only; CI status remains
+  Unknown unless visible PR/check evidence is inspected, and server smoke remains
+  unchecked.
 - [ ] `scripts/server_smoke_check.sh` passes on the beta server.
 
 ## Gate C - Paid Beta
