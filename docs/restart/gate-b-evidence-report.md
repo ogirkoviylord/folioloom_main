@@ -1,6 +1,6 @@
 # Gate B Evidence Report - FolioLoom Free Closed Beta
 
-Date: 2026-05-19
+Date: 2026-05-23
 
 Task classification: docs-only / release-related evidence collection.
 
@@ -77,7 +77,7 @@ documents.
 | No paid job can be started. | Pass | `README.md`, `docs/DECISIONS.md` and `docs/restart/release-gates.md` separate free beta from Gate C paid beta; paid jobs are out of scope. | Runtime negative check not recorded in this task. | Needed before go/no-go: flow/server smoke confirms no paid-job path exposed. | Yes for any payment/job-start changes. | Keep paid jobs blocked until Gate C. |
 | Logs/admin do not expose raw document text. | Unknown | Policies exist in `README.md`, `docs/DECISIONS.md`, `docs/restart/upload-safety-and-retention.md`; beta safety telemetry item is checked separately. | No release-wide logs/admin redaction scan or artifact proving all admin/log paths avoid raw document text. | Needed: redaction-focused tests/report and real-file matrix no-raw-text checks. | Yes for privacy/log/admin behavior changes. | Follow-up: include raw-text redaction in real-file/provider/admin evidence. |
 | Beta safety telemetry stores safe budget metadata only: job/user ids, reservations, usage counts, costs, statuses and reason codes. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` Beta Safety / Cost Guard explicitly excludes raw document text, prompts, translations and API keys. | Current telemetry inspection not run in this task. | Existing tests referenced: `tests/test_beta_safety.py`, `tests/test_beta_safety_store.py`. | Yes for telemetry schema or data-class changes. | Keep separate from paid billing ledger. |
-| The common verification commands pass. | Unknown | Docs record issue #56 local verification: full unittest suite, compileall and `scripts/predeploy_check.sh` passed on 2026-05-16 for the preview evidence slice. | No dedicated Gate B release run artifact from this task; current branch CI/run status Unknown. | Required commands: `PYTHONPATH=src python3 -m unittest discover -s tests`; `PYTHONPATH=src python3 -m compileall src`; `scripts/predeploy_check.sh`. | No for local commands; yes if environment/data access is needed. | Run and store release-scoped output summary before go/no-go. |
+| The common verification commands pass. | Pass | Issue #72 local verification on 2026-05-23 passed all three common commands from repo root on branch `codex/issue-72-gate-b-baseline`. This is local evidence only; current branch CI/run status remains Unknown because no PR/check evidence was inspected. | Server smoke, backup/restore, real-file, restart and other Gate B blockers remain missing. | `PYTHONPATH=src python3 -m unittest discover -s tests`: `Ran 1046 tests in 12.941s`, `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`: passed; `scripts/predeploy_check.sh`: passed, including server hardening tests `Ran 49 tests`, `OK`, lint `All checks passed!`, compile and diff hygiene. | No for local commands; yes if environment/data access is needed. | Re-run if code changes before go/no-go; do not treat this as server smoke or full Gate B completion. |
 | `scripts/server_smoke_check.sh` passes on the beta server. | Blocked | Script is documented in `README.md`, `docs/QUALITY_GATES.md`, `docs/RELEASE_CHECKLIST.md` and restore runbook. | No approved beta-server smoke output. | Needed: `scripts/server_smoke_check.sh` output from approved target environment. | Yes; beta server access and operations require approval. | Follow-up: server smoke evidence issue. |
 
 ## 5. Passed Checks
@@ -95,8 +95,11 @@ Only the following are confirmed by repository evidence:
 - Payment UI and paid jobs are out of free-beta scope and blocked by Gate C.
 - Beta safety telemetry is documented as safe metadata only and checked in Gate
   B.
-- Common verification commands are documented; issue #56 recorded passing local
-  commands for the preview slice, not a full Gate B go/no-go.
+- Common verification commands passed in issue #72 local verification on
+  2026-05-23: full unittest suite `Ran 1046 tests`, `OK (skipped=13)`,
+  compileall passed, and `scripts/predeploy_check.sh` passed. This does not
+  prove server smoke, backup/restore, real-file, restart or other Gate B
+  blockers.
 
 ## 6. Blockers
 
@@ -116,7 +119,6 @@ These block free closed beta unless the owner explicitly approves deferral:
 - Backup export verification artifact.
 - Restore rehearsal artifact.
 - Release-wide raw-text redaction evidence for logs/admin.
-- Dedicated Gate B common verification run.
 - Approved beta-server smoke.
 
 ## 7. High / Critical Risks
@@ -207,7 +209,7 @@ repository, it remains `Unknown`.
 | DOCX visual QA threshold | Approved | Use local LibreOffice Writer as the Gate B DOCX reader/tool. A fixture passes only if it opens without repair/recovery prompt and has no blocker visual issues. Pixel-perfect source parity is not required for free closed beta; minor/major issues may be recorded as notes. | Owner approved the recommended option during issue #71 implementation on 2026-05-17. |
 | Alerts/Backups visibility approach | Approved | Use a metadata-only owner runbook/report for Gate B now. The report must summarize provider, queue/worker, disk/storage, failed-job and backup/restore status without raw document text, prompts, translations, API keys, stack traces, backup archives or restored files. Admin UI expansion is deferred to a later follow-up. | Owner approved the owner report option during issue #71 implementation on 2026-05-17 and noted that admin UI should not require broad rewrites for each bot feature. |
 | EPUB validation approach | Approved | Use local/offline EPUBCheck as the required Gate B validation tool. Online EPUB validation services are not approved. EPUBCheck is a release verification tool, not a production dependency. Errors block fixtures; warnings are recorded and triaged. | Owner approved the recommended option during issue #71 implementation on 2026-05-17. Exploratory local EPUBCheck v5.3.0 run found validation errors in selected EPUB fixtures, so Gate B EPUB validation remains blocked. |
-| Dedicated Gate B common verification run | Unknown | Unknown: no dedicated Gate B `unittest`, `compileall` or `predeploy_check` run artifact exists in this report. | Issue #56 evidence covers the preview slice, not full Gate B readiness. |
+| Dedicated Gate B common verification run | Pass | Issue #72 local verification on 2026-05-23 passed the dedicated Gate B common commands: full unittest suite `Ran 1046 tests in 12.941s`, `OK (skipped=13)`; compileall passed; `scripts/predeploy_check.sh` passed, including server hardening tests `Ran 49 tests`, `OK`, lint `All checks passed!`, compile and diff hygiene. | Local evidence only; CI status remains Unknown unless visible PR/check evidence is inspected. |
 | Beta-server smoke status | Unknown | Unknown: no approved beta-server smoke output is recorded. | Server smoke requires approved target environment access. |
 
 ## 9. Verification Commands
@@ -219,6 +221,14 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 PYTHONPATH=src python3 -m compileall src
 scripts/predeploy_check.sh
 ```
+
+Issue #72 current local baseline, recorded 2026-05-23 from repo root:
+
+| Command | Result | Evidence summary |
+| --- | --- | --- |
+| `PYTHONPATH=src python3 -m unittest discover -s tests` | Pass | `Ran 1046 tests in 12.941s`; `OK (skipped=13)`. Output included expected test logging/security-event lines and best-effort mocked `database is locked` traces, but the command exited successfully. |
+| `PYTHONPATH=src python3 -m compileall src` | Pass | Listed `src`, package directories and compiled `src/translator_service/document_sandbox_worker.py`; command exited successfully. |
+| `scripts/predeploy_check.sh` | Pass | Server hardening tests `Ran 49 tests in 0.039s`, `OK`; lint `All checks passed!`; CLI smoke, shell syntax, documentation check, compile and diff hygiene completed; final line: `Predeploy check passed.` |
 
 Server smoke and backup/restore checks require approved environment/data access:
 
@@ -303,9 +313,9 @@ items for allowlist, rights confirmation, free preview, caps, kill switch and
 safe beta telemetry; product scope remains free, Telegram-first, TXT/DOCX/EPUB,
 no payments and SSH-tunnel-only admin.
 
-Unknown: current CI run/pass status, dedicated Gate B common verification run,
-server smoke, release-wide raw-text redaction, real-file matrix, restart
-survival, backup export, restore rehearsal and runtime proof for no payment path.
+Unknown: current CI run/pass status, server smoke, release-wide raw-text
+redaction, real-file matrix, restart survival, backup export, restore rehearsal
+and runtime proof for no payment path.
 
 Issue #71 decision register records owner-approved free beta threshold, beta
 success metrics, real-file corpus/artifact policy, retention/delete
@@ -316,9 +326,9 @@ EPUB fixtures currently fail validation, so EPUB validation is blocked.
 
 Blocks beta: every unchecked Gate B item without evidence or explicit owner
 deferral, especially upload/TTL, real files, restart/capacity/provider failures,
-EPUB/DOCX QA, alerts/backups, backup/restore, common verification and server
-smoke.
+EPUB/DOCX QA, alerts/backups, backup/restore and server smoke.
 
 Safest next step: create small GitHub issues for the blockers above, use only
-synthetic or owner-approved fixtures/data, run local common verification, then
-collect approved server/backup/restore evidence before any human go/no-go.
+synthetic or owner-approved fixtures/data, and collect approved
+server/backup/restore evidence before any human go/no-go. Re-run local common
+verification if code changes before go/no-go.
