@@ -18,6 +18,7 @@ from translator_service.bot_translation_service import (
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
     BotTranslationService,
+    DocumentScanRejectedError,
     PendingTranslation,
     PendingUpload,
     PreviewAcceptanceRequired,
@@ -32,6 +33,7 @@ from translator_service.document_sandbox import (
     DocumentSandboxError,
     SandboxTranslationUnit,
 )
+from translator_service.document_scanner import FakeDocumentScanner, ScannerVerdict
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import extract_text_from_docx, extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
@@ -542,6 +544,105 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         self.assertEqual(service.get_interface_language(42), "uk")
         self.assertEqual(service.get_interface_language(100), "en")
+
+    def test_required_clean_scan_allows_uploaded_document_to_continue(self):
+        sandbox = RecordingDocumentSandbox()
+        scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+            document_sandbox=sandbox,
+            document_scanner=scanner,
+            require_upload_scan=True,
+        )
+
+        upload = service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"This is an English document.",
+            source_language="auto",
+        )
+
+        self.assertEqual(upload.scan_result.verdict, ScannerVerdict.CLEAN)
+        self.assertEqual(upload.scan_result.safe_metadata()["document_format"], "txt")
+        self.assertEqual(
+            sandbox.extract_calls,
+            [(DocumentFormat.TXT, b"This is an English document.")],
+        )
+        self.assertEqual(service.get_pending_upload(42), upload)
+
+    def test_required_missing_scan_fails_before_parser_or_pending_upload(self):
+        sandbox = RecordingDocumentSandbox()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=20,
+            document_sandbox=sandbox,
+            require_upload_scan=True,
+        )
+
+        with self.assertRaises(DocumentScanRejectedError) as error:
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"Private source text must not leak.",
+                source_language="auto",
+            )
+
+        self.assertEqual(error.exception.verdict, None)
+        self.assertNotIn("Private source text", str(error.exception))
+        self.assertEqual(sandbox.extract_calls, [])
+        self.assertIsNone(service.get_pending_upload(42))
+
+    def test_failed_scan_verdicts_do_not_reach_parser_or_translation_workers(self):
+        fail_closed_verdicts = (
+            ScannerVerdict.INFECTED,
+            ScannerVerdict.SCANNER_TIMEOUT,
+            ScannerVerdict.SCANNER_UNAVAILABLE,
+            ScannerVerdict.SCANNER_ERROR,
+            ScannerVerdict.UNSUPPORTED,
+            ScannerVerdict.SUSPICIOUS_CONTAINER,
+        )
+
+        for verdict in fail_closed_verdicts:
+            with self.subTest(verdict=verdict.value), TemporaryDirectory() as temp_dir:
+                sandbox = RecordingDocumentSandbox()
+                scanner = FakeDocumentScanner(default_verdict=verdict)
+                storage = LocalObjectStorage(Path(temp_dir) / "objects")
+                persistent_store = SQLiteTranslationJobStore(
+                    Path(temp_dir) / "jobs.sqlite3"
+                )
+                self.addCleanup(persistent_store.close)
+                service = BotTranslationService(
+                    job_repository=InMemoryTranslationJobRepository(),
+                    pricing_rules=_pricing_rules(),
+                    max_upload_mb=50,
+                    max_fragment_chars=20,
+                    document_sandbox=sandbox,
+                    document_scanner=scanner,
+                    require_upload_scan=True,
+                    file_storage=storage,
+                    persistent_job_store=persistent_store,
+                    defer_persistent_jobs_to_worker=True,
+                )
+
+                with self.assertRaises(DocumentScanRejectedError) as error:
+                    service.store_uploaded_document(
+                        user_telegram_id=42,
+                        file_name="notes.txt",
+                        content=b"Private source text must not leak.",
+                        source_language="auto",
+                    )
+
+                self.assertEqual(error.exception.verdict, verdict)
+                self.assertNotIn("Private source text", str(error.exception))
+                self.assertEqual(sandbox.extract_calls, [])
+                self.assertIsNone(service.get_pending_upload(42))
+                self.assertEqual(persistent_store.list_jobs_for_user("telegram:42"), [])
+                self.assertFalse((Path(temp_dir) / "objects").exists())
 
     def test_uses_persistent_user_settings_when_repository_is_configured(self):
         with TemporaryDirectory() as temp_dir:

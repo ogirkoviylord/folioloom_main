@@ -245,19 +245,22 @@ core flow, release gates, operational visibility and documentation.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
-  upload validation and document sandbox modules, but release docs do not claim
-  complete quarantine baseline. Owner accepted adding a local malware/AV
-  scanning gate on 2026-05-22; implementation is not yet confirmed.
+  upload validation, document sandbox modules and an optional pluggable
+  scanner contract with fake scanner tests from issue #92, but release docs do
+  not claim complete quarantine baseline or active local malware scanning.
+  Owner accepted adding a local malware/AV scanning gate on 2026-05-22.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
   `docs/restart/release-gates.md`, `src/translator_service/documents.py`,
-  `src/translator_service/document_sandbox.py`.
+  `src/translator_service/document_sandbox.py`,
+  `src/translator_service/document_scanner.py`,
+  `tests/test_documents.py`, `tests/test_bot_translation_service.py`.
 - Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
   paths if hardening/scanning is incomplete; public external scanning could leak
   rights-sensitive documents if used as the default.
-- Suggested next task: Architect defines exact safe baseline from the policy,
-  including scanner contract, verdict taxonomy and fail-closed beta behavior;
-  Implementer adds missing negative/AV fixtures; Reviewer checks no raw text
-  leaks.
+- Suggested next task: Reviewer checks issue #92 scope, then continue the split
+  scanner work with local scanner adapter/upload-flow evidence issues. Any
+  deployment, new dependency, external scanning, retention or runtime-data
+  behavior still needs explicit owner approval.
 
 - Area: TTL cleanup and delete verification.
 - Current behavior: Retention policy is documented, but Gate B marks cleanup
