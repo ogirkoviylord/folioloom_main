@@ -387,10 +387,15 @@ Potential issues to verify:
   approval.
   Issues: [#91](https://github.com/ogirkoviylord/folioloom_main/issues/91)
   design, [#92](https://github.com/ogirkoviylord/folioloom_main/issues/92)
-  scanner contract, [#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)
+  scanner contract, [#101](https://github.com/ogirkoviylord/folioloom_main/issues/101)
+  Upload Safety Ledger reconciliation, [#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)
   ClamAV adapter, [#94](https://github.com/ogirkoviylord/folioloom_main/issues/94)
   upload-flow wiring, [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
   Gate B evidence.
+  Dependency note: #93, #94 and #95 should treat the proposed Upload Safety
+  Ledger foundation as prerequisite architecture. #101 is docs/issue-reference
+  reconciliation only; it does not implement or approve malware scanning,
+  upload hardening, TTL cleanup, admin visibility or Gate B readiness.
 
 - Задача: run release-scoped verification before any go/no-go.
   Почему важно: issue #56 recorded current preview-slice tests, but Gate B still
