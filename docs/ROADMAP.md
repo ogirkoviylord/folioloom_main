@@ -378,16 +378,55 @@ Acceptance criteria:
   verdicts route safely without adding production dependencies or deployment
   changes.
 
+- Task: Reconcile remaining AV issues around Upload Safety Ledger
+  ([#101](https://github.com/ogirkoviylord/folioloom_main/issues/101)).
+  Phase: 1
+  Priority: High
+  Risk: Medium
+  Agent suitability: safe docs-only, needs review
+  Suggested acceptance criteria: #93, #94 and #95 explicitly depend on the
+  Upload Safety Ledger foundation before ClamAV, upload-flow wiring and Gate B
+  evidence; docs keep malware scanning and Gate B readiness unimplemented until
+  verified; metadata-only, fail-closed beta behavior and no default public
+  VirusTotal-style submission remain intact.
+
 - Task: Add local ClamAV scanner adapter after approval
   ([#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)).
   Phase: 1
   Priority: High
   Risk: High
   Agent suitability: needs architect and human approval
+  Dependency: Upload Safety Ledger foundation from #101, then owner approval for
+  dependency/deployment/config/runtime shape.
   Suggested acceptance criteria: adapter supports local daemon/socket or CLI
   mode, records safe scanner metadata, handles timeout/unavailable/error
   fail-closed for beta, passes EICAR or equivalent safe AV fixture tests and
   does not expose raw document text.
+
+- Task: Wire scanner verdicts into Telegram upload flow
+  ([#94](https://github.com/ogirkoviylord/folioloom_main/issues/94)).
+  Phase: 1
+  Priority: High
+  Risk: High
+  Agent suitability: needs architect and review
+  Dependency: Upload Safety Ledger foundation from #101 and, for real local
+  scanner behavior, #93 after required approvals.
+  Suggested acceptance criteria: clean ledger-backed verdicts allow the upload
+  flow to continue; infected, scanner timeout/unavailable/error and unscanned
+  uploads fail closed before estimate, preview, persistent jobs, parser or
+  worker access; user/admin/log output remains metadata-only.
+
+- Task: Add malware scanning release evidence for Gate B
+  ([#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)).
+  Phase: 1
+  Priority: High
+  Risk: Medium
+  Agent suitability: release-scoped docs/verification, needs review
+  Dependency: Upload Safety Ledger foundation from #101 and implementation from
+  #93/#94, unless an explicit owner-approved deferral exists.
+  Suggested acceptance criteria: evidence records clean, infected/EICAR,
+  timeout/unavailable/error and unscanned paths with commands and metadata-only
+  artifacts; it does not claim broader Gate B or production readiness.
 
 - Task: Validate cancel/resume/restart behavior.
   Phase: 1
