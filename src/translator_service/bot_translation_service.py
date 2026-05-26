@@ -108,6 +108,7 @@ from translator_service.upload_safety_ledger import (
     UploadContainerVerdict,
     UploadSafetyLedgerError,
     UploadSafetyMetadata,
+    UploadSafetyRecord,
     UploadSafetyState,
     UploadScanVerdict,
 )
@@ -127,6 +128,7 @@ from translator_service.worker import (
 logger = logging.getLogger(__name__)
 RIGHTS_CONFIRMATION_VERSION = "rights-v1"
 RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
+UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE = "security.upload_safety.summary"
 PREVIEW_CANDIDATE_MAX_BLOCKS = 3
 PREVIEW_CANDIDATE_MAX_CHARS = 2_000
 TRANSLATION_MODE_DOCUMENT_FORM = "document_form"
@@ -486,6 +488,73 @@ class BotTranslationService:
                 user_telegram_id,
             )
 
+    def _record_upload_safety_activity(
+        self,
+        *,
+        user_telegram_id: int,
+        upload_safety_id: str,
+    ) -> None:
+        if self._activity_store is None:
+            return
+        history = self._upload_safety_ledger.history(upload_safety_id)
+        if not history:
+            return
+        latest = history[-1]
+        final_action = _upload_safety_final_action(history)
+        metadata = latest.metadata
+        parser_access_granted = False
+        worker_access_granted = False
+        try:
+            parser_access_granted = self._upload_safety_ledger.parser_access_decision(
+                upload_safety_id
+            ).allowed
+            worker_access_granted = self._upload_safety_ledger.worker_access_decision(
+                upload_safety_id
+            ).allowed
+        except UploadSafetyLedgerError:
+            parser_access_granted = False
+            worker_access_granted = False
+
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type=UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
+            action=final_action,
+            surface=ActivitySurface.SECURITY,
+            outcome=_upload_safety_activity_outcome(final_action),
+            target_type="upload_safety",
+            target_id=upload_safety_id,
+            metadata={
+                "upload_id": upload_safety_id,
+                "declared_format": metadata.document_format,
+                "detected_format": metadata.document_format,
+                "size_bytes": metadata.size_bytes,
+                "av_verdict": _upload_safety_latest_value(history, "scan_verdict")
+                or "not_checked",
+                "container_verdict": _upload_safety_latest_value(
+                    history,
+                    "container_verdict",
+                )
+                or "not_checked",
+                "final_action": final_action,
+                "reason_code": _upload_safety_reason_code(history, latest),
+                "parser_access_granted": parser_access_granted,
+                "worker_access_granted": worker_access_granted,
+                "timeline": [
+                    {
+                        "state": record.state.value,
+                        "reason_code": record.metadata.safe_error_class,
+                    }
+                    for record in history
+                ],
+                "scanner_health": "unknown",
+                "scanner_name": metadata.scanner_name,
+                "scanner_version": metadata.scanner_version,
+                "signature_database_version": metadata.signature_database_version,
+                "signature_database_age_seconds": None,
+                "short_hash": _short_upload_hash(metadata.sha256),
+            },
+        )
+
     def is_beta_allowed(self, user_telegram_id: int) -> bool:
         return self._beta_access_policy.is_allowed(user_telegram_id)
 
@@ -639,6 +708,7 @@ class BotTranslationService:
                 UploadSafetyState.QUARANTINED,
             )
             scan_result = self._scan_upload_with_ledger_or_raise(
+                user_telegram_id=user_telegram_id,
                 upload_safety_id=upload_safety_id,
                 file_name=file_name,
                 content=content,
@@ -681,11 +751,16 @@ class BotTranslationService:
         ):
             self._file_storage.delete(accepted.object_key)
             raise DocumentScanRejectedError()
+        self._record_upload_safety_activity(
+            user_telegram_id=user_telegram_id,
+            upload_safety_id=upload_safety_id,
+        )
         return accepted.object_key, scan_result, upload_safety_id
 
     def _scan_upload_with_ledger_or_raise(
         self,
         *,
+        user_telegram_id: int,
         upload_safety_id: str,
         file_name: str,
         content: bytes,
@@ -732,6 +807,10 @@ class BotTranslationService:
                 )
             except UploadSafetyLedgerError:
                 pass
+            self._record_upload_safety_activity(
+                user_telegram_id=user_telegram_id,
+                upload_safety_id=upload_safety_id,
+            )
             raise
 
     def _scan_upload_or_raise(
@@ -4303,6 +4382,77 @@ def _safe_scan_error_class(scanner_verdict: ScannerVerdict | None) -> str:
     if scanner_verdict is None:
         return "scanner_missing"
     return scanner_verdict.value
+
+
+def _upload_safety_latest_value(
+    history: tuple[UploadSafetyRecord, ...],
+    field_name: str,
+) -> str | None:
+    for record in reversed(history):
+        value = getattr(record, field_name)
+        if value is not None:
+            return value.value
+    return None
+
+
+def _upload_safety_final_action(history: tuple[UploadSafetyRecord, ...]) -> str:
+    states = tuple(record.state for record in history)
+    latest = states[-1]
+    if latest == UploadSafetyState.ACCEPTED_SOURCE_CREATED:
+        return "accepted"
+    if any(
+        state in {
+            UploadSafetyState.SCAN_FAILED,
+            UploadSafetyState.CONTAINER_FAILED,
+        }
+        for state in states
+    ):
+        return "failed_closed"
+    if any(
+        state in {
+            UploadSafetyState.SCAN_BLOCKED,
+            UploadSafetyState.CONTAINER_BLOCKED,
+        }
+        for state in states
+    ):
+        return "blocked"
+    if latest in {
+        UploadSafetyState.QUARANTINE_EXPIRED,
+        UploadSafetyState.QUARANTINE_DELETED,
+    }:
+        return "deleted_by_ttl"
+    if latest == UploadSafetyState.REJECTED:
+        return "rejected"
+    return "quarantined"
+
+
+def _upload_safety_reason_code(
+    history: tuple[UploadSafetyRecord, ...],
+    latest: UploadSafetyRecord,
+) -> str:
+    if latest.metadata.safe_error_class:
+        return latest.metadata.safe_error_class
+    for state in reversed(tuple(record.state for record in history)):
+        if state in {
+            UploadSafetyState.SCAN_FAILED,
+            UploadSafetyState.CONTAINER_FAILED,
+            UploadSafetyState.SCAN_BLOCKED,
+            UploadSafetyState.CONTAINER_BLOCKED,
+        }:
+            return state.value
+    return latest.state.value
+
+
+def _upload_safety_activity_outcome(final_action: str) -> ActivityOutcome:
+    if final_action == "accepted":
+        return ActivityOutcome.SUCCESS
+    if final_action == "blocked":
+        return ActivityOutcome.BLOCKED
+    return ActivityOutcome.FAILURE
+
+
+def _short_upload_hash(value: str) -> str:
+    return value[:8] if len(value) >= 8 else "n/a"
 
 
 def estimate_translation_seconds(

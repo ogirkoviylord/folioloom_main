@@ -88,6 +88,32 @@ class UserActivityStoreTest(unittest.TestCase):
             )
             self.assertEqual([event.job_id for event in job_events], ["job-1"])
 
+    def test_list_events_supports_offset_for_paged_admin_reads(self):
+        with TemporaryDirectory() as temp_dir:
+            with SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3") as store:
+                for index in range(3):
+                    store.record_event(
+                        UserActivityEventInput(
+                            actor_type=ActivityActorType.USER,
+                            actor_id="telegram:42",
+                            channel="telegram",
+                            channel_user_id="42",
+                            surface=ActivitySurface.SECURITY,
+                            event_type=f"security.event.{index}",
+                            action="recorded",
+                            outcome=ActivityOutcome.SUCCESS,
+                        )
+                    )
+
+                events = store.list_events(
+                    surface=ActivitySurface.SECURITY,
+                    limit=1,
+                    offset=1,
+                )
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].event_type, "security.event.1")
+
     def test_metadata_is_redacted_and_truncated(self):
         with TemporaryDirectory() as temp_dir:
             with SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3") as store:
