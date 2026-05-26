@@ -78,6 +78,11 @@ from translator_service.admin.translation_logs import (
     get_translation_run_details,
     list_translation_run_summaries,
 )
+from translator_service.admin.upload_safety import (
+    UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
+    UploadSafetyFilters,
+    upload_safety_read_model_from_activity_events,
+)
 from translator_service.admin.views import (
     activity_body,
     admin_page,
@@ -96,6 +101,8 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    upload_safety_body,
+    upload_safety_detail_body,
     user_detail_body,
     users_body,
 )
@@ -118,10 +125,12 @@ from translator_service.user_activity import (
     ActivityOutcome,
     ActivitySurface,
     SQLiteUserActivityStore,
+    UserActivityEvent,
     UserActivityEventInput,
 )
 
 SESSION_COOKIE = "folioloom_admin_session"
+_UPLOAD_SAFETY_EVENT_PAGE_SIZE = 500
 _ACTIVE_TRANSLATION_STATUSES = {
     "active",
     "cancel_requested",
@@ -593,6 +602,29 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Security",
             active="security",
             body=lambda session: _security_events_body(settings),
+        )
+
+    @router.get("/upload-safety", response_class=HTMLResponse)
+    async def upload_safety(request: Request) -> Response:
+        filters = _upload_safety_filters(request)
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Upload Safety",
+            active="upload_safety",
+            body=lambda session: _upload_safety_body(settings, filters),
+        )
+
+    @router.get("/upload-safety/{upload_id}", response_class=HTMLResponse)
+    async def upload_safety_detail(request: Request, upload_id: str) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Upload Safety Detail",
+            active="upload_safety",
+            body=lambda session: _upload_safety_detail_body(settings, upload_id),
         )
 
     @router.get("/operations/jobs", response_class=HTMLResponse)
@@ -2263,6 +2295,48 @@ def _security_events_body(settings: Settings) -> str:
     return security_events_body(events)
 
 
+def _upload_safety_read_model(settings: Settings):
+    with _activity_store(settings) as store:
+        events = _upload_safety_activity_events(store)
+    return upload_safety_read_model_from_activity_events(events)
+
+
+def _upload_safety_activity_events(
+    store: SQLiteUserActivityStore,
+) -> tuple[UserActivityEvent, ...]:
+    events: list[UserActivityEvent] = []
+    offset = 0
+    while True:
+        page = store.list_events(
+            surface=ActivitySurface.SECURITY,
+            event_type=UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
+            limit=_UPLOAD_SAFETY_EVENT_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        events.extend(page)
+        if len(page) < _UPLOAD_SAFETY_EVENT_PAGE_SIZE:
+            break
+        offset += len(page)
+    return tuple(events)
+
+
+def _upload_safety_body(settings: Settings, filters: UploadSafetyFilters) -> str:
+    read_model = _upload_safety_read_model(settings)
+    records = read_model.list_records(filters)
+    return upload_safety_body(
+        read_model.summarize(filters),
+        records,
+        filters=filters,
+    )
+
+
+def _upload_safety_detail_body(settings: Settings, upload_id: str) -> str:
+    read_model = _upload_safety_read_model(settings)
+    return upload_safety_detail_body(read_model.get_record(upload_id))
+
+
 def _integration_connection_groups(settings: Settings):
     bootstrap_config = env_bootstrap_config()
     if not settings.admin_secret_master_key:
@@ -2411,6 +2485,19 @@ def _activity_filters(request: Request) -> dict[str, str | None]:
         "date_from": request.query_params.get("date_from") or None,
         "date_to": request.query_params.get("date_to") or None,
     }
+
+
+def _upload_safety_filters(request: Request) -> UploadSafetyFilters:
+    return UploadSafetyFilters(
+        date_from=request.query_params.get("date_from") or None,
+        date_to=request.query_params.get("date_to") or None,
+        final_action=request.query_params.get("final_action") or None,
+        av_verdict=request.query_params.get("av_verdict") or None,
+        container_verdict=request.query_params.get("container_verdict") or None,
+        reason_code=request.query_params.get("reason_code") or None,
+        channel_user_id=request.query_params.get("channel_user_id") or None,
+        declared_format=request.query_params.get("declared_format") or None,
+    )
 
 
 def _safe_limit(value: str | None) -> int:

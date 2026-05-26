@@ -152,6 +152,9 @@ class InMemoryUploadSafetyLedger:
     def history(self, upload_id: str) -> tuple[UploadSafetyRecord, ...]:
         return tuple(self._records_by_upload_id.get(upload_id, ()))
 
+    def histories(self) -> tuple[tuple[UploadSafetyRecord, ...], ...]:
+        return tuple(tuple(records) for records in self._records_by_upload_id.values())
+
     def parser_access_decision(self, upload_id: str) -> UploadSafetyAccessDecision:
         return self._accepted_source_decision(upload_id)
 
@@ -203,7 +206,6 @@ class InMemoryUploadSafetyLedger:
                 "Upload safety ledger write failed; fail closed"
             )
         self._records_by_upload_id.setdefault(record.upload_id, []).append(record)
-
 
 _VALID_TRANSITIONS: dict[UploadSafetyState, frozenset[UploadSafetyState]] = {
     UploadSafetyState.RECEIVED: frozenset(

@@ -556,6 +556,8 @@ class BotTranslationServiceTest(unittest.TestCase):
             scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
             ledger = InMemoryUploadSafetyLedger()
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(activity_store.close)
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -566,6 +568,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 require_upload_scan=True,
                 file_storage=storage,
                 upload_safety_ledger=ledger,
+                activity_store=activity_store,
             )
 
             upload = service.store_uploaded_document(
@@ -599,7 +602,62 @@ class BotTranslationServiceTest(unittest.TestCase):
                 sandbox.extract_calls,
                 [(DocumentFormat.TXT, b"This is an English document.")],
             )
+            events = activity_store.list_events(
+                surface=ActivitySurface.SECURITY,
+                event_type="security.upload_safety.summary",
+            )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].action, "accepted")
+            self.assertEqual(events[0].target_id, upload.upload_safety_id)
+            self.assertEqual(events[0].metadata["final_action"], "accepted")
+            self.assertEqual(events[0].metadata["av_verdict"], "clean")
+            upload_digest_prefix = upload.upload_safety_id.split(":")[2][:8]
+            self.assertEqual(events[0].metadata["short_hash"], upload_digest_prefix)
+            self.assertNotIn("notes.txt", json.dumps(events[0].metadata))
             self.assertEqual(service.get_pending_upload(42), upload)
+
+    def test_required_blocked_scan_records_upload_safety_activity_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.INFECTED)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(activity_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                activity_store=activity_store,
+            )
+
+            with self.assertRaises(DocumentScanRejectedError):
+                service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="notes.txt",
+                    content=b"Private source text must not leak.",
+                    source_language="auto",
+                )
+
+            events = activity_store.list_events(
+                surface=ActivitySurface.SECURITY,
+                event_type="security.upload_safety.summary",
+            )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].action, "blocked")
+            self.assertEqual(events[0].outcome, ActivityOutcome.BLOCKED.value)
+            self.assertEqual(events[0].metadata["final_action"], "blocked")
+            self.assertEqual(events[0].metadata["reason_code"], "infected")
+            self.assertEqual(events[0].metadata["av_verdict"], "infected")
+            self.assertFalse(events[0].metadata["parser_access_granted"])
+            self.assertFalse(events[0].metadata["worker_access_granted"])
+            serialized_metadata = json.dumps(events[0].metadata)
+            self.assertNotIn("notes.txt", serialized_metadata)
+            self.assertNotIn("Private source text", serialized_metadata)
 
     def test_required_missing_scan_fails_before_parser_or_pending_upload(self):
         sandbox = RecordingDocumentSandbox()

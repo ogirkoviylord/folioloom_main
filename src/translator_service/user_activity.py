@@ -187,6 +187,7 @@ class SQLiteUserActivityStore:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> tuple[UserActivityEvent, ...]:
         where = []
         params: list[Any] = []
@@ -205,13 +206,14 @@ class SQLiteUserActivityStore:
             params.append(_inclusive_date_to(date_to))
         predicate = f"WHERE {' AND '.join(where)}" if where else ""
         params.append(max(1, min(limit, 500)))
+        params.append(max(0, offset))
         with self._lock:
             rows = self._connection.execute(
                 f"""
                 SELECT * FROM user_activity_events
                 {predicate}
                 ORDER BY created_at DESC, rowid DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 params,
             ).fetchall()
