@@ -395,13 +395,29 @@ Acceptance criteria:
   Phase: 1
   Priority: High
   Risk: High
+  Agent suitability: needs tests and review
+  Dependency: Upload Safety Ledger foundation from #101/#102 and owner approval
+  recorded in #93.
+  Suggested acceptance criteria: adapter supports local/internal `clamd`
+  `INSTREAM` scanning through the existing scanner contract, requires no shared
+  quarantine volumes, adds no new Python production dependency, records safe
+  scanner metadata, handles timeout/unavailable/malformed/error fail-closed for
+  beta, passes fake `clamd` EICAR/equivalent response tests and does not expose
+  raw document text, raw scanner output, object keys, paths or secrets.
+
+- Task: Add internal clamd service for beta runtime
+  ([#109](https://github.com/ogirkoviylord/folioloom_main/issues/109)).
+  Phase: 1
+  Priority: High
+  Risk: High
   Agent suitability: needs architect and human approval
-  Dependency: Upload Safety Ledger foundation from #101, then owner approval for
-  dependency/deployment/config/runtime shape.
-  Suggested acceptance criteria: adapter supports local daemon/socket or CLI
-  mode, records safe scanner metadata, handles timeout/unavailable/error
-  fail-closed for beta, passes EICAR or equivalent safe AV fixture tests and
-  does not expose raw document text.
+  Dependency: #93 adapter lands first.
+  Suggested acceptance criteria: internal-only `clamd` Docker Compose/runtime
+  service is not publicly exposed, app runtime reaches it through approved
+  config, scanner health/signature visibility is metadata-only,
+  resource/concurrency/timeout safeguards are defined, EICAR/equivalent smoke
+  evidence is recorded in an approved environment, and no real user data or
+  runtime `var/` operation occurs without exact-run owner approval.
 
 - Task: Wire scanner verdicts into Telegram upload flow
   ([#94](https://github.com/ogirkoviylord/folioloom_main/issues/94)).
@@ -422,8 +438,10 @@ Acceptance criteria:
   Priority: High
   Risk: Medium
   Agent suitability: release-scoped docs/verification, needs review
-  Dependency: Upload Safety Ledger foundation from #101 and implementation from
-  #93/#94, unless an explicit owner-approved deferral exists.
+  Dependency: Upload Safety Ledger foundation from #101/#102, upload-flow wiring
+  from #94, adapter implementation from #93 and runtime evidence from #109 for
+  full server/runtime evidence, unless an explicit owner-approved deferral
+  exists.
   Suggested acceptance criteria: evidence records clean, infected/EICAR,
   timeout/unavailable/error and unscanned paths with commands and metadata-only
   artifacts; it does not claim broader Gate B or production readiness.
