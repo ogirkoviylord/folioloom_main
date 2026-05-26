@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 import unittest
@@ -45,6 +46,7 @@ class WorkerTest(unittest.TestCase):
             scheduler_retry_base_delay_seconds=30,
             scheduler_retry_max_delay_seconds=600,
             scheduler_poll_seconds=0,
+            require_upload_scan=True,
         )
         store = _FakePostgresStore()
         guard = SimpleNamespace(closed=False)
@@ -87,6 +89,7 @@ class WorkerTest(unittest.TestCase):
         build_guard.assert_called_once_with(config)
         self.assertEqual(scheduler_calls[0]["beta_safety_guard"], guard)
         self.assertEqual(scheduler_calls[0]["translation_run_log_root"], "run-logs")
+        self.assertTrue(scheduler_calls[0]["require_upload_safety_policy"])
         self.assertTrue(guard.closed)
         self.assertTrue(store.closed)
 
@@ -374,6 +377,141 @@ class WorkerTest(unittest.TestCase):
                 translator.calls,
                 [("First paragraph", "en", "uk")],
             )
+
+    def test_stored_worker_rejects_quarantine_source_object(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.QUARANTINE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Do not translate this quarantined upload",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            translator = RecordingTranslator()
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                failed = run_next_stored_text_work_unit(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    worker_id="worker-a",
+                    translator=translator,
+                )
+
+            self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED)
+            self.assertEqual(
+                failed.last_error,
+                f"Work unit source object is quarantined: {failed.id}",
+            )
+            self.assertEqual(translator.calls, [])
+
+    def test_stored_worker_rejects_unaccepted_source_object_when_gate_is_provided(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Do not translate this unaccepted upload",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            translator = RecordingTranslator()
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                failed = run_next_stored_text_work_unit(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    worker_id="worker-a",
+                    translator=translator,
+                    allowed_source_object_keys=frozenset(),
+                )
+
+            self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED)
+            self.assertEqual(
+                failed.last_error,
+                f"Work unit source object is not accepted: {failed.id}",
+            )
+            self.assertEqual(translator.calls, [])
+
+    def test_stored_worker_requires_upload_safety_policy_when_gate_is_enabled(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Do not translate without upload safety policy",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            translator = RecordingTranslator()
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                failed = run_next_stored_text_work_unit(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    worker_id="worker-a",
+                    translator=translator,
+                    require_upload_safety_policy=True,
+                )
+
+            self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED)
+            self.assertEqual(
+                failed.last_error,
+                f"Job source object is not accepted by upload safety policy: {job.id}",
+            )
+            self.assertEqual(translator.calls, [])
+
+    def test_stored_worker_accepts_upload_safety_policy_marker_when_gate_is_enabled(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.epub",
+                content_type="application/epub+zip",
+                content=b"accepted source",
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(
+                store,
+                source.object_key,
+                source_object_key=original.object_key,
+                translation_policy=json.dumps(
+                    {
+                        "upload_safety": {
+                            "accepted_source_object_key": original.object_key,
+                            "source_gate": "upload_safety_ledger",
+                            "upload_safety_id": "upload-1",
+                        }
+                    }
+                ),
+            )
+            translator = RecordingTranslator()
+
+            completed = run_next_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                job_id=job.id,
+                worker_id="worker-a",
+                translator=translator,
+                require_upload_safety_policy=True,
+            )
+
+            self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+            self.assertEqual(translator.calls, [("First paragraph", "en", "uk")])
 
     def test_stored_worker_threads_context_memory_between_fallback_blocks(self):
         with TemporaryDirectory() as temp_dir:
@@ -1600,10 +1738,12 @@ def _job_with_two_stored_units(
 
 def _job_with_stored_unit(
     store: SQLiteTranslationJobStore,
-    source_object_key: str,
+    work_unit_source_object_key: str,
     *,
     source_language: str = "en",
     target_language: str = "uk",
+    source_object_key: str | None = None,
+    translation_policy: str | None = None,
 ):
     job = store.create_job(
         order_id="order-1",
@@ -1616,6 +1756,8 @@ def _job_with_stored_unit(
         adapter_version="epub-v1",
         prompt_version="plain-v1",
         pricing_snapshot_id="pricing-1",
+        source_object_key=source_object_key,
+        translation_policy=translation_policy,
     )
     store.add_work_units(
         job.id,
@@ -1627,7 +1769,7 @@ def _job_with_stored_unit(
                 prompt_tier="plain",
                 source_language=source_language,
                 target_language=target_language,
-                source_object_key=source_object_key,
+                source_object_key=work_unit_source_object_key,
             ),
         ],
     )

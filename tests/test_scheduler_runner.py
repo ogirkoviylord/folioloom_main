@@ -99,6 +99,71 @@ class SchedulerRunnerTest(unittest.TestCase):
                 "[uk] First paragraph",
             )
 
+    def test_run_once_requires_upload_safety_policy_when_gate_is_enabled(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="Private source paragraph",
+            )
+            translator = HintedRunnerTranslator(available_slots=1)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                require_upload_safety_policy=True,
+            )
+
+            [failed_unit] = store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(summary.assembled_jobs, 0)
+            self.assertEqual(failed_unit.status.value, "failed_terminal")
+            self.assertEqual(
+                failed_unit.last_error,
+                f"Job source object is not accepted by upload safety policy: {job.id}",
+            )
+            self.assertEqual(translator.calls, [])
+
+    def test_run_once_accepts_upload_safety_policy_marker_when_gate_is_enabled(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+                upload_safety_id="upload-1",
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                require_upload_safety_policy=True,
+            )
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertIsNotNone(persisted_job.final_object_key)
+
     def test_run_once_does_not_claim_when_beta_guard_blocks(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1433,6 +1498,7 @@ def _create_single_unit_txt_job(
     file_id: str,
     user_id: str = "telegram:42",
     source_text: str,
+    upload_safety_id: str | None = None,
 ):
     original = storage.put_bytes(
         kind=StoredFileKind.ORIGINAL,
@@ -1458,6 +1524,19 @@ def _create_single_unit_txt_job(
         prompt_version="plain-v1",
         pricing_snapshot_id="pricing-1",
         source_object_key=original.object_key,
+        translation_policy=(
+            json.dumps(
+                {
+                    "upload_safety": {
+                        "accepted_source_object_key": original.object_key,
+                        "source_gate": "upload_safety_ledger",
+                        "upload_safety_id": upload_safety_id,
+                    }
+                }
+            )
+            if upload_safety_id is not None
+            else None
+        ),
     )
     store.add_work_units(
         job.id,
