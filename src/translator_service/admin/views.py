@@ -49,6 +49,11 @@ from translator_service.admin.translation_logs import (
     TranslationRunFragmentDetail,
     TranslationRunSummary,
 )
+from translator_service.admin.upload_safety import (
+    UploadSafetyAdminRecord,
+    UploadSafetyFilters,
+    UploadSafetySummary,
+)
 from translator_service.user_activity import UserActivityEvent, UserProfile
 
 
@@ -100,6 +105,7 @@ def admin_page(
         ("users", "/admin/users", "Users"),
         ("settings", "/admin/settings", "Settings"),
         ("operations", "/admin/operations/jobs", "Operations"),
+        ("upload_safety", "/admin/upload-safety", "Upload Safety"),
         ("security", "/admin/security/events", "Security"),
         ("audit", "/admin/audit", "Audit"),
     )
@@ -2717,6 +2723,194 @@ def security_events_body(events: tuple[UserActivityEvent, ...]) -> str:
         <tbody>{rows}</tbody>
       </table>
     </section>
+    """
+
+
+def upload_safety_body(
+    summary: UploadSafetySummary,
+    records: tuple[UploadSafetyAdminRecord, ...],
+    *,
+    filters: UploadSafetyFilters,
+) -> str:
+    rows = "\n".join(_upload_safety_row(record) for record in records)
+    if not rows:
+        rows = """
+        <tr>
+          <td colspan="9" class="empty-cell">No upload safety records found.</td>
+        </tr>
+        """
+    top_reason_codes = ", ".join(
+        f"{reason}: {count}" for reason, count in summary.top_reason_codes
+    )
+    if not top_reason_codes:
+        top_reason_codes = "n/a"
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Upload Safety</h3>
+        <p>
+          Metadata-only scanner and upload-safety ledger status for accepted,
+          blocked, and failed-closed uploads.
+        </p>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="metric-grid">
+        {_metric("Scanner health", summary.scanner_health)}
+        {_metric("Signature DB age", _format_optional_seconds(
+            summary.signature_database_age_seconds,
+        ))}
+        {_metric("Scanned", str(summary.scanned_count))}
+        {_metric("Accepted", str(summary.accepted_count))}
+        {_metric("Blocked", str(summary.blocked_count))}
+        {_metric("Failed closed", str(summary.failed_closed_count))}
+        {_metric("Access violations", str(summary.access_violation_count))}
+        {_metric("Top reasons", top_reason_codes)}
+      </div>
+    </section>
+    <section class="panel">
+      <form class="filter-form" method="get" action="/admin/upload-safety">
+        {_filter_input("final_action", "Final action", filters.final_action)}
+        {_filter_input("av_verdict", "AV verdict", filters.av_verdict)}
+        {_filter_input(
+            "container_verdict",
+            "Container verdict",
+            filters.container_verdict,
+        )}
+        {_filter_input("reason_code", "Reason", filters.reason_code)}
+        {_filter_input("channel_user_id", "Channel user", filters.channel_user_id)}
+        {_filter_input("declared_format", "Format", filters.declared_format)}
+        <label>
+          <span>From</span>
+          <input name="date_from" type="date"
+            value="{escape(filters.date_from or "")}">
+        </label>
+        <label>
+          <span>To</span>
+          <input name="date_to" type="date"
+            value="{escape(filters.date_to or "")}">
+        </label>
+        <button type="submit">Apply filters</button>
+      </form>
+    </section>
+    <section class="panel table-panel">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>User</th>
+            <th>Format</th>
+            <th>Size</th>
+            <th>AV</th>
+            <th>Container</th>
+            <th>Reason</th>
+            <th>Action</th>
+            <th>Access</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def upload_safety_detail_body(record: UploadSafetyAdminRecord | None) -> str:
+    if record is None:
+        return section_body(
+            "Upload safety record not found",
+            "No upload safety metadata exists for this id.",
+        )
+    timeline = "\n".join(
+        _upload_safety_timeline_row(event) for event in record.timeline
+    )
+    if not timeline:
+        timeline = """
+        <tr>
+          <td colspan="3" class="empty-cell">No timeline events found.</td>
+        </tr>
+        """
+    safe_filename = record.sanitized_original_filename or "n/a"
+    details = {
+        "upload_id": record.upload_id,
+        "channel_user_id": record.channel_user_id,
+        "declared_format": record.declared_format,
+        "detected_format": record.detected_format,
+        "size_bytes": record.size_bytes,
+        "sanitized_filename": safe_filename,
+        "short_hash": record.short_hash or "n/a",
+        "scanner": record.scanner_name or "n/a",
+        "scanner_version": record.scanner_version or "n/a",
+        "signature_database_version": record.signature_database_version or "n/a",
+        "av_verdict": record.av_verdict,
+        "container_verdict": record.container_verdict,
+        "reason_code": record.reason_code,
+        "final_action": record.final_action,
+        "parser_access_granted": _bool_label(record.parser_access_granted),
+        "worker_access_granted": _bool_label(record.worker_access_granted),
+        "job_id": record.job_id or "n/a",
+    }
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>{escape(record.upload_id)}</h3>
+        <p>
+          Metadata-only upload safety detail. Raw quarantine files, object
+          paths, scanner output, and override actions are not exposed.
+        </p>
+      </div>
+    </section>
+    <section class="panel">
+      {_definition_table(details)}
+    </section>
+    <section class="panel table-panel">
+      <h3>Timeline</h3>
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>State</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>{timeline}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _upload_safety_row(record: UploadSafetyAdminRecord) -> str:
+    access = "parser" if record.parser_access_granted else ""
+    if record.worker_access_granted:
+        access = ", ".join(part for part in (access, "worker") if part)
+    if not access:
+        access = "none"
+    return f"""
+      <tr>
+        <td><a href="/admin/upload-safety/{escape(record.upload_id)}">
+          {escape(_format_datetime(record.created_at))}
+        </a></td>
+        <td>{escape(record.channel_user_id)}</td>
+        <td>{escape(record.declared_format)} / {escape(record.detected_format)}</td>
+        <td>{escape(str(record.size_bytes))}</td>
+        <td>{escape(record.av_verdict)}</td>
+        <td>{escape(record.container_verdict)}</td>
+        <td>{escape(record.reason_code)}</td>
+        <td>{escape(record.final_action)}</td>
+        <td>{escape(access)}</td>
+      </tr>
+    """
+
+
+def _upload_safety_timeline_row(event: object) -> str:
+    timestamp = getattr(event, "timestamp", None)
+    state = getattr(event, "state", "unknown")
+    reason = getattr(event, "reason_code", None) or "n/a"
+    return f"""
+      <tr>
+        <td>{escape(_format_datetime(timestamp))}</td>
+        <td>{escape(state)}</td>
+        <td>{escape(reason)}</td>
+      </tr>
     """
 
 
