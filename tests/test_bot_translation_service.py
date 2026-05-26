@@ -64,6 +64,11 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
 )
+from translator_service.upload_safety_ledger import (
+    InMemoryUploadSafetyLedger,
+    UploadSafetyMetadata,
+    UploadSafetyState,
+)
 from translator_service.user_activity import (
     ActivityActorType,
     ActivityOutcome,
@@ -546,32 +551,55 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(service.get_interface_language(100), "en")
 
     def test_required_clean_scan_allows_uploaded_document_to_continue(self):
-        sandbox = RecordingDocumentSandbox()
-        scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
-        service = BotTranslationService(
-            job_repository=InMemoryTranslationJobRepository(),
-            pricing_rules=_pricing_rules(),
-            max_upload_mb=50,
-            max_fragment_chars=20,
-            document_sandbox=sandbox,
-            document_scanner=scanner,
-            require_upload_scan=True,
-        )
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            ledger = InMemoryUploadSafetyLedger()
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                upload_safety_ledger=ledger,
+            )
 
-        upload = service.store_uploaded_document(
-            user_telegram_id=42,
-            file_name="notes.txt",
-            content=b"This is an English document.",
-            source_language="auto",
-        )
+            upload = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"This is an English document.",
+                source_language="auto",
+            )
 
-        self.assertEqual(upload.scan_result.verdict, ScannerVerdict.CLEAN)
-        self.assertEqual(upload.scan_result.safe_metadata()["document_format"], "txt")
-        self.assertEqual(
-            sandbox.extract_calls,
-            [(DocumentFormat.TXT, b"This is an English document.")],
-        )
-        self.assertEqual(service.get_pending_upload(42), upload)
+            self.assertEqual(upload.scan_result.verdict, ScannerVerdict.CLEAN)
+            self.assertEqual(
+                upload.scan_result.safe_metadata()["document_format"],
+                "txt",
+            )
+            self.assertIsNotNone(upload.upload_safety_id)
+            latest = ledger.latest(upload.upload_safety_id)
+            self.assertEqual(latest.state, UploadSafetyState.ACCEPTED_SOURCE_CREATED)
+            self.assertEqual(
+                latest.accepted_source_object_key,
+                upload.source_object_key,
+            )
+            self.assertTrue(upload.source_object_key.startswith("original/"))
+            self.assertTrue(storage.exists(upload.source_object_key))
+            self.assertEqual(
+                ledger.parser_access_decision(
+                    upload.upload_safety_id
+                ).accepted_source_object_key,
+                upload.source_object_key,
+            )
+            self.assertEqual(
+                sandbox.extract_calls,
+                [(DocumentFormat.TXT, b"This is an English document.")],
+            )
+            self.assertEqual(service.get_pending_upload(42), upload)
 
     def test_required_missing_scan_fails_before_parser_or_pending_upload(self):
         sandbox = RecordingDocumentSandbox()
@@ -642,7 +670,284 @@ class BotTranslationServiceTest(unittest.TestCase):
                 self.assertEqual(sandbox.extract_calls, [])
                 self.assertIsNone(service.get_pending_upload(42))
                 self.assertEqual(persistent_store.list_jobs_for_user("telegram:42"), [])
-                self.assertFalse((Path(temp_dir) / "objects").exists())
+                self.assertTrue((Path(temp_dir) / "objects" / "quarantine").exists())
+                self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
+
+    def test_unaccepted_ledger_source_cannot_reach_estimate_or_preview(self):
+        with TemporaryDirectory() as temp_dir:
+            content = b"This is an English document."
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            quarantine = storage.put_bytes(
+                kind=StoredFileKind.QUARANTINE,
+                file_name="notes.txt",
+                content_type="text/plain; charset=utf-8",
+                content=content,
+            )
+            ledger = InMemoryUploadSafetyLedger()
+            upload_id = "upload-bypass"
+            ledger.create_received(
+                UploadSafetyMetadata(
+                    upload_id=upload_id,
+                    user_id="telegram:42",
+                    quarantine_object_key=quarantine.object_key,
+                    original_file_name="notes.txt",
+                    document_format="txt",
+                    size_bytes=len(content),
+                    sha256=hashlib.sha256(content).hexdigest(),
+                )
+            )
+            ledger.transition(upload_id, UploadSafetyState.QUARANTINED)
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            scan_result = scanner.scan(
+                file_name="notes.txt",
+                content=content,
+                document_format=DocumentFormat.TXT,
+            )
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                upload_safety_ledger=ledger,
+            )
+            with service._state_lock:
+                service._pending_uploads[42] = PendingUpload(
+                    user_telegram_id=42,
+                    file_name="notes.txt",
+                    content=content,
+                    source_language="auto",
+                    source_object_key=quarantine.object_key,
+                    rights_confirmed=True,
+                    translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+                    scan_result=scan_result,
+                    upload_safety_id=upload_id,
+                )
+
+            with self.assertRaises(DocumentScanRejectedError):
+                service.prepare_pending_upload(
+                    user_telegram_id=42,
+                    target_language="uk",
+                )
+            self.assertEqual(sandbox.plan_calls, [])
+            self.assertIsNone(service.get_pending(42))
+
+            with service._state_lock:
+                service._pending[42] = PendingTranslation(
+                    user_telegram_id=42,
+                    file_name="notes.txt",
+                    content=content,
+                    source_language="auto",
+                    target_language="uk",
+                    price_usd=0.0,
+                    fragment_count=1,
+                    source_object_key=quarantine.object_key,
+                    rights_confirmed=True,
+                    translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+                    scan_result=scan_result,
+                    upload_safety_id=upload_id,
+                )
+            with self.assertRaises(DocumentScanRejectedError):
+                service.select_preview_candidate(user_telegram_id=42)
+            self.assertEqual(sandbox.plan_calls, [])
+
+    def test_restored_pending_upload_preserves_upload_safety_id(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            ledger = InMemoryUploadSafetyLedger()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                file_storage=storage,
+                upload_safety_ledger=ledger,
+            )
+            uploaded = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"This is an English document.",
+                source_language="auto",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+
+            restored = service.restore_pending_translation_upload(
+                user_telegram_id=42
+            )
+
+            self.assertEqual(restored.upload_safety_id, uploaded.upload_safety_id)
+            self.assertEqual(restored.source_object_key, uploaded.source_object_key)
+
+    def test_unaccepted_persistent_resume_fails_closed_when_scan_gate_required(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="notes.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=original.object_key,
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=original.object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:1",),
+                        source_text_hash=hashlib.sha256(
+                            b"First paragraph."
+                        ).hexdigest(),
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=unit_source.object_key,
+                    )
+                ],
+            )
+            persistent_store.pause_job(job.id)
+            translator = RecordingTranslator()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                upload_safety_ledger=InMemoryUploadSafetyLedger(),
+            )
+
+            result = service.resume_user_book_translation(
+                user_telegram_id=42,
+                job_id=job.id,
+                translator=translator,
+            )
+            summary = service.resume_user_book(user_telegram_id=42, job_id=job.id)
+
+            self.assertIsNone(result)
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(
+                summary.status,
+                PersistentTranslationJobStatus.PAUSED.value,
+            )
+            self.assertEqual(
+                persistent_store.get_job(job.id).status,
+                PersistentTranslationJobStatus.PAUSED,
+            )
+
+    def test_accepted_persistent_resume_keeps_ledger_binding(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            ledger = InMemoryUploadSafetyLedger()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                upload_safety_ledger=ledger,
+            )
+            uploaded = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First paragraph.",
+                source_language="en",
+            )
+            unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=uploaded.source_object_key,
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=uploaded.source_object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:1",),
+                        source_text_hash=hashlib.sha256(
+                            b"First paragraph."
+                        ).hexdigest(),
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=unit_source.object_key,
+                    )
+                ],
+            )
+            persistent_store.pause_job(job.id)
+
+            result = service.resume_user_book_translation(
+                user_telegram_id=42,
+                job_id=job.id,
+                translator=RecordingTranslator(),
+            )
+
+            self.assertEqual(result.status, TranslationJobStatus.READY)
+            self.assertEqual(
+                ledger.upload_id_for_accepted_source(uploaded.source_object_key),
+                uploaded.upload_safety_id,
+            )
 
     def test_uses_persistent_user_settings_when_repository_is_configured(self):
         with TemporaryDirectory() as temp_dir:
@@ -2281,6 +2586,59 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(snapshot["translation_policy"])["translation_mode"],
                 TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+
+    def test_persistent_txt_scan_gate_records_upload_safety_policy_marker(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(persistent_store.close)
+            ledger = InMemoryUploadSafetyLedger()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                upload_safety_ledger=ledger,
+            )
+            uploaded = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First paragraph.",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(
+                service,
+                translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            persisted_job = persistent_store.get_job(job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+            self.assertEqual(
+                translation_policy["upload_safety"],
+                {
+                    "accepted_source_object_key": uploaded.source_object_key,
+                    "source_gate": "upload_safety_ledger",
+                    "upload_safety_id": uploaded.upload_safety_id,
+                },
             )
 
     def test_persistent_confirmation_reserves_beta_safety_before_deferred_queue(self):

@@ -158,6 +158,21 @@ class InMemoryUploadSafetyLedger:
     def worker_access_decision(self, upload_id: str) -> UploadSafetyAccessDecision:
         return self._accepted_source_decision(upload_id)
 
+    def upload_id_for_accepted_source(
+        self,
+        accepted_source_object_key: str,
+    ) -> str | None:
+        for upload_id, records in self._records_by_upload_id.items():
+            if not records:
+                continue
+            latest = records[-1]
+            if (
+                latest.state == UploadSafetyState.ACCEPTED_SOURCE_CREATED
+                and latest.accepted_source_object_key == accepted_source_object_key
+            ):
+                return upload_id
+        return None
+
     def _accepted_source_decision(self, upload_id: str) -> UploadSafetyAccessDecision:
         records = self._records_by_upload_id.get(upload_id)
         if not records:
