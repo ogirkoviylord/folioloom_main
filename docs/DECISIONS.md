@@ -834,6 +834,13 @@ Decision:
 - Uploaded files should enter quarantine before parsing or translation.
 - The default direction is local scanning, such as a ClamAV daemon/sidecar,
   before parser/container checks.
+- Owner selected local ClamAV `clamd` daemon/socket as the target scanner mode
+  for the ClamAV adapter/deployment path on 2026-05-26. The approved #93
+  adapter scope uses `clamd` `INSTREAM` scanning by default, avoids path-based
+  scanning and shared quarantine volumes, adds no new Python production
+  dependency, and does not change Docker/deployment/runtime data behavior.
+  `clamd` must remain local/internal only and must not be exposed to the public
+  internet.
 - Public VirusTotal-style file submission must not be used as the default path
   for user documents because uploaded books/manuscripts can be rights-sensitive
   and private.
@@ -851,6 +858,13 @@ Evidence:
   through [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
   split the design, scanner contract, ClamAV adapter, upload-flow wiring and
   release evidence work.
+- GitHub issue [#93](https://github.com/ogirkoviylord/folioloom_main/issues/93)
+  records the 2026-05-26 owner decision to implement an application-side
+  local `clamd` `INSTREAM` adapter only.
+- GitHub issue [#109](https://github.com/ogirkoviylord/folioloom_main/issues/109)
+  tracks the separate internal `clamd` Docker Compose/runtime service,
+  signature/health visibility, resource/concurrency safeguards and runtime
+  smoke evidence.
 
 Reason:
 - User uploads are untrusted input and may include private or rights-sensitive
