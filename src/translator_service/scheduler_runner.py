@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +28,7 @@ from translator_service.translation_run_logs import (
 )
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
+    _allowed_source_object_keys_for_work_unit,
     _fail_claimed_work_unit_or_ignore_stale,
     _is_stale_work_unit_claim,
     _job_translation_context,
@@ -63,6 +64,8 @@ def run_scheduler_once(
     max_parallel_units: int = 1,
     beta_safety_guard: BetaSafetyGuard | None = None,
     translation_run_log_root: str | Path | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
 ) -> SchedulerRunOnceSummary:
     if beta_safety_guard is not None:
         decision = beta_safety_guard.can_start_new_work()
@@ -104,6 +107,8 @@ def run_scheduler_once(
                 retry_max_delay_seconds=retry_max_delay_seconds,
                 work_unit_started_callback=work_unit_started_callback,
                 usage_completed_callback=usage_completed_callback,
+                allowed_source_object_keys=allowed_source_object_keys,
+                require_upload_safety_policy=require_upload_safety_policy,
             )
         if completed is not None:
             if completed.status.value in {"translated", "cached"}:
@@ -128,6 +133,8 @@ def run_scheduler_once(
             max_parallel_units=max_parallel_units,
             usage_completed_callback=usage_completed_callback,
             translation_run_log_root=translation_run_log_root,
+            allowed_source_object_keys=allowed_source_object_keys,
+            require_upload_safety_policy=require_upload_safety_policy,
         )
 
     assembled_jobs = assemble_due_jobs(
@@ -156,6 +163,8 @@ def _run_scheduled_parallel_once(
     max_parallel_units: int,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None,
     translation_run_log_root: str | Path | None,
+    allowed_source_object_keys: Container[str] | None,
+    require_upload_safety_policy: bool,
 ) -> tuple[int, int]:
     completed_units = 0
     failed_units = 0
@@ -191,6 +200,16 @@ def _run_scheduled_parallel_once(
                     source_text = load_scheduled_work_unit_text(
                         storage=storage,
                         work_unit=work_unit,
+                        allowed_source_object_keys=(
+                            _allowed_source_object_keys_for_work_unit(
+                                store=store,
+                                work_unit=work_unit,
+                                allowed_source_object_keys=allowed_source_object_keys,
+                                require_upload_safety_policy=(
+                                    require_upload_safety_policy
+                                ),
+                            )
+                        ),
                     )
                 except FileNotFoundError as error:
                     failed = _fail_claimed_work_unit_or_ignore_stale(

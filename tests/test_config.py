@@ -11,6 +11,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.service_name, "DeepSeek Document Translator")
         self.assertEqual(settings.environment, "development")
         self.assertEqual(settings.max_upload_mb, 50)
+        self.assertFalse(settings.require_upload_scan)
         self.assertEqual(settings.deepseek_model, "deepseek-v4-flash")
         self.assertEqual(settings.object_storage_root, "var/object-storage")
         self.assertEqual(settings.persistent_jobs_db_path, "var/jobs.sqlite3")
@@ -59,6 +60,12 @@ class SettingsTest(unittest.TestCase):
             settings = Settings()
 
         self.assertTrue(settings.bot_defer_persistent_jobs_to_worker)
+
+    def test_upload_scan_gate_can_be_required_from_environment(self):
+        with patch.dict("os.environ", {"REQUIRE_UPLOAD_SCAN": "true"}):
+            settings = Settings()
+
+        self.assertTrue(settings.require_upload_scan)
 
     def test_security_thresholds_can_be_configured_from_environment(self):
         with patch.dict(

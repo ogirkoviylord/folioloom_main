@@ -245,20 +245,30 @@ core flow, release gates, operational visibility and documentation.
 
 - Area: Upload hardening/quarantine.
 - Current behavior: Policy exists; release gate remains unchecked. Code has
-  upload validation, document sandbox modules and an optional pluggable
-  scanner contract with fake scanner tests from issue #92, but release docs do
-  not claim complete quarantine baseline or active local malware scanning.
-  Owner accepted adding a local malware/AV scanning gate on 2026-05-22.
+  upload validation, document sandbox modules, an optional pluggable scanner
+  contract with fake scanner tests from issue #92, and issue #94 wiring that
+  uses the Upload Safety Ledger when `require_upload_scan` is enabled:
+  quarantine first, clean ledger-backed accepted source before parser/estimate/
+  preview/persistent-job access, fail-closed persistent resume when the current
+  ledger cannot resolve the accepted source, and stored-worker rejection for
+  quarantine, explicitly unaccepted source object keys, or scan-gated detached
+  worker jobs that lack a safe `translation_policy.upload_safety` accepted-source
+  marker. `REQUIRE_UPLOAD_SCAN=true` enables the runtime scan gate, but release
+  docs still do not claim complete upload hardening, active local ClamAV
+  scanning, quarantine retention, durable upload-safety ledger persistence or
+  Gate B malware scanning evidence. Owner accepted adding a local malware/AV
+  scanning gate on 2026-05-22.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
   `docs/restart/release-gates.md`, `src/translator_service/documents.py`,
   `src/translator_service/document_sandbox.py`,
   `src/translator_service/document_scanner.py`,
+  `src/translator_service/upload_safety_ledger.py`,
   `tests/test_documents.py`, `tests/test_bot_translation_service.py`.
 - Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
-  paths if hardening/scanning is incomplete; public external scanning could leak
-  rights-sensitive documents if used as the default.
-- Suggested next task: Reviewer checks issue #92 scope, then continue the split
-  scanner work with local scanner adapter/upload-flow evidence issues. Any
+  paths if full hardening/scanning is incomplete; public external scanning could
+  leak rights-sensitive documents if used as the default.
+- Suggested next task: Reviewer checks issue #94 scope, then continue the split
+  scanner work with the local scanner adapter and Gate B evidence issues. Any
   deployment, new dependency, external scanning, retention or runtime-data
   behavior still needs explicit owner approval.
 
