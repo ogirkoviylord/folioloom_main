@@ -54,6 +54,7 @@ def create_persistent_txt_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_txt_translation(
@@ -82,6 +83,8 @@ def create_persistent_txt_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            upload_safety_id=upload_safety_id,
+            accepted_source_object_key=source_object_key,
         ),
     )
     plans = [
@@ -120,6 +123,7 @@ def create_persistent_docx_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_docx_translation(
@@ -152,6 +156,8 @@ def create_persistent_docx_job_plan(
             translation_mode_profile=_docx_translation_mode_profile(
                 translation_mode
             ),
+            upload_safety_id=upload_safety_id,
+            accepted_source_object_key=source_object_key,
         ),
     )
     plans = [
@@ -187,6 +193,7 @@ def create_persistent_epub_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
     adapter_plan = plan_epub_translation(
@@ -215,6 +222,8 @@ def create_persistent_epub_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            upload_safety_id=upload_safety_id,
+            accepted_source_object_key=source_object_key,
         ),
     )
     plans = [
@@ -264,6 +273,8 @@ def _translation_policy_snapshot(
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
     translation_mode_profile: "_TranslationModeProfile | None" = None,
+    upload_safety_id: str | None = None,
+    accepted_source_object_key: str | None = None,
 ) -> str:
     source_text = "\n\n".join(unit.source_text for unit in units if unit.source_text)
     translation_context = build_initial_translation_context_memory(
@@ -291,6 +302,12 @@ def _translation_policy_snapshot(
         snapshot["translation_mode"] = translation_mode
     if translation_mode_profile is not None:
         snapshot["translation_mode_profile"] = translation_mode_profile.signature
+    if upload_safety_id is not None:
+        snapshot["upload_safety"] = {
+            "accepted_source_object_key": accepted_source_object_key,
+            "source_gate": "upload_safety_ledger",
+            "upload_safety_id": upload_safety_id,
+        }
     return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
 
 

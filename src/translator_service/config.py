@@ -53,6 +53,9 @@ class Settings:
     service_name: str = os.getenv("SERVICE_NAME", "DeepSeek Document Translator")
     environment: str = os.getenv("ENVIRONMENT", "development")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+    require_upload_scan: bool = field(
+        default_factory=lambda: _env_bool("REQUIRE_UPLOAD_SCAN", False)
+    )
     beta_allowlist_enabled: bool = field(
         default_factory=lambda: _env_bool("BETA_ALLOWLIST_ENABLED", False)
     )

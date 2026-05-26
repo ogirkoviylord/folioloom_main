@@ -35,6 +35,11 @@ class UploadSafetyLedgerTest(unittest.TestCase):
             ledger.parser_access_decision("upload-1").accepted_source_object_key,
             "original/accepted-book.txt",
         )
+        self.assertEqual(
+            ledger.upload_id_for_accepted_source("original/accepted-book.txt"),
+            "upload-1",
+        )
+        self.assertIsNone(ledger.upload_id_for_accepted_source("original/missing.txt"))
 
     def test_state_enum_supports_required_issue_states(self):
         self.assertEqual(

@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Protocol
@@ -187,6 +187,8 @@ def run_stored_text_job_until_idle(
     progress_callback: Callable[[PersistentJobExecutionProgress], None] | None = None,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     total_units = len(store.list_work_units(job_id))
@@ -201,6 +203,8 @@ def run_stored_text_job_until_idle(
             translator=translator,
             work_unit_started_callback=work_unit_started_callback,
             usage_completed_callback=usage_completed_callback,
+            allowed_source_object_keys=allowed_source_object_keys,
+            require_upload_safety_policy=require_upload_safety_policy,
             encoding=encoding,
         )
         if completed is None:
@@ -239,6 +243,8 @@ def run_stored_text_job_parallel_until_idle(
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     if max_parallel_units <= 1:
@@ -251,6 +257,8 @@ def run_stored_text_job_parallel_until_idle(
             progress_callback=progress_callback,
             work_unit_started_callback=work_unit_started_callback,
             usage_completed_callback=usage_completed_callback,
+            allowed_source_object_keys=allowed_source_object_keys,
+            require_upload_safety_policy=require_upload_safety_policy,
             encoding=encoding,
         )
 
@@ -287,6 +295,9 @@ def run_stored_text_job_parallel_until_idle(
                     translator=translator,
                     encoding=encoding,
                     job_context=job_context,
+                    allowed_source_object_keys=allowed_source_object_keys,
+                    require_upload_safety_policy=require_upload_safety_policy,
+                    store=store,
                 )
                 active[future] = (claimed, time.monotonic())
 
@@ -383,6 +394,8 @@ def run_next_stored_text_work_unit(
     translator: PersistentWorkUnitTranslator,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     return run_next_persistent_work_unit(
@@ -392,6 +405,12 @@ def run_next_stored_text_work_unit(
         source_loader=lambda work_unit: _load_work_unit_text(
             storage=storage,
             work_unit=work_unit,
+            allowed_source_object_keys=_allowed_source_object_keys_for_work_unit(
+                store=store,
+                work_unit=work_unit,
+                allowed_source_object_keys=allowed_source_object_keys,
+                require_upload_safety_policy=require_upload_safety_policy,
+            ),
             encoding=encoding,
         ),
         translator=translator,
@@ -412,6 +431,8 @@ def run_next_scheduled_stored_text_work_unit(
     retry_max_delay_seconds: int = 600,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     claim = store.claim_next_scheduled_work_unit(
@@ -432,6 +453,12 @@ def run_next_scheduled_stored_text_work_unit(
         source_text = load_scheduled_work_unit_text(
             storage=storage,
             work_unit=work_unit,
+            allowed_source_object_keys=_allowed_source_object_keys_for_work_unit(
+                store=store,
+                work_unit=work_unit,
+                allowed_source_object_keys=allowed_source_object_keys,
+                require_upload_safety_policy=require_upload_safety_policy,
+            ),
             encoding=encoding,
         )
     except FileNotFoundError as error:
@@ -522,11 +549,13 @@ def load_scheduled_work_unit_text(
     *,
     storage: LocalObjectStorage,
     work_unit: PersistentWorkUnit,
+    allowed_source_object_keys: Container[str] | None = None,
     encoding: str = "utf-8",
 ) -> str:
     return _load_work_unit_text(
         storage=storage,
         work_unit=work_unit,
+        allowed_source_object_keys=allowed_source_object_keys,
         encoding=encoding,
     )
 
@@ -579,10 +608,19 @@ def _translate_stored_text_work_unit(
     translator: PersistentWorkUnitTranslator,
     encoding: str,
     job_context: TranslationContextMemory | None = None,
+    allowed_source_object_keys: Container[str] | None = None,
+    require_upload_safety_policy: bool = False,
+    store: SQLiteTranslationJobStore | None = None,
 ) -> _WorkUnitTranslationResult:
     source_text = _load_work_unit_text(
         storage=storage,
         work_unit=work_unit,
+        allowed_source_object_keys=_allowed_source_object_keys_for_work_unit(
+            store=store,
+            work_unit=work_unit,
+            allowed_source_object_keys=allowed_source_object_keys,
+            require_upload_safety_policy=require_upload_safety_policy,
+        ),
         encoding=encoding,
     )
     return _translate_work_unit_text(
@@ -1157,10 +1195,74 @@ def _load_work_unit_text(
     storage: LocalObjectStorage,
     work_unit: PersistentWorkUnit,
     encoding: str,
+    allowed_source_object_keys: Container[str] | None = None,
 ) -> str:
     if not work_unit.source_object_key:
         raise ValueError(f"Work unit has no source object key: {work_unit.id}")
+    if work_unit.source_object_key.startswith(f"{StoredFileKind.QUARANTINE.value}/"):
+        raise ValueError(f"Work unit source object is quarantined: {work_unit.id}")
+    if (
+        allowed_source_object_keys is not None
+        and work_unit.source_object_key not in allowed_source_object_keys
+    ):
+        raise ValueError(f"Work unit source object is not accepted: {work_unit.id}")
     return storage.get_bytes(work_unit.source_object_key).decode(encoding)
+
+
+def _allowed_source_object_keys_for_work_unit(
+    *,
+    store: SQLiteTranslationJobStore | None,
+    work_unit: PersistentWorkUnit,
+    allowed_source_object_keys: Container[str] | None,
+    require_upload_safety_policy: bool,
+) -> Container[str] | None:
+    if allowed_source_object_keys is not None:
+        return allowed_source_object_keys
+    if not require_upload_safety_policy:
+        return None
+    if store is None:
+        raise ValueError(
+            f"Upload safety policy cannot be verified: {work_unit.id}"
+        )
+
+    job = store.get_job(work_unit.job_id)
+    if job is None:
+        raise ValueError(f"Work unit job does not exist: {work_unit.job_id}")
+    if not _job_has_upload_safety_policy(job):
+        raise ValueError(
+            f"Job source object is not accepted by upload safety policy: {job.id}"
+        )
+
+    keys = frozenset(
+        unit.source_object_key
+        for unit in store.list_work_units(job.id)
+        if unit.source_object_key
+    )
+    if work_unit.source_object_key not in keys:
+        raise ValueError(f"Work unit source object is not accepted: {work_unit.id}")
+    return keys
+
+
+def _job_has_upload_safety_policy(job) -> bool:
+    if not job.source_object_key:
+        return False
+    if job.source_object_key.startswith(f"{StoredFileKind.QUARANTINE.value}/"):
+        return False
+    if not job.translation_policy:
+        return False
+    try:
+        payload = json.loads(job.translation_policy)
+    except json.JSONDecodeError:
+        return False
+
+    upload_safety = payload.get("upload_safety")
+    if not isinstance(upload_safety, dict):
+        return False
+    return (
+        upload_safety.get("source_gate") == "upload_safety_ledger"
+        and bool(upload_safety.get("upload_safety_id"))
+        and upload_safety.get("accepted_source_object_key") == job.source_object_key
+    )
 
 
 def _job_translation_context(
@@ -1264,6 +1366,11 @@ def main() -> None:
                 retry_max_delay_seconds=settings.scheduler_retry_max_delay_seconds,
                 beta_safety_guard=beta_safety_guard,
                 translation_run_log_root=settings.translation_run_log_root,
+                require_upload_safety_policy=getattr(
+                    settings,
+                    "require_upload_scan",
+                    False,
+                ),
             )
             time.sleep(settings.scheduler_poll_seconds)
     finally:

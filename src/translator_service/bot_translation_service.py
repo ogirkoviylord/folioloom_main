@@ -103,6 +103,14 @@ from translator_service.translation_run_logs import (
     TranslationRunMetadata,
     finish_running_translation_runs_for_job,
 )
+from translator_service.upload_safety_ledger import (
+    InMemoryUploadSafetyLedger,
+    UploadContainerVerdict,
+    UploadSafetyLedgerError,
+    UploadSafetyMetadata,
+    UploadSafetyState,
+    UploadScanVerdict,
+)
 from translator_service.user_activity import (
     ActivityActorType,
     ActivityOutcome,
@@ -172,6 +180,7 @@ class PendingUpload:
     rights_confirmation_source: str | None = None
     translation_mode: str | None = None
     scan_result: ScanResult | None = None
+    upload_safety_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +205,7 @@ class PendingTranslation:
     preview_accepted_at: str | None = None
     translation_mode: str | None = None
     scan_result: ScanResult | None = None
+    upload_safety_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -334,6 +344,7 @@ class BotTranslationService:
         security_cooldown_policy: SecurityCooldownPolicy | None = None,
         document_scanner: DocumentScanner | None = None,
         require_upload_scan: bool = False,
+        upload_safety_ledger: InMemoryUploadSafetyLedger | None = None,
         activity_store: SQLiteUserActivityStore | None = None,
         beta_access_policy: (
             BetaAccessPolicy | SQLiteBackedBetaAccessPolicy | None
@@ -367,6 +378,9 @@ class BotTranslationService:
         self._document_sandbox = document_sandbox
         self._document_scanner = document_scanner
         self._require_upload_scan = require_upload_scan
+        self._upload_safety_ledger = (
+            upload_safety_ledger or InMemoryUploadSafetyLedger()
+        )
         self._security_threshold_policy = (
             security_threshold_policy or SecurityThresholdPolicy()
         )
@@ -535,20 +549,30 @@ class BotTranslationService:
             raise ValueError(
                 "Prototype bot currently supports TXT, DOCX, and EPUB translation only"
             )
-        scan_result = self._scan_upload_or_raise(
-            file_name=file_name,
-            content=content,
-            document_format=upload.document_format,
-        )
-
-        source_object_key = None
-        if self._file_storage is not None:
-            source_object_key = self._file_storage.put_bytes(
-                kind=StoredFileKind.ORIGINAL,
+        upload_safety_id = None
+        if self._requires_ledger_backed_upload_gate():
+            source_object_key, scan_result, upload_safety_id = (
+                self._create_accepted_source_or_raise(
+                    user_telegram_id=user_telegram_id,
+                    file_name=file_name,
+                    content=content,
+                    document_format=upload.document_format,
+                )
+            )
+        else:
+            scan_result = self._scan_upload_or_raise(
                 file_name=file_name,
-                content_type=_content_type_for_format(upload.document_format),
                 content=content,
-            ).object_key
+                document_format=upload.document_format,
+            )
+            source_object_key = None
+            if self._file_storage is not None:
+                source_object_key = self._file_storage.put_bytes(
+                    kind=StoredFileKind.ORIGINAL,
+                    file_name=file_name,
+                    content_type=_content_type_for_format(upload.document_format),
+                    content=content,
+                ).object_key
 
         pending_upload = PendingUpload(
             user_telegram_id=user_telegram_id,
@@ -564,10 +588,151 @@ class BotTranslationService:
             ),
             source_object_key=source_object_key,
             scan_result=scan_result,
+            upload_safety_id=upload_safety_id,
         )
         with self._state_lock:
             self._pending_uploads[user_telegram_id] = pending_upload
         return pending_upload
+
+    def _requires_ledger_backed_upload_gate(self) -> bool:
+        return self._require_upload_scan
+
+    def _create_accepted_source_or_raise(
+        self,
+        *,
+        user_telegram_id: int,
+        file_name: str,
+        content: bytes,
+        document_format: DocumentFormat,
+    ) -> tuple[str, ScanResult, str]:
+        if self._file_storage is None:
+            raise DocumentScanRejectedError()
+
+        digest = hashlib.sha256(content).hexdigest()
+        upload_safety_id = _upload_safety_id(
+            user_telegram_id=user_telegram_id,
+            digest=digest,
+        )
+        try:
+            quarantine = self._file_storage.put_bytes(
+                kind=StoredFileKind.QUARANTINE,
+                file_name=file_name,
+                content_type=_content_type_for_format(document_format),
+                content=content,
+            )
+        except Exception as error:
+            raise DocumentScanRejectedError() from error
+        try:
+            self._upload_safety_ledger.create_received(
+                UploadSafetyMetadata(
+                    upload_id=upload_safety_id,
+                    user_id=f"telegram:{user_telegram_id}",
+                    quarantine_object_key=quarantine.object_key,
+                    original_file_name=PurePath(file_name).name,
+                    document_format=document_format.value,
+                    size_bytes=len(content),
+                    sha256=digest,
+                )
+            )
+            self._upload_safety_ledger.transition(
+                upload_safety_id,
+                UploadSafetyState.QUARANTINED,
+            )
+            scan_result = self._scan_upload_with_ledger_or_raise(
+                upload_safety_id=upload_safety_id,
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
+            self._upload_safety_ledger.transition(
+                upload_safety_id,
+                UploadSafetyState.CONTAINER_STARTED,
+            )
+            self._upload_safety_ledger.transition(
+                upload_safety_id,
+                UploadSafetyState.CONTAINER_CLEAN,
+                container_verdict=UploadContainerVerdict.CLEAN,
+            )
+        except UploadSafetyLedgerError as error:
+            raise DocumentScanRejectedError() from error
+
+        try:
+            accepted = self._file_storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name=file_name,
+                content_type=_content_type_for_format(document_format),
+                content=content,
+            )
+        except Exception as error:
+            raise DocumentScanRejectedError() from error
+        try:
+            self._upload_safety_ledger.create_accepted_source(
+                upload_safety_id,
+                accepted_source_object_key=accepted.object_key,
+            )
+        except UploadSafetyLedgerError as error:
+            self._file_storage.delete(accepted.object_key)
+            raise DocumentScanRejectedError() from error
+
+        decision = self._upload_safety_ledger.parser_access_decision(upload_safety_id)
+        if (
+            not decision.allowed
+            or decision.accepted_source_object_key != accepted.object_key
+        ):
+            self._file_storage.delete(accepted.object_key)
+            raise DocumentScanRejectedError()
+        return accepted.object_key, scan_result, upload_safety_id
+
+    def _scan_upload_with_ledger_or_raise(
+        self,
+        *,
+        upload_safety_id: str,
+        file_name: str,
+        content: bytes,
+        document_format: DocumentFormat,
+    ) -> ScanResult:
+        try:
+            self._upload_safety_ledger.transition(
+                upload_safety_id,
+                UploadSafetyState.SCAN_STARTED,
+            )
+            result = self._scan_upload_or_raise(
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
+            assert result is not None
+            self._upload_safety_ledger.transition(
+                upload_safety_id,
+                UploadSafetyState.SCAN_CLEAN,
+                scan_verdict=UploadScanVerdict.CLEAN,
+            )
+            return result
+        except DocumentScanRejectedError as error:
+            result = error.scan_result
+            failed_state = (
+                UploadSafetyState.SCAN_BLOCKED
+                if error.verdict is ScannerVerdict.INFECTED
+                else UploadSafetyState.SCAN_FAILED
+            )
+            try:
+                self._upload_safety_ledger.transition(
+                    upload_safety_id,
+                    failed_state,
+                    scan_verdict=_upload_scan_verdict(error.verdict),
+                    safe_error_class=(
+                        result.safe_error_class
+                        if result is not None
+                        else _safe_scan_error_class(error.verdict)
+                    ),
+                )
+                self._upload_safety_ledger.transition(
+                    upload_safety_id,
+                    UploadSafetyState.REJECTED,
+                )
+            except UploadSafetyLedgerError:
+                pass
+            raise
 
     def _scan_upload_or_raise(
         self,
@@ -610,6 +775,57 @@ class BotTranslationService:
                 scan_result=result,
             )
         return result
+
+    def _assert_parser_access_allowed(
+        self,
+        *,
+        upload_safety_id: str | None,
+        source_object_key: str | None,
+    ) -> None:
+        if not self._requires_ledger_backed_upload_gate():
+            return
+        if upload_safety_id is None or source_object_key is None:
+            raise DocumentScanRejectedError()
+        decision = self._upload_safety_ledger.parser_access_decision(upload_safety_id)
+        if (
+            not decision.allowed
+            or decision.accepted_source_object_key != source_object_key
+        ):
+            raise DocumentScanRejectedError()
+
+    def _assert_worker_access_allowed(
+        self,
+        *,
+        upload_safety_id: str | None,
+        source_object_key: str | None,
+    ) -> None:
+        if not self._requires_ledger_backed_upload_gate():
+            return
+        if upload_safety_id is None or source_object_key is None:
+            raise DocumentScanRejectedError()
+        decision = self._upload_safety_ledger.worker_access_decision(upload_safety_id)
+        if (
+            not decision.allowed
+            or decision.accepted_source_object_key != source_object_key
+        ):
+            raise DocumentScanRejectedError()
+
+    def _upload_safety_id_for_accepted_source(
+        self,
+        source_object_key: str | None,
+    ) -> str | None:
+        if not self._requires_ledger_backed_upload_gate():
+            return None
+        if source_object_key is None:
+            raise DocumentScanRejectedError()
+        upload_safety_id = self._upload_safety_ledger.upload_id_for_accepted_source(
+            source_object_key
+        )
+        self._assert_worker_access_allowed(
+            upload_safety_id=upload_safety_id,
+            source_object_key=source_object_key,
+        )
+        return upload_safety_id
 
     def get_pending_upload(self, user_telegram_id: int) -> PendingUpload | None:
         with self._state_lock:
@@ -728,6 +944,7 @@ class BotTranslationService:
             rights_confirmation_source=pending_upload.rights_confirmation_source,
             translation_mode=pending_upload.translation_mode,
             scan_result=pending_upload.scan_result,
+            upload_safety_id=pending_upload.upload_safety_id,
         )
         with self._state_lock:
             self._pending_uploads.pop(user_telegram_id, None)
@@ -749,6 +966,7 @@ class BotTranslationService:
         rights_confirmation_source: str | None = None,
         translation_mode: str | None = None,
         scan_result: ScanResult | None = None,
+        upload_safety_id: str | None = None,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -769,11 +987,25 @@ class BotTranslationService:
                     "Prototype bot currently supports TXT, DOCX, and EPUB "
                     "translation only"
                 )
-        resolved_scan_result = scan_result or self._scan_upload_or_raise(
-            file_name=file_name,
-            content=content,
-            document_format=upload.document_format,
-        )
+        if self._requires_ledger_backed_upload_gate() and upload_safety_id is None:
+            source_object_key, resolved_scan_result, upload_safety_id = (
+                self._create_accepted_source_or_raise(
+                    user_telegram_id=user_telegram_id,
+                    file_name=file_name,
+                    content=content,
+                    document_format=upload.document_format,
+                )
+            )
+        else:
+            resolved_scan_result = scan_result or self._scan_upload_or_raise(
+                file_name=file_name,
+                content=content,
+                document_format=upload.document_format,
+            )
+            self._assert_parser_access_allowed(
+                upload_safety_id=upload_safety_id,
+                source_object_key=source_object_key,
+            )
 
         estimate = estimate_order(
             upload=upload,
@@ -817,6 +1049,7 @@ class BotTranslationService:
             ),
             translation_mode=normalized_mode,
             scan_result=resolved_scan_result,
+            upload_safety_id=upload_safety_id,
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -872,6 +1105,10 @@ class BotTranslationService:
                 raise RightsConfirmationRequired(
                     "Document rights must be confirmed before preview selection"
                 )
+            self._assert_parser_access_allowed(
+                upload_safety_id=pending.upload_safety_id,
+                source_object_key=pending.source_object_key,
+            )
 
         upload = validate_document_upload(
             file_name=pending.file_name,
@@ -1119,6 +1356,7 @@ class BotTranslationService:
                 rights_confirmation_source=pending.rights_confirmation_source,
                 translation_mode=pending.translation_mode,
                 scan_result=pending.scan_result,
+                upload_safety_id=pending.upload_safety_id,
             )
             self._pending_uploads[user_telegram_id] = upload
             return upload
@@ -1414,6 +1652,10 @@ class BotTranslationService:
             return None
         if not _can_resume_persistent_job(job.status.value):
             return self._book_summary_from_job(job)
+        try:
+            self._upload_safety_id_for_accepted_source(job.source_object_key)
+        except DocumentScanRejectedError:
+            return self._book_summary_from_job(job)
 
         return self._book_summary_from_job(
             self._persistent_job_store.resume_job(job_id)
@@ -1437,6 +1679,12 @@ class BotTranslationService:
             return None
         if not _can_resume_persistent_job(job.status.value):
             return None
+        try:
+            upload_safety_id = self._upload_safety_id_for_accepted_source(
+                job.source_object_key
+            )
+        except DocumentScanRejectedError:
+            return None
 
         document_kind = DocumentKind(job.document_kind)
         source_content = (
@@ -1453,9 +1701,15 @@ class BotTranslationService:
             price_usd=0.0,
             fragment_count=len(self._persistent_job_store.list_work_units(job_id)),
             source_object_key=job.source_object_key,
+            upload_safety_id=upload_safety_id,
         )
         resumed = self._persistent_job_store.resume_job(job_id)
-        total_fragments = len(self._persistent_job_store.list_work_units(job_id))
+        work_units = self._persistent_job_store.list_work_units(job_id)
+        total_fragments = len(work_units)
+        allowed_source_object_keys = _allowed_persistent_work_unit_source_keys(
+            work_units=work_units,
+            require_upload_scan=self._requires_ledger_backed_upload_gate(),
+        )
         if self._defer_persistent_jobs_to_worker:
             self._record_activity_for_user(
                 user_telegram_id=user_telegram_id,
@@ -1528,6 +1782,7 @@ class BotTranslationService:
                     total_fragments=total_fragments,
                     run_logger=run_logger,
                     security_limiter=security_limiter,
+                    allowed_source_object_keys=allowed_source_object_keys,
                 )
 
             return self._run_parallel_persistent_translation(
@@ -1543,6 +1798,7 @@ class BotTranslationService:
                 total_fragments=total_fragments,
                 run_logger=run_logger,
                 security_limiter=security_limiter,
+                allowed_source_object_keys=allowed_source_object_keys,
             )
         except Exception as error:
             logger.exception(
@@ -2597,6 +2853,10 @@ class BotTranslationService:
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
         assert pending.source_object_key is not None
+        self._assert_worker_access_allowed(
+            upload_safety_id=pending.upload_safety_id,
+            source_object_key=pending.source_object_key,
+        )
 
         plan = _create_persistent_job_plan(
             document_kind=document_kind,
@@ -2606,6 +2866,10 @@ class BotTranslationService:
             max_fragment_chars=self._max_fragment_chars,
         )
         total_fragments = len(plan.work_units)
+        allowed_source_object_keys = _allowed_persistent_work_unit_source_keys(
+            work_units=plan.work_units,
+            require_upload_scan=self._requires_ledger_backed_upload_gate(),
+        )
         reservation_decision = self._reserve_beta_safety_for_persistent_job(
             job_id=plan.job.id,
             user_id=plan.job.user_id,
@@ -2712,6 +2976,7 @@ class BotTranslationService:
                 total_fragments=total_fragments,
                 run_logger=run_logger,
                 security_limiter=security_limiter,
+                allowed_source_object_keys=allowed_source_object_keys,
             )
 
         if self._max_parallel_work_units > 1:
@@ -2725,6 +2990,7 @@ class BotTranslationService:
                 total_fragments=total_fragments,
                 run_logger=run_logger,
                 security_limiter=security_limiter,
+                allowed_source_object_keys=allowed_source_object_keys,
             )
 
         while True:
@@ -2760,6 +3026,7 @@ class BotTranslationService:
                     total_units=total_fragments,
                 ),
                 usage_completed_callback=self._beta_safety_usage_completed_callback(),
+                allowed_source_object_keys=allowed_source_object_keys,
             )
             if completed_unit is None:
                 break
@@ -2869,6 +3136,7 @@ class BotTranslationService:
         total_fragments: int,
         run_logger: TranslationRunLogger | None,
         security_limiter: SecurityEventLimiter,
+        allowed_source_object_keys: frozenset[str] | None,
     ) -> TranslationJob:
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
@@ -2897,6 +3165,7 @@ class BotTranslationService:
                     total_units=total_fragments,
                 ),
                 beta_safety_guard=self._beta_safety_guard,
+                allowed_source_object_keys=allowed_source_object_keys,
             )
             try:
                 _record_translator_security_events(
@@ -2976,6 +3245,7 @@ class BotTranslationService:
         total_fragments: int,
         run_logger: TranslationRunLogger | None,
         security_limiter: SecurityEventLimiter,
+        allowed_source_object_keys: frozenset[str] | None,
     ) -> TranslationJob:
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
@@ -3019,6 +3289,7 @@ class BotTranslationService:
                 ),
                 should_stop=lambda: cancellation_token.is_cancelled,
                 usage_completed_callback=self._beta_safety_usage_completed_callback(),
+                allowed_source_object_keys=allowed_source_object_keys,
             )
         except SecurityThresholdExceeded as error:
             return self._fail_persistent_translation_after_security_threshold(
@@ -3260,6 +3531,7 @@ def _create_persistent_job_plan(
         "max_fragment_chars": max_fragment_chars,
         "rights_confirmation": _rights_confirmation_payload(pending),
         "translation_mode": pending.translation_mode,
+        "upload_safety_id": pending.upload_safety_id,
     }
     if document_kind is DocumentKind.TXT:
         return create_persistent_txt_job_plan(**common)
@@ -3268,6 +3540,21 @@ def _create_persistent_job_plan(
     if document_kind is DocumentKind.EPUB:
         return create_persistent_epub_job_plan(**common)
     raise ValueError(f"Unsupported persistent document kind: {document_kind}")
+
+
+def _allowed_persistent_work_unit_source_keys(
+    *,
+    work_units,
+    require_upload_scan: bool,
+) -> frozenset[str] | None:
+    if not require_upload_scan:
+        return None
+    keys = frozenset(
+        unit.source_object_key for unit in work_units if unit.source_object_key
+    )
+    if len(keys) != len(work_units):
+        raise DocumentScanRejectedError()
+    return keys
 
 
 def _preview_adapter_plan(
@@ -3988,6 +4275,34 @@ def _content_type_for_format(document_format: DocumentFormat) -> str:
     if document_format is DocumentFormat.EPUB:
         return "application/epub+zip"
     return "application/octet-stream"
+
+
+def _upload_safety_id(*, user_telegram_id: int, digest: str) -> str:
+    return f"telegram:{user_telegram_id}:{digest[:16]}:{time.time_ns()}"
+
+
+def _upload_scan_verdict(
+    scanner_verdict: ScannerVerdict | None,
+) -> UploadScanVerdict | None:
+    if scanner_verdict is ScannerVerdict.CLEAN:
+        return UploadScanVerdict.CLEAN
+    if scanner_verdict is ScannerVerdict.INFECTED:
+        return UploadScanVerdict.INFECTED
+    if scanner_verdict is ScannerVerdict.SCANNER_TIMEOUT:
+        return UploadScanVerdict.SCANNER_TIMEOUT
+    if scanner_verdict is ScannerVerdict.SCANNER_UNAVAILABLE:
+        return UploadScanVerdict.SCANNER_UNAVAILABLE
+    if scanner_verdict is ScannerVerdict.UNSUPPORTED:
+        return UploadScanVerdict.UNSUPPORTED
+    if scanner_verdict is ScannerVerdict.SCANNER_ERROR:
+        return UploadScanVerdict.SCANNER_ERROR
+    return None
+
+
+def _safe_scan_error_class(scanner_verdict: ScannerVerdict | None) -> str:
+    if scanner_verdict is None:
+        return "scanner_missing"
+    return scanner_verdict.value
 
 
 def estimate_translation_seconds(

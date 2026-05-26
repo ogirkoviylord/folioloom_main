@@ -152,6 +152,7 @@ class BotRuntimeConfig:
     target_language: str = "en"
     max_fragment_chars: int = 4_000
     max_upload_mb: int = 50
+    require_upload_scan: bool = False
     object_storage_root: str = "var/object-storage"
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
     scheduler_backend: str = "sqlite"
@@ -289,6 +290,7 @@ def build_beta_safety_guard(config: BotRuntimeConfig) -> ConfiguredBetaSafetyGua
 def bot_runtime_config_from_settings(settings: Settings) -> BotRuntimeConfig:
     return BotRuntimeConfig(
         max_upload_mb=settings.max_upload_mb,
+        require_upload_scan=settings.require_upload_scan,
         object_storage_root=settings.object_storage_root,
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
         scheduler_backend=settings.scheduler_backend,
@@ -337,6 +339,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         pricing_rules=build_default_pricing_rules(),
         max_upload_mb=config.max_upload_mb,
         max_fragment_chars=config.max_fragment_chars,
+        require_upload_scan=config.require_upload_scan,
         file_storage=LocalObjectStorage(config.object_storage_root),
         persistent_job_store=open_persistent_job_store(config),
         translation_run_log_root=config.translation_run_log_root,
