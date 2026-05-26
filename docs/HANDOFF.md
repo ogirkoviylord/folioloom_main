@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-23
+Last updated: 2026-05-26
 
 ## 1. Текущее состояние проекта
 
@@ -253,17 +253,27 @@ core flow, release gates, operational visibility and documentation.
   ledger cannot resolve the accepted source, and stored-worker rejection for
   quarantine, explicitly unaccepted source object keys, or scan-gated detached
   worker jobs that lack a safe `translation_policy.upload_safety` accepted-source
-  marker. `REQUIRE_UPLOAD_SCAN=true` enables the runtime scan gate, but release
-  docs still do not claim complete upload hardening, active local ClamAV
-  scanning, quarantine retention, durable upload-safety ledger persistence or
-  Gate B malware scanning evidence. Owner accepted adding a local malware/AV
-  scanning gate on 2026-05-22.
+  marker. Issue #103 adds a read-only admin Upload Safety surface backed by
+  metadata-only `security.upload_safety.summary` activity events that are shared
+  through the existing admin activity DB between the bot and API processes:
+  overview/list/detail pages, safe filters, timeline rendering and redaction
+  coverage for full hashes, object keys, quarantine paths, raw scanner output,
+  raw exception details and raw document text. `REQUIRE_UPLOAD_SCAN=true` enables
+  the runtime scan gate, but release docs still do not claim complete upload
+  hardening, active local ClamAV scanning, quarantine retention, durable raw
+  upload-safety ledger persistence, real scanner health evidence or Gate B
+  malware scanning evidence. Owner accepted adding a local malware/AV scanning
+  gate on 2026-05-22.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
   `docs/restart/release-gates.md`, `src/translator_service/documents.py`,
   `src/translator_service/document_sandbox.py`,
   `src/translator_service/document_scanner.py`,
   `src/translator_service/upload_safety_ledger.py`,
-  `tests/test_documents.py`, `tests/test_bot_translation_service.py`.
+  `src/translator_service/admin/upload_safety.py`,
+  `src/translator_service/admin/routes.py`,
+  `src/translator_service/admin/views.py`,
+  `tests/test_documents.py`, `tests/test_bot_translation_service.py`,
+  `tests/test_admin_upload_safety.py`.
 - Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
   paths if full hardening/scanning is incomplete; public external scanning could
   leak rights-sensitive documents if used as the default.
