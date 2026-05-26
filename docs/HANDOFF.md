@@ -108,8 +108,11 @@ core flow, release gates, operational visibility and documentation.
 - закрыть Gate B blockers для free closed beta;
 - улучшить upload safety, TTL/delete verification и real-file QA;
 - добавить local malware/AV scanning gate как часть upload safety; owner
-  accepted this direction on 2026-05-22, but implementation evidence is still
-  Unknown;
+  accepted this direction on 2026-05-22 and selected local ClamAV `clamd`
+  daemon/socket with `INSTREAM` scanning as the target adapter mode on
+  2026-05-26. Issue #93 is the approved code/tests-only adapter slice, issue
+  #109 is the separate runtime/deployment slice, and implementation evidence is
+  still Unknown;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
 - держать payments, public production, public admin и новые форматы вне
