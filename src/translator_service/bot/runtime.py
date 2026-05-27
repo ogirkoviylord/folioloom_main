@@ -107,6 +107,11 @@ from translator_service.deepseek_key_pool import (
     DeepSeekKeyPoolTranslator,
 )
 from translator_service.document_sandbox import DocumentSandbox, DocumentSandboxLimits
+from translator_service.document_scanner import (
+    ClamdDocumentScanner,
+    DocumentScanner,
+    LimitedConcurrencyDocumentScanner,
+)
 from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
@@ -153,6 +158,14 @@ class BotRuntimeConfig:
     max_fragment_chars: int = 4_000
     max_upload_mb: int = 50
     require_upload_scan: bool = False
+    upload_scanner_backend: str = "none"
+    upload_scan_max_concurrency: int = 1
+    upload_scan_backpressure_timeout_seconds: float = 1.0
+    clamd_host: str = "127.0.0.1"
+    clamd_port: int = 3310
+    clamd_timeout_seconds: float = 10.0
+    clamd_chunk_size_bytes: int = 65_536
+    clamd_response_limit_bytes: int = 4_096
     object_storage_root: str = "var/object-storage"
     persistent_jobs_db_path: str = "var/jobs.sqlite3"
     scheduler_backend: str = "sqlite"
@@ -287,10 +300,42 @@ def build_beta_safety_guard(config: BotRuntimeConfig) -> ConfiguredBetaSafetyGua
     )
 
 
+def build_document_scanner(config: BotRuntimeConfig) -> DocumentScanner | None:
+    backend = config.upload_scanner_backend.strip().lower()
+    if backend in {"", "none", "disabled"}:
+        return None
+    if backend != "clamd":
+        raise ValueError(f"Unsupported upload scanner backend: {backend}")
+
+    scanner: DocumentScanner = ClamdDocumentScanner(
+        host=config.clamd_host,
+        port=config.clamd_port,
+        timeout_seconds=config.clamd_timeout_seconds,
+        chunk_size=config.clamd_chunk_size_bytes,
+        response_limit_bytes=config.clamd_response_limit_bytes,
+    )
+    return LimitedConcurrencyDocumentScanner(
+        scanner,
+        max_concurrent_scans=config.upload_scan_max_concurrency,
+        acquire_timeout_seconds=config.upload_scan_backpressure_timeout_seconds,
+        scanner_name="clamd",
+    )
+
+
 def bot_runtime_config_from_settings(settings: Settings) -> BotRuntimeConfig:
     return BotRuntimeConfig(
         max_upload_mb=settings.max_upload_mb,
         require_upload_scan=settings.require_upload_scan,
+        upload_scanner_backend=settings.upload_scanner_backend,
+        upload_scan_max_concurrency=settings.upload_scan_max_concurrency,
+        upload_scan_backpressure_timeout_seconds=(
+            settings.upload_scan_backpressure_timeout_seconds
+        ),
+        clamd_host=settings.clamd_host,
+        clamd_port=settings.clamd_port,
+        clamd_timeout_seconds=settings.clamd_timeout_seconds,
+        clamd_chunk_size_bytes=settings.clamd_chunk_size_bytes,
+        clamd_response_limit_bytes=settings.clamd_response_limit_bytes,
         object_storage_root=settings.object_storage_root,
         persistent_jobs_db_path=settings.persistent_jobs_db_path,
         scheduler_backend=settings.scheduler_backend,
@@ -340,6 +385,7 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         max_upload_mb=config.max_upload_mb,
         max_fragment_chars=config.max_fragment_chars,
         require_upload_scan=config.require_upload_scan,
+        document_scanner=build_document_scanner(config),
         file_storage=LocalObjectStorage(config.object_storage_root),
         persistent_job_store=open_persistent_job_store(config),
         translation_run_log_root=config.translation_run_log_root,

@@ -1,5 +1,6 @@
 import socket
 import struct
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -54,6 +55,54 @@ class DocumentScanner(Protocol):
         document_format: DocumentFormat,
     ) -> ScanResult:
         """Return a safe verdict for an uploaded document before parsing."""
+
+
+class LimitedConcurrencyDocumentScanner:
+    def __init__(
+        self,
+        scanner: DocumentScanner,
+        *,
+        max_concurrent_scans: int,
+        acquire_timeout_seconds: float,
+        scanner_name: str = "limited-document-scanner",
+    ) -> None:
+        if max_concurrent_scans <= 0:
+            raise ValueError("max_concurrent_scans must be positive")
+        if acquire_timeout_seconds < 0:
+            raise ValueError("acquire_timeout_seconds must be non-negative")
+
+        self._scanner = scanner
+        self._semaphore = threading.BoundedSemaphore(max_concurrent_scans)
+        self._acquire_timeout_seconds = acquire_timeout_seconds
+        self._scanner_name = scanner_name
+
+    def scan(
+        self,
+        *,
+        file_name: str,
+        content: bytes,
+        document_format: DocumentFormat,
+    ) -> ScanResult:
+        acquired = self._semaphore.acquire(timeout=self._acquire_timeout_seconds)
+        if not acquired:
+            return ScanResult(
+                verdict=ScannerVerdict.SCANNER_UNAVAILABLE,
+                scanner_name=self._scanner_name,
+                scanner_version=None,
+                signature_database_version=None,
+                content_sha256=sha256(content).hexdigest(),
+                size_bytes=len(content),
+                document_format=document_format,
+                safe_error_class="scanner_backpressure",
+            )
+        try:
+            return self._scanner.scan(
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
+        finally:
+            self._semaphore.release()
 
 
 class _ClamdTimeoutError(RuntimeError):

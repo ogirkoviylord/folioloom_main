@@ -58,6 +58,7 @@ from translator_service.bot.runtime import (
     build_beta_safety_guard,
     build_deepseek_translator,
     build_default_pricing_rules,
+    build_document_scanner,
     build_translation_service,
     create_router,
 )
@@ -70,6 +71,7 @@ from translator_service.bot_translation_service import (
 from translator_service.config import Settings
 from translator_service.deepseek_key_pool import DeepSeekKeyPoolTranslator
 from translator_service.document_sandbox import DocumentSandbox
+from translator_service.document_scanner import LimitedConcurrencyDocumentScanner
 from translator_service.job_runner import (
     DocumentKind,
     TranslationJob,
@@ -386,6 +388,15 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.target_language, "en")
         self.assertEqual(config.max_fragment_chars, 4_000)
         self.assertEqual(config.max_upload_mb, 50)
+        self.assertFalse(config.require_upload_scan)
+        self.assertEqual(config.upload_scanner_backend, "none")
+        self.assertEqual(config.upload_scan_max_concurrency, 1)
+        self.assertEqual(config.upload_scan_backpressure_timeout_seconds, 1.0)
+        self.assertEqual(config.clamd_host, "127.0.0.1")
+        self.assertEqual(config.clamd_port, 3310)
+        self.assertEqual(config.clamd_timeout_seconds, 10.0)
+        self.assertEqual(config.clamd_chunk_size_bytes, 65_536)
+        self.assertEqual(config.clamd_response_limit_bytes, 4_096)
         self.assertEqual(config.object_storage_root, "var/object-storage")
         self.assertEqual(config.persistent_jobs_db_path, "var/jobs.sqlite3")
         self.assertEqual(config.scheduler_backend, "sqlite")
@@ -426,6 +437,26 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(service._persistent_job_store, fake_store)
         self.assertTrue(service._use_scheduler_runner)
         self.assertFalse(service._defer_persistent_jobs_to_worker)
+
+    def test_build_document_scanner_wires_clamd_with_backpressure(self):
+        scanner = build_document_scanner(
+            BotRuntimeConfig(
+                upload_scanner_backend="clamd",
+                clamd_host="clamd",
+                clamd_port=3310,
+                clamd_timeout_seconds=2.0,
+                clamd_chunk_size_bytes=8192,
+                clamd_response_limit_bytes=1024,
+                upload_scan_max_concurrency=1,
+                upload_scan_backpressure_timeout_seconds=0.1,
+            )
+        )
+
+        self.assertIsInstance(scanner, LimitedConcurrencyDocumentScanner)
+
+    def test_build_document_scanner_rejects_unknown_backend(self):
+        with self.assertRaises(ValueError):
+            build_document_scanner(BotRuntimeConfig(upload_scanner_backend="public-av"))
 
     def test_callback_spam_guard_blocks_fast_duplicate_actions(self):
         now = 100.0

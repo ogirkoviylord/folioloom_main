@@ -12,6 +12,14 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.environment, "development")
         self.assertEqual(settings.max_upload_mb, 50)
         self.assertFalse(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "none")
+        self.assertEqual(settings.upload_scan_max_concurrency, 1)
+        self.assertEqual(settings.upload_scan_backpressure_timeout_seconds, 1.0)
+        self.assertEqual(settings.clamd_host, "127.0.0.1")
+        self.assertEqual(settings.clamd_port, 3310)
+        self.assertEqual(settings.clamd_timeout_seconds, 10.0)
+        self.assertEqual(settings.clamd_chunk_size_bytes, 65536)
+        self.assertEqual(settings.clamd_response_limit_bytes, 4096)
         self.assertEqual(settings.deepseek_model, "deepseek-v4-flash")
         self.assertEqual(settings.object_storage_root, "var/object-storage")
         self.assertEqual(settings.persistent_jobs_db_path, "var/jobs.sqlite3")
@@ -62,10 +70,31 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(settings.bot_defer_persistent_jobs_to_worker)
 
     def test_upload_scan_gate_can_be_required_from_environment(self):
-        with patch.dict("os.environ", {"REQUIRE_UPLOAD_SCAN": "true"}):
+        with patch.dict(
+            "os.environ",
+            {
+                "REQUIRE_UPLOAD_SCAN": "true",
+                "UPLOAD_SCANNER_BACKEND": "clamd",
+                "UPLOAD_SCAN_MAX_CONCURRENCY": "2",
+                "UPLOAD_SCAN_BACKPRESSURE_TIMEOUT_SECONDS": "0.5",
+                "CLAMD_HOST": "clamd",
+                "CLAMD_PORT": "3310",
+                "CLAMD_TIMEOUT_SECONDS": "2.5",
+                "CLAMD_CHUNK_SIZE_BYTES": "8192",
+                "CLAMD_RESPONSE_LIMIT_BYTES": "1024",
+            },
+        ):
             settings = Settings()
 
         self.assertTrue(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "clamd")
+        self.assertEqual(settings.upload_scan_max_concurrency, 2)
+        self.assertEqual(settings.upload_scan_backpressure_timeout_seconds, 0.5)
+        self.assertEqual(settings.clamd_host, "clamd")
+        self.assertEqual(settings.clamd_port, 3310)
+        self.assertEqual(settings.clamd_timeout_seconds, 2.5)
+        self.assertEqual(settings.clamd_chunk_size_bytes, 8192)
+        self.assertEqual(settings.clamd_response_limit_bytes, 1024)
 
     def test_security_thresholds_can_be_configured_from_environment(self):
         with patch.dict(
