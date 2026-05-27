@@ -442,6 +442,9 @@ Acceptance criteria:
   from #94, adapter implementation from #93 and runtime evidence from #109 for
   full server/runtime evidence, unless an explicit owner-approved deferral
   exists.
+  Status: issue #95 metadata-only local evidence is recorded in
+  `docs/restart/gate-b-evidence-report.md` on the PR branch; it is not a full
+  Gate B, free beta, public production or deployment readiness claim.
   Suggested acceptance criteria: evidence records clean, infected/EICAR,
   timeout/unavailable/error and unscanned paths with commands and metadata-only
   artifacts; it does not claim broader Gate B or production readiness.
