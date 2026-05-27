@@ -865,6 +865,9 @@ Evidence:
   tracks the separate internal `clamd` Docker Compose/runtime service,
   signature/health visibility, resource/concurrency safeguards and runtime
   smoke evidence.
+- GitHub issue [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
+  records metadata-only Gate B malware/AV scanning evidence on 2026-05-27,
+  after issues #93, #94, #101, #102, #103 and #109 closed.
 - Owner approved the scoped issue #109 implementation in chat on 2026-05-27:
   internal-only Docker Compose/runtime `clamd` service, safe app config,
   metadata-only health/version/EICAR checks, predeploy/server-smoke updates and
@@ -887,7 +890,10 @@ Consequences:
 - Any ClamAV sidecar, Docker/deployment change, new production dependency,
   scanner socket/service configuration, retention behavior or runtime data
   handling requires explicit owner approval in the relevant issue.
-  Gate B evidence exist.
+- Agents may cite the local/internal malware/AV scanning Gate B item as
+  evidenced after issue #95, but must not treat it as broader upload hardening,
+  TTL/quarantine cleanup, approved beta-server smoke, full Gate B or free-beta
+  readiness.
 
 Human approval required to change:
 - yes; this touches security, privacy, user data, deployment and dependency
