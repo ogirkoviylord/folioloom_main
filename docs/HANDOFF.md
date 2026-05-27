@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 ## 1. Текущее состояние проекта
 
@@ -110,9 +110,15 @@ core flow, release gates, operational visibility and documentation.
 - добавить local malware/AV scanning gate как часть upload safety; owner
   accepted this direction on 2026-05-22 and selected local ClamAV `clamd`
   daemon/socket with `INSTREAM` scanning as the target adapter mode on
-  2026-05-26. Issue #93 is the approved code/tests-only adapter slice, issue
-  #109 is the separate runtime/deployment slice, and implementation evidence is
-  still Unknown;
+  2026-05-26. Issue #93 added the code/tests-only adapter slice. Issue #109
+  adds the internal-only Docker Compose/runtime `clamd` service, env-driven
+  scanner config, bounded scan concurrency/backpressure and metadata-only
+  runtime health/version plus EICAR smoke check. On 2026-05-27, an isolated
+  local compose smoke for #109 passed with `clamd` reachable on the internal
+  Docker network, `status=ok`, `scanner_version=ClamAV 1.4.4`,
+  `signature_database_version=28010` and `eicar_verdict=infected`; real
+  `.env*`, `var/` and user data were not used. Gate B malware/AV release
+  evidence remains separate in issue #95 and is still Unknown until verified;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
 - держать payments, public production, public admin и новые форматы вне
@@ -261,10 +267,16 @@ core flow, release gates, operational visibility and documentation.
   through the existing admin activity DB between the bot and API processes:
   overview/list/detail pages, safe filters, timeline rendering and redaction
   coverage for full hashes, object keys, quarantine paths, raw scanner output,
-  raw exception details and raw document text. `REQUIRE_UPLOAD_SCAN=true` enables
-  the runtime scan gate, but release docs still do not claim complete upload
-  hardening, active local ClamAV scanning, quarantine retention, durable raw
-  upload-safety ledger persistence, real scanner health evidence or Gate B
+  raw exception details and raw document text. `REQUIRE_UPLOAD_SCAN=true` with
+  `UPLOAD_SCANNER_BACKEND=clamd` enables the runtime scan gate. Issue #93 adds
+  the local `clamd` `INSTREAM` adapter, and issue #109 adds an internal-only
+  `clamd` Docker Compose service plus metadata-only PING/VERSION and EICAR
+  smoke check. Local isolated #109 smoke on 2026-05-27 confirmed
+  `status=ok`, `scanner_version=ClamAV 1.4.4`,
+  `signature_database_version=28010` and `eicar_verdict=infected` from an app
+  image container without real `.env*`, `var/` or user data. Release docs still
+  do not claim complete upload hardening, quarantine retention, durable raw
+  upload-safety ledger persistence, approved server smoke evidence or Gate B
   malware scanning evidence. Owner accepted adding a local malware/AV scanning
   gate on 2026-05-22.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
@@ -280,9 +292,9 @@ core flow, release gates, operational visibility and documentation.
 - Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
   paths if full hardening/scanning is incomplete; public external scanning could
   leak rights-sensitive documents if used as the default.
-- Suggested next task: Reviewer checks issue #94 scope, then continue the split
-  scanner work with the local scanner adapter and Gate B evidence issues. Any
-  deployment, new dependency, external scanning, retention or runtime-data
+- Suggested next task: Reviewer checks issue #109 scope and verification, then
+  continue to issue #95 Gate B malware/AV evidence. Any deployment, external
+  scanning, retention or runtime-data
   behavior still needs explicit owner approval.
 
 - Area: TTL cleanup and delete verification.

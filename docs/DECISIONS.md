@@ -880,6 +880,13 @@ Evidence:
   tracks the separate internal `clamd` Docker Compose/runtime service,
   signature/health visibility, resource/concurrency safeguards and runtime
   smoke evidence.
+- Owner approved the scoped issue #109 implementation in chat on 2026-05-27:
+  internal-only Docker Compose/runtime `clamd` service, safe app config,
+  metadata-only health/version/EICAR checks, predeploy/server-smoke updates and
+  safe fixture/local verification are allowed. Production deploy, live server
+  operation, real `.env*`, runtime `var/`, real user data, public malware
+  scanning, retention/TTL/quarantine cleanup changes and Gate B readiness
+  claims remain out of scope unless separately approved.
 
 Reason:
 - User uploads are untrusted input and may include private or rights-sensitive

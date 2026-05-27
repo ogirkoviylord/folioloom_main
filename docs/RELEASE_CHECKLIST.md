@@ -205,7 +205,8 @@ Checklist:
 
 Confirmed operational shape:
 
-- Runtime services: `api`, `bot`, `worker`, `postgres`, `redis`.
+- Runtime services: `api`, `bot`, `worker`, `postgres`, `redis`, internal-only
+  `clamd`.
 - Deploy command documented: `scripts/deploy_server.sh`.
 - Predeploy gate documented: `scripts/predeploy_check.sh`.
 - Server smoke/status scripts documented: `scripts/server_smoke_check.sh` and
@@ -231,6 +232,9 @@ Checklist:
 - [ ] Support/debug procedure documented.
 - [ ] `scripts/server_smoke_check.sh` passed on target server or missing server
   condition is recorded.
+- [ ] If upload scanning is enabled, `scripts/server_smoke_check.sh` confirms
+  the bot container can reach internal `clamd` and records only safe
+  PING/VERSION/EICAR metadata.
 
 ## 9. AI-agent release rules
 
