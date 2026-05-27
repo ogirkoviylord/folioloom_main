@@ -53,9 +53,16 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [x] Admin kill switch exists in Settings/Live visibility and stops new
   uploads/jobs and new scheduler claims without restart.
 - [ ] Upload hardening/quarantine baseline is active.
-- [ ] Local malware/AV scanning gate is active before parsing, or explicitly
+- [x] Local malware/AV scanning gate is active before parsing, or explicitly
   deferred by owner in the Gate B evidence report. Public multi-engine services
-  must not receive user documents by default.
+  must not receive user documents by default. Evidence: issue #95 metadata-only
+  local verification on 2026-05-27 passed focused scanner/upload/runtime/
+  deployment tests, full unittest, compileall and predeploy; issue #109
+  metadata-only local runtime smoke confirmed internal `clamd` was reachable and
+  detected the safe EICAR test signature without real `.env*`, `var/`, live
+  server or user data. This checks only the malware/AV scanning item, not
+  broader upload hardening, TTL/quarantine cleanup, approved beta-server smoke
+  or full Gate B readiness.
 - [ ] TTL cleanup is active for sources, finals, partials and quarantine.
 - [ ] Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact.
 - [ ] Cancel/resume/restart scenarios pass.
