@@ -20,9 +20,11 @@ fail closed when that accepted-source marker is missing or mismatched.
 Issue #93 adds the application-side local `clamd` `INSTREAM` adapter. Issue
 #109 adds the internal-only Docker Compose/runtime `clamd` service and
 metadata-only health/version/EICAR smoke check. `REQUIRE_UPLOAD_SCAN=true`
-enables the runtime gate with `UPLOAD_SCANNER_BACKEND=clamd`. These slices do
-not by themselves make quarantine retention, durable upload-safety ledger
-persistence, full upload hardening or Gate B malware scanning evidence complete.
+enables the runtime gate with `UPLOAD_SCANNER_BACKEND=clamd`. Issue #95 records
+metadata-only Gate B malware/AV scanning evidence for these slices. This does
+not by itself make quarantine retention, durable upload-safety ledger
+persistence, full upload hardening, approved beta-server smoke or full Gate B
+readiness complete.
 
 ## Accept / Reject Policy
 
