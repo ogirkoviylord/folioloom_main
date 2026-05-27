@@ -22,23 +22,30 @@ PYTHONPATH=src python3 -m unittest \
   tests.test_backup_server_data \
   tests.test_admin_deployment_smoke \
   tests.test_admin_translation_logs \
+  tests.test_clamd_runtime \
+  tests.test_document_scanner \
   tests.test_config \
   tests.test_bot_runtime.BotRuntimeTest.test_admin_deepseek_translator_adds_admin_without_dropping_env
 
 echo "== Lint =="
 python3 -m ruff check \
+  src/translator_service/clamd_runtime.py \
   src/translator_service/admin/deployment_smoke.py \
   src/translator_service/bot/runtime.py \
   src/translator_service/config.py \
+  src/translator_service/document_scanner.py \
   scripts/backup_server_data.py \
   tests/test_admin_deployment_smoke.py \
   tests/test_backup_server_data.py \
+  tests/test_clamd_runtime.py \
+  tests/test_document_scanner.py \
   tests/test_server_deployment_config.py \
   tests/test_bot_runtime.py
 
 echo "== CLI smoke =="
 python3 scripts/backup_server_data.py --help >/dev/null
 PYTHONPATH=src python3 -m translator_service.admin.deployment_smoke --help >/dev/null
+PYTHONPATH=src python3 -m translator_service.clamd_runtime --help >/dev/null
 python3 scripts/verify_backup_export.py --help >/dev/null
 
 echo "== Shell syntax =="
@@ -75,10 +82,14 @@ git diff --check -- \
   scripts/server_status.sh \
   scripts/verify_backup_export.py \
   src/translator_service/admin/deployment_smoke.py \
+  src/translator_service/clamd_runtime.py \
   src/translator_service/bot/runtime.py \
   src/translator_service/config.py \
+  src/translator_service/document_scanner.py \
   tests/test_admin_deployment_smoke.py \
   tests/test_backup_server_data.py \
+  tests/test_clamd_runtime.py \
+  tests/test_document_scanner.py \
   tests/test_bot_runtime.py \
   tests/test_server_deployment_config.py
 

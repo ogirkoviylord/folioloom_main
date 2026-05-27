@@ -144,6 +144,21 @@ adjust the live values from Admin -> Settings after deploy:
 - `BETA_USER_DAILY_COST_CAP_USD=1.00`
 - `BETA_USER_DAILY_JOB_LIMIT=3`
 
+Upload malware/AV scanning is configured for the beta runtime through the
+internal `clamd` service:
+
+- `REQUIRE_UPLOAD_SCAN=true`
+- `UPLOAD_SCANNER_BACKEND=clamd`
+- `CLAMD_HOST=clamd`
+- `CLAMD_PORT=3310`
+- `CLAMD_PLATFORM=linux/amd64`
+- `UPLOAD_SCAN_MAX_CONCURRENCY=1`
+
+`scripts/server_smoke_check.sh` verifies that the bot container can reach
+`clamd`, reads safe version metadata and checks that the safe EICAR test
+signature is detected when upload scanning is enabled. This does not by itself
+close Gate B; issue #95 owns the malware/AV release evidence.
+
 `ADMIN_SECRET_MASTER_KEY` enables encrypted admin-managed secrets. DeepSeek
 keys added in the admin UI are additive with `DEEPSEEK_API_KEY` /
 `DEEPSEEK_API_KEYS`: adding an admin key does not disable env keys. The
@@ -197,7 +212,10 @@ Current Docker Compose services:
 - `worker` - background translation worker;
 - `postgres` - scheduler/job/work-unit state;
 - `redis` - present for runtime integration/future notification paths, not the
-  source of scheduler correctness.
+  source of scheduler correctness;
+- `clamd` - internal-only ClamAV daemon for upload malware/AV scanning. It is
+  reachable by Docker service name on the internal network and must not publish
+  port `3310` to the public internet.
 
 Runtime files are mounted from the host into app containers:
 

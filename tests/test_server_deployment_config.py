@@ -17,7 +17,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
     def test_compose_restarts_runtime_services_unless_stopped(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-        for service in ("api:", "bot:", "worker:", "postgres:", "redis:"):
+        for service in ("api:", "bot:", "worker:", "postgres:", "redis:", "clamd:"):
             service_start = compose.index(f"  {service}")
             next_service = len(compose)
             service_headers = (
@@ -26,6 +26,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
                 "  worker:",
                 "  postgres:",
                 "  redis:",
+                "  clamd:",
             )
             for candidate in service_headers:
                 candidate_index = compose.find(candidate, service_start + 1)
@@ -50,6 +51,25 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("pg_isready", compose)
         self.assertIn("redis-cli", compose)
         self.assertIn("ping", compose)
+        self.assertIn("clamdscan", compose)
+        self.assertIn("--ping=1", compose)
+
+    def test_compose_has_internal_only_clamd_service(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        service_start = compose.index("  clamd:")
+        next_service = compose.find("\nvolumes:", service_start)
+        clamd_block = compose[service_start:next_service]
+
+        self.assertIn("image: ${CLAMD_IMAGE:-clamav/clamav:1.4}", clamd_block)
+        self.assertIn("platform: ${CLAMD_PLATFORM:-linux/amd64}", clamd_block)
+        self.assertIn('expose:\n      - "3310"', clamd_block)
+        self.assertIn("clamav-db:/var/lib/clamav", clamd_block)
+        self.assertIn("mem_limit: ${CLAMD_MEM_LIMIT:-1g}", clamd_block)
+        self.assertIn('cpus: "${CLAMD_CPUS:-1.0}"', clamd_block)
+        self.assertIn("pids_limit: 256", clamd_block)
+        self.assertNotIn("ports:", clamd_block)
+        self.assertNotIn("3310:3310", clamd_block)
+        self.assertIn("clamav-db:", compose)
 
     def test_server_env_example_has_production_runtime_keys(self):
         content = (ROOT / ".env.server.example").read_text(encoding="utf-8")
@@ -82,6 +102,20 @@ class ServerDeploymentConfigTest(unittest.TestCase):
             "PERSISTENT_JOBS_DB_PATH=/data/runtime/jobs.sqlite3",
             "USER_SETTINGS_DB_PATH=/data/runtime/user-settings.sqlite3",
             "TRANSLATION_RUN_LOG_ROOT=/data/run-logs",
+            "REQUIRE_UPLOAD_SCAN=true",
+            "UPLOAD_SCANNER_BACKEND=clamd",
+            "UPLOAD_SCAN_MAX_CONCURRENCY=1",
+            "UPLOAD_SCAN_BACKPRESSURE_TIMEOUT_SECONDS=1.0",
+            "CLAMD_IMAGE=clamav/clamav:1.4",
+            "CLAMD_PLATFORM=linux/amd64",
+            "CLAMD_HOST=clamd",
+            "CLAMD_PORT=3310",
+            "CLAMD_TIMEOUT_SECONDS=10.0",
+            "CLAMD_CHUNK_SIZE_BYTES=65536",
+            "CLAMD_RESPONSE_LIMIT_BYTES=4096",
+            "CLAMD_STARTUP_TIMEOUT=1800",
+            "CLAMD_MEM_LIMIT=1g",
+            "CLAMD_CPUS=1.0",
             "ADMIN_DB_PATH=/data/runtime/admin.sqlite3",
             "ADMIN_SESSION_SECRET=",
             "ADMIN_OWNER_PASSWORD=",
@@ -137,10 +171,13 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("tests.test_backup_server_data", predeploy_content)
         self.assertIn("tests.test_admin_deployment_smoke", predeploy_content)
         self.assertIn("tests.test_admin_translation_logs", predeploy_content)
+        self.assertIn("tests.test_clamd_runtime", predeploy_content)
+        self.assertIn("tests.test_document_scanner", predeploy_content)
         self.assertIn(
             "test_admin_deepseek_translator_adds_admin_without_dropping_env",
             predeploy_content,
         )
+        self.assertIn("translator_service.clamd_runtime --help", predeploy_content)
         self.assertIn("scripts/verify_backup_export.py --help", predeploy_content)
         self.assertIn("ruff check", predeploy_content)
         self.assertIn("git diff --check", predeploy_content)
@@ -150,6 +187,10 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("postgres", smoke_content)
         self.assertIn("docker compose ps", smoke_content)
         self.assertIn("POSTGRES_PASSWORD=translator", smoke_content)
+        self.assertIn("UPLOAD_SCANNER_BACKEND=clamd", smoke_content)
+        self.assertIn("translator_service.clamd_runtime", smoke_content)
+        self.assertIn("CLAMD_HOST", smoke_content)
+        self.assertIn("--scan-eicar", smoke_content)
         self.assertIn("ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS", smoke_content)
         self.assertIn(
             "docker compose exec -T api python -m "

@@ -227,5 +227,63 @@ class ClamdDocumentScannerTest(unittest.TestCase):
         self.assertEqual(result.safe_error_class, "unsupported")
 
 
+class LimitedConcurrencyDocumentScannerTest(unittest.TestCase):
+    def test_backpressure_returns_fail_closed_scanner_unavailable(self):
+        blocker = threading.Event()
+        entered = threading.Event()
+        scanner = document_scanner.LimitedConcurrencyDocumentScanner(
+            _BlockingScanner(blocker=blocker, entered=entered),
+            max_concurrent_scans=1,
+            acquire_timeout_seconds=0.01,
+            scanner_name="clamd",
+        )
+        thread = threading.Thread(
+            target=lambda: scanner.scan(
+                file_name="first.txt",
+                content=b"first",
+                document_format=DocumentFormat.TXT,
+            ),
+            daemon=True,
+        )
+        thread.start()
+        self.assertTrue(entered.wait(timeout=1))
+
+        result = scanner.scan(
+            file_name="second.txt",
+            content=b"second",
+            document_format=DocumentFormat.TXT,
+        )
+
+        blocker.set()
+        thread.join(timeout=1)
+        self.assertEqual(
+            result.verdict,
+            document_scanner.ScannerVerdict.SCANNER_UNAVAILABLE,
+        )
+        self.assertEqual(result.scanner_name, "clamd")
+        self.assertEqual(result.safe_error_class, "scanner_backpressure")
+        self.assertNotIn("second", str(result.safe_metadata()))
+
+
+class _BlockingScanner:
+    def __init__(self, *, blocker: threading.Event, entered: threading.Event):
+        self._blocker = blocker
+        self._entered = entered
+
+    def scan(self, *, file_name, content, document_format):
+        del file_name
+        self._entered.set()
+        self._blocker.wait(timeout=1)
+        return document_scanner.ScanResult(
+            verdict=document_scanner.ScannerVerdict.CLEAN,
+            scanner_name="blocking",
+            scanner_version=None,
+            signature_database_version=None,
+            content_sha256=sha256(content).hexdigest(),
+            size_bytes=len(content),
+            document_format=document_format,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

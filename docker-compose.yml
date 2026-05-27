@@ -22,6 +22,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - clamd
     restart: unless-stopped
     logging: *default-logging
     healthcheck:
@@ -44,6 +45,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - clamd
     restart: unless-stopped
     logging: *default-logging
 
@@ -57,6 +59,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - clamd
     restart: unless-stopped
     logging: *default-logging
 
@@ -87,5 +90,30 @@ services:
         - redis-cli
         - ping
 
+  clamd:
+    image: ${CLAMD_IMAGE:-clamav/clamav:1.4}
+    platform: ${CLAMD_PLATFORM:-linux/amd64}
+    expose:
+      - "3310"
+    environment:
+      CLAMAV_NO_CLAMD: "false"
+      CLAMAV_NO_FRESHCLAMD: "false"
+      CLAMD_STARTUP_TIMEOUT: "${CLAMD_STARTUP_TIMEOUT:-1800}"
+    volumes:
+      - clamav-db:/var/lib/clamav
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${CLAMD_MEM_LIMIT:-1g}
+    cpus: "${CLAMD_CPUS:-1.0}"
+    pids_limit: 256
+    healthcheck:
+      <<: *default-healthcheck
+      start_period: 5m
+      test:
+        - CMD
+        - clamdscan
+        - --ping=1
+
 volumes:
   postgres-data:
+  clamav-db:

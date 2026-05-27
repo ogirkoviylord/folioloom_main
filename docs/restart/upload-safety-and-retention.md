@@ -17,10 +17,12 @@ can enforce an explicit allowed source-object set for work units derived after
 the ledger gate. Persistent jobs created after the scan gate also store a safe
 `translation_policy.upload_safety` marker, and scan-gated detached worker runs
 fail closed when that accepted-source marker is missing or mismatched.
-`REQUIRE_UPLOAD_SCAN=true` enables the runtime gate. These slices do not by
-themselves make local ClamAV scanning, quarantine retention, durable
-upload-safety ledger persistence, full upload hardening or Gate B malware
-scanning evidence complete.
+Issue #93 adds the application-side local `clamd` `INSTREAM` adapter. Issue
+#109 adds the internal-only Docker Compose/runtime `clamd` service and
+metadata-only health/version/EICAR smoke check. `REQUIRE_UPLOAD_SCAN=true`
+enables the runtime gate with `UPLOAD_SCANNER_BACKEND=clamd`. These slices do
+not by themselves make quarantine retention, durable upload-safety ledger
+persistence, full upload hardening or Gate B malware scanning evidence complete.
 
 ## Accept / Reject Policy
 
