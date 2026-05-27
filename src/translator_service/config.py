@@ -56,6 +56,46 @@ class Settings:
     require_upload_scan: bool = field(
         default_factory=lambda: _env_bool("REQUIRE_UPLOAD_SCAN", False)
     )
+    upload_scanner_backend: str = field(
+        default_factory=lambda: os.getenv("UPLOAD_SCANNER_BACKEND", "none").lower()
+    )
+    upload_scan_max_concurrency: int = field(
+        default_factory=lambda: _env_int("UPLOAD_SCAN_MAX_CONCURRENCY", 1, minimum=1)
+    )
+    upload_scan_backpressure_timeout_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "UPLOAD_SCAN_BACKPRESSURE_TIMEOUT_SECONDS",
+            1.0,
+            minimum=0.0,
+        )
+    )
+    clamd_host: str = field(
+        default_factory=lambda: os.getenv("CLAMD_HOST", "127.0.0.1")
+    )
+    clamd_port: int = field(
+        default_factory=lambda: _env_int("CLAMD_PORT", 3310, minimum=1)
+    )
+    clamd_timeout_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "CLAMD_TIMEOUT_SECONDS",
+            10.0,
+            minimum=0.1,
+        )
+    )
+    clamd_chunk_size_bytes: int = field(
+        default_factory=lambda: _env_int(
+            "CLAMD_CHUNK_SIZE_BYTES",
+            65536,
+            minimum=1,
+        )
+    )
+    clamd_response_limit_bytes: int = field(
+        default_factory=lambda: _env_int(
+            "CLAMD_RESPONSE_LIMIT_BYTES",
+            4096,
+            minimum=1,
+        )
+    )
     beta_allowlist_enabled: bool = field(
         default_factory=lambda: _env_bool("BETA_ALLOWLIST_ENABLED", False)
     )
