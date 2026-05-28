@@ -1,13 +1,13 @@
 import hashlib
 import json
-from tempfile import TemporaryDirectory
 import unittest
+from tempfile import TemporaryDirectory
 
 from translator_service.translation_run_logs import (
-    finish_running_translation_runs_for_job,
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    finish_running_translation_runs_for_job,
 )
 
 
@@ -76,7 +76,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertEqual(fragment["source_text_hash"], "hash-1")
             self.assertEqual(
                 fragment["translated_text_hash"],
-                hashlib.sha256("Привет, мир.".encode("utf-8")).hexdigest(),
+                hashlib.sha256("Привет, мир.".encode()).hexdigest(),
             )
             self.assertEqual(fragment["source_text_chars"], 12)
             self.assertEqual(fragment["translated_text_chars"], 12)
@@ -128,6 +128,75 @@ class TranslationRunLoggerTest(unittest.TestCase):
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("## Security", summary)
             self.assertIn("unsafe_model_outputs", summary)
+
+    def test_redacts_run_artifact_error_details(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            logger.record_event(
+                "provider_failure",
+                {
+                    "prompt": "SYSTEM PROMPT SENTINEL",
+                    "error_message": (
+                        "Provider response Bearer provider-token "
+                        "api_key=sk-synthetic-secret"
+                    ),
+                    "stack_trace": "Traceback (most recent call last)",
+                },
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="RAW SOURCE SENTINEL",
+                    translated_text="RAW TRANSLATION SENTINEL",
+                    status="failed",
+                    elapsed_seconds=0.5,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    error_message=(
+                        "Provider failed for RAW SOURCE SENTINEL -> "
+                        "RAW TRANSLATION SENTINEL with Bearer provider-token "
+                        "api_key=sk-synthetic-secret Traceback "
+                        "(most recent call last)"
+                    ),
+                )
+            )
+            logger.finish(
+                status="failed",
+                error_message=(
+                    "Traceback (most recent call last) "
+                    "api_key=sk-synthetic-secret provider internals"
+                ),
+            )
+
+            artifact_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    logger.run_dir / "run.json",
+                    logger.run_dir / "summary.md",
+                    logger.run_dir / "events.jsonl",
+                    logger.run_dir / "fragments" / "0001.json",
+                )
+            )
+
+        self.assertIn("[redacted]", artifact_text)
+        self.assertNotIn("RAW SOURCE SENTINEL", artifact_text)
+        self.assertNotIn("RAW TRANSLATION SENTINEL", artifact_text)
+        self.assertNotIn("SYSTEM PROMPT SENTINEL", artifact_text)
+        self.assertNotIn("provider-token", artifact_text)
+        self.assertNotIn("sk-synthetic-secret", artifact_text)
+        self.assertNotIn("Traceback", artifact_text)
 
     def test_can_finish_running_runs_for_deleted_job(self):
         with TemporaryDirectory() as temp_dir:

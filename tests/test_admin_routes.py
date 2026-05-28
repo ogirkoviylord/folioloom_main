@@ -1499,6 +1499,16 @@ class AdminRoutesTest(unittest.TestCase):
                 self.assertIn("run.json", names)
                 self.assertIn("summary.md", names)
                 self.assertIn("events.jsonl", names)
+                archive_text = "\n".join(
+                    archive.read(name).decode("utf-8", errors="ignore")
+                    for name in names
+                )
+            self.assertIn("[redacted]", archive_text)
+            self.assertNotIn("Chapter one", archive_text)
+            self.assertNotIn("Глава первая", archive_text)
+            self.assertNotIn("processing-bearer-token", archive_text)
+            self.assertNotIn("sk-processing-secret-value", archive_text)
+            self.assertNotIn("deepseek.api_keys.processing-key", archive_text)
 
     def test_translation_logs_page_passes_safe_limit_filter(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
