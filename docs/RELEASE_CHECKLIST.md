@@ -193,10 +193,11 @@ Checklist:
 - [ ] Dependency risks reviewed.
 - [ ] No raw document text, prompts, translations or API keys appear in logs,
   admin views, telemetry or release artifacts.
-- [ ] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
-  Current Gate B status: unchecked.
-- [ ] Local malware/AV scanning gate is confirmed before parsing or explicitly
-  deferred by owner. Current Gate B status: unchecked.
+- [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
+  Current Gate B status: checked by issue #73 local synthetic evidence.
+- [x] Local malware/AV scanning gate is confirmed before parsing or explicitly
+  deferred by owner. Current Gate B status: checked by issue #95 metadata-only
+  local evidence.
 - [ ] Public malware scanning services do not receive user documents by default.
 - [ ] Scanner errors/timeouts/unavailable verdicts fail closed for beta unless
   owner-approved otherwise.

@@ -906,9 +906,9 @@ Consequences:
   scanner socket/service configuration, retention behavior or runtime data
   handling requires explicit owner approval in the relevant issue.
 - Agents may cite the local/internal malware/AV scanning Gate B item as
-  evidenced after issue #95, but must not treat it as broader upload hardening,
-  TTL/quarantine cleanup, approved beta-server smoke, full Gate B or free-beta
-  readiness.
+  evidenced after issue #95, but must not treat it as issue #73 upload-hardening
+  baseline evidence, TTL/quarantine cleanup, approved beta-server smoke, full
+  Gate B or free-beta readiness.
 
 Human approval required to change:
 - yes; this touches security, privacy, user data, deployment and dependency

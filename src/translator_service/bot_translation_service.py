@@ -25,7 +25,12 @@ from translator_service.document_scanner import (
     ScannerVerdict,
     ScanResult,
 )
-from translator_service.documents import DocumentFormat, validate_document_upload
+from translator_service.documents import (
+    DocumentContentRejectedError,
+    DocumentFormat,
+    validate_document_content,
+    validate_document_upload,
+)
 from translator_service.extractors import (
     TextExtractionError,
     extract_text_from_docx,
@@ -718,6 +723,13 @@ class BotTranslationService:
                 upload_safety_id,
                 UploadSafetyState.CONTAINER_STARTED,
             )
+            self._validate_upload_container_with_ledger_or_raise(
+                user_telegram_id=user_telegram_id,
+                upload_safety_id=upload_safety_id,
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
             self._upload_safety_ledger.transition(
                 upload_safety_id,
                 UploadSafetyState.CONTAINER_CLEAN,
@@ -854,6 +866,53 @@ class BotTranslationService:
                 scan_result=result,
             )
         return result
+
+    def _validate_upload_container_with_ledger_or_raise(
+        self,
+        *,
+        user_telegram_id: int,
+        upload_safety_id: str,
+        file_name: str,
+        content: bytes,
+        document_format: DocumentFormat,
+    ) -> None:
+        try:
+            validate_document_content(
+                file_name=file_name,
+                content=content,
+                document_format=document_format,
+            )
+        except DocumentContentRejectedError as error:
+            failed_state = (
+                UploadSafetyState.CONTAINER_FAILED
+                if error.container_failed
+                else UploadSafetyState.CONTAINER_BLOCKED
+            )
+            verdict = (
+                UploadContainerVerdict.FAILED
+                if error.container_failed
+                else UploadContainerVerdict.SUSPICIOUS
+            )
+            try:
+                self._upload_safety_ledger.transition(
+                    upload_safety_id,
+                    failed_state,
+                    container_verdict=verdict,
+                    safe_error_class=error.safe_error_class,
+                )
+                self._upload_safety_ledger.transition(
+                    upload_safety_id,
+                    UploadSafetyState.REJECTED,
+                )
+            except UploadSafetyLedgerError:
+                pass
+            self._record_upload_safety_activity(
+                user_telegram_id=user_telegram_id,
+                upload_safety_id=upload_safety_id,
+            )
+            raise DocumentScanRejectedError(
+                verdict=ScannerVerdict.SUSPICIOUS_CONTAINER,
+            ) from error
 
     def _assert_parser_access_allowed(
         self,

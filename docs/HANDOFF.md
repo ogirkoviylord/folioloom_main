@@ -34,7 +34,6 @@ safe retry metadata. This does not make cancel/resume/restart Gate B fully
 complete and does not prove durable cross-restart automatic delivery tracking.
 
 Что пока нестабильно или не закрыто для beta:
-upload hardening/quarantine baseline, local malware/AV scanning gate,
 TTL cleanup/delete verification, real-file
 TXT/DOCX/EPUB release matrix, local/offline EPUBCheck validation, DOCX
 openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal artifact,
@@ -120,9 +119,10 @@ core flow, release gates, operational visibility and documentation.
   `.env*`, `var/` and user data were not used. Issue #95 metadata-only local
   evidence on 2026-05-27 passed focused scanner/upload/runtime/deployment
   tests, full unittest, compileall and predeploy, and marks the Gate B
-  malware/AV scanning item checked in the evidence report. This does not close
-  broader upload hardening/quarantine, TTL cleanup, approved beta-server smoke
-  or full Gate B readiness;
+  malware/AV scanning item checked in the evidence report. Issue #73 now marks
+  the upload hardening/quarantine baseline checked for local synthetic evidence.
+  This does not close TTL cleanup, approved beta-server smoke or full Gate B
+  readiness;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
 - держать payments, public production, public admin и новые форматы вне
@@ -257,8 +257,9 @@ core flow, release gates, operational visibility and documentation.
   in the real-file matrix or Gate B evidence report where relevant.
 
 - Area: Upload hardening/quarantine.
-- Current behavior: Policy exists; release gate remains unchecked. Code has
-  upload validation, document sandbox modules, an optional pluggable scanner
+- Current behavior: Policy exists; release gate is now checked for the local
+  synthetic baseline from issue #73. Code has upload validation, document
+  content/container validation, document sandbox modules, an optional pluggable scanner
   contract with fake scanner tests from issue #92, and issue #94 wiring that
   uses the Upload Safety Ledger when `require_upload_scan` is enabled:
   quarantine first, clean ledger-backed accepted source before parser/estimate/
@@ -275,13 +276,21 @@ core flow, release gates, operational visibility and documentation.
   `UPLOAD_SCANNER_BACKEND=clamd` enables the runtime scan gate. Issue #93 adds
   the local `clamd` `INSTREAM` adapter, and issue #109 adds an internal-only
   `clamd` Docker Compose service plus metadata-only PING/VERSION and EICAR
-  smoke check. Local isolated #109 smoke on 2026-05-27 confirmed
+  smoke check. Issue #73 adds stdlib-only TXT/DOCX/EPUB validation before
+  accepted source creation and local synthetic evidence for unsupported
+  extensions, wrong extension/content mismatch, invalid/binary TXT, corrupt ZIP,
+  traversal/absolute paths, archive size/count/compression limits, missing
+  expected structure and executable-looking embedded paths. Clean-scanned unsafe
+  containers fail closed from quarantine without parser/sandbox calls, accepted
+  original source objects, pending uploads or persistent jobs/work units, and
+  upload-safety activity remains metadata-only. Local isolated #109 smoke on
+  2026-05-27 confirmed
   `status=ok`, `scanner_version=ClamAV 1.4.4`,
   `signature_database_version=28010` and `eicar_verdict=infected` from an app
   image container without real `.env*`, `var/` or user data. Release docs still
-  do not claim complete upload hardening, quarantine retention, durable raw
-  upload-safety ledger persistence, approved server smoke evidence or full Gate
-  B readiness. Owner accepted adding a local malware/AV scanning gate on
+  do not claim quarantine retention, durable raw upload-safety ledger
+  persistence, approved server smoke evidence or full Gate B readiness. Owner
+  accepted adding a local malware/AV scanning gate on
   2026-05-22, and issue #95 now records scoped metadata-only Gate B malware/AV
   scanning evidence.
 - Evidence: `docs/restart/upload-safety-and-retention.md`,
@@ -294,14 +303,13 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/admin/views.py`,
   `tests/test_documents.py`, `tests/test_bot_translation_service.py`,
   `tests/test_admin_upload_safety.py`.
-- Risk: unsafe ZIP/container or malware-like inputs could reach parser/worker
-  paths if broader hardening, container release fixtures or retention cleanup are
-  incomplete; public external scanning could leak rights-sensitive documents if
-  used as the default.
-- Suggested next task: verify broader upload hardening/quarantine baseline and
-  TTL/quarantine cleanup evidence. Any deployment, external scanning,
-  retention, live/beta server operation or runtime-data behavior still needs
-  explicit owner approval.
+- Risk: real-file parser/adapter QA, TTL/quarantine cleanup and approved
+  beta-server smoke remain separate Gate B blockers; public external scanning
+  could leak rights-sensitive documents if used as the default.
+- Suggested next task: verify TTL/quarantine cleanup evidence and real-file
+  TXT/DOCX/EPUB matrix. Any deployment, external scanning, retention,
+  live/beta server operation or runtime-data behavior still needs explicit
+  owner approval.
 
 - Area: TTL cleanup and delete verification.
 - Current behavior: Retention policy is documented, but Gate B marks cleanup
@@ -380,12 +388,12 @@ Potential issues to verify:
 - Suggested fix task: run the remaining Gate B checks before any release
   go/no-go.
 
-- Problem: Upload safety and TTL policies are documented but not fully gate-checked.
+- Problem: TTL cleanup/delete policy is documented but not gate-checked.
 - Evidence: `docs/restart/upload-safety-and-retention.md` and unchecked Gate B
-  items.
-- Impact: parser safety, retention and delete expectations may be unproven.
-- Suggested fix task: implement and test negative fixtures, quarantine behavior
-  and cleanup/delete verification with human approval.
+  TTL cleanup item.
+- Impact: retention and delete expectations may be unproven.
+- Suggested fix task: implement cleanup/delete verification with human approval
+  where user-data handling, runtime data or live/beta environments are involved.
 
 - Problem: Paid beta is blocked.
 - Evidence: `CURRENT_PROJECT_STATE.md`, `docs/restart/release-gates.md`,
@@ -411,12 +419,15 @@ Potential issues to verify:
   Кто должен делать: Reviewer.
   Можно ли отдавать агенту: yes.
 
-- Задача: verify upload hardening/quarantine baseline.
+- Задача: keep upload hardening/quarantine baseline in regression checks.
   Почему важно: unsafe files must not reach workers.
   Риск: parser, storage and raw-text leakage risk.
-  Кто должен делать: Architect / Implementer / Reviewer.
-  Можно ли отдавать агенту: needs approval if behavior changes user data
-  handling or quarantine retention.
+  Кто должен делать: Reviewer.
+  Можно ли отдавать агенту: yes for local synthetic regression checks; needs
+  approval if behavior changes user data handling or quarantine retention.
+  Status note: issue #73 records local synthetic evidence and checks this Gate B
+  item only; TTL/quarantine cleanup, real-file QA, approved beta-server smoke
+  and full Gate B readiness remain separate blockers.
 
 - Задача: maintain local malware/AV scanning gate evidence in release checks.
   Почему важно: untrusted uploads must be scanned before parsing without sending
@@ -434,9 +445,9 @@ Potential issues to verify:
   upload-flow wiring, [#95](https://github.com/ogirkoviylord/folioloom_main/issues/95)
   Gate B evidence.
   Status note: #93, #94, #101, #102, #103 and #109 are closed. #95 records
-  metadata-only Gate B malware/AV scanning evidence. This does not implement or
-  approve broader upload hardening, TTL cleanup, approved beta-server smoke or
-  full Gate B readiness.
+  metadata-only Gate B malware/AV scanning evidence. #73 records local
+  synthetic upload hardening/quarantine evidence. This does not implement or
+  approve TTL cleanup, approved beta-server smoke or full Gate B readiness.
 
 - Задача: run release-scoped verification before any go/no-go.
   Почему важно: issue #56 recorded current preview-slice tests, but Gate B still

@@ -216,12 +216,13 @@ product yet.
 
 ## Main gaps against closed beta
 
-- Upload hardening/quarantine baseline.
-- Broader upload safety beyond local malware/AV scanning. Owner accepted local
+- Broader upload safety beyond local malware/AV scanning and the local
+  synthetic upload hardening/quarantine baseline. Owner accepted local
   malware/AV scanning on 2026-05-22; issue #95 now records metadata-only local
-  malware/AV Gate B evidence. Upload hardening/quarantine baseline,
-  TTL/quarantine cleanup, approved beta-server smoke and full Gate B readiness
-  remain separate gaps.
+  malware/AV Gate B evidence. Issue #73 now records local synthetic
+  upload-hardening/quarantine evidence. TTL/quarantine cleanup, approved
+  beta-server smoke, real-file QA and full Gate B readiness remain separate
+  gaps.
 - TTL cleanup/delete verification.
 - Real-file TXT/DOCX/EPUB matrix and release report.
 - EPUBCheck or equivalent release validation.
