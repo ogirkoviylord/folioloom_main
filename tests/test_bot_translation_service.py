@@ -19,6 +19,7 @@ from translator_service.bot_translation_service import (
     TRANSLATION_MODE_DOCUMENT_FORM,
     BotTranslationService,
     DocumentScanRejectedError,
+    DuplicatePreviewError,
     PendingTranslation,
     PendingUpload,
     PreviewAcceptanceRequired,
@@ -2039,7 +2040,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             translator=RecordingTranslator(),
         )
         with self.assertRaisesRegex(
-            PreviewTranslationError,
+            DuplicatePreviewError,
             "Preview has already been generated",
         ):
             service.generate_preview_translation(
@@ -2049,6 +2050,63 @@ class BotTranslationServiceTest(unittest.TestCase):
 
         self.assertEqual(len(guard.reservations), 1)
         self.assertEqual(guard.reservations[0][0], first.preview_id)
+        self.assertEqual(len(guard.usage_events), 1)
+
+    def test_repeated_preview_after_translation_is_duplicate_preview(self):
+        guard = RecordingBetaSafetyGuard()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=80,
+            beta_safety_guard=guard,
+        )
+        content = b"One meaningful preview paragraph."
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+        first_preview = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+        service.mark_pending_translation_preview_shown(
+            user_telegram_id=42,
+            preview_id=first_preview.preview_id,
+        )
+        service.accept_pending_translation_preview(user_telegram_id=42)
+        completed = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+        self.assertEqual(completed.status, TranslationJobStatus.READY)
+
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+        )
+        duplicate_translator = RecordingTranslator()
+        with self.assertRaisesRegex(
+            DuplicatePreviewError,
+            "Preview has already been generated",
+        ) as raised:
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=duplicate_translator,
+            )
+
+        self.assertEqual(duplicate_translator.requests, [])
+        self.assertNotIn("One meaningful preview paragraph", str(raised.exception))
+        self.assertEqual(len(guard.reservations), 1)
+        self.assertEqual(guard.reservations[0][0], first_preview.preview_id)
         self.assertEqual(len(guard.usage_events), 1)
 
     def test_preview_translation_uses_estimate_when_provider_usage_is_missing(self):

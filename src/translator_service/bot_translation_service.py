@@ -253,6 +253,10 @@ class PreviewTranslationError(RuntimeError):
     """Raised with a safe user-facing message when preview generation fails."""
 
 
+class DuplicatePreviewError(PreviewTranslationError):
+    """Raised when the same preview was already generated for a pending request."""
+
+
 @dataclass(frozen=True)
 class CancelTranslationResult:
     cancelled: bool
@@ -2929,7 +2933,7 @@ class BotTranslationService:
     ) -> str | None:
         with self._state_lock:
             if preview_id in self._generated_preview_ids:
-                raise PreviewTranslationError(
+                raise DuplicatePreviewError(
                     "Preview has already been generated for this document."
                 )
 
@@ -2955,7 +2959,7 @@ class BotTranslationService:
                         job_id=preview_id,
                         reason="duplicate_preview",
                     )
-                raise PreviewTranslationError(
+                raise DuplicatePreviewError(
                     "Preview has already been generated for this document."
                 )
             self._generated_preview_ids.add(preview_id)
