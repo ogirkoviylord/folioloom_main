@@ -23,6 +23,25 @@ _ACTIVE_STATUSES = {
     "translating",
 }
 _FAILED_STATUSES = {"failed", "interrupted", "error"}
+_TERMINAL_OPERATION_STATES = {"succeeded", "failed", "cancelled"}
+_TERMINAL_OPERATION_STATUSES = {
+    "canceled",
+    "cancelled",
+    "cached",
+    "complete",
+    "completed",
+    "deleted",
+    "expired",
+    "failed",
+    "failed_terminal",
+    "interrupted",
+    "partial",
+    "ready",
+    "skipped",
+    "success",
+    "succeeded",
+    "translated",
+}
 _AUTO_PSUTIL = object()
 
 
@@ -66,21 +85,29 @@ def build_live_monitor_snapshot(
         limit=200,
         now=current_time,
     )
-    live_runs = tuple(run for run in runs if run.status in _ACTIVE_STATUSES)
     today = current_time.date()
     one_hour_ago = current_time - timedelta(hours=1)
     queued = 0
     running_job_ids: set[str] = set()
+    terminal_job_ids: set[str] = set()
     if operations is not None:
         queued = operations.job_counts_by_state.get("queued", 0)
         running_job_ids = {
             job.id for job in operations.jobs if job.state in _ACTIVE_STATUSES
         }
+        terminal_job_ids = {
+            job.id for job in operations.jobs if _is_terminal_operation_job(job)
+        }
+    live_runs = tuple(
+        run
+        for run in runs
+        if run.status in _ACTIVE_STATUSES and run.job_id not in terminal_job_ids
+    )
     active_run_job_ids = {
-        run.job_id for run in runs if run.status in _ACTIVE_STATUSES and run.job_id
+        run.job_id for run in live_runs if run.job_id
     }
     active_runs_without_job_id = sum(
-        1 for run in runs if run.status in _ACTIVE_STATUSES and not run.job_id
+        1 for run in live_runs if not run.job_id
     )
     recent_runs = _recent_live_runs(
         live_runs,
@@ -182,6 +209,12 @@ def _merge_run_with_operation_progress(
         last_event_at=operation.last_event_at or run.last_event_at,
         total_tokens=max(run.total_tokens, operation.total_tokens),
         error_message=operation.error_message or run.error_message,
+    )
+
+
+def _is_terminal_operation_job(job: Any) -> bool:
+    return _status_text(getattr(job, "state", None)) in _TERMINAL_OPERATION_STATES or (
+        _status_text(getattr(job, "raw_status", None)) in _TERMINAL_OPERATION_STATUSES
     )
 
 
