@@ -16,6 +16,7 @@ from translator_service.persistent_assembly import (
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
+    PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
 from translator_service.scheduler import (
@@ -361,7 +362,10 @@ def _finish_failed_translation_run_for_work_unit(
 ) -> None:
     if root is None or work_unit is None:
         return
-    if not work_unit.status.value.startswith("failed"):
+    if work_unit.status not in {
+        PersistentWorkUnitStatus.FAILED,
+        PersistentWorkUnitStatus.FAILED_TERMINAL,
+    }:
         return
     finish_running_translation_runs_for_job(
         root,
