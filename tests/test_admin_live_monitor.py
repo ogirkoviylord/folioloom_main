@@ -270,6 +270,83 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.recent_runs[0].total_tokens, 18)
         self.assertEqual(snapshot.recent_runs[0].run_dir, str(run_logger.run_dir))
 
+    def test_stale_running_run_log_is_excluded_when_durable_job_is_terminal(self):
+        for terminal_status in ("ready", "cancelled", "failed", "deleted"):
+            with self.subTest(terminal_status=terminal_status):
+                with TemporaryDirectory() as temp_dir:
+                    stale = TranslationRunLogger.start(
+                        root=temp_dir,
+                        metadata=TranslationRunMetadata(
+                            job_id=f"job-stale-{terminal_status}",
+                            order_id=None,
+                            user_id="telegram:42",
+                            file_name="stale-private-name.txt",
+                            document_kind="txt",
+                            source_language="en",
+                            target_language="ru",
+                            total_fragment_count=2,
+                        ),
+                    )
+                    stale.record_event(
+                        "job_queued",
+                        {"job_id": f"job-stale-{terminal_status}"},
+                    )
+                    active = TranslationRunLogger.start(
+                        root=temp_dir,
+                        metadata=TranslationRunMetadata(
+                            job_id="job-genuinely-active",
+                            order_id=None,
+                            user_id="telegram:77",
+                            file_name="active-book.epub",
+                            document_kind="epub",
+                            source_language="en",
+                            target_language="uk",
+                            total_fragment_count=3,
+                        ),
+                    )
+                    active.record_event("work_unit_started", {"total_units": 3})
+                    operations = build_operations_overview(
+                        jobs=[
+                            {
+                                "id": f"job-stale-{terminal_status}",
+                                "status": terminal_status,
+                            },
+                            {"id": "job-genuinely-active", "status": "translating"},
+                        ],
+                        work_units_by_job_id={
+                            f"job-stale-{terminal_status}": (
+                                {"status": "translated"},
+                                {"status": "translated"},
+                            ),
+                            "job-genuinely-active": (
+                                {"status": "translated"},
+                                {"status": "translating"},
+                                {"status": "pending"},
+                            ),
+                        },
+                    )
+
+                    snapshot = build_live_monitor_snapshot(
+                        temp_dir,
+                        operations=operations,
+                        now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                        server=collect_local_server_health(
+                            disk_usage=_unavailable_disk_usage,
+                            psutil_module=None,
+                        ),
+                    )
+
+                self.assertEqual(snapshot.active_translations, 1)
+                self.assertEqual(
+                    [run.job_id for run in snapshot.recent_runs],
+                    ["job-genuinely-active"],
+                )
+                self.assertEqual(snapshot.recent_runs[0].status, "translating")
+                self.assertNotIn(
+                    f"job-stale-{terminal_status}",
+                    repr(snapshot.recent_runs),
+                )
+
     def test_recent_runs_include_current_resource_usage(self):
         with TemporaryDirectory() as temp_dir:
             running = TranslationRunLogger.start(
@@ -417,6 +494,10 @@ def _fake_disk_usage(path):
         used=50 * 1024 * 1024 * 1024,
         free=50 * 1024 * 1024 * 1024,
     )
+
+
+def _unavailable_disk_usage(path):
+    raise OSError("no disk")
 
 
 class _FakeMemory:
