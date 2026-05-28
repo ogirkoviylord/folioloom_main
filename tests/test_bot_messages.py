@@ -23,6 +23,7 @@ from translator_service.bot.messages import (
     build_translation_mode_selection_message,
     build_translation_progress_message,
     build_unknown_text_message,
+    build_upload_error_message,
     build_upload_prompt_message,
     get_back_text,
     get_cancel_text,
@@ -48,6 +49,7 @@ from translator_service.bot.messages import (
 from translator_service.bot_translation_service import (
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
+    DuplicatePreviewError,
     PendingTranslation,
     PreviewTranslation,
 )
@@ -94,6 +96,19 @@ class BotMessagesTest(unittest.TestCase):
                     expected_text,
                     build_start_message(interface_language=language_code),
                 )
+
+    def test_duplicate_preview_error_uses_specific_safe_message(self):
+        message = build_upload_error_message(
+            DuplicatePreviewError(
+                "Preview has already been generated for this document."
+            ),
+            interface_language="uk",
+        )
+
+        self.assertIn("Попередній перегляд", message)
+        self.assertIn("вже підготовлено", message)
+        self.assertNotIn("Під час перекладу щось пішло не так", message)
+        self.assertNotIn("Preview has already been generated", message)
 
     def test_main_menu_contains_primary_user_actions(self):
         self.assertEqual(
