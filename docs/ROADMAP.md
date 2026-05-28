@@ -131,6 +131,14 @@ Tasks:
   missing expected structure and executable-looking embedded paths. This does
   not close TTL/quarantine cleanup, real-file QA, approved beta-server smoke or
   full Gate B readiness.
+- Completed 2026-05-28: issue #78 verifies release-wide logs/admin raw-text
+  redaction with local synthetic evidence. The review found an admin
+  translation-log archive leak risk recorded as issue #117, then fixed the run
+  artifact redaction path so event payloads and error fields are redacted before
+  archive generation. Regression tests inspect archive contents for raw
+  source/translated snippets, prompt text, API-key-like strings, provider key
+  identifiers and traceback markers. This does not close real-file matrix,
+  beta-server smoke, backup/restore or full Gate B readiness.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the

@@ -1,9 +1,9 @@
+import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-import json
 from pathlib import Path
-import re
 
 from translator_service.security_telemetry import (
     build_security_event,
@@ -102,7 +102,7 @@ class TranslationRunLogger:
             "timestamp": _now_iso(),
             "event_type": event_type,
             "job_id": self._metadata.job_id,
-            "payload": payload or {},
+            "payload": _safe_event_payload(payload or {}),
         }
         with (self.run_dir / "events.jsonl").open("a", encoding="utf-8") as events:
             events.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
@@ -131,9 +131,9 @@ class TranslationRunLogger:
 
     def record_fragment(self, fragment: TranslationFragmentLog) -> None:
         fragment_path = self.run_dir / "fragments" / f"{fragment.sequence:04d}.json"
+        fragment_record = _fragment_to_dict(fragment)
         fragment_path.write_text(
-            json.dumps(_fragment_to_dict(fragment), ensure_ascii=False, indent=2)
-            + "\n",
+            json.dumps(fragment_record, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         self._fragment_count += 1
@@ -154,7 +154,7 @@ class TranslationRunLogger:
                 "prompt_tokens": fragment.prompt_tokens,
                 "completion_tokens": fragment.completion_tokens,
                 "total_tokens": fragment.total_tokens,
-                "error_message": fragment.error_message,
+                "error_message": fragment_record.get("error_message"),
             },
         )
         self._write_outputs()
@@ -168,7 +168,7 @@ class TranslationRunLogger:
     ) -> None:
         self._status = status
         self._result_file_name = result_file_name
-        self._error_message = error_message
+        self._error_message = _safe_error_message(error_message)
         self._finished_at = datetime.now(UTC)
         event_type = {
             "cancelled": "run_cancelled",
@@ -179,7 +179,7 @@ class TranslationRunLogger:
             {
                 "status": status,
                 "result_file_name": result_file_name,
-                "error_message": error_message,
+                "error_message": self._error_message,
             },
         )
         self._write_outputs()
@@ -240,7 +240,8 @@ def finish_running_translation_runs_for_job(
         snapshot["finished_at"] = _now_iso()
         if result_file_name is not None:
             snapshot["result_file_name"] = result_file_name
-        snapshot["error_message"] = error_message
+        safe_error_message = _safe_error_message(error_message)
+        snapshot["error_message"] = safe_error_message
         event_type = {
             "cancelled": "run_cancelled",
             "failed": "run_failed",
@@ -252,7 +253,7 @@ def finish_running_translation_runs_for_job(
             payload={
                 "status": status,
                 "result_file_name": snapshot.get("result_file_name"),
-                "error_message": error_message,
+                "error_message": safe_error_message,
             },
         )
         run_json.write_text(
@@ -278,7 +279,7 @@ def _append_run_event(
         "timestamp": _now_iso(),
         "event_type": event_type,
         "job_id": job_id,
-        "payload": payload or {},
+        "payload": _safe_event_payload(payload or {}),
     }
     with (run_dir / "events.jsonl").open("a", encoding="utf-8") as events:
         events.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
@@ -288,6 +289,12 @@ def _fragment_to_dict(fragment: TranslationFragmentLog) -> dict:
     data = asdict(fragment)
     source_text = data.pop("source_text")
     translated_text = data.pop("translated_text")
+    if data.get("error_message") is not None:
+        data["error_message"] = _safe_error_message(
+            data["error_message"],
+            unsafe_texts=(source_text, translated_text),
+            always_redact=True,
+        )
     if not data.get("source_text_hash"):
         data["source_text_hash"] = _text_hash(source_text)
     data["translated_text_hash"] = _text_hash(translated_text)
@@ -302,6 +309,72 @@ def _text_hash(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
+_SAFE_ERROR_MESSAGES = {
+    "Book cancelled by user.",
+    "Book deleted by user.",
+}
+
+_SENSITIVE_ERROR_PATTERNS = (
+    re.compile(r"(?is)\btraceback\b.*"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"(?i)\b(?:api[_-]?key|token|secret|secret_id|value)\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"\bsk-[A-Za-z0-9._-]+"),
+    re.compile(r"\b[A-Za-z0-9._-]*api_keys[A-Za-z0-9._-]*\b"),
+)
+
+_SENSITIVE_PAYLOAD_KEY_MARKERS = (
+    "source_text",
+    "translated_text",
+    "prompt",
+    "plaintext",
+    "api_key",
+    "secret",
+    "access_token",
+    "refresh_token",
+    "bot_token",
+    "authorization",
+    "stack_trace",
+    "traceback",
+)
+
+
+def _safe_event_payload(payload: dict) -> dict:
+    safe = {}
+    for key, value in payload.items():
+        key_text = str(key)
+        if any(marker in key_text.lower() for marker in _SENSITIVE_PAYLOAD_KEY_MARKERS):
+            safe[key_text] = "[redacted]"
+        elif key_text.lower() in {"error", "error_message", "last_error"}:
+            safe[key_text] = _safe_error_message(value)
+        else:
+            safe[key_text] = value
+    return safe
+
+
+def _safe_error_message(
+    value: object,
+    *,
+    unsafe_texts: tuple[str, ...] = (),
+    always_redact: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    if text in _SAFE_ERROR_MESSAGES:
+        return text
+    if always_redact:
+        return "[redacted]"
+    for unsafe_text in unsafe_texts:
+        unsafe = " ".join(str(unsafe_text).split())
+        if len(unsafe) >= 8:
+            text = text.replace(unsafe, "[redacted]")
+    for pattern in _SENSITIVE_ERROR_PATTERNS:
+        text = pattern.sub("[redacted]", text)
+    return text or "[redacted]"
+
+
 def _render_summary(snapshot: dict) -> str:
     lines = [
         "# Translation Run",
@@ -311,7 +384,10 @@ def _render_summary(snapshot: dict) -> str:
         f"- User: `{snapshot.get('user_id') or 'n/a'}`",
         f"- File: `{snapshot['file_name']}`",
         f"- Format: `{snapshot['document_kind']}`",
-        f"- Direction: `{snapshot['source_language']}` -> `{snapshot['target_language']}`",
+        (
+            f"- Direction: `{snapshot['source_language']}` -> "
+            f"`{snapshot['target_language']}`"
+        ),
         f"- Status: `{snapshot['status']}`",
         f"- Started: `{snapshot['started_at']}`",
         f"- Finished: `{snapshot.get('finished_at') or 'n/a'}`",
@@ -382,7 +458,10 @@ def _render_translation_stack(stack: dict | None) -> list[str]:
         "## Translation Stack",
         "",
         f"- Stack schema: `{stack.get('schema_version') or 'n/a'}`",
-        f"- Adapter: `{adapter.get('name') or 'n/a'}` (`{adapter.get('version') or 'n/a'}`)",
+        (
+            f"- Adapter: `{adapter.get('name') or 'n/a'}` "
+            f"(`{adapter.get('version') or 'n/a'}`)"
+        ),
         f"- Document kind: `{adapter.get('document_kind') or 'n/a'}`",
         f"- Run prompt version: `{prompt.get('run_prompt_version') or 'n/a'}`",
         f"- Prompt policy: `{prompt.get('prompt_policy_version') or 'n/a'}`",
