@@ -327,7 +327,82 @@ class SchedulerRunnerTest(unittest.TestCase):
                 ],
             )
 
-    def test_run_once_finishes_running_run_log_when_scheduled_unit_fails(self):
+    def test_run_once_finishes_running_run_log_when_scheduled_unit_fails_terminally(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="Private source paragraph",
+            )
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (job.id,),
+                )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=1,
+                ),
+            )
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=FailingRunnerTranslator(),
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    retry_base_delay_seconds=0,
+                    retry_max_delay_seconds=0,
+                    translation_run_log_root=run_log_root,
+                )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            [unit] = store.list_work_units(job.id)
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(unit.status.value, "failed_terminal")
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.INTERRUPTED,
+            )
+            self.assertEqual(snapshot["status"], "failed")
+            self.assertIsNotNone(snapshot["finished_at"])
+            self.assertEqual(
+                snapshot["error_message"],
+                "Translation failed in the background worker.",
+            )
+            self.assertIn("run_failed", events_jsonl)
+            self.assertNotIn("Private source paragraph", events_jsonl)
+            self.assertNotIn("Private source paragraph", json.dumps(snapshot))
+            self.assertNotIn("DeepSeek", events_jsonl)
+            self.assertNotIn("DeepSeek", json.dumps(snapshot))
+            self.assertNotIn("/var/private/source.txt", events_jsonl)
+            self.assertNotIn("/var/private/source.txt", json.dumps(snapshot))
+            self.assertNotIn("provider read timeout", events_jsonl)
+            self.assertNotIn("provider read timeout", json.dumps(snapshot))
+
+    def test_run_once_keeps_run_log_running_when_scheduled_unit_retries(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             storage = LocalObjectStorage(root / "objects")
@@ -364,29 +439,24 @@ class SchedulerRunnerTest(unittest.TestCase):
                     translator=FailingRunnerTranslator(),
                     limits=SchedulerLimits(max_active_units_global=1),
                     lease_seconds=300,
-                    retry_base_delay_seconds=0,
-                    retry_max_delay_seconds=0,
+                    retry_base_delay_seconds=60,
+                    retry_max_delay_seconds=60,
                     translation_run_log_root=run_log_root,
                 )
 
+            [unit] = store.list_work_units(job.id)
+            persisted_job = store.get_job(job.id)
             snapshot = json.loads((logger.run_dir / "run.json").read_text())
             events_jsonl = (logger.run_dir / "events.jsonl").read_text()
             self.assertEqual(summary.failed_units, 1)
-            self.assertEqual(snapshot["status"], "failed")
-            self.assertIsNotNone(snapshot["finished_at"])
+            self.assertEqual(unit.status.value, "failed_retryable")
             self.assertEqual(
-                snapshot["error_message"],
-                "Translation failed in the background worker.",
+                persisted_job.status,
+                PersistentTranslationJobStatus.TRANSLATING,
             )
-            self.assertIn("run_failed", events_jsonl)
-            self.assertNotIn("Private source paragraph", events_jsonl)
-            self.assertNotIn("Private source paragraph", json.dumps(snapshot))
-            self.assertNotIn("DeepSeek", events_jsonl)
-            self.assertNotIn("DeepSeek", json.dumps(snapshot))
-            self.assertNotIn("/var/private/source.txt", events_jsonl)
-            self.assertNotIn("/var/private/source.txt", json.dumps(snapshot))
-            self.assertNotIn("provider read timeout", events_jsonl)
-            self.assertNotIn("provider read timeout", json.dumps(snapshot))
+            self.assertEqual(snapshot["status"], "running")
+            self.assertIsNone(snapshot["finished_at"])
+            self.assertNotIn("run_failed", events_jsonl)
 
     def test_beta_safety_guard_preserves_capacity_one_serial_success_path(self):
         with TemporaryDirectory() as temp_dir:
