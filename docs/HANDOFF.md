@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-27
+Last updated: 2026-05-28
 
 ## 1. Текущее состояние проекта
 
@@ -50,6 +50,19 @@ verification passed on branch `codex/issue-72-gate-b-baseline`:
 `scripts/predeploy_check.sh` passed. This is local evidence only; it does not
 prove CI, server smoke, real-file matrix, restart, backup/restore or other Gate
 B blockers.
+
+Issue #78 redaction update on 2026-05-28: release-wide logs/admin raw-text
+redaction evidence passed locally on branch `codex/issue-78-gate-b-redaction`
+using synthetic fixtures only. The review found that admin translation-log
+archive downloads could include raw run error details; focused bug
+[#117](https://github.com/ogirkoviylord/folioloom_main/issues/117) records that
+leak risk. The fix redacts translation run artifact event payloads and error
+fields before archive generation, and regression tests inspect archive contents
+for raw source/translated snippets, prompt text, API-key-like strings, provider
+key identifiers and traceback markers. Local verification for #78 passed
+focused redaction/admin/security tests, full unittest, compileall, targeted
+ruff and `scripts/predeploy_check.sh`. This does not prove real-file matrix,
+beta-server smoke, backup/restore or full Gate B readiness.
 
 Owner decisions recorded during issue #71:
 
