@@ -124,8 +124,13 @@ Tasks:
 - Wire translation modes through the closed-beta flow in small follow-up slices.
   Issues #44, #45, #46 and #55 are merged for mode selection, metadata,
   DOCX routing/profile behavior and preview-mode propagation.
-- Проверить upload hardening/quarantine baseline для TXT/DOCX/EPUB и негативных
-  fixtures.
+- Completed 2026-05-28: issue #73 verifies upload hardening/quarantine
+  baseline for local synthetic TXT/DOCX/EPUB fixtures. Negative fixtures cover
+  unsupported extensions, wrong extension/content mismatch, invalid/binary TXT,
+  corrupt ZIP, traversal/absolute paths, archive size/count/compression limits,
+  missing expected structure and executable-looking embedded paths. This does
+  not close TTL/quarantine cleanup, real-file QA, approved beta-server smoke or
+  full Gate B readiness.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the
@@ -352,7 +357,7 @@ Acceptance criteria:
   Phase: 1
   Priority: High
   Risk: High
-  Agent suitability: needs architect
+  Agent suitability: done 2026-05-28 by issue #73
   Suggested acceptance criteria: negative fixtures reject/quarantine safely,
   quarantined files never reach workers, logs/admin show metadata only.
 

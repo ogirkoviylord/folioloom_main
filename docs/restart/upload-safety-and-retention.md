@@ -17,14 +17,18 @@ can enforce an explicit allowed source-object set for work units derived after
 the ledger gate. Persistent jobs created after the scan gate also store a safe
 `translation_policy.upload_safety` marker, and scan-gated detached worker runs
 fail closed when that accepted-source marker is missing or mismatched.
+Issue #73 adds stdlib-only TXT/DOCX/EPUB content/container validation before
+accepted source creation and records local synthetic negative-fixture evidence
+for unsupported extensions, wrong extension/content mismatch, invalid/binary
+TXT, corrupt ZIP, traversal/absolute paths, archive size/count/compression
+limits, missing expected structure and executable-looking embedded paths.
 Issue #93 adds the application-side local `clamd` `INSTREAM` adapter. Issue
 #109 adds the internal-only Docker Compose/runtime `clamd` service and
 metadata-only health/version/EICAR smoke check. `REQUIRE_UPLOAD_SCAN=true`
 enables the runtime gate with `UPLOAD_SCANNER_BACKEND=clamd`. Issue #95 records
 metadata-only Gate B malware/AV scanning evidence for these slices. This does
 not by itself make quarantine retention, durable upload-safety ledger
-persistence, full upload hardening, approved beta-server smoke or full Gate B
-readiness complete.
+persistence, approved beta-server smoke or full Gate B readiness complete.
 
 ## Accept / Reject Policy
 
@@ -200,22 +204,22 @@ exposure; and no impact on live runtime data.
 
 ## Release Checks
 
-- [ ] TXT/DOCX/EPUB only.
-- [ ] `.doc`, `.docm`, `.zip`, `.rar`, executables and unknown containers are
+- [x] TXT/DOCX/EPUB only.
+- [x] `.doc`, `.docm`, `.zip`, `.rar`, executables and unknown containers are
   rejected.
-- [ ] DOCX/EPUB traversal fixture is rejected.
-- [ ] DOCX/EPUB high compression ratio fixture is rejected.
-- [ ] Oversize fixture is rejected.
-- [ ] Wrong extension fixture is rejected.
-- [ ] Malware scanning gate is active before parsing, or explicitly deferred by
+- [x] DOCX/EPUB traversal fixture is rejected.
+- [x] DOCX/EPUB high compression ratio fixture is rejected.
+- [x] Oversize fixture is rejected.
+- [x] Wrong extension fixture is rejected.
+- [x] Malware scanning gate is active before parsing, or explicitly deferred by
   owner in Gate B evidence.
-- [ ] EICAR or equivalent safe AV test fixture is detected by the scanner in
+- [x] EICAR or equivalent safe AV test fixture is detected by the scanner in
   local verification.
-- [ ] Scanner timeout/unavailable/error verdicts fail closed for beta unless
+- [x] Scanner timeout/unavailable/error verdicts fail closed for beta unless
   owner-approved otherwise.
-- [ ] Quarantined file never reaches translation.
-- [ ] Unscanned file never reaches translation after the scanning gate is
+- [x] Quarantined file never reaches translation.
+- [x] Unscanned file never reaches translation after the scanning gate is
   enabled.
 - [ ] Explicit delete removes or schedules removal of source/final/partial
   objects according to policy.
-- [ ] Logs/admin contain metadata only, no raw document text.
+- [x] Logs/admin contain metadata only, no raw document text.

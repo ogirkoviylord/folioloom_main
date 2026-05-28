@@ -45,9 +45,6 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 
 Выглядит незавершенным:
 
-- Free preview before full translation.
-- Upload hardening/quarantine baseline, including the planned local malware/AV
-  scanning gate accepted by the owner on 2026-05-22.
 - TTL cleanup/delete verification.
 - Real-file TXT/DOCX/EPUB release matrix and report.
 - EPUBCheck or equivalent validation.
@@ -69,8 +66,10 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 - Пользователь: доверенный beta-пользователь.
 - Шаги: открыть бота, выбрать язык интерфейса, загрузить TXT/DOCX/EPUB, пройти validation, подтвердить права, выбрать целевой язык, получить estimate, подтвердить перевод, отслеживать progress, получить финальный или частичный файл.
 - Ожидаемый результат: пользователь получает переведенный документ или безопасное сообщение об ошибке/частичный результат.
-- Текущая готовность: partial. Основной flow реализован, но release matrix,
-  upload hardening including local malware/AV scanning, и TTL остаются gap.
+- Текущая готовность: partial. Основной flow реализован, issue #73 records
+  local synthetic upload hardening/quarantine evidence and issue #95 records
+  local malware/AV scanning evidence, but release matrix, TTL cleanup and other
+  Gate B blockers remain gaps.
 
 ### Сценарий: отмена или продолжение работы
 

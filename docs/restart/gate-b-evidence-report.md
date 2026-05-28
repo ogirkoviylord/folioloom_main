@@ -43,9 +43,10 @@ Verdict: Needs more verification.
 
 Why: repository evidence confirms several foundation items, including invite-only
 allowlist, rights confirmation, free preview, beta caps, kill switch, SSH-tunnel
-admin policy, no-payments scope, safe beta telemetry and scoped local malware/AV
+admin policy, no-payments scope, safe beta telemetry, scoped upload
+hardening/quarantine evidence for issue #73 and scoped local malware/AV
 scanning evidence for issue #95. Gate B still has release blockers without
-stored evidence: broader upload hardening/quarantine, TTL cleanup/delete
+stored evidence: TTL cleanup/delete
 behavior, real-file TXT/DOCX/EPUB matrix, restart/cancel/resume scenarios,
 capacity/provider-failure release evidence, EPUB/DOCX validation, Alerts MVP,
 backups visibility, backup export verification, restore rehearsal,
@@ -63,7 +64,6 @@ documents.
 | Per-user cost caps/job limits are enforced by the Phase 4 operational beta safety guard. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` Beta Safety / Cost Guard; `CURRENT_PROJECT_STATE.md`; `docs/DECISIONS.md`. | Current runtime cap smoke not run in this task. | Existing evidence references `src/translator_service/beta_safety.py`, `tests/test_beta_safety.py`, `tests/test_beta_safety_store.py`. | Yes for cap/concurrency/cost-policy changes. | Keep as release smoke and admin settings check. |
 | Global cost caps are enforced by reservation-at-enqueue and scheduler claim guards. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` and `docs/DECISIONS.md` describe reservation-at-enqueue and scheduler claim guards. | Current release run against beta config not recorded. | Existing beta safety and scheduler tests referenced in docs. | Yes for cap/provider/scheduler changes. | Verify with release-scoped cap tests before go/no-go. |
 | Admin kill switch exists in Settings/Live visibility and stops new uploads/jobs and new scheduler claims without restart. | Pass | Checked in `docs/restart/release-gates.md`; `README.md` documents `BETA_TRANSLATIONS_PAUSED`; `CURRENT_PROJECT_STATE.md` describes admin/live visibility. | Current beta-server admin smoke not run in this task. | Existing admin/live/bot/scheduler tests referenced in docs. | Yes for admin/provider/scheduler behavior changes. | Include kill-switch check in server smoke evidence. |
-| Upload hardening/quarantine baseline is active. | Blocked | Policy exists in `docs/restart/upload-safety-and-retention.md`; Gate B item is unchecked. Issue #94 adds a code slice for `require_upload_scan`: quarantine object before scan, ledger-backed accepted source before parser/estimate/preview/persistent-job access, fail-closed persistent resume without current-ledger accepted-source resolution, stored-worker rejection for quarantine or explicitly unaccepted source object keys, safe `translation_policy.upload_safety` marker on persistent jobs, and scan-gated detached worker fail-closed behavior when that marker is missing or mismatched. Issue #95 separately checks the local malware/AV scanning item. | Still no full release evidence that negative fixtures pass, parser/container limits are active for release, quarantine retention is handled, or durable Upload Safety Ledger persistence exists. | Needed: negative fixture tests for wrong extension, traversal, oversize, corrupt ZIP, zip-bomb-like input; release artifact. | Yes if behavior changes upload safety, quarantine, user-data handling or retention. | Follow-up: upload hardening/quarantine baseline issue and Reviewer pass for issue #94. |
 | Local malware/AV scanning gate is active before parsing, or explicitly deferred by owner in the Gate B evidence report. | Pass | Owner accepted local scanning on 2026-05-22 and selected local/internal ClamAV `clamd` `INSTREAM` on 2026-05-26. Prerequisite issues #93, #94, #101, #102, #103 and #109 are closed. Issue #94 gates parser/estimate/preview/persistent-job access on Upload Safety Ledger accepted-source state when `require_upload_scan` is enabled. Issue #93 adds the app-side `clamd` adapter and fail-closed verdict taxonomy. Issue #109 adds internal-only `clamd` runtime shape and metadata-only local runtime smoke evidence: isolated compose project, no real `.env*`, no `var/`, no live server and no user data; app image reached internal `clamd`; safe metadata reported `status=ok`, `scanner_version=ClamAV 1.4.4`, `signature_database_version=28010`, `eicar_verdict=infected`. Current issue #95 local verification on branch `codex/issue-95-malware-gate-b-evidence`, working tree based on commit `5845842`, passed focused scanner/upload/runtime/deployment tests, full unittest, compileall and predeploy. Public malware scanning services do not receive user documents by default. | Approved beta-server smoke remains a separate Gate B item. Broader upload hardening/quarantine, TTL/quarantine cleanup, real-file matrix and release-wide raw-text redaction remain separate Gate B blockers. | `PYTHONPATH=src python3 -m unittest tests.test_document_scanner tests.test_clamd_runtime tests.test_upload_safety_ledger tests.test_bot_translation_service tests.test_bot_runtime tests.test_server_deployment_config`: `Ran 210 tests in 9.647s`, `OK`; `PYTHONPATH=src python3 -m unittest discover -s tests`: `Ran 1099 tests in 21.211s`, `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`: passed; `scripts/predeploy_check.sh`: `Ran 64 tests`, `OK`, lint passed, CLI smoke/shell syntax/documentation check/compile/diff hygiene passed. | No for this metadata-only local/synthetic evidence. Yes for production deployment, live/beta server operations, real `.env*`, runtime `var/`, real user data, external scanning, retention/runtime data behavior, public scanner exposure or changing fail-closed beta policy. | Keep scanner behavior in release regression checks. Do not treat this pass as full Gate B or free-beta readiness. |
 | TTL cleanup is active for sources, finals, partials and quarantine. | Blocked | Retention defaults are proposed in `docs/restart/upload-safety-and-retention.md`; `docs/DECISIONS.md` marks baseline as Proposed; Gate B item is unchecked. | No idempotent cleanup/delete verification, no evidence for source/final/partial/quarantine object lifecycle. | Needed: retention/delete tests and release report; avoid real user data unless approved. | Yes; this is user-data handling/destructive-adjacent. | Follow-up: TTL cleanup/delete verification issue. |
 | Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact. | Blocked | Matrix template exists in `docs/restart/real-file-test-matrix.md`; Gate B item is unchecked. Issue #71 approved public-domain/permissive-license corpus policy. | No corpus manifest, no execution report, no artifact links, no pass/fail table. | Needed: fixture manifest with source/license URL and rights basis, commands, metadata-only artifact summary by default, release report. | No for public-domain/permissive-license metadata-only corpus policy; yes for raw source/output retention in git or use of private/runtime data. | Follow-up: real-file TXT/DOCX/EPUB matrix issue. |
@@ -115,7 +115,6 @@ Only the following are confirmed by repository evidence:
 
 These block free closed beta unless the owner explicitly approves deferral:
 
-- Upload hardening/quarantine baseline evidence.
 - TTL cleanup/delete verification for source/final/partial/quarantine objects.
 - Authorized real-file TXT/DOCX/EPUB matrix and stored release report.
 - Cancel/resume/restart, worker restart and bot restart release evidence.
@@ -138,7 +137,6 @@ High or Critical risks relevant to Gate B:
 - R-003: unclear MVP readiness; Gate B not closed.
 - R-005: cancel/resume/restart/worker recovery instability.
 - R-008: brittle DOCX/EPUB/TXT real-file processing.
-- R-009: upload hardening/quarantine not confirmed.
 - R-010 and R-023: TTL cleanup/delete and retention policy not proven.
 - R-011: background jobs and scheduler concurrency/race conditions.
 - R-012 and R-020: runtime storage and user documents are high/critical user-data
@@ -357,7 +355,7 @@ validation policy. Exploratory local EPUBCheck v5.3.0 evidence shows selected
 EPUB fixtures currently fail validation, so EPUB validation is blocked.
 
 Blocks beta: every unchecked Gate B item without evidence or explicit owner
-deferral, especially broader upload hardening, TTL, real files,
+deferral, especially TTL, real files,
 restart/capacity/provider failures, EPUB/DOCX QA, alerts/backups,
 backup/restore, release-wide redaction and approved beta-server smoke.
 
