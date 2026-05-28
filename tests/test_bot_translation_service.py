@@ -731,6 +731,182 @@ class BotTranslationServiceTest(unittest.TestCase):
                 self.assertTrue((Path(temp_dir) / "objects" / "quarantine").exists())
                 self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
 
+    def test_clean_scanned_container_mismatch_fails_before_parser_or_original_source(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            ledger = InMemoryUploadSafetyLedger()
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(activity_store.close)
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                upload_safety_ledger=ledger,
+                activity_store=activity_store,
+                persistent_job_store=persistent_store,
+                defer_persistent_jobs_to_worker=True,
+            )
+
+            with self.assertRaises(DocumentScanRejectedError) as error:
+                service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="book.docx",
+                    content=b"plain text masquerading as docx",
+                    source_language="auto",
+                )
+
+            self.assertNotIn("plain text", str(error.exception))
+            self.assertEqual(sandbox.extract_calls, [])
+            self.assertEqual(sandbox.plan_calls, [])
+            self.assertIsNone(service.get_pending_upload(42))
+            self.assertEqual(persistent_store.list_jobs_for_user("telegram:42"), [])
+            self.assertTrue((Path(temp_dir) / "objects" / "quarantine").exists())
+            self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
+            ((history),) = ledger.histories()
+            self.assertEqual(
+                [record.state for record in history],
+                [
+                    UploadSafetyState.RECEIVED,
+                    UploadSafetyState.QUARANTINED,
+                    UploadSafetyState.SCAN_STARTED,
+                    UploadSafetyState.SCAN_CLEAN,
+                    UploadSafetyState.CONTAINER_STARTED,
+                    UploadSafetyState.CONTAINER_FAILED,
+                    UploadSafetyState.REJECTED,
+                ],
+            )
+            self.assertEqual(
+                history[-2].metadata.safe_error_class,
+                "zip_invalid_signature",
+            )
+            events = activity_store.list_events(
+                surface=ActivitySurface.SECURITY,
+                event_type="security.upload_safety.summary",
+            )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].metadata["av_verdict"], "clean")
+            self.assertEqual(
+                events[0].metadata["container_verdict"],
+                "container_failed",
+            )
+            self.assertEqual(events[0].metadata["reason_code"], "zip_invalid_signature")
+            serialized_metadata = json.dumps(events[0].metadata)
+            self.assertNotIn("book.docx", serialized_metadata)
+            self.assertNotIn("plain text", serialized_metadata)
+
+    def test_clean_scanned_unsafe_zip_container_records_metadata_only_block(self):
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(activity_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                activity_store=activity_store,
+            )
+
+            with self.assertRaises(DocumentScanRejectedError):
+                service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="book.docx",
+                    content=_make_docx_with_member("../private/source.xml", b"secret"),
+                    source_language="auto",
+                )
+
+            self.assertEqual(sandbox.extract_calls, [])
+            self.assertIsNone(service.get_pending_upload(42))
+            self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
+            events = activity_store.list_events(
+                surface=ActivitySurface.SECURITY,
+                event_type="security.upload_safety.summary",
+            )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].action, "blocked")
+            self.assertEqual(events[0].metadata["reason_code"], "unsafe_archive_path")
+            serialized_metadata = json.dumps(events[0].metadata)
+            self.assertNotIn("../private/source.xml", serialized_metadata)
+            self.assertNotIn("secret", serialized_metadata)
+
+    def test_clean_scanned_executable_archive_member_fails_before_parser_or_worker(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(activity_store.close)
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+                activity_store=activity_store,
+                persistent_job_store=persistent_store,
+                defer_persistent_jobs_to_worker=True,
+            )
+
+            with self.assertRaises(DocumentScanRejectedError):
+                service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="book.docx",
+                    content=_make_docx_with_member(
+                        "word/media/payload.exe",
+                        b"MZ private payload",
+                    ),
+                    source_language="auto",
+                )
+
+            self.assertEqual(sandbox.extract_calls, [])
+            self.assertEqual(sandbox.plan_calls, [])
+            self.assertIsNone(service.get_pending_upload(42))
+            self.assertEqual(persistent_store.list_jobs_for_user("telegram:42"), [])
+            self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
+            events = activity_store.list_events(
+                surface=ActivitySurface.SECURITY,
+                event_type="security.upload_safety.summary",
+            )
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].action, "blocked")
+            self.assertFalse(events[0].metadata["parser_access_granted"])
+            self.assertFalse(events[0].metadata["worker_access_granted"])
+            self.assertEqual(
+                events[0].metadata["reason_code"],
+                "executable_archive_member",
+            )
+            serialized_metadata = json.dumps(events[0].metadata)
+            self.assertNotIn("word/media/payload.exe", serialized_metadata)
+            self.assertNotIn("MZ private payload", serialized_metadata)
+
     def test_unaccepted_ledger_source_cannot_reach_estimate_or_preview(self):
         with TemporaryDirectory() as temp_dir:
             content = b"This is an English document."
@@ -4692,6 +4868,17 @@ def _make_docx(document_xml: str) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
+    return archive.getvalue()
+
+
+def _make_docx_with_member(member_name: str, content: bytes) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as docx:
+        docx.writestr("word/document.xml", b"<w:document />")
+        docx.writestr(member_name, content)
     return archive.getvalue()
 
 

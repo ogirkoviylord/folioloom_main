@@ -2,9 +2,12 @@ import unittest
 from pathlib import Path
 
 from translator_service.document_sandbox import DocumentSandbox
-from translator_service.documents import DocumentFormat, validate_document_upload
+from translator_service.documents import (
+    DocumentFormat,
+    UnsupportedDocumentError,
+    validate_document_upload,
+)
 from translator_service.order_estimates import (
-    DocumentEstimationNotReadyError,
     estimate_epub_order,
     estimate_order,
     estimate_txt_order,
@@ -24,7 +27,7 @@ class TxtOrderEstimateTest(unittest.TestCase):
 
         estimate = estimate_txt_order(
             upload=upload,
-            content="Первый абзац.\n\nВторой абзац длиннее.".encode("utf-8"),
+            content="Первый абзац.\n\nВторой абзац длиннее.".encode(),
             pricing_rules=PricingRules(
                 deepseek_input_usd_per_million_tokens=0.28,
                 expected_output_multiplier=1.2,
@@ -115,27 +118,16 @@ class TxtOrderEstimateTest(unittest.TestCase):
         self.assertEqual(estimate.character_count, 9)
         self.assertEqual(estimate.fragment_count, 1)
 
-    def test_estimate_order_reports_formats_that_are_not_ready_yet(self):
-        upload = validate_document_upload(
-            file_name="scan.pdf",
-            size_bytes=100,
-            max_upload_mb=50,
-        )
-
-        with self.assertRaises(DocumentEstimationNotReadyError) as error:
-            estimate_order(
-                upload=upload,
-                content=b"not used yet",
-                pricing_rules=PricingRules(
-                    deepseek_input_usd_per_million_tokens=0.28,
-                    expected_output_multiplier=1.2,
-                    service_markup_multiplier=3.0,
-                    minimum_price_usd=0.10,
-                ),
-                max_fragment_chars=100,
+    def test_pdf_is_rejected_before_order_estimation(self):
+        with self.assertRaises(UnsupportedDocumentError) as error:
+            validate_document_upload(
+                file_name="scan.pdf",
+                size_bytes=100,
+                max_upload_mb=50,
             )
 
-        self.assertIn("pdf", str(error.exception))
+        self.assertIn("TXT, DOCX, and EPUB", str(error.exception))
+        self.assertNotIn("scan.pdf", str(error.exception))
 
     def test_estimate_order_dispatches_docx_uploads(self):
         upload = validate_document_upload(

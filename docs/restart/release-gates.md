@@ -52,7 +52,21 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   claim guards.
 - [x] Admin kill switch exists in Settings/Live visibility and stops new
   uploads/jobs and new scheduler claims without restart.
-- [ ] Upload hardening/quarantine baseline is active.
+- [x] Upload hardening/quarantine baseline is active. Evidence: issue #73 local
+  verification on 2026-05-28 added stdlib-only content/container validation
+  before accepted source creation for TXT/DOCX/EPUB. Synthetic negative
+  fixtures cover unsupported extensions, wrong extension/content mismatch,
+  invalid/binary TXT, corrupt ZIP, traversal/absolute paths, oversized archive
+  members and total uncompressed content, high compression ratio /
+  zip-bomb-like archives and executable-looking embedded paths. Clean-scanned
+  unsafe containers fail closed from quarantine without parser/sandbox calls,
+  accepted original source objects, pending uploads or persistent jobs/work
+  units, and upload-safety activity remains metadata-only. Local verification
+  passed the focused upload/ledger/bot/worker/admin/adapter/order suite, full
+  unittest, compileall, touched-file lint, diff hygiene and predeploy. This
+  checks only the upload hardening/quarantine item; TTL/quarantine cleanup,
+  real-file matrix, approved beta-server smoke and full Gate B readiness remain
+  separate blockers.
 - [x] Local malware/AV scanning gate is active before parsing, or explicitly
   deferred by owner in the Gate B evidence report. Public multi-engine services
   must not receive user documents by default. Evidence: issue #95 metadata-only
@@ -60,9 +74,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   deployment tests, full unittest, compileall and predeploy; issue #109
   metadata-only local runtime smoke confirmed internal `clamd` was reachable and
   detected the safe EICAR test signature without real `.env*`, `var/`, live
-  server or user data. This checks only the malware/AV scanning item, not
-  broader upload hardening, TTL/quarantine cleanup, approved beta-server smoke
-  or full Gate B readiness.
+  server or user data. This checks only the malware/AV scanning item, not issue
+  #73 upload-hardening baseline evidence, TTL/quarantine cleanup, approved
+  beta-server smoke or full Gate B readiness.
 - [ ] TTL cleanup is active for sources, finals, partials and quarantine.
 - [ ] Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact.
 - [ ] Cancel/resume/restart scenarios pass.
