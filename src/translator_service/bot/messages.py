@@ -6,6 +6,7 @@ from translator_service.bot.activity_phrases import get_activity_phrases
 from translator_service.bot_translation_service import (
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
+    DuplicatePreviewError,
     PendingTranslation,
     PreviewTranslation,
 )
@@ -120,6 +121,11 @@ MESSAGES = {
         "preview_required": (
             "Review the translation preview first, then choose Continue "
             "Translation to start the full translation."
+        ),
+        "preview_already_generated": (
+            "A preview for this same document, language, and mode is already "
+            "prepared. I cannot start another identical preview yet. Go back "
+            "or open My Books to check existing work."
         ),
         "translation_mode_prompt": (
             "File received.\n\n"
@@ -359,6 +365,12 @@ MESSAGES = {
         "preview_required": (
             "Сначала посмотрите предпросмотр, затем нажмите "
             "«Продолжить перевод», чтобы начать полный перевод."
+        ),
+        "preview_already_generated": (
+            "Предпросмотр для этого же документа, языка и режима уже "
+            "подготовлен. Я пока не могу запустить еще один такой же "
+            "предпросмотр. Вернитесь назад или откройте «Мои книги», чтобы "
+            "проверить существующую работу."
         ),
         "translation_mode_prompt": (
             "Файл получен.\n\n"
@@ -677,6 +689,12 @@ for _language_code, _fallbacks in {
         "empty_file": "Цей файл порожній. Надішліть книгу, розділ або рукопис з текстом.",
         "extraction_failed": "Не вдалося надійно прочитати цей файл.\n\nСпробуйте надіслати чистішу копію або використайте один із цих форматів:\n{formats}",
         "translation_failed": "Під час перекладу щось пішло не так.\n\nФайл не втрачено. Спробуйте ще раз або поверніться до головного меню.",
+        "preview_already_generated": (
+            "Попередній перегляд для цього самого документа, мови й режиму "
+            "вже підготовлено. Я поки не можу запустити ще один такий самий "
+            "попередній перегляд. Поверніться назад або відкрийте «Мої "
+            "книги», щоб перевірити наявну роботу."
+        ),
         "unknown_text": "Надішліть книгу, розділ або рукопис, щоб почати, або виберіть дію в головному меню.",
     },
     "fr": {
@@ -844,6 +862,12 @@ for _language_code, _fallbacks in {
         "empty_file": "Ce fichier est vide. Envoyez un livre, un chapitre ou un manuscrit contenant du texte.",
         "extraction_failed": "Je n’ai pas pu lire ce fichier de façon fiable.\n\nEssayez une copie plus propre ou utilisez l’un de ces formats :\n{formats}",
         "translation_failed": "Un problème est survenu pendant la traduction.\n\nVotre fichier est en sécurité. Réessayez ou revenez au menu principal.",
+        "preview_already_generated": (
+            "Un aperçu pour ce même document, cette langue et ce mode est "
+            "déjà prêt. Je ne peux pas lancer un autre aperçu identique pour "
+            "le moment. Revenez en arrière ou ouvrez Mes livres pour vérifier "
+            "le travail existant."
+        ),
         "unknown_text": "Envoyez un livre, un chapitre ou un manuscrit pour commencer, ou choisissez une option dans le menu principal.",
     },
     "es": {
@@ -1011,6 +1035,12 @@ for _language_code, _fallbacks in {
         "empty_file": "Este archivo está vacío. Envía un libro, capítulo o manuscrito con texto.",
         "extraction_failed": "No pude leer este archivo de forma fiable.\n\nPrueba con una copia más limpia o usa uno de estos formatos:\n{formats}",
         "translation_failed": "Algo salió mal durante la traducción.\n\nTu archivo está a salvo. Inténtalo de nuevo o vuelve al menú principal.",
+        "preview_already_generated": (
+            "Ya hay una vista previa preparada para este mismo documento, "
+            "idioma y modo. Todavía no puedo iniciar otra vista previa "
+            "idéntica. Vuelve atrás o abre Mis libros para revisar el trabajo "
+            "existente."
+        ),
         "unknown_text": "Envía un libro, capítulo o manuscrito para empezar, o elige una opción del menú principal.",
     },
     "nl": {
@@ -1178,6 +1208,12 @@ for _language_code, _fallbacks in {
         "empty_file": "Dit bestand is leeg. Stuur een boek, hoofdstuk of manuscript met tekst.",
         "extraction_failed": "Ik kon dit bestand niet betrouwbaar lezen.\n\nProbeer een schonere kopie of gebruik een van deze formaten:\n{formats}",
         "translation_failed": "Er ging iets mis tijdens het vertalen.\n\nJe bestand is veilig. Probeer het opnieuw of ga terug naar het hoofdmenu.",
+        "preview_already_generated": (
+            "Er staat al een voorbeeld klaar voor hetzelfde document, dezelfde "
+            "taal en dezelfde modus. Ik kan nog geen tweede identiek voorbeeld "
+            "starten. Ga terug of open Mijn boeken om bestaand werk te "
+            "controleren."
+        ),
         "unknown_text": "Stuur een boek, hoofdstuk of manuscript om te beginnen, of kies een optie in het Hoofdmenu.",
     },
 }.items():
@@ -1881,6 +1917,8 @@ def build_upload_error_message(error: Exception, interface_language: str = "en")
         return messages.get("beta_access_denied", MESSAGES["en"]["beta_access_denied"])
     if isinstance(error, SecurityCooldownActive):
         return messages.get("security_cooldown", messages["translation_failed"])
+    if isinstance(error, DuplicatePreviewError):
+        return messages.get("preview_already_generated", str(error))
     if isinstance(error, UnsupportedDocumentError):
         return messages["unsupported_file"].format(formats=_supported_formats_lines())
     if isinstance(error, ValueError) and "TXT, DOCX, and EPUB" in str(error):
