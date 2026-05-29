@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
 from threading import RLock
+from uuid import uuid4
 
 from translator_service.beta_access import (
     BetaAccessPolicy,
@@ -188,6 +189,7 @@ class PendingUpload:
     translation_mode: str | None = None
     scan_result: ScanResult | None = None
     upload_safety_id: str | None = None
+    attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +215,7 @@ class PendingTranslation:
     translation_mode: str | None = None
     scan_result: ScanResult | None = None
     upload_safety_id: str | None = None
+    attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +234,7 @@ class PreviewCandidate:
     max_character_count: int
     adapter_version: str
     metadata: dict[str, object]
+    attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -667,6 +671,7 @@ class BotTranslationService:
             source_object_key=source_object_key,
             scan_result=scan_result,
             upload_safety_id=upload_safety_id,
+            attempt_id=_translation_attempt_id(user_telegram_id),
         )
         with self._state_lock:
             self._pending_uploads[user_telegram_id] = pending_upload
@@ -1087,6 +1092,7 @@ class BotTranslationService:
             translation_mode=pending_upload.translation_mode,
             scan_result=pending_upload.scan_result,
             upload_safety_id=pending_upload.upload_safety_id,
+            attempt_id=pending_upload.attempt_id,
         )
         with self._state_lock:
             self._pending_uploads.pop(user_telegram_id, None)
@@ -1109,6 +1115,7 @@ class BotTranslationService:
         translation_mode: str | None = None,
         scan_result: ScanResult | None = None,
         upload_safety_id: str | None = None,
+        attempt_id: str | None = None,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -1192,6 +1199,7 @@ class BotTranslationService:
             translation_mode=normalized_mode,
             scan_result=resolved_scan_result,
             upload_safety_id=upload_safety_id,
+            attempt_id=attempt_id or _translation_attempt_id(user_telegram_id),
         )
         with self._state_lock:
             self._pending[user_telegram_id] = pending
@@ -1317,6 +1325,7 @@ class BotTranslationService:
             max_character_count=PREVIEW_CANDIDATE_MAX_CHARS,
             adapter_version=plan.adapter_version,
             metadata=metadata,
+            attempt_id=pending.attempt_id,
         )
 
     def generate_preview_translation(
@@ -1499,6 +1508,7 @@ class BotTranslationService:
                 translation_mode=pending.translation_mode,
                 scan_result=pending.scan_result,
                 upload_safety_id=pending.upload_safety_id,
+                attempt_id=pending.attempt_id,
             )
             self._pending_uploads[user_telegram_id] = upload
             return upload
@@ -4288,6 +4298,8 @@ def _preview_id(candidate: PreviewCandidate) -> str:
     digest = hashlib.sha256()
     digest.update(str(candidate.user_telegram_id).encode("utf-8"))
     digest.update(b"\0")
+    digest.update((candidate.attempt_id or "").encode("utf-8", errors="replace"))
+    digest.update(b"\0")
     digest.update(candidate.file_name.encode("utf-8", errors="replace"))
     digest.update(b"\0")
     digest.update(candidate.source_language.encode("utf-8", errors="replace"))
@@ -4298,6 +4310,10 @@ def _preview_id(candidate: PreviewCandidate) -> str:
     digest.update(b"\0")
     digest.update(candidate.source_text.encode("utf-8", errors="replace"))
     return f"preview:{candidate.user_telegram_id}:{digest.hexdigest()[:24]}"
+
+
+def _translation_attempt_id(user_telegram_id: int) -> str:
+    return f"attempt:{user_telegram_id}:{uuid4().hex}"
 
 
 def _estimate_preview_cost(
