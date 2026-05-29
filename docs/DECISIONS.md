@@ -1029,6 +1029,73 @@ Consequences:
 Human approval required to change:
 - yes; this is an owner-facing workflow preference.
 
+### 2026-05-28 - Architecture decisions: duplicate uploads and fresh retry/retranslate attempts
+
+Status: Active
+
+Decision:
+- First implementation uses a bounded same-user metadata scan for duplicate
+  detection and does not add schema changes.
+- Duplicate lookup is same-user only and must not reveal cross-user activity.
+- Duplicate identity for the first slice is:
+  `user_id`, source content SHA256, `document_kind`, requested
+  `source_language`, `target_language`, `translation_mode`, `adapter_version`,
+  `prompt_version`, and a normalized safe translation-policy signature.
+- The first duplicate scan limit is `100` same-user persistent jobs. Jobs beyond
+  that bound, jobs without source metadata, and jobs whose source object is
+  missing are treated as no duplicate found.
+- `translation_policy=None` is a distinct legacy/unknown policy signature.
+  Requested `source_language="auto"` remains distinct from explicitly selected
+  source languages unless a later approved decision defines detected-language
+  matching.
+- `resume` / `continue translation` remains My Books-only.
+- A resumed job may use the existing job id and work units, but any provider
+  work done by resume must still respect beta access, cooldown, kill switch and
+  cost/cap guardrails.
+- Concurrent fresh `translate again` while an existing duplicate job is active
+  is not approved for the first implementation.
+- Implementation order is: first #121 fresh translate-again attempt semantics,
+  then #123 duplicate upload UX. #123 must not expose a working
+  `translate again` action until #121 is implemented and verified.
+- Free retry/retranslate remains closed-beta operational safety accounting only;
+  it is not paid billing, credits, refunds or payment policy.
+- The first no-schema implementation may leave newly accepted duplicate upload
+  source objects in storage when the user chooses existing download/status/back.
+  This is an accepted temporary closed-beta risk and does not close TTL/delete
+- Durable indexed duplicate keys, schema/state changes, scheduler/job/work-unit
+  semantic changes, retention/TTL cleanup, backups/restore, deployment,
+  payments and legal/privacy copy remain out of scope without separate explicit
+  owner approval.
+
+Evidence:
+- GitHub issue #120 records the accepted duplicate/retry idea.
+- GitHub issue #124 records the architecture note, Reviewer critique and owner
+  approval on 2026-05-28.
+- Owner explicitly approved following the corrected recommendation in chat on
+  2026-05-28.
+
+Reason:
+- Same-user duplicate handling is needed for closed beta, but durable state,
+  storage, beta-safety and privacy risks require a small no-schema first slice.
+- Putting #121 before #123 prevents the Telegram duplicate UX from presenting a
+  `translate again` action before fresh-attempt semantics exist.
+- Keeping cross-user dedupe, paid retry policy and runtime cleanup out of scope
+  preserves privacy, payment and user-data guardrails.
+
+Consequences:
+- #121 may proceed only within the approved no-schema/no-migration model and
+  must prove fresh attempts create distinct preview/job state without
+  overwriting old history/results.
+- #123 may add duplicate UX only after #121 or must hide/disable
+  `translate again` until it is implemented.
+- Future robust duplicate indexing needs a separate architecture/state issue,
+  owner approval and SQLite/Postgres compatibility tests.
+- TTL/delete and accepted-source cleanup remain separate Gate B work.
+
+Human approval required to change:
+- yes; this affects user-data semantics, job/retry behavior, beta-safety
+  accounting and implementation order.
+
 ## Decisions that still need human approval
 
 - Decision recorded: free closed beta waits for complete Gate B evidence.
