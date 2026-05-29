@@ -483,6 +483,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 fragment_count=2,
                 source_language_display="ru",
                 estimated_seconds=150,
+                attempt_id=pending.attempt_id,
             ),
         )
         self.assertEqual(service.get_pending(42), pending)
@@ -1291,6 +1292,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 content=b"This is an English document.",
                 source_language="auto",
                 source_language_display="English",
+                attempt_id=upload.attempt_id,
             ),
         )
         self.assertEqual(service.get_pending_upload(42), upload)
@@ -2052,7 +2054,7 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(guard.reservations[0][0], first.preview_id)
         self.assertEqual(len(guard.usage_events), 1)
 
-    def test_repeated_preview_after_translation_is_duplicate_preview(self):
+    def test_repeated_preview_after_translation_uses_fresh_attempt_id(self):
         guard = RecordingBetaSafetyGuard()
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
@@ -2093,21 +2095,16 @@ class BotTranslationServiceTest(unittest.TestCase):
             target_language="uk",
             translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
         )
-        duplicate_translator = RecordingTranslator()
-        with self.assertRaisesRegex(
-            DuplicatePreviewError,
-            "Preview has already been generated",
-        ) as raised:
-            service.generate_preview_translation(
-                user_telegram_id=42,
-                translator=duplicate_translator,
-            )
+        next_preview = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
 
-        self.assertEqual(duplicate_translator.requests, [])
-        self.assertNotIn("One meaningful preview paragraph", str(raised.exception))
-        self.assertEqual(len(guard.reservations), 1)
+        self.assertNotEqual(next_preview.preview_id, first_preview.preview_id)
+        self.assertEqual(len(guard.reservations), 2)
         self.assertEqual(guard.reservations[0][0], first_preview.preview_id)
-        self.assertEqual(len(guard.usage_events), 1)
+        self.assertEqual(guard.reservations[1][0], next_preview.preview_id)
+        self.assertEqual(len(guard.usage_events), 2)
 
     def test_preview_translation_uses_estimate_when_provider_usage_is_missing(self):
         guard = RecordingBetaSafetyGuard()
@@ -2981,6 +2978,85 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(estimate.prompt_tokens, 3)
             self.assertEqual(estimate.completion_tokens, 3)
             self.assertEqual(guard.releases, [])
+
+    def test_repeated_persistent_translation_creates_distinct_attempt_jobs(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=80,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                beta_safety_guard=guard,
+            )
+            content = b"Alpha beta repeated attempt fixture."
+
+            def translate_once() -> tuple[str, str, str]:
+                upload = service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="notes.txt",
+                    content=content,
+                    source_language="en",
+                )
+                service.confirm_pending_upload_rights(user_telegram_id=42)
+                self._select_default_translation_mode(service)
+                service.prepare_pending_upload(
+                    user_telegram_id=42,
+                    target_language="uk",
+                )
+                preview = service.generate_preview_translation(
+                    user_telegram_id=42,
+                    translator=RecordingTranslator(),
+                )
+                service.mark_pending_translation_preview_shown(
+                    user_telegram_id=42,
+                    preview_id=preview.preview_id,
+                )
+                service.accept_pending_translation_preview(user_telegram_id=42)
+                job = service.confirm_pending_translation(
+                    user_telegram_id=42,
+                    translator=RecordingTranslator(),
+                )
+                self.assertEqual(job.status, TranslationJobStatus.READY)
+                return preview.preview_id, job.id, upload.source_object_key
+
+            first_preview_id, first_job_id, _first_source_key = translate_once()
+            second_preview_id, second_job_id, _second_source_key = translate_once()
+
+            self.assertNotEqual(second_preview_id, first_preview_id)
+            self.assertNotEqual(second_job_id, first_job_id)
+            self.assertEqual(
+                [job.job_id for job in service.list_user_books(user_telegram_id=42)],
+                [second_job_id, first_job_id],
+            )
+            self.assertIsNotNone(
+                service.get_user_book_result(
+                    user_telegram_id=42,
+                    job_id=first_job_id,
+                )
+            )
+            self.assertIsNotNone(
+                service.get_user_book_result(
+                    user_telegram_id=42,
+                    job_id=second_job_id,
+                )
+            )
+            self.assertEqual(
+                [reservation[0] for reservation in guard.reservations],
+                [first_preview_id, first_job_id, second_preview_id, second_job_id],
+            )
+            self.assertEqual(
+                guard.consumed,
+                [first_preview_id, first_job_id, second_preview_id, second_job_id],
+            )
+            self.assertEqual(len(guard.releases), 0)
 
     def test_persistent_confirmation_denied_by_beta_safety_fails_safely(self):
         with TemporaryDirectory() as temp_dir:
