@@ -148,6 +148,15 @@ Tasks:
   free retry/retranslate as beta-safety accounting rather than paid billing.
   Schema/state changes, durable indexed duplicate keys, concurrent duplicate
   work, TTL cleanup and runtime data operations require separate approval.
+- Completed locally 2026-05-29: issue #121 implements fresh attempt identity
+  for repeated same-document translation without schema changes. Repeated
+  pending attempts get distinct preview reservation ids; repeated persistent
+  translations create distinct job ids and keep old/new My Books history and
+  result access. Same-pending duplicate preview protection remains in place,
+  rights confirmation remains required, and beta-safety preview/job accounting
+  is reserved/consumed per attempt. This does not implement #123 duplicate
+  upload UX, duplicate lookup, durable indexes, concurrent duplicate work,
+  TTL cleanup, paid retries or release readiness.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the
