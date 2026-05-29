@@ -109,6 +109,22 @@ Owner decisions recorded during issue #71:
   Implementation order is #121 fresh attempt semantics before #123 duplicate
   upload UX. Durable indexed duplicate keys, schema/state changes and
   retention/TTL cleanup require separate owner approval.
+- 2026-05-29: Issue #121 implementation slice is locally verified. New pending
+  upload/translation attempts carry an internal attempt id that makes repeated
+  same-document preview reservation ids distinct while keeping same-pending
+  duplicate preview protection. Repeated persistent translations create
+  distinct job ids, preserve old and new My Books/history result access, keep
+  rights confirmation in the upload flow and continue to reserve/consume beta
+  safety separately for each preview/job. This does not implement #123 duplicate
+  upload UX, durable duplicate indexes, schema changes, concurrent duplicate
+  work, TTL cleanup or paid retry policy. Local verification on branch
+  `codex/issue-121-translate-again-fresh-attempt`: focused bot repeat-attempt
+  tests passed, `tests.test_bot_translation_service tests.test_bot_runtime`
+  passed, `tests.test_persistent_jobs tests.test_postgres_scheduler` passed,
+  full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1122 tests
+  with `OK (skipped=13)`, `PYTHONPATH=src python3 -m compileall src` passed,
+  and targeted ruff on the changed Python files passed. CI status remains
+  Unknown until a PR/checks page is inspected.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
