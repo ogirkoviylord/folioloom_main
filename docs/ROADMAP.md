@@ -144,6 +144,15 @@ Tasks:
   source/translated snippets, prompt text, API-key-like strings, provider key
   identifiers and traceback markers. This does not close real-file matrix,
   beta-server smoke, backup/restore or full Gate B readiness.
+- Approved 2026-05-28: duplicate upload / retry architecture for issues
+  #120-#125 uses a no-schema first implementation. Work order is #121 fresh
+  translate-again attempt semantics before #123 duplicate upload UX, so the bot
+  does not show a `translate again` action before the action is implemented.
+  The first duplicate lookup is same-user only, scans at most `100` same-user
+  persistent jobs by source metadata, keeps resume My Books-only, and treats
+  free retry/retranslate as beta-safety accounting rather than paid billing.
+  Schema/state changes, durable indexed duplicate keys, concurrent duplicate
+  work, TTL cleanup and runtime data operations require separate approval.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the

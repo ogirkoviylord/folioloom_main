@@ -101,6 +101,14 @@ Owner decisions recorded during issue #71:
   required validation tool. Online EPUB validators are not approved. EPUBCheck
   is a release verification tool, not a production dependency; errors block
   fixtures and warnings are recorded/triaged.
+- 2026-05-28: Duplicate upload / retry architecture for issues #120-#125 uses
+  a no-schema first implementation: bounded same-user metadata scan with limit
+  `100`, no cross-user dedupe, no concurrent fresh `translate again` while a
+  duplicate job is active, resume remains My Books-only, and free
+  retry/retranslate stays beta-safety accounting rather than paid billing.
+  Implementation order is #121 fresh attempt semantics before #123 duplicate
+  upload UX. Durable indexed duplicate keys, schema/state changes and
+  retention/TTL cleanup require separate owner approval.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
