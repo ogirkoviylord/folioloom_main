@@ -90,6 +90,16 @@ _NAV_ACTIVE_ALIASES = {
     "providers": ("ai_providers",),
     "safety": ("upload_safety",),
 }
+_ACTION_VARIANTS = frozenset(
+    {
+        "view",
+        "copy",
+        "refresh",
+        "probe",
+        "change",
+        "danger",
+    }
+)
 
 
 def login_page(*, error: str | None = None) -> str:
@@ -204,6 +214,92 @@ def _nav_item_is_active(key: str, active: str) -> bool:
     return active in _NAV_ACTIVE_ALIASES.get(key, ())
 
 
+def _action_link(
+    label: str,
+    href: str,
+    variant: str,
+    *,
+    compact: bool = False,
+    extra_class: str = "",
+    target: str | None = None,
+    rel: str | None = None,
+) -> str:
+    safe_variant = _safe_action_variant(variant)
+    attrs = [
+        f'class="{escape(_action_classes(safe_variant, compact, extra_class))}"',
+        f'href="{escape(href)}"',
+        f'data-action-variant="{escape(safe_variant)}"',
+    ]
+    if target:
+        attrs.append(f'target="{escape(target)}"')
+    if rel:
+        attrs.append(f'rel="{escape(rel)}"')
+    return f'<a {" ".join(attrs)}>{escape(label)}</a>'
+
+
+def _action_button(
+    label: str,
+    variant: str,
+    *,
+    button_type: str = "submit",
+    name: str | None = None,
+    value: str | None = None,
+    compact: bool = False,
+    extra_class: str = "",
+    disabled_reason: str | None = None,
+) -> str:
+    safe_variant = _safe_action_variant(variant)
+    attrs = [
+        f'class="{escape(_action_classes(safe_variant, compact, extra_class))}"',
+        f'type="{escape(button_type)}"',
+        f'data-action-variant="{escape(safe_variant)}"',
+    ]
+    if name is not None:
+        attrs.append(f'name="{escape(name)}"')
+    if value is not None:
+        attrs.append(f'value="{escape(value)}"')
+    if disabled_reason:
+        attrs.extend(
+            (
+                "disabled",
+                'aria-disabled="true"',
+                'data-action-state="disabled"',
+                f'data-disabled-reason="{escape(disabled_reason)}"',
+            )
+        )
+        body = (
+            f"<span>{escape(label)}</span>"
+            " "
+            f'<small class="action-disabled-reason">{escape(disabled_reason)}</small>'
+        )
+    else:
+        body = escape(label)
+    return f'<button {" ".join(attrs)}>{body}</button>'
+
+
+def _action_classes(variant: str, compact: bool, extra_class: str) -> str:
+    classes = ["action-control", f"action-control-{variant}"]
+    if compact:
+        classes.append("action-control-compact")
+    classes.extend(_safe_class_tokens(extra_class))
+    return " ".join(classes)
+
+
+def _safe_action_variant(variant: str) -> str:
+    normalized = variant.strip().lower().replace("_", "-")
+    if normalized in _ACTION_VARIANTS:
+        return normalized
+    return "view"
+
+
+def _safe_class_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for token in value.split():
+        if token.replace("-", "").replace("_", "").isalnum():
+            tokens.append(token)
+    return tokens
+
+
 def section_body(title: str, copy: str) -> str:
     return f"""
     <section class="panel">
@@ -262,9 +358,7 @@ def _action_item(item: ActionItem) -> str:
           </div>
         </dl>
       </div>
-      <a class="button-link compact-action action-next" href="{escape(href)}">
-        {escape(next_action)}
-      </a>
+      {_action_link(next_action, href, "view", compact=True, extra_class="action-next")}
       <span class="sr-only">Next step</span>
     </article>
     """
@@ -336,7 +430,7 @@ def settings_body(
           <span>Telegram user ID</span>
           <input name="telegram_id" type="number" min="1" step="1" required>
         </label>
-        <button type="submit">Add ID</button>
+        {_action_button("Add ID", "change")}
       </form>
       {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
     </section>
@@ -350,7 +444,7 @@ def settings_body(
         action="/admin/settings/beta-safety">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {_beta_safety_setting_inputs(beta_safety_settings)}
-        <button type="submit">Save beta safety</button>
+        {_action_button("Save beta safety", "change")}
       </form>
     </section>
     <section class="metrics">
@@ -436,7 +530,7 @@ def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
     status = "on" if enabled else "off"
     next_enabled = "false" if enabled else "true"
     label = "Disable allowlist" if enabled else "Enable allowlist"
-    danger = " danger" if enabled else ""
+    variant = "danger" if enabled else "change"
     detail = (
         "Only listed Telegram IDs can start new uploads and translations."
         if enabled
@@ -451,9 +545,7 @@ def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
         <form method="post" action="/admin/settings/beta-allowlist/toggle">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
           <input type="hidden" name="enabled" value="{escape(next_enabled)}">
-          <button class="compact-action{danger}" type="submit">
-            {escape(label)}
-          </button>
+          {_action_button(label, variant, compact=True)}
         </form>
       </div>
     """
@@ -485,7 +577,7 @@ def _beta_allowlist_row(user_id: int, csrf_token: str) -> str:
           <form method="post" action="/admin/settings/beta-allowlist/remove">
             <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
             <input type="hidden" name="telegram_id" value="{safe_id}">
-            <button class="compact-action danger" type="submit">Remove</button>
+            {_action_button("Remove", "danger", compact=True)}
           </form>
         </td>
       </tr>
@@ -505,7 +597,7 @@ def _secret_safety_row(item: SecretSafetyItem) -> str:
       </td>
       <td><span class="status">{escape(item.status.replace("_", " "))}</span></td>
       <td><code>{escape(value)}</code></td>
-      <td><a class="table-action" href="{escape(href)}">Open</a></td>
+      <td>{_action_link("Open", href, "view", compact=True)}</td>
     </tr>
     """
 
@@ -623,7 +715,7 @@ def deepseek_keys_body(
         </p>
       </div>
       <div class="toolbar-actions">
-        <a class="secondary-action" href="/admin/ai-providers">Back to providers</a>
+        {_action_link("Back to providers", "/admin/ai-providers", "view")}
         {_ai_provider_test_all_keys_form(
             "deepseek",
             csrf_token=csrf_token,
@@ -740,11 +832,11 @@ def _ai_provider_card(
     )
     manage_keys_link = ""
     if summary.integration_id == "deepseek":
-        manage_keys_link = """
-      <a class="secondary-action" href="/admin/ai-providers/deepseek/keys">
-        Manage DeepSeek keys
-      </a>
-    """
+        manage_keys_link = _action_link(
+            "Manage DeepSeek keys",
+            "/admin/ai-providers/deepseek/keys",
+            "view",
+        )
     return f"""
     <article class="integration-card wide-card">
       <div>
@@ -1017,7 +1109,7 @@ def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
             required
           >
         </label>
-        <button type="submit">Add key</button>
+        {_action_button("Add key", "change")}
       </form>
     """
 
@@ -1108,7 +1200,7 @@ def _runtime_reload_form(
       <form class="secret-form" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit">{escape(label)}</button>
+        {_action_button(label, "change")}
       </form>
     """
 
@@ -1395,10 +1487,8 @@ def _provider_balance_panel(
         <form class="secret-form" method="post"
           action="/admin/ai-providers/deepseek/balance/refresh">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-          <button type="submit">Refresh balance</button>
-          <a class="table-action" href="{escape(safe_top_up)}" rel="noreferrer">
-            Open DeepSeek top-up
-          </a>
+          {_action_button("Refresh balance", "refresh")}
+          {_action_link("Open DeepSeek top-up", safe_top_up, "view", rel="noreferrer")}
         </form>
       </div>
     """
@@ -1438,12 +1528,21 @@ def _ai_provider_test_all_keys_form(
     csrf_token: str,
     active_key_count: int,
 ) -> str:
-    disabled = " disabled" if active_key_count == 0 else ""
+    disabled_reason = (
+        "No active admin-managed keys are available to test."
+        if active_key_count == 0
+        else None
+    )
+    button = _action_button(
+        "Test all active keys",
+        "probe",
+        disabled_reason=disabled_reason,
+    )
     return f"""
       <form class="secret-form" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/keys/test-all">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit"{disabled}>Test all active keys</button>
+        {button}
       </form>
     """
 
@@ -1536,6 +1635,14 @@ def _ai_provider_key_row(
     validation_html = (
         _ai_provider_key_validation(validation) if show_validation else ""
     )
+    toggle_button = _action_button(
+        toggle_label,
+        "danger" if toggle_label == "Disable" else "change",
+        name="key_id",
+        value=key.key_id,
+    )
+    remove_button = _action_button("Remove", "danger", name="key_id", value=key.key_id)
+    test_button = _action_button("Test key", "probe", name="key_id", value=key.key_id)
     return f"""
     <div class="key-row">
       <div>
@@ -1571,7 +1678,7 @@ def _ai_provider_key_row(
             required
           >
         </label>
-        <button type="submit">Save</button>
+        {_action_button("Save label", "change")}
       </form>
       <form method="post" action="{rotate_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
@@ -1581,27 +1688,21 @@ def _ai_provider_key_row(
           <small class="field-help">Replaces the stored encrypted value.</small>
           <input name="value" type="password" autocomplete="new-password">
         </label>
-        <button type="submit">Rotate</button>
+        {_action_button("Rotate", "change")}
       </form>
       <span>Weight {key.weight}</span>
       <span>Max parallel requests {key.max_parallel_requests}</span>
       <form method="post" action="{toggle_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit" value="{escape(key.key_id)}" name="key_id">
-          {toggle_label}
-        </button>
+        {toggle_button}
       </form>
       <form method="post" action="{remove_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button class="danger" type="submit" value="{escape(key.key_id)}" name="key_id">
-          Remove
-        </button>
+        {remove_button}
       </form>
       <form method="post" action="{test_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit" value="{escape(key.key_id)}" name="key_id">
-          Test key
-        </button>
+        {test_button}
       </form>
     </div>
     """
@@ -1789,7 +1890,7 @@ def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
         <code>{escape(summary.candidate_path)}</code>
         <form method="post" action="/admin/quality/run">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-          <button type="submit">Run quality check</button>
+          {_action_button("Run quality check", "probe")}
         </form>
       </div>
     </section>
@@ -1902,9 +2003,7 @@ def _cost_run_row(run: CostRunSummary) -> str:
       <td>{run.total_tokens}</td>
       <td>{escape(_format_usd(run.estimated_cost_usd))}</td>
       <td>
-        <a class="table-action" href="{escape(_safe_cost_log_href(run.log_href))}">
-          Logs
-        </a>
+        {_action_link("Logs", _safe_cost_log_href(run.log_href), "view", compact=True)}
       </td>
     </tr>
     """
@@ -2010,8 +2109,7 @@ def _operation_job_row(job, csrf_token: str) -> str:
     fragments = f"{job.completed_units}/{job.total_units}"
     trace_href = trace_href_for_log_href(job.log_href)
     logs = (
-        '<a class="table-action" '
-        f'href="{escape(trace_href)}">Open trace</a>'
+        _action_link("Open trace", trace_href, "view", compact=True)
         if trace_href
         else '<span class="muted-text">No run</span>'
     )
@@ -2051,8 +2149,20 @@ def _job_actions(job, csrf_token: str) -> str:
     if actions:
         return '<div class="job-actions">' + "".join(actions) + "</div>"
     if job.retryable:
-        return '<button type="button" disabled>Retry unavailable</button>'
-    return '<button type="button" disabled>No action</button>'
+        return _action_button(
+            "Retry unavailable",
+            "change",
+            button_type="button",
+            disabled_reason="Retry is not available from this console view.",
+            compact=True,
+        )
+    return _action_button(
+        "No action",
+        "view",
+        button_type="button",
+        disabled_reason="This job state has no admin action available.",
+        compact=True,
+    )
 
 
 def _job_action_form(
@@ -2061,11 +2171,11 @@ def _job_action_form(
     label: str,
     csrf_token: str,
 ) -> str:
-    danger = " danger" if action in {"cancel", "delete"} else ""
+    variant = "danger" if action in {"cancel", "delete"} else "change"
     return f"""
     <form method="post" action="/admin/operations/jobs/{escape(job_id)}/{action}">
       <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-      <button class="compact-action{danger}" type="submit">{escape(label)}</button>
+      {_action_button(label, variant, compact=True)}
     </form>
     """
 
@@ -2163,6 +2273,13 @@ def live_body(
     )
     runtime_cards = _live_runtime_cards(runtime_statuses, runtime_reload_states)
     beta_warning = _beta_safety_live_warning(beta_safety)
+    monitor_link = _action_link(
+        "Open monitor",
+        "/admin/live",
+        "view",
+        target="_blank",
+        rel="noreferrer",
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -2172,9 +2289,7 @@ def live_body(
           provider capacity, token spend, failures, and server health.
         </p>
       </div>
-      <a class="button-link" href="/admin/live" target="_blank" rel="noreferrer">
-        Open monitor
-      </a>
+      {monitor_link}
     </section>
     {beta_warning}
     <section class="metrics live-grid">{metric_cards}</section>
@@ -2590,7 +2705,7 @@ def logs_body(
           <span>To</span>
           <input name="date_to" type="date" value="{escape(date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -2637,10 +2752,8 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         </p>
       </div>
       <div class="toolbar-actions">
-        <a class="secondary-action" href="/admin/logs">Back to logs</a>
-        <a class="secondary-action" href="/admin/logs/{escape(run_id)}/download">
-          Download archive
-        </a>
+        {_action_link("Back to logs", "/admin/logs", "view")}
+        {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
     </section>
     <section class="panel">
@@ -2846,9 +2959,7 @@ def translation_trace_body(trace: TranslationTrace) -> str:
         </p>
       </div>
       <div class="toolbar-actions">
-        <a class="button-link" href="{escape(trace.next_action.href)}">
-          {escape(trace.next_action.label)}
-        </a>
+        {_action_link(trace.next_action.label, trace.next_action.href, "view")}
       </div>
     </section>
     <section class="trace-layout">
@@ -2876,9 +2987,7 @@ def translation_trace_body(trace: TranslationTrace) -> str:
             Follow one primary path first, then use the advanced links only
             if the trace does not explain the incident.
           </p>
-          <a class="button-link" href="{escape(trace.next_action.href)}">
-            {escape(trace.next_action.label)}
-          </a>
+          {_action_link(trace.next_action.label, trace.next_action.href, "view")}
         </section>
         <section class="panel">
           <h4>Evidence</h4>
@@ -2943,7 +3052,7 @@ def activity_body(
           <span>To</span>
           <input name="date_to" type="date" value="{escape(date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -3151,7 +3260,7 @@ def upload_safety_body(
           <input name="date_to" type="date"
             value="{escape(filters.date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -3427,8 +3536,7 @@ def _trace_provider_panel(provider: TranslationTraceProviderSignal | None) -> st
 
 def _trace_link_group(links: tuple[TranslationTraceLink, ...]) -> str:
     return "\n".join(
-        f'<a class="secondary-action trace-link" href="{escape(link.href)}">'
-        f"{escape(link.label)}</a>"
+        _action_link(link.label, link.href, "view", extra_class="trace-link")
         for link in links
     )
 
@@ -3438,6 +3546,18 @@ def _log_row(row: TranslationRunSummary) -> str:
     direction = f"{row.source_language} -> {row.target_language}"
     error = row.error_message or ""
     run_id = Path(row.run_dir).name
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    details_link = _action_link(
+        "Details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -3452,14 +3572,8 @@ def _log_row(row: TranslationRunSummary) -> str:
       <td>{row.total_tokens}</td>
       <td>{escape(error)}</td>
       <td>
-        <a class="table-action"
-          href="{escape(trace_href_for_run_id(run_id))}">
-          Open trace
-        </a>
-        <a class="table-action"
-          href="/admin/logs/{escape(run_id)}">
-          Details
-        </a>
+        {trace_link}
+        {details_link}
       </td>
     </tr>
     """
@@ -3631,7 +3745,7 @@ def _integration_card(
           <input name="label" type="text" placeholder="stable" required>
         </label>
         {fields}
-        <button type="submit">Add connection</button>
+        {_action_button("Add connection", "change")}
       </form>
     </details>
     """
@@ -3686,7 +3800,7 @@ def _integration_connection_remove_control(
           name="connection_id"
           value="{escape(connection.connection_id)}"
         >
-        <button class="danger" type="submit">Remove</button>
+        {_action_button("Remove", "danger")}
       </form>
     """
 
@@ -3856,8 +3970,13 @@ header {
 }
 .toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.toolbar-actions .secret-form {
+  border-top: 0;
+  padding-top: 0;
 }
 .secondary-action {
   border: 1px solid var(--line);
@@ -4154,6 +4273,109 @@ button.secondary {
 button.danger {
   color: #ffffff;
   background: var(--warn);
+}
+.action-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: var(--ink);
+  background: #ffffff;
+  text-align: center;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 750;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.action-control:hover {
+  text-decoration: none;
+}
+.action-control-compact {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+}
+.action-control-view {
+  border-color: var(--line);
+  color: #174b46;
+  background: #ffffff;
+}
+.action-control-view:hover {
+  border-color: #9fb7b4;
+  background: #f4faf9;
+}
+.action-control-copy {
+  border-color: #c9c7ee;
+  color: #3730a3;
+  background: #f7f7ff;
+}
+.action-control-copy:hover {
+  background: #efefff;
+}
+.action-control-refresh {
+  border-color: #adc6ea;
+  color: #1f4f86;
+  background: #f2f7fd;
+}
+.action-control-refresh:hover {
+  background: #e8f1fb;
+}
+.action-control-probe {
+  border-color: #d2b8e8;
+  color: #6d3a91;
+  background: #fbf6ff;
+}
+.action-control-probe:hover {
+  background: #f3e8ff;
+}
+.action-control-change {
+  border-color: #256f68;
+  color: #ffffff;
+  background: var(--accent);
+}
+.action-control-change:hover {
+  background: var(--accent-strong);
+}
+.action-control-danger {
+  border-color: #a33d2a;
+  color: #ffffff;
+  background: var(--warn);
+}
+.action-control-danger:hover {
+  background: #7f2f21;
+}
+.action-control[disabled],
+.action-control[aria-disabled="true"] {
+  border-color: #d8dee8;
+  color: #667085;
+  background: #eef1f5;
+  cursor: not-allowed;
+}
+.action-control[disabled]:hover,
+.action-control[aria-disabled="true"]:hover {
+  border-color: #d8dee8;
+  background: #eef1f5;
+}
+.action-control[disabled] {
+  display: inline-grid;
+  justify-items: center;
+}
+.action-disabled-reason {
+  display: block;
+  max-width: 220px;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
 }
 .job-actions {
   display: flex;
