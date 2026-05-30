@@ -48,6 +48,12 @@ class TranslationTraceLink:
 
 
 @dataclass(frozen=True)
+class TranslationTraceEvidencePacket:
+    body: str
+    file_name: str
+
+
+@dataclass(frozen=True)
 class TranslationTrace:
     run_id: str
     job_id: str
@@ -104,6 +110,10 @@ def trace_href_for_run_id(run_id: str) -> str:
     return f"/admin/translations/{quote(run_id, safe='')}/trace"
 
 
+def evidence_href_for_run_id(run_id: str) -> str:
+    return f"/admin/translations/{quote(run_id, safe='')}/evidence"
+
+
 def trace_href_for_log_href(href: str | None) -> str | None:
     if not href or not href.startswith("/admin/logs/"):
         return None
@@ -111,6 +121,78 @@ def trace_href_for_log_href(href: str | None) -> str | None:
     if not run_id:
         return None
     return trace_href_for_run_id(run_id)
+
+
+def build_translation_trace_evidence_packet(
+    trace: TranslationTrace,
+) -> TranslationTraceEvidencePacket:
+    incident = _fact_map(trace.summary_facts)
+    document = _fact_map(trace.document_facts)
+    choices = _fact_map(trace.choice_facts)
+    job = _fact_map(trace.job_facts)
+    provider = _provider_fact_map(trace.provider)
+    links = {
+        "Trace": trace_href_for_run_id(trace.run_id),
+        **{link.label: link.href for link in trace.advanced_links},
+    }
+    body = "\n".join(
+        (
+            "# FolioLoom Translation Evidence Packet",
+            "",
+            "Metadata only: yes",
+            "Format version: 1",
+            "",
+            "## Incident",
+            f"- Run id: {_packet_value(trace.run_id)}",
+            f"- Job id: {_packet_value(trace.job_id)}",
+            f"- User: {_packet_value(incident.get('User'))}",
+            f"- Order: {_packet_value(incident.get('Order'))}",
+            f"- Status: {_packet_value(trace.status)}",
+            f"- Failure category: {_packet_value(trace.failure_category)}",
+            f"- Safe error summary: {_packet_value(trace.safe_error_summary)}",
+            f"- Started at: {_packet_value(incident.get('Started at'))}",
+            f"- Finished at: {_packet_value(incident.get('Finished at'))}",
+            f"- Last event at: {_packet_value(incident.get('Last event at'))}",
+            "",
+            "## Document",
+            f"- File: {_packet_value(document.get('File'))}",
+            f"- Document kind: {_packet_value(document.get('Document kind'))}",
+            f"- Fragments: {_packet_value(document.get('Fragments'))}",
+            f"- Tokens: {_packet_value(document.get('Tokens'))}",
+            "",
+            "## Choices",
+            f"- Source language: {_packet_value(choices.get('Source language'))}",
+            f"- Target language: {_packet_value(choices.get('Target language'))}",
+            f"- Detected source: {_packet_value(choices.get('Detected source'))}",
+            f"- Translation policy: {_packet_value(choices.get('Translation policy'))}",
+            f"- Quality route: {_packet_value(choices.get('Quality route'))}",
+            "",
+            "## Job",
+            f"- Job state: {_packet_value(job.get('Job state'))}",
+            f"- Work units: {_packet_value(job.get('Work units'))}",
+            f"- Failed units: {_packet_value(job.get('Failed units'))}",
+            f"- Active workers: {_packet_value(job.get('Active workers'))}",
+            "",
+            "## Provider",
+            f"- Provider: {_packet_value(provider.get('Provider'))}",
+            f"- Runtime status: {_packet_value(provider.get('Runtime status'))}",
+            f"- Active channels: {_packet_value(provider.get('Active channels'))}",
+            f"- Degraded channels: {_packet_value(provider.get('Degraded channels'))}",
+            f"- Failure categories: {_packet_value(provider.get('Failure categories'))}",
+            f"- Balance status: {_packet_value(provider.get('Balance status'))}",
+            "",
+            "## Links",
+            *(
+                f"- {label}: {href}"
+                for label, href in links.items()
+            ),
+            "",
+        )
+    )
+    return TranslationTraceEvidencePacket(
+        body=body,
+        file_name=f"{_safe_evidence_file_stem(trace.run_id)}-evidence.md",
+    )
 
 
 def _summary_facts(
@@ -128,6 +210,9 @@ def _summary_facts(
         TranslationTraceFact("Status", summary.status or "Unknown"),
         TranslationTraceFact("Failure category", failure_category),
         TranslationTraceFact("Safe error", safe_error_summary),
+        TranslationTraceFact("Started at", _datetime_value(summary.started_at)),
+        TranslationTraceFact("Finished at", _datetime_value(summary.finished_at)),
+        TranslationTraceFact("Last event at", _datetime_value(summary.last_event_at)),
     )
 
 
@@ -464,6 +549,52 @@ def _safe_text(value: Any) -> str | None:
     for pattern in _SENSITIVE_PATTERNS:
         text = pattern.sub("[redacted]", text)
     return text or None
+
+
+def _fact_map(facts: tuple[TranslationTraceFact, ...]) -> dict[str, str]:
+    return {fact.label: fact.value for fact in facts}
+
+
+def _provider_fact_map(
+    provider: TranslationTraceProviderSignal | None,
+) -> dict[str, str]:
+    if provider is None:
+        return {
+            "Provider": "Unknown",
+            "Runtime status": "Unknown",
+            "Active channels": "Unknown",
+            "Degraded channels": "Unknown",
+            "Failure categories": "Unknown",
+            "Balance status": "Unknown",
+        }
+    return {
+        "Provider": provider.provider_id,
+        "Runtime status": provider.status,
+        "Active channels": str(provider.active_channels),
+        "Degraded channels": str(provider.degraded_channels),
+        "Failure categories": ", ".join(provider.safe_failure_categories),
+        "Balance status": provider.balance_status,
+    }
+
+
+def _packet_value(value: str | None) -> str:
+    if value is None or value == "":
+        return "Unknown"
+    text = " ".join(str(value).split())
+    return text or "Unknown"
+
+
+def _datetime_value(value: datetime | None) -> str:
+    if value is None:
+        return "Unknown"
+    return value.isoformat(timespec="seconds")
+
+
+def _safe_evidence_file_stem(run_id: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", run_id).strip(".-")
+    if not stem:
+        return "translation"
+    return stem[:120].rstrip(".-") or "translation"
 
 
 def _string(value: Any) -> str | None:
