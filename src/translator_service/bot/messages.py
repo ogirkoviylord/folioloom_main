@@ -254,7 +254,7 @@ MESSAGES = {
         "translating": "Your translation is in progress: {file_name}.",
         "paused": "Translation paused by an admin.\n\nI will not continue it until it is resumed.",
         "ready": "Your translation is ready.\n\nYou can download the translated file below: {result_name}.",
-        "partial": "Translation finished with skipped passages.\n\nPartial result: {result_name}.\n\nSome problematic passages were kept in the original language. You can retry them later without uploading the file again.",
+        "partial": "Translation finished with skipped passages.\n\nPartial result: {result_name}.\n\nSome passages remain in the original language. You can continue from My Books later without uploading the file again.",
         "cancelled": "Translation cancelled.\n\nPartial result: {result_name}.",
         "cancelled_without_result": (
             "Translation cancelled.\n\n"
@@ -518,7 +518,7 @@ MESSAGES = {
         "translating": "Перевод выполняется: {file_name}.",
         "paused": "Администратор поставил перевод на паузу.\n\nЯ не продолжу его, пока перевод снова не запустят.",
         "ready": "Перевод готов.\n\nВы можете скачать файл ниже: {result_name}.",
-        "partial": "Перевод завершен с пропущенными отрывками.\n\nЧастичный результат: {result_name}.\n\nПроблемные отрывки оставлены в оригинале. Позже их можно будет повторить без новой загрузки файла.",
+        "partial": "Перевод завершен с пропущенными отрывками.\n\nЧастичный результат: {result_name}.\n\nНекоторые отрывки остались на исходном языке. Позже можно продолжить из My Books без новой загрузки файла.",
         "cancelled": "Перевод отменен.\n\nЧастичный результат: {result_name}.",
         "cancelled_without_result": (
             "Перевод отменен.\n\n"
@@ -710,7 +710,7 @@ for _language_code, _fallbacks in {
         "queued": "Переклад у черзі: {file_name}.",
         "translating": "Переклад виконується: {file_name}.",
         "ready": "Переклад готовий.\n\nВи можете завантажити файл нижче: {result_name}.",
-        "partial": "Переклад завершено з пропущеними уривками.\n\nЧастковий результат: {result_name}.\n\nПроблемні уривки залишено в оригіналі. Пізніше їх можна буде повторити без нового завантаження файлу.",
+        "partial": "Переклад завершено з пропущеними уривками.\n\nЧастковий результат: {result_name}.\n\nДеякі уривки залишилися мовою оригіналу. Пізніше можна продовжити з My Books без нового завантаження файлу.",
         "cancelled": "Переклад скасовано.\n\nЧастковий результат: {result_name}.",
         "cancelled_without_result": (
             "Переклад скасовано.\n\n"
@@ -900,7 +900,7 @@ for _language_code, _fallbacks in {
         "queued": "Votre traduction est en file d’attente : {file_name}.",
         "translating": "Votre traduction est en cours : {file_name}.",
         "ready": "Votre traduction est prête.\n\nVous pouvez télécharger le fichier ci-dessous : {result_name}.",
-        "partial": "La traduction est terminée avec des passages ignorés.\n\nRésultat partiel : {result_name}.\n\nLes passages problématiques ont été conservés dans la langue d'origine. Vous pourrez les relancer plus tard sans téléverser à nouveau le fichier.",
+        "partial": "La traduction est terminée avec des passages ignorés.\n\nRésultat partiel : {result_name}.\n\nCertains passages restent dans la langue d'origine. Vous pourrez continuer depuis My Books plus tard sans téléverser à nouveau le fichier.",
         "cancelled": "Traduction annulée.\n\nRésultat partiel : {result_name}.",
         "cancelled_without_result": (
             "Traduction annulée.\n\n"
@@ -1073,7 +1073,7 @@ for _language_code, _fallbacks in {
         "queued": "Tu traducción está en cola: {file_name}.",
         "translating": "Tu traducción está en curso: {file_name}.",
         "ready": "Tu traducción está lista.\n\nPuedes descargar el archivo abajo: {result_name}.",
-        "partial": "La traducción terminó con pasajes omitidos.\n\nResultado parcial: {result_name}.\n\nLos pasajes problemáticos se conservaron en el idioma original. Más adelante podrás reintentarlos sin volver a subir el archivo.",
+        "partial": "La traducción terminó con pasajes omitidos.\n\nResultado parcial: {result_name}.\n\nAlgunos pasajes permanecen en el idioma original. Más adelante podrás continuar desde My Books sin volver a subir el archivo.",
         "cancelled": "Traducción cancelada.\n\nResultado parcial: {result_name}.",
         "cancelled_without_result": (
             "Traducción cancelada.\n\n"
@@ -1246,7 +1246,7 @@ for _language_code, _fallbacks in {
         "queued": "Je vertaling staat in de wachtrij: {file_name}.",
         "translating": "Je vertaling wordt uitgevoerd: {file_name}.",
         "ready": "Je vertaling is klaar.\n\nJe kunt het bestand hieronder downloaden: {result_name}.",
-        "partial": "De vertaling is voltooid met overgeslagen passages.\n\nGedeeltelijk resultaat: {result_name}.\n\nProblematische passages zijn in de oorspronkelijke taal bewaard. Je kunt ze later opnieuw proberen zonder het bestand opnieuw te uploaden.",
+        "partial": "De vertaling is voltooid met overgeslagen passages.\n\nGedeeltelijk resultaat: {result_name}.\n\nSommige passages blijven in de oorspronkelijke taal. Je kunt later doorgaan vanuit My Books zonder het bestand opnieuw te uploaden.",
         "cancelled": "Vertaling geannuleerd.\n\nGedeeltelijk resultaat: {result_name}.",
         "cancelled_without_result": (
             "Vertaling geannuleerd.\n\n"

@@ -8,6 +8,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -3535,6 +3536,145 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertTrue(detail.has_partial_result)
             self.assertTrue(detail.can_resume)
 
+    def test_user_book_detail_resume_visibility_follows_recoverable_state_matrix(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"Original",
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="book.uk.partial.txt",
+                content_type="text/plain",
+                content=b"Partial",
+            )
+            final = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="book.uk.txt",
+                content_type="text/plain",
+                content=b"Final",
+            )
+            recoverable_statuses = {
+                PersistentTranslationJobStatus.CANCELLED,
+                PersistentTranslationJobStatus.FAILED,
+                PersistentTranslationJobStatus.INTERRUPTED,
+                PersistentTranslationJobStatus.PARTIAL,
+                PersistentTranslationJobStatus.PAUSED,
+            }
+            cancellable_statuses = {
+                PersistentTranslationJobStatus.QUEUED,
+                PersistentTranslationJobStatus.TRANSLATING,
+                PersistentTranslationJobStatus.ASSEMBLING,
+                PersistentTranslationJobStatus.CANCEL_REQUESTED,
+            }
+
+            for status in PersistentTranslationJobStatus:
+                with self.subTest(status=status.value):
+                    job = persistent_store.create_job(
+                        order_id=f"order-{status.value}",
+                        user_id="telegram:42",
+                        file_id=source.object_key,
+                        file_name=f"{status.value}.txt",
+                        document_kind="txt",
+                        source_language="en",
+                        target_language="uk",
+                        adapter_version="txt-v1",
+                        prompt_version="plain-v1",
+                        pricing_snapshot_id="pricing-1",
+                        source_object_key=source.object_key,
+                    )
+                    if status is PersistentTranslationJobStatus.PARTIAL:
+                        persistent_store.attach_job_output(
+                            job.id,
+                            partial_object_key=partial.object_key,
+                        )
+                    elif status is PersistentTranslationJobStatus.READY:
+                        persistent_store.attach_job_output(
+                            job.id,
+                            final_object_key=final.object_key,
+                        )
+                    with persistent_store._connection:
+                        persistent_store._update_job_status(
+                            job.id,
+                            status,
+                            now=datetime.now(UTC),
+                        )
+
+                    detail = service.get_user_book_detail(
+                        user_telegram_id=42,
+                        job_id=job.id,
+                    )
+
+                    self.assertEqual(
+                        detail.can_resume,
+                        status in recoverable_statuses,
+                    )
+                    self.assertEqual(
+                        detail.can_cancel,
+                        status in cancellable_statuses,
+                    )
+                    self.assertEqual(
+                        detail.has_partial_result,
+                        status is PersistentTranslationJobStatus.PARTIAL,
+                    )
+
+    def test_user_book_detail_hides_resume_when_source_object_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            job = persistent_store.create_job(
+                order_id="order-missing-source",
+                user_id="telegram:42",
+                file_id="original/missing.txt",
+                file_name="missing.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/missing.txt",
+            )
+            with persistent_store._connection:
+                persistent_store._update_job_status(
+                    job.id,
+                    PersistentTranslationJobStatus.FAILED,
+                    now=datetime.now(UTC),
+                )
+
+            detail = service.get_user_book_detail(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertFalse(detail.can_resume)
+
     def test_resume_user_book_translation_runs_remaining_work_units(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
@@ -4876,6 +5016,7 @@ class BotTranslationServiceTest(unittest.TestCase):
 
     def test_cancels_specific_persistent_book_for_owner(self):
         with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
             persistent_store = SQLiteTranslationJobStore(
                 Path(temp_dir) / "jobs.sqlite3"
             )
@@ -4886,14 +5027,21 @@ class BotTranslationServiceTest(unittest.TestCase):
                 pricing_rules=_pricing_rules(),
                 max_upload_mb=50,
                 max_fragment_chars=5,
+                file_storage=storage,
                 persistent_job_store=persistent_store,
                 translation_run_log_root=run_log_root,
             )
             self.addCleanup(service.close)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"Original",
+            )
             job = persistent_store.create_job(
                 order_id="order-1",
                 user_id="telegram:42",
-                file_id="file-1",
+                file_id=source.object_key,
                 file_name="book.txt",
                 document_kind="txt",
                 source_language="en",
@@ -4901,7 +5049,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 adapter_version="txt-v1",
                 prompt_version="plain-v1",
                 pricing_snapshot_id="pricing-1",
-                source_object_key="original/book.txt",
+                source_object_key=source.object_key,
             )
             persistent_store.add_work_units(
                 job.id,

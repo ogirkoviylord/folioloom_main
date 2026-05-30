@@ -1869,11 +1869,7 @@ class BotTranslationService:
         job = self._persistent_job_store.get_job(job_id)
         if job is None or job.user_id != f"telegram:{user_telegram_id}":
             return None
-        if not _can_resume_persistent_job(job.status.value):
-            return self._book_summary_from_job(job)
-        try:
-            self._upload_safety_id_for_accepted_source(job.source_object_key)
-        except DocumentScanRejectedError:
+        if not self._persistent_job_can_resume(job):
             return self._book_summary_from_job(job)
 
         return self._book_summary_from_job(
@@ -1896,14 +1892,11 @@ class BotTranslationService:
         job = self._persistent_job_store.get_job(job_id)
         if job is None or job.user_id != f"telegram:{user_telegram_id}":
             return None
-        if not _can_resume_persistent_job(job.status.value):
+        if not self._persistent_job_can_resume(job):
             return None
-        try:
-            upload_safety_id = self._upload_safety_id_for_accepted_source(
-                job.source_object_key
-            )
-        except DocumentScanRejectedError:
-            return None
+        upload_safety_id = self._upload_safety_id_for_accepted_source(
+            job.source_object_key
+        )
 
         document_kind = DocumentKind(job.document_kind)
         source_content = (
@@ -2249,11 +2242,26 @@ class BotTranslationService:
             has_partial_result=bool(
                 job.partial_object_key and not job.final_object_key
             ),
-            can_resume=_can_resume_persistent_job(job.status.value),
+            can_resume=self._persistent_job_can_resume(job),
             can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
             updated_at=job.updated_at.isoformat(timespec="minutes"),
         )
+
+    def _persistent_job_can_resume(self, job) -> bool:
+        if not _can_resume_persistent_job(job.status.value):
+            return False
+        if (
+            self._file_storage is None
+            or not job.source_object_key
+            or not self._file_storage.exists(job.source_object_key)
+        ):
+            return False
+        try:
+            self._upload_safety_id_for_accepted_source(job.source_object_key)
+        except DocumentScanRejectedError:
+            return False
+        return True
 
     def _duplicate_upload_match_from_job(self, job) -> DuplicateUploadMatch:
         status = job.status.value

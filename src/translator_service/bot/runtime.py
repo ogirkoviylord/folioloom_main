@@ -2372,7 +2372,9 @@ def _duplicate_upload_keyboard(match, interface_language: str = "en"):
                 )
             ]
         )
-    elif match.can_open_existing:
+    if match.can_open_existing and (
+        not match.can_download_existing or getattr(match, "status", None) != "ready"
+    ):
         keyboard.append(
             [
                 InlineKeyboardButton(

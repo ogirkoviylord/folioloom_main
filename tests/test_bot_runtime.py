@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
@@ -2286,6 +2287,41 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 [("Delete Book", "delete_book:job-1")],
                 [("Back to My Books", "my_books")],
             ],
+        )
+
+    def test_duplicate_upload_keyboard_for_partial_result_links_my_books_recovery(self):
+        from translator_service.bot.runtime import _duplicate_upload_keyboard
+
+        keyboard = _duplicate_upload_keyboard(
+            SimpleNamespace(
+                job_id="job-1",
+                status="partial",
+                can_download_existing=True,
+                can_open_existing=True,
+                can_translate_again=True,
+            ),
+            interface_language="en",
+        )
+
+        self.assertEqual(
+            [
+                [(button.text, button.callback_data) for button in row]
+                for row in keyboard.inline_keyboard
+            ],
+            [
+                [("Download Translation", "download_book:job-1")],
+                [("Open Existing Translation", "book_detail:job-1")],
+                [("Translate Again", "duplicate_upload_translate_again")],
+                [("Back", "duplicate_upload_back")],
+            ],
+        )
+        self.assertNotIn(
+            "resume_book",
+            "\n".join(
+                button.callback_data
+                for row in keyboard.inline_keyboard
+                for button in row
+            ),
         )
 
     async def test_callback_message_helper_edits_existing_inline_message(self):
