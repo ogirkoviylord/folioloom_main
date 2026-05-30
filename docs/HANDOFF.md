@@ -144,6 +144,23 @@ Owner decisions recorded during issue #71:
   duplicate indexes, schema changes,
   concurrent duplicate work, upload-flow resume, TTL cleanup, paid retries,
   deployment, release readiness or CI evidence.
+- 2026-05-30: Issue #125 implementation slice is locally verified on branch
+  `codex/issue-125-my-books-resume-controls`. My Books detail now shows
+  `Continue Translation` only when the job status is architecture-approved as
+  recoverable and the stored source object is still available for backend
+  resume. Duplicate-upload choices still never show `Continue Translation`;
+  partial duplicate results now provide both partial download and an explicit
+  open-existing/My Books path for recovery. Partial-result user copy is neutral
+  and does not describe skipped passages as quality problems. Local
+  verification: `PYTHONPATH=src python3 -m unittest tests.test_bot_messages
+  tests.test_bot_runtime tests.test_bot_translation_service` ran 253 tests with
+  `OK`; full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1133
+  tests with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`
+  passed; targeted `python3 -m ruff check --select F,I` on changed files
+  passed. This does not change durable job/work-unit semantics, add
+  schema/state changes, perform runtime data operations, implement upload-flow
+  resume, or close broad Gate B cancel/resume/restart evidence in #81. CI
+  status remains Unknown until a PR/checks page is inspected.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

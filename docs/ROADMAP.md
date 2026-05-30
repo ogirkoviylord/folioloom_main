@@ -171,6 +171,13 @@ Tasks:
   Books rather than the upload prompt. This does not implement durable duplicate
   indexes, schema/state changes, upload-flow resume, TTL cleanup, paid retry
   policy, deployment or release readiness.
+- Completed locally 2026-05-30: issue #125 keeps resume controls My Books-only
+  for recoverable translations without schema changes. My Books detail shows
+  `Continue Translation` only for architecture-approved recoverable statuses
+  when the stored source object is available for backend resume. Duplicate
+  upload choices do not show resume; partial duplicate results offer partial
+  download plus an open-existing/My Books path. This does not close broad Gate B
+  cancel/resume/restart release evidence.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the
