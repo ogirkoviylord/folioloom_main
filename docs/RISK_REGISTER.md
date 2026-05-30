@@ -54,6 +54,7 @@
 | R-033 | Admin/provider bulk diagnostics competing with active translation work | Admin / Provider / Cost | Medium | Issue #30 and PR #38 added a fail-closed guard for Admin -> AI Providers -> Test all active keys during active translations/provider requests | Uncontrolled diagnostics can add provider traffic during incidents or expose unsafe metadata if guardrails regress | Keep bulk key tests paused during active translations/provider requests; focused admin/provider tests and redaction review for future changes | Architect / Reviewer | Mitigated / watch |
 | R-034 | Malware/AV scanning can regress or be misrepresented as broader Gate B readiness | Security / Privacy / User data / Deployment | High | Owner accepted local malware scanning on 2026-05-22; Gate B requires local malware/AV scanning or explicit owner deferral; issue #93 adds the app `clamd` adapter, issue #94 wires ledger-backed upload gating, issue #103 adds metadata-only admin visibility, issue #109 adds internal-only runtime shape and local runtime smoke, and issue #95 records metadata-only Gate B malware/AV evidence on 2026-05-27 | Unsafe files may reach parsers/workers if the runtime gate is misconfigured or regresses, or private books/manuscripts may be submitted to inappropriate public scanning services; agents may mistake the malware/AV item pass for full upload safety or Gate B readiness | Keep local/internal scanning, quarantine-first flow, Upload Safety Ledger accepted-source gating, fail-closed beta errors and metadata-only logs/admin; keep public scanning services out of the default path; preserve #95 evidence scope and keep issue #73 upload-hardening scope, TTL/quarantine cleanup, real-file matrix, and beta-server smoke as separate evidence items | Human / Architect / Reviewer | Mitigated / watch |
 | R-035 | Skill dispatch bypass or docs drift | AI workflow | Medium | `AGENTS.md` defines Skill Dispatch Contract; `docs/AGENT_SKILL_ROUTING.md` defines primary routing plus supporting skill domain catalog; `.agents/skills/*` must stay aligned | Agents may choose the wrong role/skill, skip approval evidence, overuse supporting skills, or read excessive docs if routing guidance drifts | Keep dispatcher compact in `AGENTS.md`, use 0-2 supporting skills by default, require routing receipts in final reports, and have Reviewer check route/approval consistency | Reviewer / Scribe | Open |
+| R-036 | Beta Operations Console redesign can become a broad admin rewrite or add confusing/risky controls | Admin / Operational / AI workflow | Medium | Owner approved `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md` as a before-beta design direction; admin auth/security, provider controls and user data remain high-risk zones | A broad redesign could delay Gate B work, hide existing diagnostic detail, weaken redaction, or put state-changing controls too close to read-only incident investigation | Split into small issues; start with Translation Failure Trace and safe evidence packet; keep advanced/raw views available; keep state-changing actions deeper and clearly classified; require Architect review for provider controls, auth/security, user data, database/state, deployment or dependency changes | Orchestrator / Architect / Reviewer | Open |
 
 ## 4. Обязательные категории рисков
 
@@ -150,6 +151,9 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   and Reviewer should check route/approval consistency against `AGENTS.md` and
   `docs/AGENT_SKILL_ROUTING.md`.
 - Agents weakening guardrails: High; Reviewer must check safety/privacy/payment/deployment guardrails explicitly.
+- Admin redesign scope creep: Medium; the Beta Operations Console should remain
+  incident-first, read-only by default and split into small issues rather than
+  becoming a broad admin rewrite.
 
 ## 5. Human approval required
 
@@ -293,6 +297,20 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Acceptance criteria: provider, queue/worker, disk/storage, failed-job and
   backup/restore status visible or documented; no raw document text, prompts,
   translations, API keys, stack traces, backup archives or restored files.
+
+- Task: Implement Beta Operations Console redesign in small slices.
+  Risk reduced: R-015, R-028, R-036.
+  Priority: High before free closed beta.
+  Suggested owner: Orchestrator / Architect / Implementer / Reviewer.
+  Decision status: owner approved the design direction on 2026-05-31; design is
+  recorded in
+  `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md`.
+  Acceptance criteria: first slice provides Translation Failure Trace and a
+  safe evidence packet; provider/key incident clarity follows; overview triage
+  links to trace views; state-changing admin actions remain deeper and clearly
+  classified; advanced/raw views remain available; no raw document text,
+  prompts, translations, API keys, stack traces, public admin exposure, payment
+  readiness or production-readiness claims are introduced.
 
 - Task: Define paid-beta plan only when owner chooses Gate C work.
   Risk reduced: R-024.

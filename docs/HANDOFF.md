@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-29
+Last updated: 2026-05-31
 
 ## 1. Текущее состояние проекта
 
@@ -161,6 +161,16 @@ Owner decisions recorded during issue #71:
   schema/state changes, perform runtime data operations, implement upload-flow
   resume, or close broad Gate B cancel/resume/restart evidence in #81. CI
   status remains Unknown until a PR/checks page is inspected.
+- 2026-05-31: Owner approved the admin redesign direction as a before-free
+  closed beta Beta Operations Console effort. The accepted direction is
+  incident-first and read-only by default: Translation Failure Trace and safe
+  evidence packet first, then provider/key incident clarity, overview triage,
+  navigation cleanup, action semantics and user support/debug views. The design
+  is recorded in
+  `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md`.
+  This is a design/roadmap decision only; it does not implement the redesign,
+  satisfy Gate B, change SSH-tunnel-only admin, authorize public admin,
+  payment, deployment, auth/RBAC, database/state or user-data changes.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
@@ -198,6 +208,9 @@ core flow, release gates, operational visibility and documentation.
   readiness;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
+- выполнить owner-approved Beta Operations Console redesign in small scoped
+  admin UX issues, starting with Translation Failure Trace and safe evidence
+  packet for crashed translations;
 - держать payments, public production, public admin и новые форматы вне
   текущего scope.
 - GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)
