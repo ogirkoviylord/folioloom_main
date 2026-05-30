@@ -132,6 +132,19 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
+    def test_admin_translation_trace_does_not_read_run_without_login(self):
+        with patch(
+            "translator_service.admin.routes.get_translation_run_details",
+            side_effect=AssertionError("translation trace should be lazy"),
+        ):
+            response = self.client.get(
+                "/admin/translations/run-1/trace",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
     def test_admin_activity_users_and_security_do_not_read_activity_without_login(self):
         for path in (
             "/admin/activity",
@@ -1233,7 +1246,10 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("order-queued", page.text)
             self.assertIn("worker-a", page.text)
             self.assertIn("21", page.text)
-            self.assertIn(f'href="/admin/logs/{logger.run_dir.name}"', page.text)
+            self.assertIn(
+                f'href="/admin/translations/{logger.run_dir.name}/trace"',
+                page.text,
+            )
             self.assertIn("Pause", page.text)
             self.assertIn("Cancel", page.text)
             self.assertIn("Delete", page.text)
@@ -1420,6 +1436,7 @@ class AdminRoutesTest(unittest.TestCase):
 
             page = client.get("/admin/logs?status=ready")
             api = client.get("/admin/api/logs?status=ready")
+            trace = client.get(f"/admin/translations/{logger.run_dir.name}/trace")
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
@@ -1430,7 +1447,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("book.txt", page.text)
             self.assertIn("ready", page.text)
             self.assertIn(
-                f"/admin/logs/{logger.run_dir.name}/download",
+                f"/admin/translations/{logger.run_dir.name}/trace",
                 page.text,
             )
             self.assertIn(
@@ -1438,6 +1455,18 @@ class AdminRoutesTest(unittest.TestCase):
                 page.text,
             )
             self.assertNotIn("source_text", page.text)
+            self.assertEqual(trace.status_code, 200)
+            self.assertIn("Translation Failure Trace", trace.text)
+            self.assertIn("job-logs-1", trace.text)
+            self.assertIn("book.txt", trace.text)
+            self.assertIn("Not failed", trace.text)
+            self.assertIn("Advanced log detail", trace.text)
+            self.assertIn("Evidence packet copy/download is tracked", trace.text)
+            self.assertNotIn("Chapter one", trace.text)
+            self.assertNotIn("Глава первая", trace.text)
+            self.assertNotIn("processing-bearer-token", trace.text)
+            self.assertNotIn("sk-processing-secret-value", trace.text)
+            self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
             self.assertIn("Progress", details.text)
