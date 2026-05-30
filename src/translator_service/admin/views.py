@@ -139,6 +139,7 @@ _UNSAFE_SUPPORT_VALUE_MARKERS = (
     "\\object-storage",
     "/var/",
 )
+_FAILED_SUPPORT_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
 def login_page(*, error: str | None = None) -> str:
@@ -3252,9 +3253,7 @@ def _support_translation_row(row: TranslationRunSummary) -> str:
     target = _safe_support_text(row.target_language) or "unknown"
     document_kind = _safe_support_text(row.document_kind) or "unknown"
     choice = f"{source} -> {target} · {document_kind}"
-    detail = _safe_support_text(row.error_message)
-    if not detail:
-        detail = _safe_support_text(row.current_stage) or "n/a"
+    detail = _support_translation_stage(row)
     trace_link = _action_link(
         "Open trace",
         trace_href_for_run_id(run_id),
@@ -3281,6 +3280,13 @@ def _support_translation_row(row: TranslationRunSummary) -> str:
       <td><div class="job-actions">{trace_link}{details_link}</div></td>
     </tr>
     """
+
+
+def _support_translation_stage(row: TranslationRunSummary) -> str:
+    stage = _safe_support_text(row.current_stage) or row.status or "n/a"
+    if row.status in _FAILED_SUPPORT_TRANSLATION_STATUSES and row.error_message:
+        return f"{stage} (redacted error)"
+    return stage
 
 
 def _support_activity_rows(events: tuple[UserActivityEvent, ...]) -> str:

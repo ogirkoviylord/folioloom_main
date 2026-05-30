@@ -1954,8 +1954,8 @@ class AdminRoutesTest(unittest.TestCase):
             logger.finish(
                 status="failed",
                 error_message=(
-                    "Provider failed with api_key=sk-support-secret "
-                    "Traceback /object-storage/private/book.txt"
+                    "Provider failed after echoing RAW SOURCE SENTINEL "
+                    "RAW TRANSLATION SENTINEL RAW PROMPT SENTINEL"
                 ),
             )
             run_id = Path(logger.run_dir).name
