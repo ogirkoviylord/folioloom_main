@@ -127,6 +127,23 @@ MESSAGES = {
             "prepared. I cannot start another identical preview yet. Go back "
             "or open My Books to check existing work."
         ),
+        "duplicate_ready": (
+            "This document has already been translated with these settings.\n\n"
+            "Choose whether to download the existing translation or translate "
+            "it again as a new attempt."
+        ),
+        "duplicate_active": (
+            "A matching translation is already in progress.\n\n"
+            "Open the existing book to check its status, or go back to change "
+            "translation settings."
+        ),
+        "duplicate_existing": (
+            "A matching translation already exists in My Books.\n\n"
+            "Open the existing book or translate this upload again as a new "
+            "attempt."
+        ),
+        "duplicate_translate_again": "Translate Again",
+        "duplicate_open_existing": "Open Existing Translation",
         "translation_mode_prompt": (
             "File received.\n\n"
             "Title: {file_name}\n"
@@ -372,6 +389,23 @@ MESSAGES = {
             "предпросмотр. Вернитесь назад или откройте «Мои книги», чтобы "
             "проверить существующую работу."
         ),
+        "duplicate_ready": (
+            "Этот документ уже переводился с такими настройками.\n\n"
+            "Выберите: скачать существующий перевод или перевести заново как "
+            "новую попытку."
+        ),
+        "duplicate_active": (
+            "Такой перевод уже выполняется.\n\n"
+            "Откройте существующую книгу, чтобы проверить статус, или "
+            "вернитесь назад и измените настройки перевода."
+        ),
+        "duplicate_existing": (
+            "Такой перевод уже есть в «Моих книгах».\n\n"
+            "Откройте существующую книгу или переведите эту загрузку заново "
+            "как новую попытку."
+        ),
+        "duplicate_translate_again": "Перевести заново",
+        "duplicate_open_existing": "Открыть существующий перевод",
         "translation_mode_prompt": (
             "Файл получен.\n\n"
             "Название: {file_name}\n"
@@ -695,6 +729,23 @@ for _language_code, _fallbacks in {
             "попередній перегляд. Поверніться назад або відкрийте «Мої "
             "книги», щоб перевірити наявну роботу."
         ),
+        "duplicate_ready": (
+            "Цей документ уже перекладався з такими налаштуваннями.\n\n"
+            "Виберіть: завантажити наявний переклад або перекласти заново як "
+            "нову спробу."
+        ),
+        "duplicate_active": (
+            "Такий переклад уже виконується.\n\n"
+            "Відкрийте наявну книгу, щоб перевірити статус, або поверніться "
+            "назад і змініть налаштування перекладу."
+        ),
+        "duplicate_existing": (
+            "Такий переклад уже є в «Моїх книгах».\n\n"
+            "Відкрийте наявну книгу або перекладіть це завантаження заново "
+            "як нову спробу."
+        ),
+        "duplicate_translate_again": "Перекласти заново",
+        "duplicate_open_existing": "Відкрити наявний переклад",
         "unknown_text": "Надішліть книгу, розділ або рукопис, щоб почати, або виберіть дію в головному меню.",
     },
     "fr": {
@@ -1558,6 +1609,24 @@ def build_preview_translation_message(
 
 def build_preview_required_message(interface_language: str = "en") -> str:
     return _messages(interface_language)["preview_required"]
+
+
+def build_duplicate_upload_message(match, interface_language: str = "en") -> str:
+    messages = _messages(interface_language)
+    status = getattr(match, "status", "")
+    if status == "ready":
+        return messages["duplicate_ready"]
+    if status in {"queued", "translating", "assembling", "cancel_requested"}:
+        return messages["duplicate_active"]
+    return messages["duplicate_existing"]
+
+
+def get_duplicate_translate_again_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["duplicate_translate_again"]
+
+
+def get_duplicate_open_existing_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["duplicate_open_existing"]
 
 
 def build_translation_mode_required_message(interface_language: str = "en") -> str:

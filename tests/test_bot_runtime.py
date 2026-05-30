@@ -348,6 +348,12 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 return handler.callback
         self.fail(f"Router message handler not found: {name}")
 
+    def _router_callback_handler(self, router, name: str):
+        for handler in router.callback_query.handlers:
+            if getattr(handler.callback, "__name__", None) == name:
+                return handler.callback
+        self.fail(f"Router callback handler not found: {name}")
+
     def _accept_pending_preview(self, service, *, user_telegram_id: int = 42) -> None:
         with service._state_lock:
             pending = service._pending[user_telegram_id]
@@ -719,6 +725,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
                 persistent_jobs_db_path=":memory:",
                 user_settings_db_path=":memory:",
+                object_storage_root=str(Path(temp_dir.name) / "objects"),
             )
         )
         self.addCleanup(service.close)
@@ -756,6 +763,139 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(keyboard_texts, ["Continue Translation", "Back"])
 
+    async def test_language_choice_shows_ready_duplicate_choice_without_preview(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+                object_storage_root=str(Path(temp_dir.name) / "objects"),
+            )
+        )
+        self.addCleanup(service.close)
+        content = b"One meaningful paragraph for duplicate prompt."
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=content,
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+        self._accept_pending_preview(service)
+        completed = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=_RuntimeRecordingTranslator(),
+        )
+        self.assertEqual(completed.status, TranslationJobStatus.READY)
+
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="copy.txt",
+            content=content,
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+
+        await _prepare_and_send_translation_preview(
+            message=message,
+            service=service,
+            translator=translator,
+            target_language="uk",
+            interface_language="en",
+        )
+
+        self.assertEqual(translator.requests, [])
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("has already been translated", message.answers[0][0])
+        keyboard_buttons = [
+            (button.text, button.callback_data)
+            for row in message.answers[0][1].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            keyboard_buttons,
+            [
+                ("Download Translation", f"download_book:{completed.id}"),
+                ("Translate Again", "duplicate_upload_translate_again"),
+                ("Back", "duplicate_upload_back"),
+            ],
+        )
+        self.assertNotIn("Continue Translation", message.answers[0][0])
+        self.assertIsNotNone(service.get_pending(42))
+        self.assertIsNone(service.get_pending_upload(42))
+
+    async def test_duplicate_translate_again_callback_shows_fresh_preview(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+                object_storage_root=str(Path(temp_dir.name) / "objects"),
+            )
+        )
+        self.addCleanup(service.close)
+        content = b"One meaningful paragraph for duplicate translate again."
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=content,
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+        self._accept_pending_preview(service)
+        service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=_RuntimeRecordingTranslator(),
+        )
+
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="copy.txt",
+            content=content,
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+        translator = _RuntimeRecordingTranslator()
+        router = create_router(
+            service=service,
+            translator=translator,
+            config=BotRuntimeConfig(),
+        )
+        callback = RecordingCallback(data="duplicate_upload_translate_again")
+        callback.message = RecordingMessage()
+
+        handler = self._router_callback_handler(
+            router,
+            "duplicate_upload_translate_again",
+        )
+        await handler(callback)
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(len(callback.message.answers), 1)
+        self.assertIn("Translation preview", callback.message.answers[0][0])
+        keyboard_texts = [
+            button.text
+            for row in callback.message.answers[0][1].keyboard
+            for button in row
+        ]
+        self.assertEqual(keyboard_texts, ["Continue Translation", "Back"])
+        pending = service.get_pending(42)
+        self.assertIsNotNone(pending)
+        self.assertTrue(pending.preview_shown)
+
     async def test_preview_failure_restores_language_selection_state(self):
         temp_dir = TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
@@ -764,6 +904,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
                 persistent_jobs_db_path=":memory:",
                 user_settings_db_path=":memory:",
+                object_storage_root=str(Path(temp_dir.name) / "objects"),
             )
         )
         self.addCleanup(service.close)
