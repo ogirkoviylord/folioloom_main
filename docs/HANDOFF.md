@@ -161,6 +161,23 @@ Owner decisions recorded during issue #71:
   schema/state changes, perform runtime data operations, implement upload-flow
   resume, or close broad Gate B cancel/resume/restart evidence in #81. CI
   status remains Unknown until a PR/checks page is inspected.
+- 2026-05-30: Issue #134 implementation slice is locally verified on branch
+  `codex/issue-134-investigate`. Upload Safety admin now builds a
+  metadata-only accepted/blocked/failed-closed read model from deduplicated
+  `security.upload_safety.summary` activity snapshots, including sanitized
+  filename and job correlation when available. Clean accepted uploads through
+  the required scanner gate remain visible as `accepted`/`clean`; persistent
+  jobs keep the worker-facing `translation_policy.upload_safety` marker; run
+  artifacts also include a safe upload-safety marker without object storage
+  keys. Local verification used synthetic fixtures only and did not inspect
+  real `.env*`, live beta/server runtime data, `var/` data or user documents:
+  focused upload-safety/admin tests passed, `tests.test_admin_upload_safety`
+  and `tests.test_bot_translation_service` passed, full unittest discover ran
+  1137 tests with `OK (skipped=13)`, compileall passed, targeted ruff passed,
+  and `scripts/predeploy_check.sh` passed. This does not implement TTL cleanup,
+  deployment/server smoke, production readiness, public/external scanning,
+  scanner override/rescan controls or any live runtime-data repair. CI status
+  remains Unknown until a PR/checks page is inspected.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
