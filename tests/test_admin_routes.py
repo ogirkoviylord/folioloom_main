@@ -72,6 +72,29 @@ def _admin_setting_row(db_path: str, key: str):
     finally:
         connection.close()
 
+
+def _nav_section(page_text: str, class_name: str) -> str:
+    tag = "details" if class_name == "advanced-nav" else "div"
+    pattern = (
+        rf'<{tag}[^>]+class="[^"]*{re.escape(class_name)}[^"]*"[^>]*>'
+        rf"(.*?)</{tag}>"
+    )
+    match = re.search(pattern, page_text, re.DOTALL)
+    if match is None:
+        raise AssertionError(f"{class_name} nav section not found")
+    return match.group(1)
+
+
+def _advanced_nav_tag(page_text: str) -> str:
+    match = re.search(
+        r'<details class="[^"]*advanced-nav[^"]*"[^>]*>',
+        page_text,
+    )
+    if match is None:
+        raise AssertionError("advanced nav details not found")
+    return match.group(0)
+
+
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
 
@@ -387,15 +410,73 @@ class AdminRoutesTest(unittest.TestCase):
         overview = self.client.get("/admin/overview")
 
         self.assertEqual(overview.status_code, 200)
-        self.assertIn("Overview", overview.text)
-        self.assertIn("Integrations", overview.text)
-        self.assertIn("AI Providers", overview.text)
-        self.assertIn("Billing", overview.text)
-        self.assertIn("Costs", overview.text)
-        self.assertIn("Quality", overview.text)
-        self.assertIn("Live", overview.text)
-        self.assertIn("Settings", overview.text)
+        primary_nav = _nav_section(overview.text, "primary-nav")
+        for label in (
+            "Overview",
+            "Live",
+            "Translations",
+            "Users",
+            "Providers",
+            "Beta Controls",
+            "Safety",
+            "Settings",
+        ):
+            self.assertIn(label, primary_nav)
         self.assertEqual(overview.headers["cache-control"], "no-store")
+
+    def test_admin_navigation_groups_raw_pages_under_advanced(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        overview = self.client.get("/admin/overview")
+
+        self.assertEqual(overview.status_code, 200)
+        primary_nav = _nav_section(overview.text, "primary-nav")
+        advanced_nav = _nav_section(overview.text, "advanced-nav")
+        self.assertIn(">Advanced<", overview.text)
+        for label in ("Logs", "Activity", "Operations", "Audit"):
+            self.assertNotIn(f">{label}<", primary_nav)
+            self.assertIn(f">{label}<", advanced_nav)
+        for href in (
+            "/admin/logs",
+            "/admin/activity",
+            "/admin/operations/jobs",
+            "/admin/audit",
+        ):
+            self.assertIn(f'href="{href}"', advanced_nav)
+
+    def test_advanced_route_marks_advanced_nav_item_active(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        page = self.client.get("/admin/operations/jobs")
+
+        self.assertEqual(page.status_code, 200)
+        primary_nav = _nav_section(page.text, "primary-nav")
+        advanced_nav = _nav_section(page.text, "advanced-nav")
+        self.assertIn("open", _advanced_nav_tag(page.text))
+        self.assertIn(
+            'href="/admin/operations/jobs" class="active"',
+            advanced_nav,
+        )
+        self.assertNotIn('class="active"', primary_nav)
+
+    def test_translations_alias_is_primary_while_raw_logs_stay_advanced(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        translations = self.client.get("/admin/translations")
+        logs = self.client.get("/admin/logs")
+
+        self.assertEqual(translations.status_code, 200)
+        self.assertEqual(logs.status_code, 200)
+        self.assertIn(
+            'href="/admin/translations" class="active"',
+            _nav_section(translations.text, "primary-nav"),
+        )
+        self.assertNotIn("open", _advanced_nav_tag(translations.text))
+        self.assertIn(
+            'href="/admin/logs" class="active"',
+            _nav_section(logs.text, "advanced-nav"),
+        )
+        self.assertIn("open", _advanced_nav_tag(logs.text))
 
     def test_owner_can_add_view_and_remove_beta_allowlist_ids_from_settings(self):
         with TemporaryDirectory() as temp_dir:
@@ -830,6 +911,8 @@ class AdminRoutesTest(unittest.TestCase):
         for path, label in (
             ("/admin/integrations", "Integrations"),
             ("/admin/ai-providers", "AI Providers"),
+            ("/admin/translations", "Translations"),
+            ("/admin/beta-controls", "Beta Controls"),
             ("/admin/billing", "Billing"),
             ("/admin/costs", "Costs"),
             ("/admin/quality", "Quality"),

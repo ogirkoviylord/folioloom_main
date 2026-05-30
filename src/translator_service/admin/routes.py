@@ -363,6 +363,23 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/beta-controls", response_class=HTMLResponse)
+    async def beta_controls(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Beta Controls",
+            active="beta_controls",
+            body=lambda session: settings_body(
+                _secret_safety_report(settings),
+                beta_allowlist_enabled=_beta_allowlist_policy(settings).enabled,
+                beta_allowlist_ids=_beta_allowlist_ids(settings),
+                beta_safety_settings=_beta_safety_setting_values(settings),
+                csrf_token=session.csrf_token,
+            ),
+        )
+
     @router.post("/settings/beta-allowlist/toggle")
     async def toggle_beta_allowlist(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
@@ -522,6 +539,26 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/translations", response_class=HTMLResponse)
+    async def translations(request: Request) -> Response:
+        filters = _log_filters(request)
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translations",
+            active="translations",
+            body=lambda session: logs_body(
+                list_translation_run_summaries(
+                    settings.translation_run_log_root,
+                    **filters,
+                ),
+                title="Translations",
+                form_action="/admin/translations",
+                **filters,
+            ),
+        )
+
     @router.get("/logs/{run_id}", response_class=HTMLResponse)
     async def log_detail(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
@@ -570,7 +607,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             session_manager=session_manager,
             environment=settings.environment,
             title="Translation Trace",
-            active="logs",
+            active="translations",
             body=translation_trace_body(trace),
         )
 
