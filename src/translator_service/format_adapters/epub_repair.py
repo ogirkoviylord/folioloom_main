@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from html.entities import name2codepoint
 from io import BytesIO
 from pathlib import PurePosixPath
-import re
 from zipfile import BadZipFile, ZipFile
 
 from translator_service.extractors import TextExtractionError, validate_archive_members
@@ -81,6 +81,16 @@ def repair_epub_xml_part(
             )
         )
 
+    repaired, simple_doctype_count = _strip_simple_html_doctype(repaired)
+    if simple_doctype_count:
+        actions.append(
+            EpubRepairAction(
+                kind="strip_simple_doctype",
+                file_name=file_name,
+                count=simple_doctype_count,
+            )
+        )
+
     repaired, entity_count = _replace_html_named_entities(repaired)
     if entity_count:
         actions.append(
@@ -127,6 +137,10 @@ def _strip_external_doctype(content: bytes) -> tuple[bytes, int]:
     return _EXTERNAL_DOCTYPE_PATTERN.subn(b"", content, count=1)
 
 
+def _strip_simple_html_doctype(content: bytes) -> tuple[bytes, int]:
+    return _SIMPLE_HTML_DOCTYPE_PATTERN.subn(b"", content, count=1)
+
+
 def _replace_html_named_entities(content: bytes) -> tuple[bytes, int]:
     replacement_count = 0
 
@@ -152,5 +166,6 @@ _EXTERNAL_DOCTYPE_PATTERN = re.compile(
     br"""|SYSTEM\s+(?:"[^"]*"|'[^']*'))\s*>""",
     re.IGNORECASE,
 )
+_SIMPLE_HTML_DOCTYPE_PATTERN = re.compile(br"<!DOCTYPE\s+html\s*>", re.IGNORECASE)
 _HTML_NAMED_ENTITY_PATTERN = re.compile(br"&([A-Za-z][A-Za-z0-9]+);")
 _XML_PREDEFINED_ENTITY_NAMES = frozenset({b"amp", b"lt", b"gt", b"quot", b"apos"})
