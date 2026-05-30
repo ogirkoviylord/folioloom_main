@@ -2106,6 +2106,330 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(guard.reservations[1][0], next_preview.preview_id)
         self.assertEqual(len(guard.usage_events), 2)
 
+    def test_ready_duplicate_match_is_same_user_and_does_not_reserve_preview(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = RecordingBetaSafetyGuard()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                beta_safety_guard=guard,
+            )
+            content = b"One meaningful paragraph for duplicate detection."
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            first_pending = service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            first_preview = service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            service.mark_pending_translation_preview_shown(
+                user_telegram_id=42,
+                preview_id=first_preview.preview_id,
+            )
+            service.accept_pending_translation_preview(user_telegram_id=42)
+            completed = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            self.assertEqual(completed.status, TranslationJobStatus.READY)
+
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            second_pending = service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            reservations_before_duplicate_lookup = list(guard.reservations)
+
+            match = service.find_pending_translation_duplicate(user_telegram_id=42)
+
+            self.assertIsNotNone(match)
+            self.assertEqual(match.job_id, completed.id)
+            self.assertEqual(match.status, "ready")
+            self.assertTrue(match.can_download_existing)
+            self.assertTrue(match.can_translate_again)
+            self.assertEqual(
+                guard.reservations,
+                reservations_before_duplicate_lookup,
+            )
+            self.assertNotEqual(first_pending.attempt_id, second_pending.attempt_id)
+
+            service.store_uploaded_document(
+                user_telegram_id=100,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=100)
+            self._select_default_translation_mode(service, user_telegram_id=100)
+            service.prepare_pending_upload(user_telegram_id=100, target_language="uk")
+
+            self.assertIsNone(
+                service.find_pending_translation_duplicate(user_telegram_id=100)
+            )
+
+    def test_duplicate_match_requires_approved_identity_fields(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            content = b"One meaningful paragraph for duplicate identity."
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(
+                service,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+            preview = service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            service.mark_pending_translation_preview_shown(
+                user_telegram_id=42,
+                preview_id=preview.preview_id,
+            )
+            service.accept_pending_translation_preview(user_telegram_id=42)
+            service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(
+                service,
+                translation_mode=TRANSLATION_MODE_DOCUMENT_FORM,
+            )
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            self.assertIsNone(
+                service.find_pending_translation_duplicate(user_telegram_id=42)
+            )
+
+            service.discard_pending_translation(42)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="auto",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(
+                service,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            self.assertIsNone(
+                service.find_pending_translation_duplicate(user_telegram_id=42)
+            )
+
+    def test_duplicate_lookup_skips_missing_source_and_legacy_policy(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            content = b"One meaningful paragraph for metadata edge cases."
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+            preview = service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            service.mark_pending_translation_preview_shown(
+                user_telegram_id=42,
+                preview_id=preview.preview_id,
+            )
+            service.accept_pending_translation_preview(user_telegram_id=42)
+            completed = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            original_policy = persistent_store.get_job(completed.id).translation_policy
+
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+            self.assertIsNotNone(
+                service.find_pending_translation_duplicate(user_telegram_id=42)
+            )
+
+            persistent_store._connection.execute(
+                "UPDATE translation_jobs SET translation_policy = NULL WHERE id = ?",
+                (completed.id,),
+            )
+            self.assertIsNone(
+                service.find_pending_translation_duplicate(user_telegram_id=42)
+            )
+
+            persistent_store._connection.execute(
+                "UPDATE translation_jobs SET translation_policy = ? WHERE id = ?",
+                (original_policy, completed.id),
+            )
+            service.discard_pending_translation(42)
+            original_job = persistent_store.get_job(completed.id)
+            self.assertTrue(storage.delete(original_job.source_object_key))
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            self.assertIsNone(
+                service.find_pending_translation_duplicate(user_telegram_id=42)
+            )
+
+    def test_active_duplicate_does_not_allow_concurrent_translate_again(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                defer_persistent_jobs_to_worker=True,
+            )
+            content = b"One meaningful paragraph for active duplicate."
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+            preview = service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            service.mark_pending_translation_preview_shown(
+                user_telegram_id=42,
+                preview_id=preview.preview_id,
+            )
+            service.accept_pending_translation_preview(user_telegram_id=42)
+            queued = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+            self.assertEqual(queued.status, TranslationJobStatus.QUEUED)
+
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            match = service.find_pending_translation_duplicate(user_telegram_id=42)
+
+            self.assertIsNotNone(match)
+            self.assertEqual(match.status, "queued")
+            self.assertFalse(match.can_translate_again)
+            self.assertTrue(match.can_open_existing)
+
+            service.discard_pending_translation(42)
+            persistent_store.mark_job_interrupted(queued.id)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="copy.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(user_telegram_id=42, target_language="uk")
+
+            recoverable_match = service.find_pending_translation_duplicate(
+                user_telegram_id=42
+            )
+
+            self.assertIsNotNone(recoverable_match)
+            self.assertEqual(recoverable_match.status, "interrupted")
+            self.assertTrue(recoverable_match.can_translate_again)
+            self.assertTrue(recoverable_match.can_open_existing)
+
     def test_preview_translation_uses_estimate_when_provider_usage_is_missing(self):
         guard = RecordingBetaSafetyGuard()
         service = BotTranslationService(

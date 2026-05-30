@@ -75,6 +75,8 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
 )
 from translator_service.persistent_planner import (
+    _docx_translation_mode_profile,
+    _translation_context_with_mode_profile,
     create_persistent_docx_job_plan,
     create_persistent_epub_job_plan,
     create_persistent_txt_job_plan,
@@ -92,6 +94,9 @@ from translator_service.structure_optimizer import TextBlockKind
 from translator_service.translation_cache import (
     MemoryTranslationCache,
     TranslationCache,
+)
+from translator_service.translation_context import (
+    build_initial_translation_context_memory,
 )
 from translator_service.translation_jobs import (
     CancellationToken,
@@ -137,6 +142,7 @@ RIGHTS_CONFIRMATION_SOURCE_TELEGRAM = "telegram_button"
 UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE = "security.upload_safety.summary"
 PREVIEW_CANDIDATE_MAX_BLOCKS = 3
 PREVIEW_CANDIDATE_MAX_CHARS = 2_000
+UPLOAD_DUPLICATE_SCAN_LIMIT = 100
 TRANSLATION_MODE_DOCUMENT_FORM = "document_form"
 TRANSLATION_MODE_BOOK_MANUSCRIPT = "book_manuscript"
 SUPPORTED_TRANSLATION_MODES = (
@@ -281,6 +287,17 @@ class UserBookSummary:
     can_cancel: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class DuplicateUploadMatch:
+    job_id: str
+    file_name: str
+    status: str
+    has_result: bool
+    can_download_existing: bool
+    can_translate_again: bool
+    can_open_existing: bool
 
 
 @dataclass(frozen=True)
@@ -1698,6 +1715,56 @@ class BotTranslationService:
 
         return self._book_summary_from_job(job)
 
+    def find_pending_translation_duplicate(
+        self,
+        *,
+        user_telegram_id: int,
+    ) -> DuplicateUploadMatch | None:
+        if self._persistent_job_store is None or self._file_storage is None:
+            return None
+
+        with self._state_lock:
+            pending = self._pending.get(user_telegram_id)
+        if pending is None:
+            return None
+
+        pending_source_sha256 = _pending_source_sha256(
+            pending=pending,
+            storage=self._file_storage,
+        )
+        if pending_source_sha256 is None:
+            return None
+
+        pending_identity = _duplicate_identity_for_pending(
+            pending=pending,
+            source_sha256=pending_source_sha256,
+            max_upload_mb=self._max_upload_mb,
+            max_fragment_chars=self._max_fragment_chars,
+            document_sandbox=self._document_sandbox,
+        )
+        if pending_identity is None:
+            return None
+
+        for job in self._persistent_job_store.list_jobs_for_user(
+            f"telegram:{user_telegram_id}",
+            limit=UPLOAD_DUPLICATE_SCAN_LIMIT,
+        ):
+            job_source_sha256 = _job_source_sha256(
+                job=job,
+                storage=self._file_storage,
+            )
+            if job_source_sha256 is None:
+                continue
+            job_identity = _duplicate_identity_for_job(
+                job=job,
+                source_sha256=job_source_sha256,
+            )
+            if job_identity != pending_identity:
+                continue
+            return self._duplicate_upload_match_from_job(job)
+
+        return None
+
     def get_user_book_progress(
         self,
         *,
@@ -2186,6 +2253,26 @@ class BotTranslationService:
             can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
             updated_at=job.updated_at.isoformat(timespec="minutes"),
+        )
+
+    def _duplicate_upload_match_from_job(self, job) -> DuplicateUploadMatch:
+        status = job.status.value
+        result = self._book_result_from_object_key(job)
+        active_statuses = {
+            PersistentTranslationJobStatus.QUEUED.value,
+            PersistentTranslationJobStatus.TRANSLATING.value,
+            PersistentTranslationJobStatus.ASSEMBLING.value,
+            PersistentTranslationJobStatus.CANCEL_REQUESTED.value,
+        }
+        can_translate_again = status not in active_statuses
+        return DuplicateUploadMatch(
+            job_id=job.id,
+            file_name=job.file_name,
+            status=status,
+            has_result=bool(job.final_object_key or job.partial_object_key),
+            can_download_existing=result is not None,
+            can_translate_again=can_translate_again,
+            can_open_existing=True,
         )
 
     def cancel_translation(self, user_telegram_id: int) -> bool:
@@ -4314,6 +4401,179 @@ def _preview_id(candidate: PreviewCandidate) -> str:
 
 def _translation_attempt_id(user_telegram_id: int) -> str:
     return f"attempt:{user_telegram_id}:{uuid4().hex}"
+
+
+@dataclass(frozen=True)
+class _DuplicateIdentity:
+    source_sha256: str
+    document_kind: str
+    source_language: str
+    target_language: str
+    translation_mode: str | None
+    adapter_version: str
+    prompt_version: str
+    policy_signature: str
+
+
+def _pending_source_sha256(
+    *,
+    pending: PendingTranslation,
+    storage: LocalObjectStorage,
+) -> str | None:
+    if pending.source_object_key is None:
+        return None
+    try:
+        if not storage.exists(pending.source_object_key):
+            return None
+        return storage.get_metadata(pending.source_object_key).sha256
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _job_source_sha256(*, job, storage: LocalObjectStorage) -> str | None:
+    try:
+        if not job.source_object_key or not storage.exists(job.source_object_key):
+            return None
+        return storage.get_metadata(job.source_object_key).sha256
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _duplicate_identity_for_pending(
+    *,
+    pending: PendingTranslation,
+    source_sha256: str,
+    max_upload_mb: int,
+    max_fragment_chars: int,
+    document_sandbox: DocumentSandbox | None,
+) -> _DuplicateIdentity | None:
+    upload = validate_document_upload(
+        file_name=pending.file_name,
+        size_bytes=len(pending.content),
+        max_upload_mb=max_upload_mb,
+    )
+    document_kind = _document_kind_from_format(upload.document_format)
+    if document_kind is None:
+        return None
+    plan = _preview_adapter_plan(
+        document_format=upload.document_format,
+        content=pending.content,
+        max_fragment_chars=max_fragment_chars,
+        document_sandbox=document_sandbox,
+        translation_mode=pending.translation_mode,
+    )
+    if not plan.units:
+        return None
+    policy_signature = _duplicate_policy_signature_for_units(
+        units=plan.units,
+        source_language=pending.source_language,
+        target_language=pending.target_language,
+        translation_mode=pending.translation_mode,
+        document_kind=document_kind,
+    )
+    return _DuplicateIdentity(
+        source_sha256=source_sha256,
+        document_kind=document_kind.value,
+        source_language=pending.source_language,
+        target_language=pending.target_language,
+        translation_mode=pending.translation_mode,
+        adapter_version=plan.adapter_version,
+        prompt_version="plain-v1",
+        policy_signature=policy_signature,
+    )
+
+
+def _duplicate_identity_for_job(*, job, source_sha256: str) -> _DuplicateIdentity:
+    policy_payload = _policy_payload(job.translation_policy)
+    return _DuplicateIdentity(
+        source_sha256=source_sha256,
+        document_kind=job.document_kind,
+        source_language=job.source_language,
+        target_language=job.target_language,
+        translation_mode=(
+            str(policy_payload.get("translation_mode"))
+            if policy_payload is not None and policy_payload.get("translation_mode")
+            else None
+        ),
+        adapter_version=job.adapter_version,
+        prompt_version=job.prompt_version,
+        policy_signature=_normalized_duplicate_policy_signature(
+            job.translation_policy
+        ),
+    )
+
+
+def _duplicate_policy_signature_for_units(
+    *,
+    units,
+    source_language: str,
+    target_language: str,
+    translation_mode: str | None,
+    document_kind: DocumentKind,
+) -> str:
+    source_text = "\n\n".join(unit.source_text for unit in units if unit.source_text)
+    translation_context = build_initial_translation_context_memory(
+        source_text,
+        target_language=target_language,
+    )
+    translation_mode_profile = (
+        _docx_translation_mode_profile(translation_mode)
+        if document_kind is DocumentKind.DOCX
+        else None
+    )
+    if translation_mode_profile is not None:
+        translation_context = _translation_context_with_mode_profile(
+            translation_context,
+            translation_mode_profile,
+        )
+    policy = build_translation_policy(
+        text=source_text,
+        source_language=source_language,
+        target_language=target_language,
+        translation_context=translation_context,
+    )
+    payload = json.loads(translation_policy_signature(policy))
+    if translation_mode is not None:
+        payload["translation_mode"] = translation_mode
+    if translation_mode_profile is not None:
+        payload["translation_mode_profile"] = translation_mode_profile.signature
+    return _safe_duplicate_policy_signature(payload)
+
+
+def _normalized_duplicate_policy_signature(translation_policy: str | None) -> str:
+    payload = _policy_payload(translation_policy)
+    if payload is None:
+        return "__translation_policy_none__"
+    return _safe_duplicate_policy_signature(payload)
+
+
+def _policy_payload(translation_policy: str | None) -> dict | None:
+    if translation_policy is None:
+        return None
+    try:
+        payload = json.loads(translation_policy)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _safe_duplicate_policy_signature(payload: dict) -> str:
+    safe_keys = (
+        "prompt_policy_version",
+        "protection_policy_version",
+        "adapter_policy_version",
+        "source_language",
+        "target_language",
+        "target_language_policy",
+        "source_pair_policy",
+        "text_type",
+        "prompt_tier",
+        "output_contract",
+        "translation_mode",
+        "translation_mode_profile",
+    )
+    safe_payload = {key: payload.get(key) for key in safe_keys if key in payload}
+    return json.dumps(safe_payload, ensure_ascii=False, sort_keys=True)
 
 
 def _estimate_preview_cost(
