@@ -182,6 +182,34 @@ Owner decisions recorded during issue #71:
   PR #136 passed. This does not implement TTL cleanup, deployment/server smoke,
   production readiness, public/external scanning, scanner override/rescan
   controls or any live runtime-data repair.
+- 2026-05-30: Issue
+  [#137](https://github.com/ogirkoviylord/folioloom_main/issues/137)
+  implementation slice is locally verified on branch
+  `codex/new-upload-failure`. New persistent TXT/DOCX/EPUB job beta-safety
+  reservations now use the adapter plan's `estimated_input_tokens` instead of
+  the previous `fragment_count * max_fragment_chars` capacity estimate. This
+  keeps beta caps unchanged while avoiding false `job_estimate_cap` rejections
+  for EPUB files with many small work units. Regression coverage uses synthetic
+  EPUB content only and confirms a >1000-work-unit EPUB whose planned estimate
+  is within the default job cap queues successfully, while the old capacity
+  estimate would have exceeded the cap. Local verification: focused red/green
+  tests for persistent reservation and EPUB cap behavior passed;
+  metadata-only local estimate checks of owner-provided `pg45304-images-3.epub`
+  and `pg2641-images-3.epub` printed no raw book text and showed
+  `pg45304-images-3.epub` planned beta-safety cost `0.639347` vs old capacity
+  cost `3.04842`, and `pg2641-images-3.epub` planned cost `0.144057` vs old
+  capacity cost `0.28428`;
+  `PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service` ran
+  111 tests with `OK`; `PYTHONPATH=src python3 -m unittest
+  tests.test_bot_runtime tests.test_persistent_jobs
+  tests.test_persistent_job_store` ran 112 tests with `OK`; full
+  `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1141 tests with
+  `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src` passed;
+  targeted `python3 -m ruff check --select F,I` on changed Python files passed;
+  `git diff --check` passed. CI status remains Unknown until a PR/checks page
+  is inspected. This does not change beta limits/pricing rates, persistent DB
+  schema/state, runtime `var/` data, deployment, secrets, legal/privacy policy,
+  or release readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
