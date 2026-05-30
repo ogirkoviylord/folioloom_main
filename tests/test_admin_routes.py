@@ -1887,6 +1887,219 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(users_api.status_code, 200)
             self.assertEqual(users_api.json()["users"][0]["user_id"], "telegram:42")
 
+    def test_user_profile_shows_safe_support_debug_translation_links(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.mode.selected",
+                        action="select",
+                        target_type="translation_mode",
+                        target_id="book_manuscript",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={
+                            "translation_mode": "book_manuscript",
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                            "source_text": "RAW SOURCE SENTINEL",
+                            "translated_text": "RAW TRANSLATION SENTINEL",
+                            "prompt": "RAW PROMPT SENTINEL",
+                            "api_key": "sk-support-secret",
+                            "traceback": "Traceback (most recent call last)",
+                            "object_storage_path": "/object-storage/private/book.txt",
+                            "secret_id": "deepseek.api_keys.support",
+                        },
+                    )
+                )
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.target_language.selected",
+                        action="select",
+                        target_type="target_language",
+                        target_id="uk",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                        },
+                    )
+                )
+
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-support-1",
+                    order_id="order-support-1",
+                    user_id="telegram:42",
+                    file_name="very-long-safe-manuscript-name.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek-chat",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.finish(
+                status="failed",
+                error_message=(
+                    "Provider failed with api_key=sk-support-secret "
+                    "Traceback /object-storage/private/book.txt"
+                ),
+            )
+            run_id = Path(logger.run_dir).name
+            completed_logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-support-2",
+                    order_id="order-support-2",
+                    user_id="telegram:42",
+                    file_name="completed-safe-manuscript-name.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek-chat",
+                    total_fragment_count=1,
+                ),
+            )
+            completed_logger.finish(
+                status="completed",
+                result_file_name="completed-safe-manuscript-name.uk.txt",
+            )
+            completed_run_id = Path(completed_logger.run_dir).name
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.failed",
+                        action="failed",
+                        target_type="document",
+                        target_id="very-long-safe-manuscript-name.txt",
+                        outcome=ActivityOutcome.FAILURE,
+                        job_id="job-support-1",
+                        order_id="order-support-1",
+                        translation_run_dir=str(logger.run_dir),
+                        metadata={
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                        },
+                    )
+                )
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.completed",
+                        action="completed",
+                        target_type="document",
+                        target_id="completed-safe-manuscript-name.txt",
+                        outcome=ActivityOutcome.SUCCESS,
+                        job_id="job-support-2",
+                        order_id="order-support-2",
+                        translation_run_dir=str(completed_logger.run_dir),
+                        metadata={
+                            "file_name": "completed-safe-manuscript-name.txt",
+                            "result_file_name": (
+                                "completed-safe-manuscript-name.uk.txt"
+                            ),
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                        },
+                    )
+                )
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=str(db_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/users/telegram:42")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Support profile", response.text)
+            self.assertIn("Recent translations", response.text)
+            self.assertIn("very-long-safe-manuscript-name.txt", response.text)
+            self.assertIn("completed-safe-manuscript-name.txt", response.text)
+            self.assertIn("book_manuscript", response.text)
+            self.assertIn("uk", response.text)
+            self.assertIn("failed", response.text)
+            self.assertIn("completed", response.text)
+            self.assertIn(f'/admin/translations/{run_id}/trace', response.text)
+            self.assertIn(f'/admin/logs/{completed_run_id}', response.text)
+            self.assertIn("Support reports", response.text)
+            self.assertIn("Unknown", response.text)
+            self.assertNotIn("RAW SOURCE SENTINEL", response.text)
+            self.assertNotIn("RAW TRANSLATION SENTINEL", response.text)
+            self.assertNotIn("RAW PROMPT SENTINEL", response.text)
+            self.assertNotIn("sk-support-secret", response.text)
+            self.assertNotIn(".api_keys.", response.text)
+            self.assertNotIn("Traceback", response.text)
+            self.assertNotIn("/object-storage/private", response.text)
+
+    def test_user_profile_without_translation_sources_is_honest_unknown(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:77",
+                        channel="telegram",
+                        channel_user_id="77",
+                        surface=ActivitySurface.BOT,
+                        event_type="user.interface_language.changed",
+                        action="change",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={"language_code": "en"},
+                    )
+                )
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=str(db_path),
+                        translation_run_log_root=str(Path(temp_dir) / "runs"),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/users/telegram:77")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Support profile", response.text)
+            self.assertIn("Support reports", response.text)
+            self.assertIn("Unknown", response.text)
+            self.assertIn("No linked translation runs found.", response.text)
+
     def test_live_monitor_page_and_api_show_snapshot(self):
         with TemporaryDirectory() as temp_dir:
             _logger = TranslationRunLogger.start(
