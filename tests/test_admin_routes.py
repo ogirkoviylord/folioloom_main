@@ -376,6 +376,139 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Test all active keys", response.text)
         self.assertIn("Reload DeepSeek runtime", response.text)
 
+    def test_action_control_helpers_render_semantic_variants_and_disabled_reasons(self):
+        from translator_service.admin import views
+
+        link = views._action_link(
+            "Open <trace>",
+            "/admin/logs?path=<unsafe>",
+            "view",
+            compact=True,
+        )
+        probe = views._action_button(
+            "Test key",
+            "probe",
+            name="key_id",
+            value="key-1",
+            compact=True,
+        )
+        disabled_probe = views._action_button(
+            "Test all active keys",
+            "probe",
+            disabled_reason="No active admin-managed keys are available to test.",
+            compact=True,
+        )
+        danger = views._action_button("Delete", "danger", compact=True)
+
+        html = link + probe + disabled_probe + danger
+        self.assertIn('data-action-variant="view"', link)
+        self.assertIn("Open &lt;trace&gt;", link)
+        self.assertIn("path=&lt;unsafe&gt;", link)
+        self.assertIn('data-action-variant="probe"', probe)
+        self.assertIn('name="key_id"', probe)
+        self.assertIn('value="key-1"', probe)
+        self.assertIn('data-action-variant="probe"', disabled_probe)
+        self.assertIn('data-action-state="disabled"', disabled_probe)
+        self.assertIn("data-disabled-reason=", disabled_probe)
+        self.assertIn(
+            "No active admin-managed keys are available to test.",
+            disabled_probe,
+        )
+        self.assertIn('data-action-variant="danger"', danger)
+        self.assertNotIn("compact-action", html)
+
+    def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            empty_keys_page = client.get("/admin/ai-providers/deepseek/keys")
+            self.assertEqual(empty_keys_page.status_code, 200)
+            self.assertIn('data-action-variant="probe"', empty_keys_page.text)
+            self.assertIn('data-action-state="disabled"', empty_keys_page.text)
+            self.assertIn(
+                "No active admin-managed keys are available to test.",
+                empty_keys_page.text,
+            )
+
+            csrf_token = _csrf_token(empty_keys_page.text)
+            response = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf_token,
+                    "value": "sk-admin-action-semantics",
+                    "label": "Semantics key",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(response.status_code, 303)
+
+            keys_page = client.get("/admin/ai-providers/deepseek/keys")
+            self.assertEqual(keys_page.status_code, 200)
+            self.assertIn('data-action-variant="change"', keys_page.text)
+            self.assertIn('data-action-variant="probe"', keys_page.text)
+            self.assertIn('data-action-variant="danger"', keys_page.text)
+            self.assertIn("Save label", keys_page.text)
+            self.assertIn("Test key", keys_page.text)
+            self.assertIn("Remove", keys_page.text)
+
+            providers_page = client.get("/admin/ai-providers")
+            self.assertEqual(providers_page.status_code, 200)
+            self.assertIn('data-action-variant="refresh"', providers_page.text)
+            self.assertIn("Refresh balance", providers_page.text)
+
+    def test_job_actions_use_change_danger_and_disabled_reasons(self):
+        from translator_service.admin import views
+
+        actionable_job = SimpleNamespace(
+            id="job-actionable",
+            pausable=True,
+            cancellable=True,
+            deletable=True,
+            retryable=False,
+        )
+        html = views._job_actions(actionable_job, "csrf-token")
+        self.assertIn('data-action-variant="change"', html)
+        self.assertGreaterEqual(html.count('data-action-variant="danger"'), 2)
+        self.assertIn("Pause", html)
+        self.assertIn("Cancel", html)
+        self.assertIn("Delete", html)
+
+        inactive_job = SimpleNamespace(
+            id="job-inactive",
+            pausable=False,
+            cancellable=False,
+            deletable=False,
+            retryable=False,
+        )
+        disabled_html = views._job_actions(inactive_job, "csrf-token")
+        self.assertIn('data-action-state="disabled"', disabled_html)
+        self.assertIn("data-disabled-reason=", disabled_html)
+        self.assertIn("This job state has no admin action available.", disabled_html)
+
+        retryable_job = SimpleNamespace(
+            id="job-retry",
+            pausable=False,
+            cancellable=False,
+            deletable=False,
+            retryable=True,
+        )
+        retry_html = views._job_actions(retryable_job, "csrf-token")
+        self.assertIn('data-action-state="disabled"', retry_html)
+        self.assertIn("Retry is not available from this console view.", retry_html)
+
     def test_admin_quality_does_not_build_summary_without_login(self):
         with patch(
             "translator_service.admin.routes._quality_run_summary",
