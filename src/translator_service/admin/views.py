@@ -639,6 +639,15 @@ def _ai_provider_card(
     rows = "\n".join(_ai_provider_key_row(key, csrf_token) for key in keys)
     if not rows:
         rows = '<p class="empty-state">No keys configured yet. Test key</p>'
+    incident_panel = _provider_incident_panel(
+        summary.integration_id,
+        keys=keys,
+        health=health,
+        runtime=runtime,
+        reload_state=reload_state,
+        balance_snapshot=balance_snapshot,
+        balance_stale_seconds=balance_stale_seconds,
+    )
     health_panel = _provider_health_panel(health)
     runtime_panel = _provider_runtime_panel(
         summary.integration_id,
@@ -674,6 +683,7 @@ def _ai_provider_card(
         <span class="status">{active_key_count} active keys</span>
       </div>
       <p>{escape(summary.description)}</p>
+      {incident_panel}
       {health_panel}
       {runtime_panel}
       {balance_panel}
@@ -683,6 +693,210 @@ def _ai_provider_card(
       {_ai_provider_key_add_form(summary.integration_id, csrf_token)}
     </article>
     """
+
+
+def _provider_incident_panel(
+    provider_id: str,
+    *,
+    keys: tuple[AIProviderKeySummary, ...],
+    health: ProviderHealthSummary | None,
+    runtime: AIProviderRuntimeStatus | None,
+    reload_state: AIProviderRuntimeReloadRequest | None,
+    balance_snapshot: ProviderBalanceSnapshot | None,
+    balance_stale_seconds: int,
+) -> str:
+    rows = (
+        _provider_incident_row(
+            "Keys configured",
+            _configured_key_label(keys),
+            "Inventory metadata only; raw key values and secret ids stay hidden.",
+        ),
+        _provider_incident_row(
+            "Keys valid",
+            _key_validity_label(health, keys),
+            "Last validation state from existing safe provider health metadata.",
+        ),
+        _provider_incident_row(
+            "Keys enabled",
+            _enabled_key_label(keys),
+            "Keys currently allowed for runtime use versus paused/read-only rows.",
+        ),
+        _provider_incident_row(
+            "Runtime sees channels",
+            _runtime_channel_visibility_label(runtime),
+            "Separates missing usable channels from degraded runtime with channels.",
+        ),
+        _provider_incident_row(
+            "Reload state",
+            _runtime_reload_label(reload_state),
+            "Whether saved key/settings changes are waiting for bot or worker runtime.",
+        ),
+        _provider_incident_row(
+            "Balance",
+            _provider_balance_state_label(
+                provider_id,
+                balance_snapshot,
+                stale_seconds=balance_stale_seconds,
+            ),
+            "DeepSeek balance metadata only; not a paid billing ledger.",
+        ),
+        _provider_incident_row(
+            "Safe failure categories",
+            _safe_provider_failure_category_label(runtime),
+            "Provider counters are separated from model-output safety blocks.",
+        ),
+        _provider_incident_row(
+            "Fallback capacity",
+            _fallback_capacity_label(runtime),
+            "Read-only capacity signal from existing runtime state.",
+        ),
+    )
+    return f"""
+      <div class="provider-incident-state">
+        <div>
+          <h4>Provider incident state</h4>
+          <p>
+            Read-only diagnosis from existing safe metadata. Probe, change and
+            danger actions stay below this section.
+          </p>
+        </div>
+        <div class="incident-state-list">{''.join(rows)}</div>
+      </div>
+    """
+
+
+def _provider_incident_row(label: str, value: str, detail: str) -> str:
+    return f"""
+        <div class="incident-state-row">
+          <span>{escape(label)}</span>
+          <div>
+            <strong>{escape(value)}</strong>
+            <small>{escape(detail)}</small>
+          </div>
+        </div>
+    """
+
+
+def _configured_key_label(keys: tuple[AIProviderKeySummary, ...]) -> str:
+    total = len(keys)
+    env_count = sum(1 for key in keys if is_env_deepseek_key(key))
+    admin_count = total - env_count
+    if total == 0:
+        return "0 total"
+    return f"{total} total / {admin_count} admin / {env_count} env"
+
+
+def _enabled_key_label(keys: tuple[AIProviderKeySummary, ...]) -> str:
+    active = sum(1 for key in keys if key.enabled and not key.disabled)
+    paused = len(keys) - active
+    return f"{active} active / {paused} paused"
+
+
+def _key_validity_label(
+    health: ProviderHealthSummary | None,
+    keys: tuple[AIProviderKeySummary, ...],
+) -> str:
+    if not keys:
+        return "No keys configured"
+    if health is None:
+        return "Unknown"
+    status = health.last_validation_status.strip()
+    if not status:
+        return "Unknown"
+    if status.lower() == "runtime degraded":
+        return "not checked"
+    return status
+
+
+def _runtime_channel_visibility_label(
+    runtime: AIProviderRuntimeStatus | None,
+) -> str:
+    if runtime is None:
+        return "Unknown"
+    active = len(runtime.active_channels)
+    degraded = _degraded_runtime_channel_count(runtime)
+    if active == 0 or runtime.status == "missing_keys":
+        return f"{active} active / missing usable channels"
+    if runtime.status in {"degraded", "error", "failed"}:
+        return f"{active} active / {degraded} degraded / runtime {runtime.status}"
+    return f"{active} active / {degraded} degraded"
+
+
+def _runtime_reload_label(
+    reload_state: AIProviderRuntimeReloadRequest | None,
+) -> str:
+    if reload_state is None:
+        return "No reload requested"
+    if reload_state.pending:
+        return "Waiting for runtime"
+    consumed = (
+        reload_state.consumed_at.isoformat(timespec="seconds")
+        if reload_state.consumed_at is not None
+        else "Unknown"
+    )
+    return f"Consumed at {consumed}"
+
+
+def _provider_balance_state_label(
+    provider_id: str,
+    snapshot: ProviderBalanceSnapshot | None,
+    *,
+    stale_seconds: int,
+) -> str:
+    if provider_id != "deepseek":
+        return "Unknown"
+    if snapshot is None:
+        return "Unknown"
+    return _balance_status(snapshot, stale_seconds)
+
+
+def _safe_provider_failure_category_label(
+    runtime: AIProviderRuntimeStatus | None,
+) -> str:
+    if runtime is None:
+        return "Unknown"
+    channels = runtime.active_channels
+    counters = (
+        ("rate_limit", sum(channel.total_rate_limit_failures for channel in channels)),
+        ("auth", sum(channel.total_auth_failures for channel in channels)),
+        ("billing", sum(channel.total_billing_failures for channel in channels)),
+        ("timeout", sum(channel.total_timeout_failures for channel in channels)),
+        ("unavailable", sum(channel.total_unavailable_failures for channel in channels)),
+        (
+            "malformed",
+            sum(channel.total_malformed_response_failures for channel in channels),
+        ),
+        (
+            "unsafe_model_output",
+            sum(channel.total_unsafe_model_output_failures for channel in channels),
+        ),
+        ("other_provider", sum(channel.total_other_provider_failures for channel in channels)),
+    )
+    visible = [f"{label} {value}" for label, value in counters if value > 0]
+    return " / ".join(visible) if visible else "none"
+
+
+def _fallback_capacity_label(runtime: AIProviderRuntimeStatus | None) -> str:
+    if runtime is None:
+        return "Unknown"
+    if not runtime.active_channels or runtime.status == "missing_keys":
+        return "0 slots / 0 usable channels"
+    usable_channels = sum(
+        1
+        for channel in runtime.active_channels
+        if channel.health.lower() not in {"disabled", "missing"}
+    )
+    return f"{runtime.provider_state.available_slots} slots / {usable_channels} usable channels"
+
+
+def _degraded_runtime_channel_count(runtime: AIProviderRuntimeStatus) -> int:
+    return sum(
+        1
+        for channel in runtime.active_channels
+        if channel.health.lower() not in {"healthy", "ok", "ready"}
+        or bool(channel.error_kind)
+        or bool(channel.last_error_excerpt)
+    )
 
 
 def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
@@ -3832,14 +4046,54 @@ button.danger {
   overflow-wrap: anywhere;
 }
 .metric-card small,
-.processing-summary p {
+.processing-summary p,
+.provider-incident-state p,
+.incident-state-row small {
   color: var(--muted);
   line-height: 1.45;
 }
-.processing-summary {
+.processing-summary,
+.provider-incident-state {
   display: grid;
   gap: 12px;
   margin: 14px 0;
+}
+.provider-incident-state {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+.provider-incident-state h4,
+.provider-incident-state p {
+  margin: 0;
+}
+.incident-state-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+.incident-state-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.incident-state-row > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.incident-state-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.incident-state-row strong {
+  overflow-wrap: anywhere;
 }
 .progress-bar {
   height: 10px;
@@ -3973,6 +4227,10 @@ button.danger {
   }
   .trace-rail {
     position: static;
+  }
+  .incident-state-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
   .definition-table tr {
     grid-template-columns: 1fr;

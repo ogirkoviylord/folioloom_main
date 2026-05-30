@@ -15,14 +15,14 @@ from translator_service.admin.integrations import (
     DEFAULT_INTEGRATION_REGISTRY,
     IntegrationSecretSummary,
 )
+from translator_service.admin.provider_balance import (
+    ProviderBalanceAmount,
+    ProviderBalanceSnapshot,
+)
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
-)
-from translator_service.admin.provider_balance import (
-    ProviderBalanceAmount,
-    ProviderBalanceSnapshot,
 )
 from translator_service.admin.views import overview_body
 
@@ -232,6 +232,49 @@ class AdminActionCenterTest(unittest.TestCase):
         self.assertIn("ai_provider_runtime_stale", keys)
         self.assertIn("ai_provider_runtime_reload_pending", keys)
         self.assertIn("ai_provider_runtime_missing_channels", keys)
+
+    def test_degraded_runtime_with_channels_gets_distinct_action(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="degraded",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=now,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=2,
+                            health="degraded",
+                            error_kind="provider_error",
+                        ),
+                    ),
+                ),
+            ),
+            now=now,
+        )
+
+        by_key = {item.key: item for item in center.items}
+
+        self.assertIn("ai_provider_runtime_degraded", by_key)
+        self.assertNotIn("ai_provider_runtime_missing_channels", by_key)
+        self.assertEqual(
+            by_key["ai_provider_runtime_degraded"].title,
+            "DeepSeek runtime is degraded",
+        )
+        self.assertIn(
+            "active channels",
+            by_key["ai_provider_runtime_degraded"].detail,
+        )
 
     def test_runtime_not_reporting_is_action_when_keys_exist(self):
         center = build_action_center(
