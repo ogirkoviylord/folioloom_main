@@ -145,6 +145,19 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
+    def test_admin_translation_evidence_does_not_read_run_without_login(self):
+        with patch(
+            "translator_service.admin.routes.get_translation_run_details",
+            side_effect=AssertionError("translation evidence should be lazy"),
+        ):
+            response = self.client.get(
+                "/admin/translations/run-1/evidence",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
     def test_admin_activity_users_and_security_do_not_read_activity_without_login(self):
         for path in (
             "/admin/activity",
@@ -1437,6 +1450,9 @@ class AdminRoutesTest(unittest.TestCase):
             page = client.get("/admin/logs?status=ready")
             api = client.get("/admin/api/logs?status=ready")
             trace = client.get(f"/admin/translations/{logger.run_dir.name}/trace")
+            evidence = client.get(
+                f"/admin/translations/{logger.run_dir.name}/evidence"
+            )
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
@@ -1461,12 +1477,29 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("book.txt", trace.text)
             self.assertIn("Not failed", trace.text)
             self.assertIn("Advanced log detail", trace.text)
-            self.assertIn("Evidence packet copy/download is tracked", trace.text)
+            self.assertIn("Copy evidence", trace.text)
+            self.assertIn("Metadata-only packet for Codex", trace.text)
             self.assertNotIn("Chapter one", trace.text)
             self.assertNotIn("Глава первая", trace.text)
             self.assertNotIn("processing-bearer-token", trace.text)
             self.assertNotIn("sk-processing-secret-value", trace.text)
             self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
+            self.assertEqual(evidence.status_code, 200)
+            self.assertIn("text/markdown", evidence.headers["content-type"])
+            self.assertIn("attachment;", evidence.headers["content-disposition"])
+            self.assertIn("FolioLoom Translation Evidence Packet", evidence.text)
+            self.assertIn("Metadata only: yes", evidence.text)
+            self.assertIn("Format version: 1", evidence.text)
+            self.assertIn("job-logs-1", evidence.text)
+            self.assertIn("book.txt", evidence.text)
+            self.assertIn("Not failed", evidence.text)
+            self.assertIn("Provider: Unknown", evidence.text)
+            self.assertIn("Runtime status: Unknown", evidence.text)
+            self.assertNotIn("Chapter one", evidence.text)
+            self.assertNotIn("Глава первая", evidence.text)
+            self.assertNotIn("processing-bearer-token", evidence.text)
+            self.assertNotIn("sk-processing-secret-value", evidence.text)
+            self.assertNotIn("deepseek.api_keys.processing-key", evidence.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
             self.assertIn("Progress", details.text)
