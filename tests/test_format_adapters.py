@@ -285,6 +285,26 @@ class EpubFormatAdapterTest(unittest.TestCase):
             ["First — second.", "Old\u00a0Title"],
         )
 
+    def test_plans_epub_xhtml_with_simple_html_doctype(self):
+        plan = plan_epub_translation(
+            content=_make_epub(
+                {
+                    "OPS/cover.xhtml": """
+                    <!DOCTYPE html>
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Readable cover text.</p></body>
+                    </html>
+                    """
+                }
+            ),
+            max_fragment_chars=100,
+        )
+
+        self.assertEqual(
+            [block.text for unit in plan.units for block in unit.blocks],
+            ["Readable cover text."],
+        )
+
     def test_plans_legacy_epub_ncx_with_external_doctype(self):
         plan = plan_epub_translation(
             content=_make_epub(
