@@ -523,6 +523,8 @@ class BotTranslationService:
         *,
         user_telegram_id: int,
         upload_safety_id: str,
+        job_id: str | None = None,
+        translation_run_dir: str | None = None,
     ) -> None:
         if self._activity_store is None:
             return
@@ -553,11 +555,16 @@ class BotTranslationService:
             outcome=_upload_safety_activity_outcome(final_action),
             target_type="upload_safety",
             target_id=upload_safety_id,
+            job_id=job_id,
+            translation_run_dir=translation_run_dir,
             metadata={
                 "upload_id": upload_safety_id,
                 "declared_format": metadata.document_format,
                 "detected_format": metadata.document_format,
                 "size_bytes": metadata.size_bytes,
+                "sanitized_original_filename": _safe_upload_filename(
+                    metadata.original_file_name
+                ),
                 "av_verdict": _upload_safety_latest_value(history, "scan_verdict")
                 or "not_checked",
                 "container_verdict": _upload_safety_latest_value(
@@ -3154,6 +3161,13 @@ class BotTranslationService:
                     "source_object_key": plan.job.source_object_key,
                 },
             )
+        if pending.upload_safety_id is not None:
+            self._record_upload_safety_activity(
+                user_telegram_id=pending.user_telegram_id,
+                upload_safety_id=pending.upload_safety_id,
+                job_id=plan.job.id,
+                translation_run_dir=str(run_logger.run_dir) if run_logger else None,
+            )
         if self._defer_persistent_jobs_to_worker:
             if run_logger is not None:
                 run_logger.record_event(
@@ -4105,6 +4119,7 @@ def _translation_policy_snapshot_for_pending(
         translation_policy_signature(policy),
         rights_confirmation=_rights_confirmation_payload(pending),
         translation_mode=pending.translation_mode,
+        upload_safety=_upload_safety_run_policy_marker(pending),
     )
 
 
@@ -4167,6 +4182,7 @@ def _translation_policy_with_rights_confirmation(
     *,
     rights_confirmation: dict,
     translation_mode: str | None = None,
+    upload_safety: dict | None = None,
 ) -> str | None:
     if not translation_policy:
         return None
@@ -4176,7 +4192,25 @@ def _translation_policy_with_rights_confirmation(
     payload["rights_confirmation"] = rights_confirmation
     if translation_mode is not None:
         payload["translation_mode"] = translation_mode
+    if upload_safety is not None:
+        payload["upload_safety"] = upload_safety
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _upload_safety_run_policy_marker(pending: PendingTranslation) -> dict | None:
+    if pending.upload_safety_id is None:
+        return None
+    return {
+        "source_gate": "upload_safety_ledger",
+        "upload_safety_id": pending.upload_safety_id,
+    }
+
+
+def _safe_upload_filename(file_name: str | None) -> str | None:
+    if not file_name:
+        return None
+    safe_name = PurePath(file_name.replace("\\", "/")).name.strip()
+    return safe_name or None
 
 
 def _rights_confirmation_payload(

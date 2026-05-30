@@ -116,7 +116,10 @@ from translator_service.beta_access import (
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage
-from translator_service.persistent_job_store import open_persistent_job_store
+from translator_service.persistent_job_store import (
+    open_persistent_job_store,
+    sqlite_store_exists,
+)
 from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
 )
@@ -2298,7 +2301,48 @@ def _security_events_body(settings: Settings) -> str:
 def _upload_safety_read_model(settings: Settings):
     with _activity_store(settings) as store:
         events = _upload_safety_activity_events(store)
-    return upload_safety_read_model_from_activity_events(events)
+    return upload_safety_read_model_from_activity_events(
+        events,
+        job_file_names_by_id=_upload_safety_job_file_names(settings, events),
+    )
+
+
+def _upload_safety_job_file_names(
+    settings: Settings,
+    events: tuple[UserActivityEvent, ...],
+) -> dict[str, str]:
+    missing_file_job_ids = {
+        event.job_id
+        for event in events
+        if event.job_id
+        and not (
+            event.metadata.get("sanitized_original_filename")
+            or event.metadata.get("original_file_name")
+            or event.metadata.get("file_name")
+        )
+    }
+    if not missing_file_job_ids:
+        return {}
+    if (
+        settings.scheduler_backend == "sqlite"
+        and not sqlite_store_exists(settings.persistent_jobs_db_path)
+    ):
+        return {}
+
+    store = None
+    try:
+        store = open_persistent_job_store(settings)
+        file_names: dict[str, str] = {}
+        for job_id in missing_file_job_ids:
+            job = store.get_job(job_id)
+            if job is not None and job.file_name:
+                file_names[job.id] = job.file_name
+        return file_names
+    except Exception:
+        return {}
+    finally:
+        if store is not None:
+            store.close()
 
 
 def _upload_safety_activity_events(

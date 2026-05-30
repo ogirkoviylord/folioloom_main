@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import PurePath
 
 from translator_service.upload_safety_ledger import (
     InMemoryUploadSafetyLedger,
@@ -195,21 +197,31 @@ def upload_safety_read_model_from_ledger(
 
 def upload_safety_read_model_from_activity_events(
     events: tuple[UserActivityEvent, ...],
+    *,
+    job_file_names_by_id: Mapping[str, str] | None = None,
 ) -> UploadSafetyAdminReadModel:
-    records = tuple(
-        record
-        for record in (
-            _admin_record_from_activity_event(event)
-            for event in events
-            if event.event_type == UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE
+    records_by_upload_id: dict[str, UploadSafetyAdminRecord] = {}
+    for event in sorted(
+        events,
+        key=lambda item: item.created_at,
+        reverse=True,
+    ):
+        if event.event_type != UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE:
+            continue
+        record = _admin_record_from_activity_event(
+            event,
+            job_file_names_by_id=job_file_names_by_id,
         )
-        if record is not None
-    )
-    return UploadSafetyAdminReadModel(records)
+        if record is None or record.upload_id in records_by_upload_id:
+            continue
+        records_by_upload_id[record.upload_id] = record
+    return UploadSafetyAdminReadModel(tuple(records_by_upload_id.values()))
 
 
 def _admin_record_from_activity_event(
     event: UserActivityEvent,
+    *,
+    job_file_names_by_id: Mapping[str, str] | None = None,
 ) -> UploadSafetyAdminRecord | None:
     metadata = event.metadata
     upload_id = _string(metadata, "upload_id") or event.target_id
@@ -242,10 +254,26 @@ def _admin_record_from_activity_event(
             metadata,
             "signature_database_age_seconds",
         ),
-        sanitized_original_filename=_string(metadata, "sanitized_original_filename"),
+        sanitized_original_filename=_safe_activity_filename(
+            _string(metadata, "sanitized_original_filename")
+            or _string(metadata, "original_file_name")
+            or _string(metadata, "file_name")
+            or (
+                job_file_names_by_id.get(event.job_id)
+                if event.job_id and job_file_names_by_id
+                else None
+            )
+        ),
         short_hash=_string(metadata, "short_hash"),
         job_id=event.job_id,
     )
+
+
+def _safe_activity_filename(file_name: str | None) -> str | None:
+    if not file_name:
+        return None
+    sanitized = PurePath(file_name.replace("\\", "/")).name.strip()
+    return sanitized or None
 
 
 def _timeline_event_from_metadata(
