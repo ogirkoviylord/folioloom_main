@@ -78,6 +78,7 @@ from translator_service.admin.translation_logs import (
     get_translation_run_details,
     list_translation_run_summaries,
 )
+from translator_service.admin.translation_trace import build_translation_trace
 from translator_service.admin.upload_safety import (
     UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
     UploadSafetyFilters,
@@ -101,6 +102,7 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    translation_trace_body,
     upload_safety_body,
     upload_safety_detail_body,
     user_detail_body,
@@ -536,6 +538,39 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Details",
             active="logs",
             body=log_detail_body(details),
+        )
+
+    @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
+    async def translation_trace(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = get_translation_run_details(
+            settings.translation_run_log_root,
+            run_id,
+        )
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        activity_events: tuple[UserActivityEvent, ...] = ()
+        if details.summary.job_id:
+            with _activity_store(settings) as store:
+                activity_events = store.list_events(
+                    job_id=details.summary.job_id,
+                    limit=25,
+                )
+        trace = build_translation_trace(
+            details,
+            operations=_operations_overview(settings),
+            activity_events=activity_events,
+            runtime_statuses=_ai_provider_runtime_statuses(settings),
+            balance_snapshot=_deepseek_balance_snapshot(settings),
+        )
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Trace",
+            active="logs",
+            body=translation_trace_body(trace),
         )
 
     @router.get("/logs/{run_id}/download")

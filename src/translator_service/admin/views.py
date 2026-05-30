@@ -49,6 +49,15 @@ from translator_service.admin.translation_logs import (
     TranslationRunFragmentDetail,
     TranslationRunSummary,
 )
+from translator_service.admin.translation_trace import (
+    TranslationTrace,
+    TranslationTraceFact,
+    TranslationTraceLink,
+    TranslationTraceProviderSignal,
+    TranslationTraceTimelineItem,
+    trace_href_for_log_href,
+    trace_href_for_run_id,
+)
 from translator_service.admin.upload_safety import (
     UploadSafetyAdminRecord,
     UploadSafetyFilters,
@@ -1708,10 +1717,11 @@ def _operation_job_rows(overview: OperationsOverview, csrf_token: str) -> str:
 
 def _operation_job_row(job, csrf_token: str) -> str:
     fragments = f"{job.completed_units}/{job.total_units}"
+    trace_href = trace_href_for_log_href(job.log_href)
     logs = (
         '<a class="table-action" '
-        f'href="{escape(_safe_operation_log_href(job.log_href))}">Logs</a>'
-        if job.log_href
+        f'href="{escape(trace_href)}">Open trace</a>'
+        if trace_href
         else '<span class="muted-text">No run</span>'
     )
     return f"""
@@ -1767,12 +1777,6 @@ def _job_action_form(
       <button class="compact-action{danger}" type="submit">{escape(label)}</button>
     </form>
     """
-
-
-def _safe_operation_log_href(href: str) -> str:
-    if href.startswith("/admin/"):
-        return href
-    return "/admin/logs"
 
 
 def _format_datetime(value) -> str:
@@ -2535,6 +2539,70 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     """
 
 
+def translation_trace_body(trace: TranslationTrace) -> str:
+    provider = _trace_provider_panel(trace.provider)
+    timeline = _trace_timeline(trace.timeline)
+    advanced_links = _trace_link_group(trace.advanced_links)
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translation Failure Trace</h3>
+        <p>
+          {escape(trace.job_id)} · {escape(trace.status)}
+          · {escape(trace.failure_category)}
+        </p>
+      </div>
+      <div class="toolbar-actions">
+        <a class="button-link" href="{escape(trace.next_action.href)}">
+          {escape(trace.next_action.label)}
+        </a>
+      </div>
+    </section>
+    <section class="trace-layout">
+      <div class="trace-main">
+        <section class="panel">
+          <div class="trace-summary-strip">
+            <span class="status">{escape(trace.status)}</span>
+            <span class="status">{escape(trace.failure_category)}</span>
+            <strong>{escape(trace.safe_error_summary)}</strong>
+          </div>
+        </section>
+        <section class="panel detail-grid">
+          {_trace_fact_section("Incident", trace.summary_facts)}
+          {_trace_fact_section("Document", trace.document_facts)}
+          {_trace_fact_section("Choices", trace.choice_facts)}
+          {_trace_fact_section("Job", trace.job_facts)}
+        </section>
+        {timeline}
+        {provider}
+      </div>
+      <aside class="trace-rail">
+        <section class="panel">
+          <h4>What to check next</h4>
+          <p>
+            Follow one primary path first, then use the advanced links only
+            if the trace does not explain the incident.
+          </p>
+          <a class="button-link" href="{escape(trace.next_action.href)}">
+            {escape(trace.next_action.label)}
+          </a>
+        </section>
+        <section class="panel">
+          <h4>Evidence</h4>
+          <p>
+            Safe metadata only. Evidence packet copy/download is tracked in
+            issue #146.
+          </p>
+        </section>
+        <section class="panel">
+          <h4>Advanced</h4>
+          {advanced_links}
+        </section>
+      </aside>
+    </section>
+    """
+
+
 def activity_body(
     events: tuple[UserActivityEvent, ...],
     *,
@@ -2989,10 +3057,94 @@ def _metric(label: str, value: str, *, field: str | None = None) -> str:
     """
 
 
+def _trace_fact_section(
+    title: str,
+    facts: tuple[TranslationTraceFact, ...],
+) -> str:
+    return f"""
+      <div>
+        <h4>{escape(title)}</h4>
+        {_definition_table({fact.label: fact.value for fact in facts})}
+      </div>
+    """
+
+
+def _trace_timeline(items: tuple[TranslationTraceTimelineItem, ...]) -> str:
+    if not items:
+        rows = """
+        <tr>
+          <td colspan="3" class="empty-cell">No safe trace timeline found.</td>
+        </tr>
+        """
+    else:
+        rows = "\n".join(_trace_timeline_row(item) for item in items)
+    return f"""
+    <section class="panel table-panel">
+      <h4>Timeline</h4>
+      <table class="log-table trace-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Safe detail</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _trace_timeline_row(item: TranslationTraceTimelineItem) -> str:
+    return f"""
+    <tr>
+      <td>{escape(_format_datetime(item.timestamp))}</td>
+      <td><strong>{escape(item.label)}</strong></td>
+      <td>{escape(item.detail)}</td>
+    </tr>
+    """
+
+
+def _trace_provider_panel(provider: TranslationTraceProviderSignal | None) -> str:
+    if provider is None:
+        facts = (
+            TranslationTraceFact("Provider", "Unknown"),
+            TranslationTraceFact("Runtime status", "Unknown"),
+            TranslationTraceFact("Failure categories", "Unknown"),
+        )
+    else:
+        facts = (
+            TranslationTraceFact("Provider", provider.provider_id),
+            TranslationTraceFact("Runtime status", provider.status),
+            TranslationTraceFact("Active channels", str(provider.active_channels)),
+            TranslationTraceFact("Degraded channels", str(provider.degraded_channels)),
+            TranslationTraceFact(
+                "Failure categories",
+                ", ".join(provider.safe_failure_categories),
+            ),
+            TranslationTraceFact("Balance status", provider.balance_status),
+        )
+    return f"""
+    <section class="panel">
+      <h4>Provider</h4>
+      {_definition_table({fact.label: fact.value for fact in facts})}
+    </section>
+    """
+
+
+def _trace_link_group(links: tuple[TranslationTraceLink, ...]) -> str:
+    return "\n".join(
+        f'<a class="secondary-action trace-link" href="{escape(link.href)}">'
+        f"{escape(link.label)}</a>"
+        for link in links
+    )
+
+
 def _log_row(row: TranslationRunSummary) -> str:
     started = row.started_at.isoformat(timespec="seconds") if row.started_at else "n/a"
     direction = f"{row.source_language} -> {row.target_language}"
     error = row.error_message or ""
+    run_id = Path(row.run_dir).name
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -3008,12 +3160,12 @@ def _log_row(row: TranslationRunSummary) -> str:
       <td>{escape(error)}</td>
       <td>
         <a class="table-action"
-          href="/admin/logs/{escape(Path(row.run_dir).name)}">
-          Details
+          href="{escape(trace_href_for_run_id(run_id))}">
+          Open trace
         </a>
         <a class="table-action"
-          href="/admin/logs/{escape(Path(row.run_dir).name)}/download">
-          Download
+          href="/admin/logs/{escape(run_id)}">
+          Details
         </a>
       </td>
     </tr>
@@ -3298,6 +3450,7 @@ body {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
 }
+body > * { min-width: 0; }
 .login-screen {
   display: grid;
   grid-template-columns: 1fr;
@@ -3305,6 +3458,7 @@ body {
   padding: 24px;
 }
 .login-panel, .panel, .toolbar-panel, .integration-card, .metric {
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -3315,6 +3469,7 @@ body {
   padding: 28px;
 }
 .sidebar {
+  min-width: 0;
   min-height: 100vh;
   padding: 24px 18px;
   background: #111827;
@@ -3324,7 +3479,12 @@ body {
   gap: 24px;
 }
 .sidebar h1, .workspace h2, .panel h3 { margin: 0; }
-.sidebar nav { display: grid; gap: 6px; }
+.sidebar nav {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
 .sidebar a {
   color: #d1d5db;
   text-decoration: none;
@@ -3336,6 +3496,7 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 .workspace {
+  min-width: 0;
   padding: 28px;
   display: grid;
   align-content: start;
@@ -3354,6 +3515,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .toolbar-actions {
   display: flex;
@@ -3721,6 +3884,42 @@ button.danger {
 .table-panel h4 {
   margin: 0 0 12px;
 }
+.trace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 18px;
+  align-items: start;
+}
+.trace-main,
+.trace-rail {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.trace-rail {
+  position: sticky;
+  top: 18px;
+}
+.trace-summary-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.trace-summary-strip strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trace-link {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.trace-table {
+  min-width: 720px;
+}
 .definition-table {
   width: 100%;
   border-collapse: collapse;
@@ -3769,6 +3968,12 @@ button.danger {
   line-height: 1.4;
 }
 @media (max-width: 760px) {
+  .trace-layout {
+    grid-template-columns: 1fr;
+  }
+  .trace-rail {
+    position: static;
+  }
   .definition-table tr {
     grid-template-columns: 1fr;
     gap: 4px;
