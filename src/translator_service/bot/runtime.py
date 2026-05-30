@@ -34,6 +34,7 @@ from translator_service.bot.messages import (
     build_delete_book_confirmation_message,
     build_delete_unavailable_message,
     build_download_unavailable_message,
+    build_duplicate_upload_message,
     build_help_message,
     build_how_it_works_message,
     build_language_selected_message,
@@ -67,6 +68,8 @@ from translator_service.bot.messages import (
     get_continue_translation_text,
     get_delete_book_text,
     get_download_translation_text,
+    get_duplicate_open_existing_text,
+    get_duplicate_translate_again_text,
     get_keep_book_text,
     get_last_book_text,
     get_main_menu_button_text,
@@ -1503,6 +1506,80 @@ def create_router(
         await callback.answer()
         await _send_user_book_result(callback.message, result)
 
+    @router.callback_query(F.data == "duplicate_upload_translate_again")
+    async def duplicate_upload_translate_again(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        duplicate = service.find_pending_translation_duplicate(
+            user_telegram_id=callback.from_user.id,
+        )
+        if duplicate is not None and not duplicate.can_translate_again:
+            if callback.message is not None:
+                await _edit_callback_message(
+                    callback.message,
+                    build_duplicate_upload_message(
+                        duplicate,
+                        interface_language=interface_language,
+                    ),
+                    reply_markup=_duplicate_upload_keyboard(
+                        duplicate,
+                        interface_language=interface_language,
+                    ),
+                )
+            await callback.answer()
+            return
+        if callback.message is None:
+            await callback.answer(
+                build_download_unavailable_message(interface_language),
+                show_alert=True,
+            )
+            return
+        try:
+            await _send_pending_translation_preview(
+                message=callback.message,
+                service=service,
+                translator=translator,
+                interface_language=interface_language,
+                user_telegram_id=callback.from_user.id,
+            )
+        except (
+            BetaAccessDenied,
+            DocumentEstimationNotReadyError,
+            PreviewTranslationError,
+            RightsConfirmationRequired,
+            SecurityCooldownActive,
+            TranslationModeRequired,
+            TextExtractionError,
+            UnsupportedDocumentError,
+            ValueError,
+        ) as error:
+            await callback.message.answer(
+                build_upload_error_message(error, interface_language)
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data == "duplicate_upload_back")
+    async def duplicate_upload_back(callback: CallbackQuery) -> None:
+        if await _answer_callback_if_spam(callback, callback_spam_guard):
+            return
+        interface_language = service.get_interface_language(callback.from_user.id)
+        pending_upload = service.restore_pending_translation_upload(
+            user_telegram_id=callback.from_user.id,
+        )
+        if callback.message is None or pending_upload is None:
+            await callback.answer()
+            return
+        await callback.message.answer(
+            build_translation_language_selection_message(
+                pending_upload.file_name,
+                interface_language=interface_language,
+                source_language_display=pending_upload.source_language_display,
+            ),
+            reply_markup=_target_language_keyboard(interface_language),
+        )
+        await callback.answer()
+
     @router.message(F.text.func(is_help_text))
     async def help_text(message: Message) -> None:
         interface_language = service.get_interface_language(message.from_user.id)
@@ -2282,6 +2359,48 @@ def _preview_keyboard(interface_language: str = "en"):
     )
 
 
+def _duplicate_upload_keyboard(match, interface_language: str = "en"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    keyboard = []
+    if match.can_download_existing:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=get_download_translation_text(interface_language),
+                    callback_data=f"download_book:{match.job_id}",
+                )
+            ]
+        )
+    elif match.can_open_existing:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=get_duplicate_open_existing_text(interface_language),
+                    callback_data=f"book_detail:{match.job_id}",
+                )
+            ]
+        )
+    if match.can_translate_again:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=get_duplicate_translate_again_text(interface_language),
+                    callback_data="duplicate_upload_translate_again",
+                )
+            ]
+        )
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=get_back_text(interface_language),
+                callback_data="duplicate_upload_back",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def _language_keyboard_rows():
     from aiogram.types import KeyboardButton
 
@@ -2431,15 +2550,50 @@ async def _prepare_and_send_translation_preview(
         user_telegram_id=message.from_user.id,
         target_language=target_language,
     )
+    duplicate = service.find_pending_translation_duplicate(
+        user_telegram_id=message.from_user.id,
+    )
+    if duplicate is not None:
+        await message.answer(
+            build_duplicate_upload_message(
+                duplicate,
+                interface_language=interface_language,
+            ),
+            reply_markup=_duplicate_upload_keyboard(
+                duplicate,
+                interface_language=interface_language,
+            ),
+        )
+        return
+
+    await _send_pending_translation_preview(
+        message=message,
+        service=service,
+        translator=translator,
+        interface_language=interface_language,
+    )
+
+
+async def _send_pending_translation_preview(
+    *,
+    message,
+    service: BotTranslationService,
+    translator: TextTranslator,
+    interface_language: str,
+    user_telegram_id: int | None = None,
+) -> None:
+    resolved_user_telegram_id = (
+        user_telegram_id if user_telegram_id is not None else message.from_user.id
+    )
     try:
         preview = await asyncio.to_thread(
             service.generate_preview_translation,
-            user_telegram_id=message.from_user.id,
+            user_telegram_id=resolved_user_telegram_id,
             translator=translator,
         )
     except Exception:
         service.restore_pending_translation_upload(
-            user_telegram_id=message.from_user.id,
+            user_telegram_id=resolved_user_telegram_id,
         )
         raise
     await message.answer(
@@ -2451,7 +2605,7 @@ async def _prepare_and_send_translation_preview(
         parse_mode="HTML",
     )
     service.mark_pending_translation_preview_shown(
-        user_telegram_id=message.from_user.id,
+        user_telegram_id=resolved_user_telegram_id,
         preview_id=preview.preview_id,
     )
 
