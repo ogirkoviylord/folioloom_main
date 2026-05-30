@@ -207,13 +207,26 @@ def _runtime_action_items(
                     href="/admin/live",
                 )
             )
-        if not runtime.active_channels or runtime.status in _RUNTIME_DEGRADED_STATUSES:
+        if not runtime.active_channels or runtime.status == "missing_keys":
             items.append(
                 ActionItem(
                     key="ai_provider_runtime_missing_channels",
                     severity="critical",
                     title="DeepSeek runtime has no active channels",
                     detail="Runtime cannot use an active DeepSeek channel right now.",
+                    href="/admin/ai-providers",
+                )
+            )
+        elif runtime.status in _RUNTIME_DEGRADED_STATUSES:
+            items.append(
+                ActionItem(
+                    key="ai_provider_runtime_degraded",
+                    severity="warning",
+                    title="DeepSeek runtime is degraded",
+                    detail=(
+                        "Runtime still reports active channels; review "
+                        "provider/channel warning categories."
+                    ),
                     href="/admin/ai-providers",
                 )
             )

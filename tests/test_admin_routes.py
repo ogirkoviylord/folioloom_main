@@ -2103,6 +2103,9 @@ class AdminRoutesTest(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertIn("Provider health", response.text)
+            self.assertIn("Provider incident state", response.text)
+            self.assertIn("Keys configured", response.text)
+            self.assertIn("Runtime sees channels", response.text)
             self.assertIn("0 active keys", response.text)
             self.assertIn("missing keys", response.text)
             self.assertIn("<code>missing</code>", response.text)
@@ -2797,6 +2800,21 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIsNotNone(csrf)
 
             self.assertIn("Runtime status", page.text)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Read-only diagnosis", page.text)
+            self.assertIn("Probe, change and", page.text)
+            self.assertIn("danger actions stay below", page.text)
+            self.assertIn("Keys configured", page.text)
+            self.assertIn("Keys valid", page.text)
+            self.assertIn("Keys enabled", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 1 degraded", page.text)
+            self.assertIn("Safe failure categories", page.text)
+            self.assertIn("rate_limit 2 / auth 1 / timeout 4", page.text)
+            self.assertIn("unavailable 1", page.text)
+            self.assertIn("unsafe_model_output 5", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("0 slots / 1 usable channels", page.text)
             self.assertIn("Processing summary", page.text)
             self.assertIn("Read-only diagnostics", page.text)
             self.assertIn("they are not controls", page.text)
@@ -2954,6 +2972,13 @@ class AdminRoutesTest(unittest.TestCase):
             page = client.get("/admin/ai-providers")
 
             self.assertEqual(page.status_code, 200)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 0 degraded", page.text)
+            self.assertIn("Safe failure categories", page.text)
+            self.assertIn("none", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("2 slots / 1 usable channels", page.text)
             self.assertIn("Processing summary", page.text)
             self.assertIn("Active key channels", page.text)
             self.assertIn("Configured DeepSeek channels currently available", page.text)
@@ -2969,6 +2994,55 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("429 0 / auth 0 / billing 0 / timeout 0", page.text)
             self.assertIn("not controls", page.text)
             self.assertIn("production readiness guarantees", page.text)
+
+    def test_ai_provider_page_labels_degraded_runtime_with_active_channels(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="degraded",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="fallback",
+                            weight=1,
+                            max_parallel_requests=2,
+                            health="healthy",
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=1,
+                        max_capacity=2,
+                        active_requests=0,
+                        available_slots=1,
+                    ),
+                    error="provider degraded Bearer sk-runtime-secret",
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/ai-providers")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 0 degraded / runtime degraded", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("1 slots / 1 usable channels", page.text)
+            self.assertNotIn("sk-runtime-secret", page.text)
+            self.assertNotIn("Bearer", page.text)
 
     def test_failed_ai_provider_key_test_is_recorded_as_audit_failure(self):
         with TemporaryDirectory() as temp_dir:
