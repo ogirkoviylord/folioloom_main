@@ -144,8 +144,9 @@ Tasks:
   source/translated snippets, prompt text, API-key-like strings, provider key
   identifiers and traceback markers. This does not close real-file matrix,
   beta-server smoke, backup/restore or full Gate B readiness.
-- Approved 2026-05-28: duplicate upload / retry architecture for issues
-  #120-#125 uses a no-schema first implementation. Work order is #121 fresh
+- Approved 2026-05-28 and closed as a first slice on 2026-05-30: duplicate
+  upload / retry architecture for issues #120-#125 uses a no-schema first
+  implementation. Work order is #121 fresh
   translate-again attempt semantics before #123 duplicate upload UX, so the bot
   does not show a `translate again` action before the action is implemented.
   The first duplicate lookup is same-user only, scans at most `100` same-user
@@ -153,7 +154,7 @@ Tasks:
   free retry/retranslate as beta-safety accounting rather than paid billing.
   Schema/state changes, durable indexed duplicate keys, concurrent duplicate
   work, TTL cleanup and runtime data operations require separate approval.
-- Completed locally 2026-05-29: issue #121 implements fresh attempt identity
+- Completed and merged 2026-05-29: issue #121 implements fresh attempt identity
   for repeated same-document translation without schema changes. Repeated
   pending attempts get distinct preview reservation ids; repeated persistent
   translations create distinct job ids and keep old/new My Books history and
@@ -162,7 +163,7 @@ Tasks:
   is reserved/consumed per attempt. This does not implement #123 duplicate
   upload UX, duplicate lookup, durable indexes, concurrent duplicate work,
   TTL cleanup, paid retries or release readiness.
-- Completed locally 2026-05-29: issue #123 implements the first duplicate
+- Completed and merged 2026-05-30: issue #123 implements the first duplicate
   upload UX slice without schema changes. After rights confirmation,
   translation mode and target language selection, the bot performs a bounded
   same-user metadata scan before preview/provider work. Ready duplicates offer
@@ -171,13 +172,19 @@ Tasks:
   Books rather than the upload prompt. This does not implement durable duplicate
   indexes, schema/state changes, upload-flow resume, TTL cleanup, paid retry
   policy, deployment or release readiness.
-- Completed locally 2026-05-30: issue #125 keeps resume controls My Books-only
+- Completed and merged 2026-05-30: issue #125 keeps resume controls My Books-only
   for recoverable translations without schema changes. My Books detail shows
   `Continue Translation` only for architecture-approved recoverable statuses
   when the stored source object is available for backend resume. Duplicate
   upload choices do not show resume; partial duplicate results offer partial
   download plus an open-existing/My Books path. This does not close broad Gate B
   cancel/resume/restart release evidence.
+- Closed 2026-05-30: umbrella issue #120 is complete for the approved first
+  slice. Child issues #122, #124, #121, #123 and #125 are closed; PRs #126-#130
+  are merged and their visible GitHub `Python checks` passed. Future robust
+  duplicate indexing, schema/state changes, concurrent duplicate work,
+  upload-flow resume, TTL/delete cleanup and paid retry policy remain separate
+  tasks requiring explicit approval where applicable.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the

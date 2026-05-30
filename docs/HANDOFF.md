@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 ## 1. Текущее состояние проекта
 
@@ -161,6 +161,17 @@ Owner decisions recorded during issue #71:
   schema/state changes, perform runtime data operations, implement upload-flow
   resume, or close broad Gate B cancel/resume/restart evidence in #81. CI
   status remains Unknown until a PR/checks page is inspected.
+- 2026-05-30: Umbrella issue
+  [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
+  is closed after the planned first-slice work was completed and merged.
+  Child issues #122, #124, #121, #123 and #125 are closed; PRs #126-#130 are
+  merged into `main`, and visible GitHub `Python checks` passed for each PR.
+  The closed scope covers the narrow repeated-preview bugfix, approved
+  duplicate/retry architecture, fresh translate-again attempts, same-user
+  duplicate upload UX and My Books-only resume controls. This does not close
+  durable indexed duplicate keys, schema/state changes, concurrent duplicate
+  work, upload-flow resume, TTL/delete cleanup, paid retry policy, deployment,
+  release readiness or broad Gate B cancel/resume/restart evidence.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
