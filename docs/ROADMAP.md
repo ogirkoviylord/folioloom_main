@@ -162,6 +162,15 @@ Tasks:
   is reserved/consumed per attempt. This does not implement #123 duplicate
   upload UX, duplicate lookup, durable indexes, concurrent duplicate work,
   TTL cleanup, paid retries or release readiness.
+- Completed locally 2026-05-29: issue #123 implements the first duplicate
+  upload UX slice without schema changes. After rights confirmation,
+  translation mode and target language selection, the bot performs a bounded
+  same-user metadata scan before preview/provider work. Ready duplicates offer
+  existing download or fresh translate-again, active duplicates do not allow
+  concurrent translate-again, and recoverable duplicates keep resume in My
+  Books rather than the upload prompt. This does not implement durable duplicate
+  indexes, schema/state changes, upload-flow resume, TTL cleanup, paid retry
+  policy, deployment or release readiness.
 - Добавить local malware/AV scanning gate как часть upload hardening: quarantine
   first, scan before parsing, fail closed for beta scanner errors unless owner
   approves otherwise, and keep public VirusTotal-style submission out of the

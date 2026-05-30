@@ -4,6 +4,7 @@ from importlib.util import find_spec
 from translator_service.bot.messages import (
     build_back_to_menu_message,
     build_cancel_requested_message,
+    build_duplicate_upload_message,
     build_help_message,
     build_how_it_works_message,
     build_language_selected_message,
@@ -109,6 +110,22 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("вже підготовлено", message)
         self.assertNotIn("Під час перекладу щось пішло не так", message)
         self.assertNotIn("Preview has already been generated", message)
+
+    def test_duplicate_upload_messages_are_neutral_and_localized(self):
+        ready_match = type("Match", (), {"status": "ready"})()
+        active_match = type("Match", (), {"status": "queued"})()
+
+        english = build_duplicate_upload_message(ready_match, "en")
+        russian = build_duplicate_upload_message(ready_match, "ru")
+        ukrainian = build_duplicate_upload_message(active_match, "uk")
+
+        self.assertIn("has already been translated", english)
+        self.assertIn("translate it again as a new attempt", english)
+        self.assertIn("уже переводился", russian)
+        self.assertIn("новую попытку", russian)
+        self.assertIn("уже виконується", ukrainian)
+        self.assertNotIn("bad", english.lower())
+        self.assertNotIn("incomplete", english.lower())
 
     def test_main_menu_contains_primary_user_actions(self):
         self.assertEqual(

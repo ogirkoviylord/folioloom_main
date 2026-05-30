@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 ## 1. Текущее состояние проекта
 
@@ -125,6 +125,25 @@ Owner decisions recorded during issue #71:
   with `OK (skipped=13)`, `PYTHONPATH=src python3 -m compileall src` passed,
   and targeted ruff on the changed Python files passed. CI status remains
   Unknown until a PR/checks page is inspected.
+- 2026-05-29: Issue #123 implementation slice is locally verified on branch
+  `codex/issue-123-duplicate-upload-ux`. The upload flow now performs a
+  read-only same-user duplicate lookup after rights confirmation, translation
+  mode and target language selection, but before preview/provider work. The
+  first slice scans at most `100` same-user persistent jobs by source metadata
+  and approved identity fields, skips missing source metadata/object safely,
+  shows neutral duplicate choices for ready/active/recoverable matches, does
+  not show upload-flow Continue Translation, and keeps resume My Books-only.
+  Existing ready results can be downloaded or translated again as a fresh
+  attempt; active duplicates do not offer concurrent translate-again. Local
+  verification: `tests.test_bot_messages tests.test_bot_runtime
+  tests.test_bot_translation_service` ran 249 tests with `OK`,
+  `tests.test_persistent_jobs tests.test_postgres_scheduler` ran 40 tests with
+  `OK (skipped=13)`, full unittest discover ran 1129 tests with
+  `OK (skipped=13)`, compileall over `src` passed, and targeted
+  `ruff --select F,I` on changed files passed. This does not add durable
+  duplicate indexes, schema changes,
+  concurrent duplicate work, upload-flow resume, TTL cleanup, paid retries,
+  deployment, release readiness or CI evidence.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
