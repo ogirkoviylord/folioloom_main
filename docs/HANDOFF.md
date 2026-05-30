@@ -210,6 +210,31 @@ Owner decisions recorded during issue #71:
   is inspected. This does not change beta limits/pricing rates, persistent DB
   schema/state, runtime `var/` data, deployment, secrets, legal/privacy policy,
   or release readiness.
+- 2026-05-30: Issue
+  [#139](https://github.com/ogirkoviylord/folioloom_main/issues/139)
+  implementation slice is locally verified on branch
+  `codex/worker-failure-beta-release`. Owner-provided `pg2641-images-3.epub`
+  run-log export showed a deferred worker job that reached `run_failed` with
+  `0` prompt/completion tokens and no work-unit progress, meaning the failure
+  happened before successful translation usage was recorded. The scheduler now
+  releases the job's beta-safety reservation when it observes a terminal
+  deferred worker failure and keeps retryable worker failures running/reserved.
+  Regression coverage confirms the terminal failure path writes the existing
+  safe generic run-log error without raw source/provider details and releases
+  the reservation with reason `terminal_failure`; the retryable failure path
+  keeps the run log running and does not release/consume the reservation. Local
+  verification: focused red/green scheduler tests passed; `PYTHONPATH=src
+  python3 -m unittest tests.test_scheduler_runner` ran 25 tests with `OK`;
+  `PYTHONPATH=src python3 -m unittest tests.test_worker tests.test_beta_safety
+  tests.test_beta_safety_store tests.test_scheduler_runner` ran 89 tests with
+  `OK`; full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1141
+  tests with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`
+  passed; targeted `python3 -m ruff check --select F,I` on changed Python files
+  passed; `git diff --check` passed. CI status remains Unknown until a
+  PR/checks page is inspected. This does not repair existing active
+  reservations in live runtime data, change beta limits/pricing/provider
+  behavior, alter schema/state, perform deployment/server operations, read real
+  `.env*`, or claim release readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
