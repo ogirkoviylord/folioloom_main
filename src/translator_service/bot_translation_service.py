@@ -2983,7 +2983,7 @@ class BotTranslationService:
         *,
         job_id: str,
         user_id: str,
-        total_fragments: int,
+        estimated_input_tokens: int,
     ):
         if self._beta_safety_guard is None:
             return None
@@ -2991,8 +2991,7 @@ class BotTranslationService:
             job_id=job_id,
             user_id=user_id,
             estimate=_estimate_persistent_job_cost(
-                total_fragments=total_fragments,
-                max_fragment_chars=self._max_fragment_chars,
+                estimated_input_tokens=estimated_input_tokens,
                 rates=self._beta_safety_rates,
             ),
         )
@@ -3127,7 +3126,7 @@ class BotTranslationService:
         reservation_decision = self._reserve_beta_safety_for_persistent_job(
             job_id=plan.job.id,
             user_id=plan.job.user_id,
-            total_fragments=total_fragments,
+            estimated_input_tokens=plan.estimated_input_tokens,
         )
         if reservation_decision is not None and not reservation_decision.allowed:
             self._beta_safety_denied_job_ids.add(plan.job.id)
@@ -4405,13 +4404,10 @@ def _document_kind_from_format(document_format: DocumentFormat) -> DocumentKind 
 
 def _estimate_persistent_job_cost(
     *,
-    total_fragments: int,
-    max_fragment_chars: int,
+    estimated_input_tokens: int,
     rates: BetaSafetyRates,
 ) -> JobCostEstimate:
-    estimated_tokens = math.ceil(
-        max(0, total_fragments) * max(1, max_fragment_chars) / 4
-    )
+    estimated_tokens = max(0, estimated_input_tokens)
     return JobCostEstimate(
         prompt_tokens=estimated_tokens,
         completion_tokens=estimated_tokens,
