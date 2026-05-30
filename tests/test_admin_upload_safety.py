@@ -79,6 +79,42 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertIn("scan_blocked", page.text)
         _assert_no_sensitive_upload_metadata(page.text)
 
+    def test_upload_safety_list_shows_clean_accepted_activity_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(admin_db_path) as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-clean",
+                        created_job_id="job-clean",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="clean-book.txt",
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_db_path=str(admin_db_path),
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/upload-safety")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("upload-clean", page.text)
+        self.assertIn("clean-book.txt", page.text)
+        self.assertIn("job-clean", page.text)
+        self.assertIn("accepted_source_created", page.text)
+        _assert_no_sensitive_upload_metadata(page.text)
+
     def test_upload_safety_filters_include_records_older_than_first_page(self):
         with TemporaryDirectory() as temp_dir:
             admin_db_path = Path(temp_dir) / "admin.sqlite3"
@@ -150,7 +186,7 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertIn("Access violations", page.text)
         self.assertIn("upload-blocked", page.text)
         self.assertNotIn("upload-accepted", page.text)
-        self.assertNotIn("blocked-book.txt", page.text)
+        self.assertIn("blocked-book.txt", page.text)
         self.assertNotIn("accepted-book.txt", page.text)
         _assert_no_sensitive_upload_metadata(page.text)
 
@@ -306,7 +342,46 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertEqual(record.short_hash, "01234567")
         self.assertEqual(record.job_id, "job-safe")
         self.assertEqual([event.state for event in record.timeline], ["scan_blocked"])
-        self.assertIsNone(record.sanitized_original_filename)
+        self.assertEqual(record.sanitized_original_filename, "safe-book.txt")
+
+    def test_upload_safety_read_model_keeps_latest_safe_correlation_event(self):
+        with TemporaryDirectory() as temp_dir:
+            with SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3") as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-accepted",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="safe-book.txt",
+                    )
+                )
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-accepted",
+                        created_job_id="job-safe",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="safe-book.txt",
+                    )
+                )
+                events = store.list_events(surface=ActivitySurface.SECURITY)
+
+        read_model = upload_safety_read_model_from_activity_events(events)
+        records = read_model.list_records()
+        record = read_model.get_record("upload-accepted")
+
+        self.assertEqual(len(records), 1)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.final_action, "accepted")
+        self.assertEqual(record.job_id, "job-safe")
+        self.assertEqual(record.sanitized_original_filename, "safe-book.txt")
+        self.assertEqual(read_model.summarize().accepted_count, 1)
 
 
 def _record(
@@ -360,6 +435,7 @@ def _activity_event_input(
     container_verdict: str = "not_checked",
     reason_code: str = "scan_blocked",
     outcome: ActivityOutcome = ActivityOutcome.BLOCKED,
+    sanitized_original_filename: str | None = "safe-book.txt",
 ) -> UserActivityEventInput:
     return UserActivityEventInput(
         actor_type=ActivityActorType.USER,
@@ -390,6 +466,7 @@ def _activity_event_input(
             "scanner_version": "1.0",
             "signature_database_version": "daily-test",
             "signature_database_age_seconds": None,
+            "sanitized_original_filename": sanitized_original_filename,
             "short_hash": "01234567",
         },
     )
@@ -457,6 +534,9 @@ def _assert_no_sensitive_upload_metadata(html: str) -> None:
         "Eicar-Test-Signature raw scanner output",
         "Traceback (most recent call last)",
         "raw document text",
+        "raw prompt text",
+        "translated secret text",
+        "sk-test-api-key-like-value",
     )
     for value in forbidden:
         if value in html:

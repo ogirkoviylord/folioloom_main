@@ -196,16 +196,19 @@ def upload_safety_read_model_from_ledger(
 def upload_safety_read_model_from_activity_events(
     events: tuple[UserActivityEvent, ...],
 ) -> UploadSafetyAdminReadModel:
-    records = tuple(
-        record
-        for record in (
-            _admin_record_from_activity_event(event)
-            for event in events
-            if event.event_type == UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE
-        )
-        if record is not None
-    )
-    return UploadSafetyAdminReadModel(records)
+    records_by_upload_id: dict[str, UploadSafetyAdminRecord] = {}
+    for event in sorted(
+        events,
+        key=lambda item: item.created_at,
+        reverse=True,
+    ):
+        if event.event_type != UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE:
+            continue
+        record = _admin_record_from_activity_event(event)
+        if record is None or record.upload_id in records_by_upload_id:
+            continue
+        records_by_upload_id[record.upload_id] = record
+    return UploadSafetyAdminReadModel(tuple(records_by_upload_id.values()))
 
 
 def _admin_record_from_activity_event(
