@@ -373,6 +373,37 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("cancelled", message.lower())
         self.assertIn("book.uk.partial.epub", message)
 
+    def test_partial_status_message_uses_neutral_recovery_copy(self):
+        disallowed_fragments = {
+            "en": ("problematic", "quality"),
+            "ru": ("проблемн", "качество"),
+            "uk": ("проблемн", "якість"),
+            "fr": ("probl", "qualité"),
+            "es": ("problem", "calidad"),
+            "nl": ("problem", "kwaliteit"),
+        }
+
+        for language_code, fragments in disallowed_fragments.items():
+            with self.subTest(language_code=language_code):
+                message = build_translation_job_status_message(
+                    TranslationJob(
+                        id="job-1",
+                        user_telegram_id=42,
+                        file_name="book.epub",
+                        content=b"book",
+                        source_language="en",
+                        target_language="uk",
+                        status=TranslationJobStatus.PARTIAL,
+                        result_file_name="book.uk.partial.epub",
+                    ),
+                    interface_language=language_code,
+                )
+
+                self.assertIn("book.uk.partial.epub", message)
+                lowered = message.lower()
+                for fragment in fragments:
+                    self.assertNotIn(fragment, lowered)
+
     def test_translation_job_status_message_for_cancelled_job_without_result(self):
         message = build_translation_job_status_message(
             TranslationJob(
