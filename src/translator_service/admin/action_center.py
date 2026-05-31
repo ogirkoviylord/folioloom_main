@@ -225,11 +225,11 @@ def _runtime_action_items(
             items.append(
                 ActionItem(
                     key="ai_provider_runtime_degraded",
-                    severity="critical",
+                    severity="warning",
                     title="DeepSeek runtime is degraded",
                     detail=(
-                        "Runtime has active DeepSeek channels, but provider "
-                        "or channel health needs review."
+                        "Runtime still reports active DeepSeek channels; review "
+                        "provider/channel warning categories."
                     ),
                     href="/admin/ai-providers",
                 )
