@@ -1395,6 +1395,7 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
         f"{channel.total_billing_failures}/"
         f"{channel.total_unsafe_model_output_failures}"
     )
+    last_error = escape(_safe_runtime_error_text(channel.last_error_excerpt))
     return f"""
           <div class="key-row">
             <div>
@@ -1402,7 +1403,7 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
               <span>{escape(channel.health)}</span>
               <span>error_kind {escape(_safe_runtime_text(channel.error_kind))}</span>
               <span>
-                last error {escape(_safe_runtime_error_text(channel.last_error_excerpt))}
+                last error {last_error}
               </span>
             </div>
             <span>weight {channel.weight}</span>
