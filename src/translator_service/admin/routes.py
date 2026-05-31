@@ -79,7 +79,10 @@ from translator_service.admin.translation_logs import (
     get_translation_run_details,
     list_translation_run_summaries,
 )
-from translator_service.admin.translation_trace import build_translation_trace
+from translator_service.admin.translation_trace import (
+    build_translation_trace,
+    build_translation_trace_evidence_packet,
+)
 from translator_service.admin.upload_safety import (
     UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
     UploadSafetyFilters,
@@ -544,16 +547,13 @@ def create_admin_router(settings: Settings) -> APIRouter:
             body=log_detail_body(details),
         )
 
-    @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
-    async def translation_trace(run_id: str, request: Request) -> Response:
-        if _session_or_none(request, session_manager) is None:
-            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+    def _translation_trace_for_run(run_id: str):
         details = get_translation_run_details(
             settings.translation_run_log_root,
             run_id,
         )
         if details is None:
-            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+            return None
         activity_events: tuple[UserActivityEvent, ...] = ()
         if details.summary.job_id:
             with _activity_store(settings) as store:
@@ -561,13 +561,21 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     job_id=details.summary.job_id,
                     limit=25,
                 )
-        trace = build_translation_trace(
+        return build_translation_trace(
             details,
             operations=_operations_overview(settings),
             activity_events=activity_events,
             runtime_statuses=_ai_provider_runtime_statuses(settings),
             balance_snapshot=_deepseek_balance_snapshot(settings),
         )
+
+    @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
+    async def translation_trace(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        trace = _translation_trace_for_run(run_id)
+        if trace is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         return _protected_page(
             request,
             session_manager=session_manager,
@@ -575,6 +583,24 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Trace",
             active="logs",
             body=translation_trace_body(trace),
+        )
+
+    @router.get("/translations/{run_id}/evidence")
+    async def translation_evidence(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        trace = _translation_trace_for_run(run_id)
+        if trace is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        packet = build_translation_trace_evidence_packet(trace)
+        return Response(
+            packet.body,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{packet.file_name}"'
+                )
+            },
         )
 
     @router.get("/logs/{run_id}/download")

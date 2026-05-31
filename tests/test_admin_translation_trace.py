@@ -9,7 +9,10 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeStatus,
 )
 from translator_service.admin.translation_logs import get_translation_run_details
-from translator_service.admin.translation_trace import build_translation_trace
+from translator_service.admin.translation_trace import (
+    build_translation_trace,
+    build_translation_trace_evidence_packet,
+)
 from translator_service.admin.views import translation_trace_body
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
@@ -48,6 +51,7 @@ class AdminTranslationTraceTest(unittest.TestCase):
                     "status": "failed",
                     "source_text": "SECRET SOURCE TEXT",
                     "prompt": "SECRET PROMPT TEXT",
+                    "source_object_key": "objects/raw/secret-book.txt",
                     "error_message": (
                         "Bearer raw-bearer-token "
                         "api_key=sk-raw-secret "
@@ -104,13 +108,29 @@ class AdminTranslationTraceTest(unittest.TestCase):
                 ),
             )
             html = translation_trace_body(trace)
+            packet = build_translation_trace_evidence_packet(trace)
 
         self.assertEqual(trace.failure_category, "Provider")
         self.assertIn("Translation Failure Trace", html)
         self.assertIn("Open provider", html)
+        self.assertIn("Copy evidence", html)
+        self.assertIn("trace-evidence-packet", html)
+        self.assertIn("Download .md", html)
+        self.assertIn("Metadata-only packet for Codex", html)
         self.assertIn("job-trace-1", html)
         self.assertIn("timeout", html)
         self.assertIn("[redacted]", html)
+        self.assertIn("FolioLoom Translation Evidence Packet", packet.body)
+        self.assertIn("Metadata only: yes", packet.body)
+        self.assertIn("Format version: 1", packet.body)
+        self.assertIn("Failure category: Provider", packet.body)
+        self.assertIn("Provider: deepseek", packet.body)
+        self.assertIn("Runtime status: degraded", packet.body)
+        self.assertIn("Failure categories: timeout", packet.body)
+        self.assertIn("Started at:", packet.body)
+        self.assertIn("Finished at:", packet.body)
+        self.assertIn("Last event at:", packet.body)
+        self.assertTrue(packet.file_name.endswith("-evidence.md"))
         for forbidden in (
             "SECRET SOURCE TEXT",
             "SECRET TRANSLATED TEXT",
@@ -119,9 +139,11 @@ class AdminTranslationTraceTest(unittest.TestCase):
             "sk-finish-secret",
             "raw-bearer-token",
             "deepseek.api_keys.trace-key",
+            "objects/raw/secret-book.txt",
             "Traceback",
         ):
             self.assertNotIn(forbidden, html)
+            self.assertNotIn(forbidden, packet.body)
 
     def test_activity_timeline_uses_allowlisted_metadata_only(self):
         with TemporaryDirectory() as temp_dir:

@@ -55,6 +55,8 @@ from translator_service.admin.translation_trace import (
     TranslationTraceLink,
     TranslationTraceProviderSignal,
     TranslationTraceTimelineItem,
+    build_translation_trace_evidence_packet,
+    evidence_href_for_run_id,
     trace_href_for_log_href,
     trace_href_for_run_id,
 )
@@ -2763,6 +2765,7 @@ def translation_trace_body(trace: TranslationTrace) -> str:
     provider = _trace_provider_panel(trace.provider)
     timeline = _trace_timeline(trace.timeline)
     advanced_links = _trace_link_group(trace.advanced_links)
+    evidence = build_translation_trace_evidence_packet(trace)
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -2773,6 +2776,13 @@ def translation_trace_body(trace: TranslationTrace) -> str:
         </p>
       </div>
       <div class="toolbar-actions">
+        <button
+          class="button-link copy-button"
+          type="button"
+          data-copy-target="trace-evidence-packet"
+        >
+          Copy evidence
+        </button>
         <a class="button-link" href="{escape(trace.next_action.href)}">
           {escape(trace.next_action.label)}
         </a>
@@ -2807,12 +2817,32 @@ def translation_trace_body(trace: TranslationTrace) -> str:
             {escape(trace.next_action.label)}
           </a>
         </section>
-        <section class="panel">
+        <section class="panel evidence-box">
           <h4>Evidence</h4>
           <p>
-            Safe metadata only. Evidence packet copy/download is tracked in
-            issue #146.
+            Metadata-only packet for Codex. It does not include raw text,
+            prompts, translations, API keys, object paths or stack traces.
           </p>
+          <textarea
+            id="trace-evidence-packet"
+            class="evidence-packet"
+            readonly
+          >{escape(evidence.body)}</textarea>
+          <div class="toolbar-actions evidence-actions">
+            <button
+              class="button-link copy-button"
+              type="button"
+              data-copy-target="trace-evidence-packet"
+            >
+              Copy evidence
+            </button>
+            <a
+              class="secondary-action"
+              href="{escape(evidence_href_for_run_id(trace.run_id))}"
+            >
+              Download .md
+            </a>
+          </div>
         </section>
         <section class="panel">
           <h4>Advanced</h4>
@@ -2820,6 +2850,38 @@ def translation_trace_body(trace: TranslationTrace) -> str:
         </section>
       </aside>
     </section>
+    <script>
+      (() => {{
+        const buttons = document.querySelectorAll("[data-copy-target]");
+        const copyText = async (target) => {{
+          const field = document.getElementById(target);
+          if (!field) {{
+            return false;
+          }}
+          field.focus();
+          field.select();
+          if (navigator.clipboard && navigator.clipboard.writeText) {{
+            await navigator.clipboard.writeText(field.value);
+            return true;
+          }}
+          return document.execCommand("copy");
+        }};
+        buttons.forEach((button) => {{
+          button.addEventListener("click", async () => {{
+            const original = button.textContent.trim();
+            try {{
+              await copyText(button.dataset.copyTarget || "");
+              button.textContent = "Copied";
+            }} catch (error) {{
+              button.textContent = "Select text";
+            }}
+            window.setTimeout(() => {{
+              button.textContent = original;
+            }}, 1600);
+          }});
+        }});
+      }})();
+    </script>
     """
 
 
@@ -4181,6 +4243,40 @@ button.danger {
   width: 100%;
   margin-top: 8px;
   overflow-wrap: anywhere;
+}
+.evidence-box {
+  display: grid;
+  gap: 12px;
+}
+.evidence-packet {
+  width: 100%;
+  min-height: 340px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8fafc;
+  color: var(--ink);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+.evidence-actions {
+  align-items: stretch;
+}
+.copy-button {
+  border: 0;
+  min-width: 132px;
 }
 .trace-table {
   min-width: 720px;
