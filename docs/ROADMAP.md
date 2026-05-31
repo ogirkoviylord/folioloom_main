@@ -253,6 +253,11 @@ Tasks:
   blind spots.
 - Улучшить safe error reasons: provider auth/billing/rate-limit/timeout,
   parser rejection, quota/cap/kill switch.
+- Implement the owner-approved Beta Operations Console redesign from
+  `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md` in
+  small issues: Translation Failure Trace and safe evidence packet first,
+  provider/key incident clarity second, overview triage third, then navigation
+  cleanup, action semantics and user support/debug views.
 - Описать support/debug workflow для owner: какие admin pages смотреть, какие
   scripts запускать, какие artifacts сохранять.
 - Preserve the issue #30 admin guardrail: bulk provider key probes should wait
@@ -262,6 +267,9 @@ Acceptance criteria:
 
 - Owner может понять текущее состояние beta без просмотра raw runtime data.
 - Error reasons actionable и безопасны для пользователя/admin.
+- Owner can open one failed translation trace and see safe user/upload/job/run,
+  provider/key and failure-category evidence without hunting through multiple
+  log-like pages.
 - Backup/restore состояние видно через admin или documented owner report.
 - Любые новые debug surfaces проходят redaction review.
 
@@ -269,7 +277,9 @@ Later:
 
 - Admin UI для backups/alerts visibility remains a follow-up. Issue #71 chose
   metadata-only owner report for Gate B so new bot features do not force broad
-  admin console rewrites.
+  admin console rewrites. The 2026-05-31 Beta Operations Console decision may
+  add admin UI in scoped redesign issues, but Gate B evidence remains separate
+  until implemented and verified.
 
 ## 7. Phase 3 - Testing and reliability
 
