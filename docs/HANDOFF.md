@@ -39,9 +39,9 @@ TXT/DOCX/EPUB release matrix, local/offline EPUBCheck validation, DOCX
 openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal artifact,
 cancel/resume/restart release evidence и server smoke evidence.
 
-Что неизвестно: `.github/workflows/checks.yml` существует, но current branch
-GitHub Actions run/pass status Unknown until a PR check exists; public
-production readiness не подтверждена.
+Что неизвестно: `.github/workflows/checks.yml` существует, но GitHub Actions
+run/pass status для отдельной ветки остается Unknown until a PR check exists
+and is inspected; public production readiness не подтверждена.
 
 Issue #72 verification update on 2026-05-23: dedicated local Gate B common
 verification passed on branch `codex/issue-72-gate-b-baseline`:
@@ -161,6 +161,91 @@ Owner decisions recorded during issue #71:
   schema/state changes, perform runtime data operations, implement upload-flow
   resume, or close broad Gate B cancel/resume/restart evidence in #81. CI
   status remains Unknown until a PR/checks page is inspected.
+- 2026-05-30: Issue #134 implementation slice is locally verified on branches
+  `codex/issue-134-investigate` and `codex/issue-134-file-fallback`. Upload
+  Safety admin now builds a metadata-only accepted/blocked/failed-closed read
+  model from deduplicated `security.upload_safety.summary` activity snapshots,
+  including sanitized filename and job correlation when available. If an
+  older/correlation upload safety activity has `job_id` but lacks filename
+  metadata, the admin view can fall back to the matching user's persistent job
+  `file_name` through a read-only lookup, sanitizing it without exposing object
+  storage keys. Clean accepted uploads through the required scanner gate remain
+  visible as `accepted`/`clean`; persistent jobs keep the worker-facing
+  `translation_policy.upload_safety` marker; run artifacts also include a safe
+  upload-safety marker without object storage keys. Local verification used
+  synthetic fixtures only and did not inspect
+  real `.env*`, live beta/server runtime data, `var/` data or user documents:
+  focused upload-safety/admin tests passed, `tests.test_admin_upload_safety`
+  and `tests.test_bot_translation_service` passed, full unittest discover ran
+  1140 tests with `OK (skipped=13)`, compileall passed, targeted ruff passed,
+  `scripts/predeploy_check.sh` passed, and visible GitHub `Python checks` for
+  PR #136 passed. This does not implement TTL cleanup, deployment/server smoke,
+  production readiness, public/external scanning, scanner override/rescan
+  controls or any live runtime-data repair.
+- 2026-05-30: Issue
+  [#137](https://github.com/ogirkoviylord/folioloom_main/issues/137)
+  implementation slice is locally verified on branch
+  `codex/new-upload-failure`. New persistent TXT/DOCX/EPUB job beta-safety
+  reservations now use the adapter plan's `estimated_input_tokens` instead of
+  the previous `fragment_count * max_fragment_chars` capacity estimate. This
+  keeps beta caps unchanged while avoiding false `job_estimate_cap` rejections
+  for EPUB files with many small work units. Regression coverage uses synthetic
+  EPUB content only and confirms a >1000-work-unit EPUB whose planned estimate
+  is within the default job cap queues successfully, while the old capacity
+  estimate would have exceeded the cap. Local verification: focused red/green
+  tests for persistent reservation and EPUB cap behavior passed;
+  metadata-only local estimate checks of owner-provided `pg45304-images-3.epub`
+  and `pg2641-images-3.epub` printed no raw book text and showed
+  `pg45304-images-3.epub` planned beta-safety cost `0.639347` vs old capacity
+  cost `3.04842`, and `pg2641-images-3.epub` planned cost `0.144057` vs old
+  capacity cost `0.28428`;
+  `PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service` ran
+  111 tests with `OK`; `PYTHONPATH=src python3 -m unittest
+  tests.test_bot_runtime tests.test_persistent_jobs
+  tests.test_persistent_job_store` ran 112 tests with `OK`; full
+  `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1141 tests with
+  `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src` passed;
+  targeted `python3 -m ruff check --select F,I` on changed Python files passed;
+  `git diff --check` passed. CI status remains Unknown until a PR/checks page
+  is inspected. This does not change beta limits/pricing rates, persistent DB
+  schema/state, runtime `var/` data, deployment, secrets, legal/privacy policy,
+  or release readiness.
+- 2026-05-30: Issue
+  [#139](https://github.com/ogirkoviylord/folioloom_main/issues/139)
+  implementation slice is locally verified on branch
+  `codex/worker-failure-beta-release`. Owner-provided `pg2641-images-3.epub`
+  run-log export showed a deferred worker job that reached `run_failed` with
+  `0` prompt/completion tokens and no work-unit progress, meaning the failure
+  happened before successful translation usage was recorded. The scheduler now
+  releases the job's beta-safety reservation when it observes a terminal
+  deferred worker failure and keeps retryable worker failures running/reserved.
+  Regression coverage confirms the terminal failure path writes the existing
+  safe generic run-log error without raw source/provider details and releases
+  the reservation with reason `terminal_failure`; the retryable failure path
+  keeps the run log running and does not release/consume the reservation. Local
+  verification: focused red/green scheduler tests passed; `PYTHONPATH=src
+  python3 -m unittest tests.test_scheduler_runner` ran 25 tests with `OK`;
+  `PYTHONPATH=src python3 -m unittest tests.test_worker tests.test_beta_safety
+  tests.test_beta_safety_store tests.test_scheduler_runner` ran 89 tests with
+  `OK`; full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1141
+  tests with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`
+  passed; targeted `python3 -m ruff check --select F,I` on changed Python files
+  passed; `git diff --check` passed. CI status remains Unknown until a
+  PR/checks page is inspected. This does not repair existing active
+  reservations in live runtime data, change beta limits/pricing/provider
+  behavior, alter schema/state, perform deployment/server operations, read real
+  `.env*`, or claim release readiness.
+- 2026-05-30: Umbrella issue
+  [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
+  is closed after the planned first-slice work was completed and merged.
+  Child issues #122, #124, #121, #123 and #125 are closed; PRs #126-#130 are
+  merged into `main`, and visible GitHub `Python checks` passed for each PR.
+  The closed scope covers the narrow repeated-preview bugfix, approved
+  duplicate/retry architecture, fresh translate-again attempts, same-user
+  duplicate upload UX and My Books-only resume controls. This does not close
+  durable indexed duplicate keys, schema/state changes, concurrent duplicate
+  work, upload-flow resume, TTL/delete cleanup, paid retry policy, deployment,
+  release readiness or broad Gate B cancel/resume/restart evidence.
 - 2026-05-31: Owner approved the admin redesign direction as a before-free
   closed beta Beta Operations Console effort. The accepted direction is
   incident-first and read-only by default: Translation Failure Trace and safe
