@@ -966,7 +966,7 @@ def _provider_runtime_panel(
         interval = _format_seconds(runtime.reload_interval_seconds)
         last_reload = runtime.last_reloaded_at.isoformat()
         freshness = _runtime_freshness(runtime)
-        error = _safe_runtime_text(runtime.error)
+        error = _safe_runtime_error_text(runtime.error)
         provider_state = _runtime_provider_state_row(runtime.provider_state)
         channels = "\n".join(
             _runtime_channel_row(channel) for channel in runtime.active_channels
@@ -1066,7 +1066,7 @@ def _runtime_provider_state_row(state: AIProviderRuntimeProviderState) -> str:
               <strong>Adaptive throttle</strong>
               <span>{escape(adaptive)}</span>
               <span>circuit {escape(_safe_runtime_text(state.circuit_state))}</span>
-              <span>reason {escape(_safe_runtime_text(state.last_reason))}</span>
+              <span>reason {escape(_safe_runtime_error_text(state.last_reason))}</span>
             </div>
             <span>limit {state.current_limit}/{state.max_capacity}</span>
             <span>active {state.active_requests}</span>
@@ -1233,7 +1233,7 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
               <span>{escape(channel.health)}</span>
               <span>error_kind {escape(_safe_runtime_text(channel.error_kind))}</span>
               <span>
-                last error {escape(_safe_runtime_text(channel.last_error_excerpt))}
+                last error {escape(_safe_runtime_error_text(channel.last_error_excerpt))}
               </span>
             </div>
             <span>weight {channel.weight}</span>
@@ -1253,6 +1253,12 @@ def _safe_runtime_text(value: str | None) -> str:
     if value is None:
         return "n/a"
     return _redact_sensitive_text(value) or "n/a"
+
+
+def _safe_runtime_error_text(value: str | None) -> str:
+    if value is None or not value.strip():
+        return "n/a"
+    return "[redacted]"
 
 
 def _format_latency_ms(value: float | None) -> str:

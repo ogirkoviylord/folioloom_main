@@ -1857,7 +1857,7 @@ def _ai_provider_runtime_payload(
         "provider_state": _ai_provider_runtime_provider_state_payload(
             status.provider_state
         ),
-        "error": _safe_runtime_text(status.error),
+        "error": _safe_runtime_error_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
         "reload_requested_by": (
             reload_state.actor_id if reload_state is not None else None
@@ -1882,7 +1882,7 @@ def _ai_provider_runtime_provider_state_payload(state):
         "available_slots": state.available_slots,
         "circuit_state": _safe_runtime_text(state.circuit_state),
         "circuit_open_remaining_seconds": state.circuit_open_remaining_seconds,
-        "last_reason": _safe_runtime_text(state.last_reason),
+        "last_reason": _safe_runtime_error_text(state.last_reason),
         "total_ramp_ups": state.total_ramp_ups,
         "total_decreases": state.total_decreases,
         "total_circuit_opened": state.total_circuit_opened,
@@ -1916,7 +1916,7 @@ def _ai_provider_runtime_channel_payload(channel):
         "average_latency_ms": channel.average_latency_ms,
         "last_latency_ms": channel.last_latency_ms,
         "error_kind": _safe_runtime_text(channel.error_kind),
-        "last_error_excerpt": _safe_runtime_text(channel.last_error_excerpt),
+        "last_error_excerpt": _safe_runtime_error_text(channel.last_error_excerpt),
     }
 
 
@@ -1924,6 +1924,12 @@ def _safe_runtime_text(value: str | None) -> str | None:
     if value is None:
         return None
     return _redact_sensitive_text(value)
+
+
+def _safe_runtime_error_text(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    return "[redacted]"
 
 
 def _deepseek_balance_snapshot(settings: Settings) -> ProviderBalanceSnapshot | None:
