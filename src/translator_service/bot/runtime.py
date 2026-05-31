@@ -152,6 +152,19 @@ HEARTBEAT_PATTERNS = {
     "page": ("□", "▣", "■", "▣"),
     "star": ("✦", "✧", "✦", "✧"),
 }
+_BOOK_ACTIVE_STATUS_INDICATOR_STATUSES = {
+    "queued",
+    "translating",
+    "assembling",
+    "cancel_requested",
+}
+_BOOK_RECOVERABLE_STATUS_INDICATOR_STATUSES = {
+    "cancelled",
+    "failed",
+    "interrupted",
+    "partial",
+    "paused",
+}
 
 
 @dataclass(frozen=True)
@@ -2163,10 +2176,14 @@ def _my_books_keyboard(books, interface_language: str = "en"):
 
     latest_job_id = _book_job_id(book_list[0])
     if latest_job_id:
+        latest_indicator = _book_status_indicator(book_list[0])
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=get_last_book_text(interface_language),
+                    text=(
+                        f"{latest_indicator}"
+                        f"{get_last_book_text(interface_language)}"
+                    ),
                     callback_data=f"book_detail:{latest_job_id}",
                 )
             ]
@@ -2175,10 +2192,14 @@ def _my_books_keyboard(books, interface_language: str = "en"):
         job_id = _book_job_id(book)
         if not job_id:
             continue
+        indicator = _book_status_indicator(book)
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=get_open_book_text(index, interface_language),
+                    text=(
+                        f"{indicator}"
+                        f"{get_open_book_text(index, interface_language)}"
+                    ),
                     callback_data=f"book_detail:{job_id}",
                 )
             ]
@@ -2440,6 +2461,29 @@ def _book_can_cancel(book) -> bool:
     if isinstance(book, dict):
         return bool(book.get("can_cancel"))
     return bool(getattr(book, "can_cancel", False))
+
+
+def _book_status_indicator(book) -> str:
+    status = _book_status(book)
+    if status == TranslationJobStatus.READY.value:
+        return "✅ "
+    if status in _BOOK_ACTIVE_STATUS_INDICATOR_STATUSES:
+        return "⚙️ "
+    if status in _BOOK_RECOVERABLE_STATUS_INDICATOR_STATUSES:
+        return "↻ " if _book_can_resume(book) else ""
+    if not status and _book_has_result(book):
+        return "✅ "
+    return ""
+
+
+def _book_status(book) -> str:
+    if isinstance(book, dict):
+        status = book.get("status")
+    else:
+        status = getattr(book, "status", None)
+    if status is None:
+        return ""
+    return str(getattr(status, "value", status))
 
 
 async def _send_user_book_result(message, result) -> None:
