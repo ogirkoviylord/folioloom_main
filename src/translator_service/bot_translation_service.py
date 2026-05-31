@@ -149,6 +149,17 @@ SUPPORTED_TRANSLATION_MODES = (
     TRANSLATION_MODE_DOCUMENT_FORM,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
 )
+_MY_BOOK_DETAIL_PROGRESS_STATUSES = {
+    PersistentTranslationJobStatus.QUEUED.value,
+    PersistentTranslationJobStatus.TRANSLATING.value,
+    PersistentTranslationJobStatus.ASSEMBLING.value,
+    PersistentTranslationJobStatus.CANCEL_REQUESTED.value,
+    PersistentTranslationJobStatus.PAUSED.value,
+    PersistentTranslationJobStatus.PARTIAL.value,
+    PersistentTranslationJobStatus.CANCELLED.value,
+    PersistentTranslationJobStatus.INTERRUPTED.value,
+    PersistentTranslationJobStatus.FAILED.value,
+}
 AutomaticResultDeliveryKey = tuple[int, str, str, int, str]
 
 
@@ -287,6 +298,9 @@ class UserBookSummary:
     can_cancel: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+    progress_completed_fragments: int | None = None
+    progress_total_fragments: int | None = None
+    progress_percent: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1720,7 +1734,10 @@ class BotTranslationService:
         if job is None or job.user_id != f"telegram:{user_telegram_id}":
             return None
 
-        return self._book_summary_from_job(job)
+        return self._book_summary_from_job(
+            job,
+            progress=self._book_progress_from_job(job),
+        )
 
     def find_pending_translation_duplicate(
         self,
@@ -2237,7 +2254,22 @@ class BotTranslationService:
             result_content=result.content if result is not None else None,
         )
 
-    def _book_summary_from_job(self, job) -> UserBookSummary:
+    def _book_summary_from_job(
+        self,
+        job,
+        *,
+        progress: UserBookProgress | None = None,
+    ) -> UserBookSummary:
+        progress_percent = None
+        if progress is not None and progress.total_fragments > 0:
+            progress_percent = min(
+                100,
+                round(
+                    progress.completed_fragments
+                    / max(progress.total_fragments, 1)
+                    * 100
+                ),
+            )
         return UserBookSummary(
             job_id=job.id,
             file_name=job.file_name,
@@ -2253,6 +2285,43 @@ class BotTranslationService:
             can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
             updated_at=job.updated_at.isoformat(timespec="minutes"),
+            progress_completed_fragments=(
+                progress.completed_fragments if progress is not None else None
+            ),
+            progress_total_fragments=(
+                progress.total_fragments if progress is not None else None
+            ),
+            progress_percent=progress_percent,
+        )
+
+    def _book_progress_from_job(self, job) -> UserBookProgress | None:
+        if self._persistent_job_store is None:
+            return None
+        if job.status.value not in _MY_BOOK_DETAIL_PROGRESS_STATUSES:
+            return None
+        work_units = self._persistent_job_store.list_work_units(job.id)
+        total_fragments = len(work_units)
+        if total_fragments <= 0:
+            return None
+        completed_fragments = sum(
+            1
+            for unit in work_units
+            if unit.status
+            in {
+                PersistentWorkUnitStatus.TRANSLATED,
+                PersistentWorkUnitStatus.CACHED,
+            }
+        )
+        return UserBookProgress(
+            job_id=job.id,
+            status=_translation_job_status_from_persistent_status(job.status),
+            completed_fragments=min(completed_fragments, total_fragments),
+            total_fragments=total_fragments,
+            estimated_seconds=estimate_translation_seconds(
+                total_fragments,
+                max_parallel_work_units=self._max_parallel_work_units,
+                provider_parallel_capacity=self._provider_parallel_capacity,
+            ),
         )
 
     def _persistent_job_can_resume(self, job) -> bool:

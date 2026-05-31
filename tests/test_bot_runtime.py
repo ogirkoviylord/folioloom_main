@@ -1154,6 +1154,59 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(service.progress_calls, 1)
 
+    async def test_book_detail_callback_renders_persistent_progress(self):
+        class BookDetailProgressService:
+            def __init__(self) -> None:
+                self.activity: list[dict[str, object]] = []
+
+            def get_interface_language(self, user_telegram_id: int) -> str:
+                return "en"
+
+            def record_user_activity(self, **kwargs) -> None:
+                self.activity.append(kwargs)
+
+            def get_user_book_detail(self, **kwargs):
+                return {
+                    "job_id": "job-1",
+                    "file_name": "active.txt",
+                    "document_kind": "txt",
+                    "source_language": "en",
+                    "target_language": "uk",
+                    "status": "translating",
+                    "has_result": False,
+                    "can_resume": False,
+                    "can_cancel": True,
+                    "progress_completed_fragments": 2,
+                    "progress_total_fragments": 5,
+                    "progress_percent": 40,
+                }
+
+        service = BookDetailProgressService()
+        router = create_router(
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            config=BotRuntimeConfig(),
+        )
+        callback = RecordingCallback(data="book_detail:job-1")
+        callback.message = EditableMessage()
+
+        handler = self._router_callback_handler(router, "book_detail")
+        await handler(callback)
+
+        self.assertEqual(len(callback.message.edited_texts), 1)
+        self.assertIn(
+            "Translation progress: 40% (2/5)",
+            callback.message.edited_texts[0],
+        )
+        self.assertIn(
+            "cancel_book:job-1",
+            "\n".join(
+                button.callback_data
+                for row in callback.message.edited_reply_markups[0].inline_keyboard
+                for button in row
+            ),
+        )
+
     async def test_cancel_active_translation_sends_persistent_partial_result(self):
         message = RecordingMessage()
         job = TranslationJob(
@@ -2242,9 +2295,54 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
     def test_my_books_keyboard_opens_last_book_and_each_book_detail(self):
         keyboard = _my_books_keyboard(
             [
-                {"job_id": "job-1", "file_name": "first.epub", "has_result": True},
-                {"job_id": "job-2", "file_name": "second.docx", "has_result": False},
-                {"job_id": "job-3", "file_name": "third.txt", "has_result": True},
+                {
+                    "job_id": "job-1",
+                    "file_name": "first.epub",
+                    "status": "ready",
+                    "has_result": True,
+                },
+                {
+                    "job_id": "job-2",
+                    "file_name": "second.docx",
+                    "status": "translating",
+                    "has_result": False,
+                },
+                {
+                    "job_id": "job-3",
+                    "file_name": "third.txt",
+                    "status": "failed",
+                    "has_result": False,
+                    "can_resume": True,
+                },
+            ],
+            interface_language="en",
+        )
+
+        self.assertEqual(
+            [
+                [(button.text, button.callback_data) for button in row]
+                for row in keyboard.inline_keyboard
+            ],
+            [
+                [("✅ Last Book", "book_detail:job-1")],
+                [("✅ Book 1", "book_detail:job-1")],
+                [("⚙️ Book 2", "book_detail:job-2")],
+                [("↻ Book 3", "book_detail:job-3")],
+            ],
+        )
+
+    def test_my_books_keyboard_does_not_mark_non_resumable_failed_book_as_resumable(
+        self,
+    ):
+        keyboard = _my_books_keyboard(
+            [
+                {
+                    "job_id": "job-1",
+                    "file_name": "missing-source.txt",
+                    "status": "failed",
+                    "has_result": False,
+                    "can_resume": False,
+                },
             ],
             interface_language="en",
         )
@@ -2257,8 +2355,6 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             [
                 [("Last Book", "book_detail:job-1")],
                 [("Book 1", "book_detail:job-1")],
-                [("Book 2", "book_detail:job-2")],
-                [("Book 3", "book_detail:job-3")],
             ],
         )
 

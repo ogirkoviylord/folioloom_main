@@ -1423,8 +1423,11 @@ def build_my_book_detail_message(book, interface_language: str = "en") -> str:
         f"{messages['book_detail_format']}: {str(value.get('document_kind', '-')).upper()}",
         f"{messages['book_detail_language']}: {_language_pair_text(value, interface_language)}",
         f"{messages['book_detail_status']}: {_status_label(value.get('status', '-'), interface_language)}",
-        f"{messages['book_detail_result']}: {result_text}",
     ]
+    progress_line = _book_progress_line(value, interface_language)
+    if progress_line is not None:
+        lines.append(progress_line)
+    lines.append(f"{messages['book_detail_result']}: {result_text}")
     if updated_at:
         lines.append(f"{messages['book_detail_updated']}: {updated_at}")
     lines.extend(["", resume_text])
@@ -2022,6 +2025,17 @@ def _book_value(book, key: str | None = None):
             "can_cancel": getattr(book, "can_cancel", False),
             "created_at": getattr(book, "created_at", None),
             "updated_at": getattr(book, "updated_at", None),
+            "progress_completed_fragments": getattr(
+                book,
+                "progress_completed_fragments",
+                None,
+            ),
+            "progress_total_fragments": getattr(
+                book,
+                "progress_total_fragments",
+                None,
+            ),
+            "progress_percent": getattr(book, "progress_percent", None),
             "total_active": getattr(book, "total_active", None),
             "queued": getattr(book, "queued", None),
             "translating": getattr(book, "translating", None),
@@ -2045,6 +2059,29 @@ def _status_label(status: object, interface_language: str) -> str:
         f"status_{raw_status}",
         raw_status.replace("_", " ").title(),
     )
+
+
+def _book_progress_line(book: dict, interface_language: str) -> str | None:
+    completed = _optional_int(book.get("progress_completed_fragments"))
+    total = _optional_int(book.get("progress_total_fragments"))
+    if completed is None or total is None or total <= 0:
+        return None
+    completed = min(max(0, completed), total)
+    percent = _optional_int(book.get("progress_percent"))
+    if percent is None:
+        percent = round(completed / total * 100)
+    percent = min(100, max(0, percent))
+    progress_label = _messages(interface_language)["progress"]
+    return f"{progress_label}: {percent}% ({completed}/{total})"
+
+
+def _optional_int(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _time_units(interface_language: str) -> dict[str, str]:

@@ -272,6 +272,45 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Partial download available", message)
         self.assertIn("This translation can be continued", message)
 
+    def test_my_book_detail_message_shows_metadata_only_progress(self):
+        message = build_my_book_detail_message(
+            {
+                "file_name": "active.epub",
+                "document_kind": "epub",
+                "source_language": "en",
+                "target_language": "uk",
+                "status": "translating",
+                "has_result": False,
+                "can_resume": False,
+                "progress_completed_fragments": 2,
+                "progress_total_fragments": 5,
+                "progress_percent": 40,
+            },
+            "en",
+        )
+
+        self.assertIn("Translation progress: 40% (2/5)", message)
+        self.assertNotIn("Latest translated passage", message)
+
+    def test_my_book_detail_message_omits_missing_progress(self):
+        message = build_my_book_detail_message(
+            {
+                "file_name": "queued.epub",
+                "document_kind": "epub",
+                "source_language": "en",
+                "target_language": "uk",
+                "status": "queued",
+                "has_result": False,
+                "can_resume": False,
+                "progress_completed_fragments": 0,
+                "progress_total_fragments": 0,
+            },
+            "en",
+        )
+
+        self.assertNotIn("Translation progress:", message)
+        self.assertIn("Queued", message)
+
     def test_help_and_how_it_works_have_distinct_roles(self):
         help_message = build_help_message("en")
         how_message = build_how_it_works_message("en")

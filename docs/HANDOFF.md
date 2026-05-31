@@ -252,6 +252,26 @@ Owner decisions recorded during issue #71:
   repair, mutate scheduler/job/work-unit state, change schema, deploy or
   restart server services, change provider behavior, read real `.env*`, or
   claim release readiness.
+- 2026-05-31: Issue
+  [#164](https://github.com/ogirkoviylord/folioloom_main/issues/164)
+  implementation slice is locally verified on branch
+  `codex/issue-164-my-books-progress`. My Books book detail now shows
+  metadata-only translation progress for active/recoverable persistent jobs
+  when work-unit counts are available, using completed/total fragments and a
+  percentage without raw source text, translated text, prompts or provider
+  internals. Owner expanded the scope in chat on 2026-05-31 to add compact
+  status indicators to My Books inline buttons: ready books show a check mark,
+  active jobs show a gear, and recoverable incomplete jobs show a resume-style
+  marker. Local verification: `tests.test_bot_messages` ran 62 tests with
+  `OK`; `tests.test_bot_runtime tests.test_bot_translation_service` ran 197
+  tests with `OK`; full unittest discover ran 1167 tests with
+  `OK (skipped=13)`; compileall over `src` passed; targeted
+  `ruff --select F,I` on changed Python files passed; `git diff --check`
+  passed. CI status remains Unknown until a PR/checks page is inspected. This
+  does not change scheduler/job/work-unit persistence semantics, schema,
+  runtime data, provider behavior, beta caps, deployment, payments, auth/RBAC,
+  legal/privacy copy, upload-flow resume, duplicate-upload behavior or release
+  readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
