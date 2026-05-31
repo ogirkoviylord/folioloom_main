@@ -337,6 +337,59 @@ Human approval required to change:
 - yes; this changes operational visibility scope and release evidence
   expectations.
 
+### 2026-05-31 - Product/UX decisions: beta operations console redesign
+
+Status: Active
+
+Decision:
+- The admin redesign direction is accepted as a before-free-closed-beta product
+  and UX effort.
+- The target admin experience is a Beta Operations Console: incident-first,
+  read-only by default, and optimized for investigating failed translations,
+  provider/key failures and safe evidence handoff to Codex.
+- The first implementation slice should not be a broad navigation rewrite.
+  Start with a Translation Failure Trace and safe evidence packet, then provider
+  incident clarity, overview triage, navigation cleanup, action semantics and
+  user support/debug views.
+- Existing advanced/raw admin views may remain available while the new flows
+  prove they cover real incidents.
+- The redesign must not weaken SSH-tunnel-only admin, redaction, beta allowlist,
+  cost caps, kill switch, payment/public-production gates or rights
+  confirmation.
+
+Evidence:
+- Owner reported on 2026-05-31 that the current admin console is confusing when
+  investigating crashed translations and provider/key failures.
+- Owner identified `Logs`, `Activity` and `Operations` as feeling overlapping,
+  and provider key/status/settings surfaces as too similar.
+- Owner approved the Beta Operations Console direction and asked to record the
+  redesign plan.
+- Detailed design is recorded in
+  `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md`.
+
+Reason:
+- The owner needs to understand "what failed, why, who/what is affected, and
+  what evidence Codex needs" without already knowing internal log and job
+  artifacts.
+- Before free closed beta, operational visibility matters as much as feature
+  breadth. A confusing admin console increases incident response risk.
+- Splitting the redesign into incident trace, provider clarity, overview triage
+  and action semantics avoids replacing one broad admin surface with another.
+
+Consequences:
+- Orchestrator should split this redesign into small GitHub issues with
+  acceptance criteria and verification plans.
+- Architect review is required before implementation slices that touch admin
+  controls, provider behavior, auth/security boundaries, user data,
+  database/state, deployment or dependencies.
+- This decision does not claim that the redesign is implemented.
+- This decision does not by itself satisfy Gate B Alerts/Backups visibility,
+  closed beta readiness, public admin hardening, paid beta readiness or
+  production readiness.
+
+Human approval required to change:
+- yes; this changes owner-facing admin UX priorities before free closed beta.
+
 ### 2026-05-17 - Release decisions: Gate B EPUB validation approach
 
 Status: Active
