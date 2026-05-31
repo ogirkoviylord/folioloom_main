@@ -72,6 +72,29 @@ def _admin_setting_row(db_path: str, key: str):
     finally:
         connection.close()
 
+
+def _nav_section(page_text: str, class_name: str) -> str:
+    tag = "details" if class_name == "advanced-nav" else "div"
+    pattern = (
+        rf'<{tag}[^>]+class="[^"]*{re.escape(class_name)}[^"]*"[^>]*>'
+        rf"(.*?)</{tag}>"
+    )
+    match = re.search(pattern, page_text, re.DOTALL)
+    if match is None:
+        raise AssertionError(f"{class_name} nav section not found")
+    return match.group(1)
+
+
+def _advanced_nav_tag(page_text: str) -> str:
+    match = re.search(
+        r'<details class="[^"]*advanced-nav[^"]*"[^>]*>',
+        page_text,
+    )
+    if match is None:
+        raise AssertionError("advanced nav details not found")
+    return match.group(0)
+
+
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
 
@@ -128,6 +151,19 @@ class AdminRoutesTest(unittest.TestCase):
             side_effect=AssertionError("translation logs should be lazy"),
         ):
             response = self.client.get("/admin/logs", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_translation_trace_does_not_read_run_without_login(self):
+        with patch(
+            "translator_service.admin.routes.get_translation_run_details",
+            side_effect=AssertionError("translation trace should be lazy"),
+        ):
+            response = self.client.get(
+                "/admin/translations/run-1/trace",
+                follow_redirects=False,
+            )
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
@@ -340,6 +376,139 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Test all active keys", response.text)
         self.assertIn("Reload DeepSeek runtime", response.text)
 
+    def test_action_control_helpers_render_semantic_variants_and_disabled_reasons(self):
+        from translator_service.admin import views
+
+        link = views._action_link(
+            "Open <trace>",
+            "/admin/logs?path=<unsafe>",
+            "view",
+            compact=True,
+        )
+        probe = views._action_button(
+            "Test key",
+            "probe",
+            name="key_id",
+            value="key-1",
+            compact=True,
+        )
+        disabled_probe = views._action_button(
+            "Test all active keys",
+            "probe",
+            disabled_reason="No active admin-managed keys are available to test.",
+            compact=True,
+        )
+        danger = views._action_button("Delete", "danger", compact=True)
+
+        html = link + probe + disabled_probe + danger
+        self.assertIn('data-action-variant="view"', link)
+        self.assertIn("Open &lt;trace&gt;", link)
+        self.assertIn("path=&lt;unsafe&gt;", link)
+        self.assertIn('data-action-variant="probe"', probe)
+        self.assertIn('name="key_id"', probe)
+        self.assertIn('value="key-1"', probe)
+        self.assertIn('data-action-variant="probe"', disabled_probe)
+        self.assertIn('data-action-state="disabled"', disabled_probe)
+        self.assertIn("data-disabled-reason=", disabled_probe)
+        self.assertIn(
+            "No active admin-managed keys are available to test.",
+            disabled_probe,
+        )
+        self.assertIn('data-action-variant="danger"', danger)
+        self.assertNotIn("compact-action", html)
+
+    def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            empty_keys_page = client.get("/admin/ai-providers/deepseek/keys")
+            self.assertEqual(empty_keys_page.status_code, 200)
+            self.assertIn('data-action-variant="probe"', empty_keys_page.text)
+            self.assertIn('data-action-state="disabled"', empty_keys_page.text)
+            self.assertIn(
+                "No active admin-managed keys are available to test.",
+                empty_keys_page.text,
+            )
+
+            csrf_token = _csrf_token(empty_keys_page.text)
+            response = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf_token,
+                    "value": "sk-admin-action-semantics",
+                    "label": "Semantics key",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(response.status_code, 303)
+
+            keys_page = client.get("/admin/ai-providers/deepseek/keys")
+            self.assertEqual(keys_page.status_code, 200)
+            self.assertIn('data-action-variant="change"', keys_page.text)
+            self.assertIn('data-action-variant="probe"', keys_page.text)
+            self.assertIn('data-action-variant="danger"', keys_page.text)
+            self.assertIn("Save label", keys_page.text)
+            self.assertIn("Test key", keys_page.text)
+            self.assertIn("Remove", keys_page.text)
+
+            providers_page = client.get("/admin/ai-providers")
+            self.assertEqual(providers_page.status_code, 200)
+            self.assertIn('data-action-variant="refresh"', providers_page.text)
+            self.assertIn("Refresh balance", providers_page.text)
+
+    def test_job_actions_use_change_danger_and_disabled_reasons(self):
+        from translator_service.admin import views
+
+        actionable_job = SimpleNamespace(
+            id="job-actionable",
+            pausable=True,
+            cancellable=True,
+            deletable=True,
+            retryable=False,
+        )
+        html = views._job_actions(actionable_job, "csrf-token")
+        self.assertIn('data-action-variant="change"', html)
+        self.assertGreaterEqual(html.count('data-action-variant="danger"'), 2)
+        self.assertIn("Pause", html)
+        self.assertIn("Cancel", html)
+        self.assertIn("Delete", html)
+
+        inactive_job = SimpleNamespace(
+            id="job-inactive",
+            pausable=False,
+            cancellable=False,
+            deletable=False,
+            retryable=False,
+        )
+        disabled_html = views._job_actions(inactive_job, "csrf-token")
+        self.assertIn('data-action-state="disabled"', disabled_html)
+        self.assertIn("data-disabled-reason=", disabled_html)
+        self.assertIn("This job state has no admin action available.", disabled_html)
+
+        retryable_job = SimpleNamespace(
+            id="job-retry",
+            pausable=False,
+            cancellable=False,
+            deletable=False,
+            retryable=True,
+        )
+        retry_html = views._job_actions(retryable_job, "csrf-token")
+        self.assertIn('data-action-state="disabled"', retry_html)
+        self.assertIn("Retry is not available from this console view.", retry_html)
+
     def test_admin_quality_does_not_build_summary_without_login(self):
         with patch(
             "translator_service.admin.routes._quality_run_summary",
@@ -374,15 +543,73 @@ class AdminRoutesTest(unittest.TestCase):
         overview = self.client.get("/admin/overview")
 
         self.assertEqual(overview.status_code, 200)
-        self.assertIn("Overview", overview.text)
-        self.assertIn("Integrations", overview.text)
-        self.assertIn("AI Providers", overview.text)
-        self.assertIn("Billing", overview.text)
-        self.assertIn("Costs", overview.text)
-        self.assertIn("Quality", overview.text)
-        self.assertIn("Live", overview.text)
-        self.assertIn("Settings", overview.text)
+        primary_nav = _nav_section(overview.text, "primary-nav")
+        for label in (
+            "Overview",
+            "Live",
+            "Translations",
+            "Users",
+            "Providers",
+            "Beta Controls",
+            "Safety",
+            "Settings",
+        ):
+            self.assertIn(label, primary_nav)
         self.assertEqual(overview.headers["cache-control"], "no-store")
+
+    def test_admin_navigation_groups_raw_pages_under_advanced(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        overview = self.client.get("/admin/overview")
+
+        self.assertEqual(overview.status_code, 200)
+        primary_nav = _nav_section(overview.text, "primary-nav")
+        advanced_nav = _nav_section(overview.text, "advanced-nav")
+        self.assertIn(">Advanced<", overview.text)
+        for label in ("Logs", "Activity", "Operations", "Audit"):
+            self.assertNotIn(f">{label}<", primary_nav)
+            self.assertIn(f">{label}<", advanced_nav)
+        for href in (
+            "/admin/logs",
+            "/admin/activity",
+            "/admin/operations/jobs",
+            "/admin/audit",
+        ):
+            self.assertIn(f'href="{href}"', advanced_nav)
+
+    def test_advanced_route_marks_advanced_nav_item_active(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        page = self.client.get("/admin/operations/jobs")
+
+        self.assertEqual(page.status_code, 200)
+        primary_nav = _nav_section(page.text, "primary-nav")
+        advanced_nav = _nav_section(page.text, "advanced-nav")
+        self.assertIn("open", _advanced_nav_tag(page.text))
+        self.assertIn(
+            'href="/admin/operations/jobs" class="active"',
+            advanced_nav,
+        )
+        self.assertNotIn('class="active"', primary_nav)
+
+    def test_translations_alias_is_primary_while_raw_logs_stay_advanced(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        translations = self.client.get("/admin/translations")
+        logs = self.client.get("/admin/logs")
+
+        self.assertEqual(translations.status_code, 200)
+        self.assertEqual(logs.status_code, 200)
+        self.assertIn(
+            'href="/admin/translations" class="active"',
+            _nav_section(translations.text, "primary-nav"),
+        )
+        self.assertNotIn("open", _advanced_nav_tag(translations.text))
+        self.assertIn(
+            'href="/admin/logs" class="active"',
+            _nav_section(logs.text, "advanced-nav"),
+        )
+        self.assertIn("open", _advanced_nav_tag(logs.text))
 
     def test_owner_can_add_view_and_remove_beta_allowlist_ids_from_settings(self):
         with TemporaryDirectory() as temp_dir:
@@ -685,10 +912,59 @@ class AdminRoutesTest(unittest.TestCase):
         response = self.client.get("/admin/overview")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Action Center", response.text)
+        self.assertIn("Triage inbox", response.text)
         self.assertIn("integrations_missing", response.text)
         self.assertIn("/admin/integrations", response.text)
         self.assertNotIn("pending actions will live here", response.text)
+
+    def test_overview_links_failed_translation_to_trace_triage(self):
+        with TemporaryDirectory() as temp_dir:
+            log_root = Path(temp_dir) / "translation-runs"
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-overview-failed",
+                    order_id="order-overview-failed",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                ),
+            )
+            logger.finish(
+                status="failed",
+                error_message=(
+                    "Provider failed with Bearer overview-trace-token "
+                    "api_key=sk-overview-trace-secret"
+                ),
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Triage inbox", response.text)
+        self.assertIn("Translation failed", response.text)
+        self.assertIn("book.txt", response.text)
+        self.assertIn("job-overview-failed", response.text)
+        self.assertIn("Open trace", response.text)
+        self.assertIn(
+            f'href="/admin/translations/{logger.run_dir.name}/trace"',
+            response.text,
+        )
+        self.assertNotIn("overview-trace-token", response.text)
+        self.assertNotIn("sk-overview-trace-secret", response.text)
 
     def test_overview_action_center_redacts_deepseek_balance_error(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
@@ -768,6 +1044,8 @@ class AdminRoutesTest(unittest.TestCase):
         for path, label in (
             ("/admin/integrations", "Integrations"),
             ("/admin/ai-providers", "AI Providers"),
+            ("/admin/translations", "Translations"),
+            ("/admin/beta-controls", "Beta Controls"),
             ("/admin/billing", "Billing"),
             ("/admin/costs", "Costs"),
             ("/admin/quality", "Quality"),
@@ -1233,7 +1511,10 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("order-queued", page.text)
             self.assertIn("worker-a", page.text)
             self.assertIn("21", page.text)
-            self.assertIn(f'href="/admin/logs/{logger.run_dir.name}"', page.text)
+            self.assertIn(
+                f'href="/admin/translations/{logger.run_dir.name}/trace"',
+                page.text,
+            )
             self.assertIn("Pause", page.text)
             self.assertIn("Cancel", page.text)
             self.assertIn("Delete", page.text)
@@ -1420,6 +1701,7 @@ class AdminRoutesTest(unittest.TestCase):
 
             page = client.get("/admin/logs?status=ready")
             api = client.get("/admin/api/logs?status=ready")
+            trace = client.get(f"/admin/translations/{logger.run_dir.name}/trace")
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
@@ -1430,7 +1712,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("book.txt", page.text)
             self.assertIn("ready", page.text)
             self.assertIn(
-                f"/admin/logs/{logger.run_dir.name}/download",
+                f"/admin/translations/{logger.run_dir.name}/trace",
                 page.text,
             )
             self.assertIn(
@@ -1438,6 +1720,18 @@ class AdminRoutesTest(unittest.TestCase):
                 page.text,
             )
             self.assertNotIn("source_text", page.text)
+            self.assertEqual(trace.status_code, 200)
+            self.assertIn("Translation Failure Trace", trace.text)
+            self.assertIn("job-logs-1", trace.text)
+            self.assertIn("book.txt", trace.text)
+            self.assertIn("Not failed", trace.text)
+            self.assertIn("Advanced log detail", trace.text)
+            self.assertIn("Evidence packet copy/download is tracked", trace.text)
+            self.assertNotIn("Chapter one", trace.text)
+            self.assertNotIn("Глава первая", trace.text)
+            self.assertNotIn("processing-bearer-token", trace.text)
+            self.assertNotIn("sk-processing-secret-value", trace.text)
+            self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
             self.assertIn("Progress", details.text)
@@ -1592,6 +1886,219 @@ class AdminRoutesTest(unittest.TestCase):
             )
             self.assertEqual(users_api.status_code, 200)
             self.assertEqual(users_api.json()["users"][0]["user_id"], "telegram:42")
+
+    def test_user_profile_shows_safe_support_debug_translation_links(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.mode.selected",
+                        action="select",
+                        target_type="translation_mode",
+                        target_id="book_manuscript",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={
+                            "translation_mode": "book_manuscript",
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                            "source_text": "RAW SOURCE SENTINEL",
+                            "translated_text": "RAW TRANSLATION SENTINEL",
+                            "prompt": "RAW PROMPT SENTINEL",
+                            "api_key": "sk-support-secret",
+                            "traceback": "Traceback (most recent call last)",
+                            "object_storage_path": "/object-storage/private/book.txt",
+                            "secret_id": "deepseek.api_keys.support",
+                        },
+                    )
+                )
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.target_language.selected",
+                        action="select",
+                        target_type="target_language",
+                        target_id="uk",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                        },
+                    )
+                )
+
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-support-1",
+                    order_id="order-support-1",
+                    user_id="telegram:42",
+                    file_name="very-long-safe-manuscript-name.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek-chat",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.finish(
+                status="failed",
+                error_message=(
+                    "Provider failed after echoing RAW SOURCE SENTINEL "
+                    "RAW TRANSLATION SENTINEL RAW PROMPT SENTINEL"
+                ),
+            )
+            run_id = Path(logger.run_dir).name
+            completed_logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-support-2",
+                    order_id="order-support-2",
+                    user_id="telegram:42",
+                    file_name="completed-safe-manuscript-name.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek-chat",
+                    total_fragment_count=1,
+                ),
+            )
+            completed_logger.finish(
+                status="completed",
+                result_file_name="completed-safe-manuscript-name.uk.txt",
+            )
+            completed_run_id = Path(completed_logger.run_dir).name
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.failed",
+                        action="failed",
+                        target_type="document",
+                        target_id="very-long-safe-manuscript-name.txt",
+                        outcome=ActivityOutcome.FAILURE,
+                        job_id="job-support-1",
+                        order_id="order-support-1",
+                        translation_run_dir=str(logger.run_dir),
+                        metadata={
+                            "file_name": "very-long-safe-manuscript-name.txt",
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                        },
+                    )
+                )
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.completed",
+                        action="completed",
+                        target_type="document",
+                        target_id="completed-safe-manuscript-name.txt",
+                        outcome=ActivityOutcome.SUCCESS,
+                        job_id="job-support-2",
+                        order_id="order-support-2",
+                        translation_run_dir=str(completed_logger.run_dir),
+                        metadata={
+                            "file_name": "completed-safe-manuscript-name.txt",
+                            "result_file_name": (
+                                "completed-safe-manuscript-name.uk.txt"
+                            ),
+                            "target_language": "uk",
+                            "translation_mode": "book_manuscript",
+                        },
+                    )
+                )
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=str(db_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/users/telegram:42")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Support profile", response.text)
+            self.assertIn("Recent translations", response.text)
+            self.assertIn("very-long-safe-manuscript-name.txt", response.text)
+            self.assertIn("completed-safe-manuscript-name.txt", response.text)
+            self.assertIn("book_manuscript", response.text)
+            self.assertIn("uk", response.text)
+            self.assertIn("failed", response.text)
+            self.assertIn("completed", response.text)
+            self.assertIn(f'/admin/translations/{run_id}/trace', response.text)
+            self.assertIn(f'/admin/logs/{completed_run_id}', response.text)
+            self.assertIn("Support reports", response.text)
+            self.assertIn("Unknown", response.text)
+            self.assertNotIn("RAW SOURCE SENTINEL", response.text)
+            self.assertNotIn("RAW TRANSLATION SENTINEL", response.text)
+            self.assertNotIn("RAW PROMPT SENTINEL", response.text)
+            self.assertNotIn("sk-support-secret", response.text)
+            self.assertNotIn(".api_keys.", response.text)
+            self.assertNotIn("Traceback", response.text)
+            self.assertNotIn("/object-storage/private", response.text)
+
+    def test_user_profile_without_translation_sources_is_honest_unknown(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:77",
+                        channel="telegram",
+                        channel_user_id="77",
+                        surface=ActivitySurface.BOT,
+                        event_type="user.interface_language.changed",
+                        action="change",
+                        outcome=ActivityOutcome.SUCCESS,
+                        metadata={"language_code": "en"},
+                    )
+                )
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=str(db_path),
+                        translation_run_log_root=str(Path(temp_dir) / "runs"),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/users/telegram:77")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Support profile", response.text)
+            self.assertIn("Support reports", response.text)
+            self.assertIn("Unknown", response.text)
+            self.assertIn("No linked translation runs found.", response.text)
 
     def test_live_monitor_page_and_api_show_snapshot(self):
         with TemporaryDirectory() as temp_dir:
@@ -2074,6 +2581,9 @@ class AdminRoutesTest(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertIn("Provider health", response.text)
+            self.assertIn("Provider incident state", response.text)
+            self.assertIn("Keys configured", response.text)
+            self.assertIn("Runtime sees channels", response.text)
             self.assertIn("0 active keys", response.text)
             self.assertIn("missing keys", response.text)
             self.assertIn("<code>missing</code>", response.text)
@@ -2730,7 +3240,8 @@ class AdminRoutesTest(unittest.TestCase):
                             error_kind="rate_limit",
                             last_error_excerpt=(
                                 "HTTP 429 Bearer sk-runtime-secret "
-                                "secret_id=deepseek.api_keys.key-1"
+                                "secret_id=deepseek.api_keys.key-1 "
+                                "FORBIDDEN_PROVIDER_PROMPT"
                             ),
                         ),
                     ),
@@ -2744,7 +3255,8 @@ class AdminRoutesTest(unittest.TestCase):
                         circuit_open_remaining_seconds=90.0,
                         last_reason=(
                             "billing Bearer sk-runtime-secret "
-                            "secret_id=deepseek.api_keys.key-1"
+                            "secret_id=deepseek.api_keys.key-1 "
+                            "FORBIDDEN_PROVIDER_PROMPT"
                         ),
                         total_ramp_ups=2,
                         total_decreases=3,
@@ -2768,6 +3280,21 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIsNotNone(csrf)
 
             self.assertIn("Runtime status", page.text)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Read-only diagnosis", page.text)
+            self.assertIn("Probe, change and", page.text)
+            self.assertIn("danger actions stay below", page.text)
+            self.assertIn("Keys configured", page.text)
+            self.assertIn("Keys valid", page.text)
+            self.assertIn("Keys enabled", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 1 degraded", page.text)
+            self.assertIn("Safe failure categories", page.text)
+            self.assertIn("rate_limit 2 / auth 1 / timeout 4", page.text)
+            self.assertIn("unavailable 1", page.text)
+            self.assertIn("unsafe_model_output 5", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("0 slots / 1 usable channels", page.text)
             self.assertIn("Processing summary", page.text)
             self.assertIn("Read-only diagnostics", page.text)
             self.assertIn("they are not controls", page.text)
@@ -2808,6 +3335,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-runtime-secret", page.text)
             self.assertNotIn("Bearer", page.text)
             self.assertNotIn(".api_keys.", page.text)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", page.text)
             reload_response = client.post(
                 "/admin/ai-providers/deepseek/runtime/reload",
                 data={"csrf_token": csrf.group(1)},
@@ -2863,6 +3391,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-runtime-secret", serialized_payload)
             self.assertNotIn("Bearer", serialized_payload)
             self.assertNotIn(".api_keys.", serialized_payload)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", serialized_payload)
             self.assertIn("DeepSeek runtime", live_page.text)
             self.assertIn("admin_store", live_page.text)
             self.assertIn("Reload pending", live_page.text)
@@ -2925,6 +3454,13 @@ class AdminRoutesTest(unittest.TestCase):
             page = client.get("/admin/ai-providers")
 
             self.assertEqual(page.status_code, 200)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 0 degraded", page.text)
+            self.assertIn("Safe failure categories", page.text)
+            self.assertIn("none", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("2 slots / 1 usable channels", page.text)
             self.assertIn("Processing summary", page.text)
             self.assertIn("Active key channels", page.text)
             self.assertIn("Configured DeepSeek channels currently available", page.text)
@@ -2940,6 +3476,59 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("429 0 / auth 0 / billing 0 / timeout 0", page.text)
             self.assertIn("not controls", page.text)
             self.assertIn("production readiness guarantees", page.text)
+
+    def test_ai_provider_page_labels_degraded_runtime_with_active_channels(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="degraded",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="fallback",
+                            weight=1,
+                            max_parallel_requests=2,
+                            health="healthy",
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=1,
+                        max_capacity=2,
+                        active_requests=0,
+                        available_slots=1,
+                    ),
+                    error=(
+                        "provider degraded Bearer sk-runtime-secret "
+                        "FORBIDDEN_PROVIDER_PROMPT"
+                    ),
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/ai-providers")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Provider incident state", page.text)
+            self.assertIn("Runtime sees channels", page.text)
+            self.assertIn("1 active / 0 degraded / runtime degraded", page.text)
+            self.assertIn("Fallback capacity", page.text)
+            self.assertIn("1 slots / 1 usable channels", page.text)
+            self.assertNotIn("sk-runtime-secret", page.text)
+            self.assertNotIn("Bearer", page.text)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", page.text)
 
     def test_failed_ai_provider_key_test_is_recorded_as_audit_failure(self):
         with TemporaryDirectory() as temp_dir:

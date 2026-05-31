@@ -49,12 +49,97 @@ from translator_service.admin.translation_logs import (
     TranslationRunFragmentDetail,
     TranslationRunSummary,
 )
+from translator_service.admin.translation_trace import (
+    TranslationTrace,
+    TranslationTraceFact,
+    TranslationTraceLink,
+    TranslationTraceProviderSignal,
+    TranslationTraceTimelineItem,
+    trace_href_for_log_href,
+    trace_href_for_run_id,
+)
 from translator_service.admin.upload_safety import (
     UploadSafetyAdminRecord,
     UploadSafetyFilters,
     UploadSafetySummary,
 )
 from translator_service.user_activity import UserActivityEvent, UserProfile
+
+_PRIMARY_NAV_ITEMS = (
+    ("overview", "/admin/overview", "Overview"),
+    ("live", "/admin/live", "Live"),
+    ("translations", "/admin/translations", "Translations"),
+    ("users", "/admin/users", "Users"),
+    ("providers", "/admin/ai-providers", "Providers"),
+    ("beta_controls", "/admin/beta-controls", "Beta Controls"),
+    ("safety", "/admin/upload-safety", "Safety"),
+    ("settings", "/admin/settings", "Settings"),
+)
+_ADVANCED_NAV_ITEMS = (
+    ("logs", "/admin/logs", "Logs"),
+    ("activity", "/admin/activity", "Activity"),
+    ("operations", "/admin/operations/jobs", "Operations"),
+    ("audit", "/admin/audit", "Audit"),
+    ("integrations", "/admin/integrations", "Integrations"),
+    ("billing", "/admin/billing", "Billing"),
+    ("costs", "/admin/costs", "Costs"),
+    ("quality", "/admin/quality", "Quality"),
+    ("security", "/admin/security/events", "Security Events"),
+)
+_NAV_ACTIVE_ALIASES = {
+    "providers": ("ai_providers",),
+    "safety": ("upload_safety",),
+}
+_ACTION_VARIANTS = frozenset(
+    {
+        "view",
+        "copy",
+        "refresh",
+        "probe",
+        "change",
+        "danger",
+    }
+)
+_SUPPORT_METADATA_FIELDS = (
+    ("file_name", "File"),
+    ("result_file_name", "Result"),
+    ("document_kind", "Format"),
+    ("source_language", "Source"),
+    ("target_language", "Target"),
+    ("translation_mode", "Mode"),
+    ("language_code", "Language"),
+    ("declared_format", "Declared format"),
+    ("detected_format", "Detected format"),
+    ("reason_code", "Reason"),
+    ("security_state", "Security"),
+    ("status", "Status"),
+)
+_UNSAFE_SUPPORT_KEY_MARKERS = (
+    "source_text",
+    "translated_text",
+    "prompt",
+    "plaintext",
+    "api_key",
+    "secret",
+    "token",
+    "password",
+    "authorization",
+    "traceback",
+    "stack_trace",
+    "object_storage",
+    "storage_path",
+    "path",
+)
+_UNSAFE_SUPPORT_VALUE_MARKERS = (
+    "sk-",
+    ".api_keys.",
+    "traceback",
+    "bearer ",
+    "/object-storage",
+    "\\object-storage",
+    "/var/",
+)
+_FAILED_SUPPORT_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
 def login_page(*, error: str | None = None) -> str:
@@ -92,27 +177,7 @@ def admin_page(
     body: str,
     environment: str | None = None,
 ) -> str:
-    nav_items = (
-        ("overview", "/admin/overview", "Overview"),
-        ("integrations", "/admin/integrations", "Integrations"),
-        ("ai_providers", "/admin/ai-providers", "AI Providers"),
-        ("billing", "/admin/billing", "Billing"),
-        ("costs", "/admin/costs", "Costs"),
-        ("quality", "/admin/quality", "Quality"),
-        ("live", "/admin/live", "Live"),
-        ("logs", "/admin/logs", "Logs"),
-        ("activity", "/admin/activity", "Activity"),
-        ("users", "/admin/users", "Users"),
-        ("settings", "/admin/settings", "Settings"),
-        ("operations", "/admin/operations/jobs", "Operations"),
-        ("upload_safety", "/admin/upload-safety", "Upload Safety"),
-        ("security", "/admin/security/events", "Security"),
-        ("audit", "/admin/audit", "Audit"),
-    )
-    nav = "\n".join(
-        f'<a href="{href}" class="{"active" if key == active else ""}">{label}</a>'
-        for key, href, label in nav_items
-    )
+    nav = _admin_nav(active)
     csrf_token = escape(session.csrf_token)
     actor_id = escape(session.actor_id)
     environment_badge = ""
@@ -134,7 +199,7 @@ def admin_page(
       <p class="eyebrow">FolioLoom</p>
       <h1>Admin Console</h1>
     </div>
-    <nav>{nav}</nav>
+    {nav}
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf_token" value="{csrf_token}">
       <button type="submit" class="secondary">Sign out</button>
@@ -154,6 +219,127 @@ def admin_page(
 </html>"""
 
 
+def _admin_nav(active: str) -> str:
+    primary = "\n".join(_nav_link(item, active) for item in _PRIMARY_NAV_ITEMS)
+    advanced = "\n".join(_nav_link(item, active) for item in _ADVANCED_NAV_ITEMS)
+    advanced_is_active = any(
+        _nav_item_is_active(key, active) for key, _href, _label in _ADVANCED_NAV_ITEMS
+    )
+    advanced_open = " open" if advanced_is_active else ""
+    advanced_class = "nav-section advanced-nav"
+    if advanced_is_active:
+        advanced_class += " active-group"
+    return f"""
+    <nav class="sidebar-nav" aria-label="Admin navigation">
+      <div class="nav-section primary-nav" aria-label="Primary workflows">
+        {primary}
+      </div>
+      <details class="{advanced_class}"{advanced_open}>
+        <summary class="nav-summary">Advanced</summary>
+        {advanced}
+      </details>
+    </nav>
+    """
+
+
+def _nav_link(item: tuple[str, str, str], active: str) -> str:
+    key, href, label = item
+    class_name = "active" if _nav_item_is_active(key, active) else ""
+    return f'<a href="{href}" class="{class_name}">{label}</a>'
+
+
+def _nav_item_is_active(key: str, active: str) -> bool:
+    if key == active:
+        return True
+    return active in _NAV_ACTIVE_ALIASES.get(key, ())
+
+
+def _action_link(
+    label: str,
+    href: str,
+    variant: str,
+    *,
+    compact: bool = False,
+    extra_class: str = "",
+    target: str | None = None,
+    rel: str | None = None,
+) -> str:
+    safe_variant = _safe_action_variant(variant)
+    attrs = [
+        f'class="{escape(_action_classes(safe_variant, compact, extra_class))}"',
+        f'href="{escape(href)}"',
+        f'data-action-variant="{escape(safe_variant)}"',
+    ]
+    if target:
+        attrs.append(f'target="{escape(target)}"')
+    if rel:
+        attrs.append(f'rel="{escape(rel)}"')
+    return f'<a {" ".join(attrs)}>{escape(label)}</a>'
+
+
+def _action_button(
+    label: str,
+    variant: str,
+    *,
+    button_type: str = "submit",
+    name: str | None = None,
+    value: str | None = None,
+    compact: bool = False,
+    extra_class: str = "",
+    disabled_reason: str | None = None,
+) -> str:
+    safe_variant = _safe_action_variant(variant)
+    attrs = [
+        f'class="{escape(_action_classes(safe_variant, compact, extra_class))}"',
+        f'type="{escape(button_type)}"',
+        f'data-action-variant="{escape(safe_variant)}"',
+    ]
+    if name is not None:
+        attrs.append(f'name="{escape(name)}"')
+    if value is not None:
+        attrs.append(f'value="{escape(value)}"')
+    if disabled_reason:
+        attrs.extend(
+            (
+                "disabled",
+                'aria-disabled="true"',
+                'data-action-state="disabled"',
+                f'data-disabled-reason="{escape(disabled_reason)}"',
+            )
+        )
+        body = (
+            f"<span>{escape(label)}</span>"
+            " "
+            f'<small class="action-disabled-reason">{escape(disabled_reason)}</small>'
+        )
+    else:
+        body = escape(label)
+    return f'<button {" ".join(attrs)}>{body}</button>'
+
+
+def _action_classes(variant: str, compact: bool, extra_class: str) -> str:
+    classes = ["action-control", f"action-control-{variant}"]
+    if compact:
+        classes.append("action-control-compact")
+    classes.extend(_safe_class_tokens(extra_class))
+    return " ".join(classes)
+
+
+def _safe_action_variant(variant: str) -> str:
+    normalized = variant.strip().lower().replace("_", "-")
+    if normalized in _ACTION_VARIANTS:
+        return normalized
+    return "view"
+
+
+def _safe_class_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for token in value.split():
+        if token.replace("-", "").replace("_", "").isalnum():
+            tokens.append(token)
+    return tokens
+
+
 def section_body(title: str, copy: str) -> str:
     return f"""
     <section class="panel">
@@ -169,16 +355,16 @@ def overview_body(action_center: ActionCenter) -> str:
     else:
         rows = """
         <div class="empty-state">
-          No urgent admin actions right now.
+          Everything quiet. No actionable beta operations items right now.
         </div>
         """
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Action Center</h3>
+        <h3>Triage inbox</h3>
         <p>
-          Prioritized operations signals from integrations, translation runs,
-          provider keys, token spend, and server health.
+          Actionable beta operations items only. Each row explains what
+          happened, why it is shown now, what is affected, and the next step.
         </p>
       </div>
     </section>
@@ -191,18 +377,30 @@ def overview_body(action_center: ActionCenter) -> str:
 def _action_item(item: ActionItem) -> str:
     severity = _safe_action_severity(item.severity)
     href = _safe_action_href(item.href)
+    next_action = item.next_action.strip() or "Open"
     return f"""
-    <a
+    <article
       class="action-item action-{escape(severity)}"
       data-action-key="{escape(item.key)}"
-      href="{escape(href)}"
     >
-      <span class="status">{escape(severity)}</span>
-      <span>
+      <span class="status">{escape(_action_severity_label(severity))}</span>
+      <div class="action-copy">
         <strong>{escape(item.title)}</strong>
         <small>{escape(item.detail)}</small>
-      </span>
-    </a>
+        <dl class="action-meta">
+          <div>
+            <dt>Affected</dt>
+            <dd>{escape(item.affected)}</dd>
+          </div>
+          <div>
+            <dt>Why now</dt>
+            <dd>{escape(item.reason)}</dd>
+          </div>
+        </dl>
+      </div>
+      {_action_link(next_action, href, "view", compact=True, extra_class="action-next")}
+      <span class="sr-only">Next step</span>
+    </article>
     """
 
 
@@ -213,9 +411,24 @@ def _safe_action_href(href: str) -> str:
 
 
 def _safe_action_severity(severity: str) -> str:
-    if severity in {"critical", "warning", "info"}:
-        return severity
+    aliases = {
+        "critical": "blocked",
+        "warning": "watch",
+    }
+    normalized = aliases.get(severity, severity)
+    if normalized in {"info", "watch", "investigate", "action_needed", "blocked"}:
+        return normalized
     return "info"
+
+
+def _action_severity_label(severity: str) -> str:
+    return {
+        "info": "Info",
+        "watch": "Watch",
+        "investigate": "Investigate",
+        "action_needed": "Action needed",
+        "blocked": "Blocked",
+    }.get(severity, "Info")
 
 
 def settings_body(
@@ -243,7 +456,7 @@ def settings_body(
         </p>
       </div>
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel" id="beta-controls">
       <h3>Closed Beta Allowlist</h3>
       <p>
         Add trusted Telegram numeric user IDs now, then enable enforcement when
@@ -257,11 +470,11 @@ def settings_body(
           <span>Telegram user ID</span>
           <input name="telegram_id" type="number" min="1" step="1" required>
         </label>
-        <button type="submit">Add ID</button>
+        {_action_button("Add ID", "change")}
       </form>
       {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel" id="beta-safety-controls">
       <h3>Beta Safety Controls</h3>
       <p>
         Live budget guardrails for the closed beta. These values protect beta
@@ -271,7 +484,7 @@ def settings_body(
         action="/admin/settings/beta-safety">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {_beta_safety_setting_inputs(beta_safety_settings)}
-        <button type="submit">Save beta safety</button>
+        {_action_button("Save beta safety", "change")}
       </form>
     </section>
     <section class="metrics">
@@ -357,7 +570,7 @@ def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
     status = "on" if enabled else "off"
     next_enabled = "false" if enabled else "true"
     label = "Disable allowlist" if enabled else "Enable allowlist"
-    danger = " danger" if enabled else ""
+    variant = "danger" if enabled else "change"
     detail = (
         "Only listed Telegram IDs can start new uploads and translations."
         if enabled
@@ -372,9 +585,7 @@ def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
         <form method="post" action="/admin/settings/beta-allowlist/toggle">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
           <input type="hidden" name="enabled" value="{escape(next_enabled)}">
-          <button class="compact-action{danger}" type="submit">
-            {escape(label)}
-          </button>
+          {_action_button(label, variant, compact=True)}
         </form>
       </div>
     """
@@ -406,7 +617,7 @@ def _beta_allowlist_row(user_id: int, csrf_token: str) -> str:
           <form method="post" action="/admin/settings/beta-allowlist/remove">
             <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
             <input type="hidden" name="telegram_id" value="{safe_id}">
-            <button class="compact-action danger" type="submit">Remove</button>
+            {_action_button("Remove", "danger", compact=True)}
           </form>
         </td>
       </tr>
@@ -426,7 +637,7 @@ def _secret_safety_row(item: SecretSafetyItem) -> str:
       </td>
       <td><span class="status">{escape(item.status.replace("_", " "))}</span></td>
       <td><code>{escape(value)}</code></td>
-      <td><a class="table-action" href="{escape(href)}">Open</a></td>
+      <td>{_action_link("Open", href, "view", compact=True)}</td>
     </tr>
     """
 
@@ -544,7 +755,7 @@ def deepseek_keys_body(
         </p>
       </div>
       <div class="toolbar-actions">
-        <a class="secondary-action" href="/admin/ai-providers">Back to providers</a>
+        {_action_link("Back to providers", "/admin/ai-providers", "view")}
         {_ai_provider_test_all_keys_form(
             "deepseek",
             csrf_token=csrf_token,
@@ -630,6 +841,15 @@ def _ai_provider_card(
     rows = "\n".join(_ai_provider_key_row(key, csrf_token) for key in keys)
     if not rows:
         rows = '<p class="empty-state">No keys configured yet. Test key</p>'
+    incident_panel = _provider_incident_panel(
+        summary.integration_id,
+        keys=keys,
+        health=health,
+        runtime=runtime,
+        reload_state=reload_state,
+        balance_snapshot=balance_snapshot,
+        balance_stale_seconds=balance_stale_seconds,
+    )
     health_panel = _provider_health_panel(health)
     runtime_panel = _provider_runtime_panel(
         summary.integration_id,
@@ -652,11 +872,11 @@ def _ai_provider_card(
     )
     manage_keys_link = ""
     if summary.integration_id == "deepseek":
-        manage_keys_link = """
-      <a class="secondary-action" href="/admin/ai-providers/deepseek/keys">
-        Manage DeepSeek keys
-      </a>
-    """
+        manage_keys_link = _action_link(
+            "Manage DeepSeek keys",
+            "/admin/ai-providers/deepseek/keys",
+            "view",
+        )
     return f"""
     <article class="integration-card wide-card">
       <div>
@@ -665,6 +885,7 @@ def _ai_provider_card(
         <span class="status">{active_key_count} active keys</span>
       </div>
       <p>{escape(summary.description)}</p>
+      {incident_panel}
       {health_panel}
       {runtime_panel}
       {balance_panel}
@@ -674,6 +895,217 @@ def _ai_provider_card(
       {_ai_provider_key_add_form(summary.integration_id, csrf_token)}
     </article>
     """
+
+
+def _provider_incident_panel(
+    provider_id: str,
+    *,
+    keys: tuple[AIProviderKeySummary, ...],
+    health: ProviderHealthSummary | None,
+    runtime: AIProviderRuntimeStatus | None,
+    reload_state: AIProviderRuntimeReloadRequest | None,
+    balance_snapshot: ProviderBalanceSnapshot | None,
+    balance_stale_seconds: int,
+) -> str:
+    rows = (
+        _provider_incident_row(
+            "Keys configured",
+            _configured_key_label(keys),
+            "Inventory metadata only; raw key values and secret ids stay hidden.",
+        ),
+        _provider_incident_row(
+            "Keys valid",
+            _key_validity_label(health, keys),
+            "Last validation state from existing safe provider health metadata.",
+        ),
+        _provider_incident_row(
+            "Keys enabled",
+            _enabled_key_label(keys),
+            "Keys currently allowed for runtime use versus paused/read-only rows.",
+        ),
+        _provider_incident_row(
+            "Runtime sees channels",
+            _runtime_channel_visibility_label(runtime),
+            "Separates missing usable channels from degraded runtime with channels.",
+        ),
+        _provider_incident_row(
+            "Reload state",
+            _runtime_reload_label(reload_state),
+            "Whether saved key/settings changes are waiting for bot or worker runtime.",
+        ),
+        _provider_incident_row(
+            "Balance",
+            _provider_balance_state_label(
+                provider_id,
+                balance_snapshot,
+                stale_seconds=balance_stale_seconds,
+            ),
+            "DeepSeek balance metadata only; not a paid billing ledger.",
+        ),
+        _provider_incident_row(
+            "Safe failure categories",
+            _safe_provider_failure_category_label(runtime),
+            "Provider counters are separated from model-output safety blocks.",
+        ),
+        _provider_incident_row(
+            "Fallback capacity",
+            _fallback_capacity_label(runtime),
+            "Read-only capacity signal from existing runtime state.",
+        ),
+    )
+    return f"""
+      <div class="provider-incident-state">
+        <div>
+          <h4>Provider incident state</h4>
+          <p>
+            Read-only diagnosis from existing safe metadata. Probe, change and
+            danger actions stay below this section.
+          </p>
+        </div>
+        <div class="incident-state-list">{''.join(rows)}</div>
+      </div>
+    """
+
+
+def _provider_incident_row(label: str, value: str, detail: str) -> str:
+    return f"""
+        <div class="incident-state-row">
+          <span>{escape(label)}</span>
+          <div>
+            <strong>{escape(value)}</strong>
+            <small>{escape(detail)}</small>
+          </div>
+        </div>
+    """
+
+
+def _configured_key_label(keys: tuple[AIProviderKeySummary, ...]) -> str:
+    total = len(keys)
+    env_count = sum(1 for key in keys if is_env_deepseek_key(key))
+    admin_count = total - env_count
+    if total == 0:
+        return "0 total"
+    return f"{total} total / {admin_count} admin / {env_count} env"
+
+
+def _enabled_key_label(keys: tuple[AIProviderKeySummary, ...]) -> str:
+    active = sum(1 for key in keys if key.enabled and not key.disabled)
+    paused = len(keys) - active
+    return f"{active} active / {paused} paused"
+
+
+def _key_validity_label(
+    health: ProviderHealthSummary | None,
+    keys: tuple[AIProviderKeySummary, ...],
+) -> str:
+    if not keys:
+        return "No keys configured"
+    if health is None:
+        return "Unknown"
+    status = health.last_validation_status.strip()
+    if not status:
+        return "Unknown"
+    if status.lower() == "runtime degraded":
+        return "not checked"
+    return status
+
+
+def _runtime_channel_visibility_label(
+    runtime: AIProviderRuntimeStatus | None,
+) -> str:
+    if runtime is None:
+        return "Unknown"
+    active = len(runtime.active_channels)
+    degraded = _degraded_runtime_channel_count(runtime)
+    if active == 0 or runtime.status == "missing_keys":
+        return f"{active} active / missing usable channels"
+    if runtime.status in {"degraded", "error", "failed"}:
+        return f"{active} active / {degraded} degraded / runtime {runtime.status}"
+    return f"{active} active / {degraded} degraded"
+
+
+def _runtime_reload_label(
+    reload_state: AIProviderRuntimeReloadRequest | None,
+) -> str:
+    if reload_state is None:
+        return "No reload requested"
+    if reload_state.pending:
+        return "Waiting for runtime"
+    consumed = (
+        reload_state.consumed_at.isoformat(timespec="seconds")
+        if reload_state.consumed_at is not None
+        else "Unknown"
+    )
+    return f"Consumed at {consumed}"
+
+
+def _provider_balance_state_label(
+    provider_id: str,
+    snapshot: ProviderBalanceSnapshot | None,
+    *,
+    stale_seconds: int,
+) -> str:
+    if provider_id != "deepseek":
+        return "Unknown"
+    if snapshot is None:
+        return "Unknown"
+    return _balance_status(snapshot, stale_seconds)
+
+
+def _safe_provider_failure_category_label(
+    runtime: AIProviderRuntimeStatus | None,
+) -> str:
+    if runtime is None:
+        return "Unknown"
+    channels = runtime.active_channels
+    counters = (
+        ("rate_limit", sum(channel.total_rate_limit_failures for channel in channels)),
+        ("auth", sum(channel.total_auth_failures for channel in channels)),
+        ("billing", sum(channel.total_billing_failures for channel in channels)),
+        ("timeout", sum(channel.total_timeout_failures for channel in channels)),
+        (
+            "unavailable",
+            sum(channel.total_unavailable_failures for channel in channels),
+        ),
+        (
+            "malformed",
+            sum(channel.total_malformed_response_failures for channel in channels),
+        ),
+        (
+            "unsafe_model_output",
+            sum(channel.total_unsafe_model_output_failures for channel in channels),
+        ),
+        (
+            "other_provider",
+            sum(channel.total_other_provider_failures for channel in channels),
+        ),
+    )
+    visible = [f"{label} {value}" for label, value in counters if value > 0]
+    return " / ".join(visible) if visible else "none"
+
+
+def _fallback_capacity_label(runtime: AIProviderRuntimeStatus | None) -> str:
+    if runtime is None:
+        return "Unknown"
+    if not runtime.active_channels or runtime.status == "missing_keys":
+        return "0 slots / 0 usable channels"
+    usable_channels = sum(
+        1
+        for channel in runtime.active_channels
+        if channel.health.lower() not in {"disabled", "missing"}
+    )
+    available_slots = runtime.provider_state.available_slots
+    return f"{available_slots} slots / {usable_channels} usable channels"
+
+
+def _degraded_runtime_channel_count(runtime: AIProviderRuntimeStatus) -> int:
+    return sum(
+        1
+        for channel in runtime.active_channels
+        if channel.health.lower() not in {"healthy", "ok", "ready"}
+        or bool(channel.error_kind)
+        or bool(channel.last_error_excerpt)
+    )
 
 
 def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
@@ -717,7 +1149,7 @@ def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
             required
           >
         </label>
-        <button type="submit">Add key</button>
+        {_action_button("Add key", "change")}
       </form>
     """
 
@@ -743,7 +1175,7 @@ def _provider_runtime_panel(
         interval = _format_seconds(runtime.reload_interval_seconds)
         last_reload = runtime.last_reloaded_at.isoformat()
         freshness = _runtime_freshness(runtime)
-        error = _safe_runtime_text(runtime.error)
+        error = _safe_runtime_error_text(runtime.error)
         provider_state = _runtime_provider_state_row(runtime.provider_state)
         channels = "\n".join(
             _runtime_channel_row(channel) for channel in runtime.active_channels
@@ -808,7 +1240,7 @@ def _runtime_reload_form(
       <form class="secret-form" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit">{escape(label)}</button>
+        {_action_button(label, "change")}
       </form>
     """
 
@@ -843,7 +1275,7 @@ def _runtime_provider_state_row(state: AIProviderRuntimeProviderState) -> str:
               <strong>Adaptive throttle</strong>
               <span>{escape(adaptive)}</span>
               <span>circuit {escape(_safe_runtime_text(state.circuit_state))}</span>
-              <span>reason {escape(_safe_runtime_text(state.last_reason))}</span>
+              <span>reason {escape(_safe_runtime_error_text(state.last_reason))}</span>
             </div>
             <span>limit {state.current_limit}/{state.max_capacity}</span>
             <span>active {state.active_requests}</span>
@@ -1003,6 +1435,7 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
         f"{channel.total_billing_failures}/"
         f"{channel.total_unsafe_model_output_failures}"
     )
+    last_error = escape(_safe_runtime_error_text(channel.last_error_excerpt))
     return f"""
           <div class="key-row">
             <div>
@@ -1010,7 +1443,7 @@ def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
               <span>{escape(channel.health)}</span>
               <span>error_kind {escape(_safe_runtime_text(channel.error_kind))}</span>
               <span>
-                last error {escape(_safe_runtime_text(channel.last_error_excerpt))}
+                last error {last_error}
               </span>
             </div>
             <span>weight {channel.weight}</span>
@@ -1030,6 +1463,12 @@ def _safe_runtime_text(value: str | None) -> str:
     if value is None:
         return "n/a"
     return _redact_sensitive_text(value) or "n/a"
+
+
+def _safe_runtime_error_text(value: str | None) -> str:
+    if value is None or not value.strip():
+        return "n/a"
+    return "[redacted]"
 
 
 def _format_latency_ms(value: float | None) -> str:
@@ -1095,10 +1534,8 @@ def _provider_balance_panel(
         <form class="secret-form" method="post"
           action="/admin/ai-providers/deepseek/balance/refresh">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-          <button type="submit">Refresh balance</button>
-          <a class="table-action" href="{escape(safe_top_up)}" rel="noreferrer">
-            Open DeepSeek top-up
-          </a>
+          {_action_button("Refresh balance", "refresh")}
+          {_action_link("Open DeepSeek top-up", safe_top_up, "view", rel="noreferrer")}
         </form>
       </div>
     """
@@ -1138,12 +1575,21 @@ def _ai_provider_test_all_keys_form(
     csrf_token: str,
     active_key_count: int,
 ) -> str:
-    disabled = " disabled" if active_key_count == 0 else ""
+    disabled_reason = (
+        "No active admin-managed keys are available to test."
+        if active_key_count == 0
+        else None
+    )
+    button = _action_button(
+        "Test all active keys",
+        "probe",
+        disabled_reason=disabled_reason,
+    )
     return f"""
       <form class="secret-form" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/keys/test-all">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit"{disabled}>Test all active keys</button>
+        {button}
       </form>
     """
 
@@ -1236,6 +1682,14 @@ def _ai_provider_key_row(
     validation_html = (
         _ai_provider_key_validation(validation) if show_validation else ""
     )
+    toggle_button = _action_button(
+        toggle_label,
+        "danger" if toggle_label == "Disable" else "change",
+        name="key_id",
+        value=key.key_id,
+    )
+    remove_button = _action_button("Remove", "danger", name="key_id", value=key.key_id)
+    test_button = _action_button("Test key", "probe", name="key_id", value=key.key_id)
     return f"""
     <div class="key-row">
       <div>
@@ -1271,7 +1725,7 @@ def _ai_provider_key_row(
             required
           >
         </label>
-        <button type="submit">Save</button>
+        {_action_button("Save label", "change")}
       </form>
       <form method="post" action="{rotate_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
@@ -1281,27 +1735,21 @@ def _ai_provider_key_row(
           <small class="field-help">Replaces the stored encrypted value.</small>
           <input name="value" type="password" autocomplete="new-password">
         </label>
-        <button type="submit">Rotate</button>
+        {_action_button("Rotate", "change")}
       </form>
       <span>Weight {key.weight}</span>
       <span>Max parallel requests {key.max_parallel_requests}</span>
       <form method="post" action="{toggle_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit" value="{escape(key.key_id)}" name="key_id">
-          {toggle_label}
-        </button>
+        {toggle_button}
       </form>
       <form method="post" action="{remove_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button class="danger" type="submit" value="{escape(key.key_id)}" name="key_id">
-          Remove
-        </button>
+        {remove_button}
       </form>
       <form method="post" action="{test_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <button type="submit" value="{escape(key.key_id)}" name="key_id">
-          Test key
-        </button>
+        {test_button}
       </form>
     </div>
     """
@@ -1489,7 +1937,7 @@ def quality_body(summary: QualityRunSummary, *, csrf_token: str) -> str:
         <code>{escape(summary.candidate_path)}</code>
         <form method="post" action="/admin/quality/run">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-          <button type="submit">Run quality check</button>
+          {_action_button("Run quality check", "probe")}
         </form>
       </div>
     </section>
@@ -1602,9 +2050,7 @@ def _cost_run_row(run: CostRunSummary) -> str:
       <td>{run.total_tokens}</td>
       <td>{escape(_format_usd(run.estimated_cost_usd))}</td>
       <td>
-        <a class="table-action" href="{escape(_safe_cost_log_href(run.log_href))}">
-          Logs
-        </a>
+        {_action_link("Logs", _safe_cost_log_href(run.log_href), "view", compact=True)}
       </td>
     </tr>
     """
@@ -1708,10 +2154,10 @@ def _operation_job_rows(overview: OperationsOverview, csrf_token: str) -> str:
 
 def _operation_job_row(job, csrf_token: str) -> str:
     fragments = f"{job.completed_units}/{job.total_units}"
+    trace_href = trace_href_for_log_href(job.log_href)
     logs = (
-        '<a class="table-action" '
-        f'href="{escape(_safe_operation_log_href(job.log_href))}">Logs</a>'
-        if job.log_href
+        _action_link("Open trace", trace_href, "view", compact=True)
+        if trace_href
         else '<span class="muted-text">No run</span>'
     )
     return f"""
@@ -1750,8 +2196,20 @@ def _job_actions(job, csrf_token: str) -> str:
     if actions:
         return '<div class="job-actions">' + "".join(actions) + "</div>"
     if job.retryable:
-        return '<button type="button" disabled>Retry unavailable</button>'
-    return '<button type="button" disabled>No action</button>'
+        return _action_button(
+            "Retry unavailable",
+            "change",
+            button_type="button",
+            disabled_reason="Retry is not available from this console view.",
+            compact=True,
+        )
+    return _action_button(
+        "No action",
+        "view",
+        button_type="button",
+        disabled_reason="This job state has no admin action available.",
+        compact=True,
+    )
 
 
 def _job_action_form(
@@ -1760,19 +2218,13 @@ def _job_action_form(
     label: str,
     csrf_token: str,
 ) -> str:
-    danger = " danger" if action in {"cancel", "delete"} else ""
+    variant = "danger" if action in {"cancel", "delete"} else "change"
     return f"""
     <form method="post" action="/admin/operations/jobs/{escape(job_id)}/{action}">
       <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-      <button class="compact-action{danger}" type="submit">{escape(label)}</button>
+      {_action_button(label, variant, compact=True)}
     </form>
     """
-
-
-def _safe_operation_log_href(href: str) -> str:
-    if href.startswith("/admin/"):
-        return href
-    return "/admin/logs"
 
 
 def _format_datetime(value) -> str:
@@ -1868,6 +2320,13 @@ def live_body(
     )
     runtime_cards = _live_runtime_cards(runtime_statuses, runtime_reload_states)
     beta_warning = _beta_safety_live_warning(beta_safety)
+    monitor_link = _action_link(
+        "Open monitor",
+        "/admin/live",
+        "view",
+        target="_blank",
+        rel="noreferrer",
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -1877,9 +2336,7 @@ def live_body(
           provider capacity, token spend, failures, and server health.
         </p>
       </div>
-      <a class="button-link" href="/admin/live" target="_blank" rel="noreferrer">
-        Open monitor
-      </a>
+      {monitor_link}
     </section>
     {beta_warning}
     <section class="metrics live-grid">{metric_cards}</section>
@@ -2254,6 +2711,8 @@ def logs_body(
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = 100,
+    title: str = "Translation Logs",
+    form_action: str = "/admin/logs",
 ) -> str:
     rows = "\n".join(_log_row(row) for row in logs)
     if not rows:
@@ -2265,7 +2724,7 @@ def logs_body(
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Translation Logs</h3>
+        <h3>{escape(title)}</h3>
         <p>
           Review translation runs by date, state, file, language direction,
           token usage, and safe error metadata.
@@ -2273,7 +2732,7 @@ def logs_body(
       </div>
     </section>
     <section class="panel">
-      <form class="filter-form" method="get" action="/admin/logs">
+      <form class="filter-form" method="get" action="{escape(form_action)}">
         <label>
           <span>Status</span>
           <select name="status">
@@ -2293,7 +2752,7 @@ def logs_body(
           <span>To</span>
           <input name="date_to" type="date" value="{escape(date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -2340,10 +2799,8 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         </p>
       </div>
       <div class="toolbar-actions">
-        <a class="secondary-action" href="/admin/logs">Back to logs</a>
-        <a class="secondary-action" href="/admin/logs/{escape(run_id)}/download">
-          Download archive
-        </a>
+        {_action_link("Back to logs", "/admin/logs", "view")}
+        {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
     </section>
     <section class="panel">
@@ -2535,6 +2992,66 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     """
 
 
+def translation_trace_body(trace: TranslationTrace) -> str:
+    provider = _trace_provider_panel(trace.provider)
+    timeline = _trace_timeline(trace.timeline)
+    advanced_links = _trace_link_group(trace.advanced_links)
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translation Failure Trace</h3>
+        <p>
+          {escape(trace.job_id)} · {escape(trace.status)}
+          · {escape(trace.failure_category)}
+        </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link(trace.next_action.label, trace.next_action.href, "view")}
+      </div>
+    </section>
+    <section class="trace-layout">
+      <div class="trace-main">
+        <section class="panel">
+          <div class="trace-summary-strip">
+            <span class="status">{escape(trace.status)}</span>
+            <span class="status">{escape(trace.failure_category)}</span>
+            <strong>{escape(trace.safe_error_summary)}</strong>
+          </div>
+        </section>
+        <section class="panel detail-grid">
+          {_trace_fact_section("Incident", trace.summary_facts)}
+          {_trace_fact_section("Document", trace.document_facts)}
+          {_trace_fact_section("Choices", trace.choice_facts)}
+          {_trace_fact_section("Job", trace.job_facts)}
+        </section>
+        {timeline}
+        {provider}
+      </div>
+      <aside class="trace-rail">
+        <section class="panel">
+          <h4>What to check next</h4>
+          <p>
+            Follow one primary path first, then use the advanced links only
+            if the trace does not explain the incident.
+          </p>
+          {_action_link(trace.next_action.label, trace.next_action.href, "view")}
+        </section>
+        <section class="panel">
+          <h4>Evidence</h4>
+          <p>
+            Safe metadata only. Evidence packet copy/download is tracked in
+            issue #146.
+          </p>
+        </section>
+        <section class="panel">
+          <h4>Advanced</h4>
+          {advanced_links}
+        </section>
+      </aside>
+    </section>
+    """
+
+
 def activity_body(
     events: tuple[UserActivityEvent, ...],
     *,
@@ -2582,7 +3099,7 @@ def activity_body(
           <span>To</span>
           <input name="date_to" type="date" value="{escape(date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -2644,33 +3161,66 @@ def users_body(users: tuple[UserProfile, ...]) -> str:
 def user_detail_body(
     user: UserProfile | None,
     events: tuple[UserActivityEvent, ...],
+    *,
+    translations: tuple[TranslationRunSummary, ...] = (),
 ) -> str:
     if user is None:
         return section_body(
             "User not found",
             "No activity profile exists for this user.",
         )
-    rows = "".join(_activity_row(event, include_user=False) for event in events)
+    translation_rows = _support_translation_rows(translations)
+    activity_rows = _support_activity_rows(events)
+    translation_mode = _latest_support_metadata_value(
+        events,
+        "translation_mode",
+        fallback_target_type="translation_mode",
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>{escape(user.user_id)}</h3>
+        <h3>Support profile</h3>
         <p>
+          {escape(user.user_id)} ·
           {escape(user.channel)} user {escape(user.channel_user_id)} ·
           security {escape(user.security_state)}
         </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link("Back to users", "/admin/users", "view")}
       </div>
     </section>
     <section class="panel">
       <div class="metric-grid">
         {_metric("Interface", user.interface_language or "n/a")}
         {_metric("Last target", user.last_target_language or "n/a")}
+        {_metric("Translation mode", translation_mode or "Unknown")}
         {_metric("Progress preview", _bool_label(user.progress_preview_enabled))}
+        {_metric("Support reports", "Unknown")}
         {_metric("First seen", user.first_seen_at.isoformat(timespec="seconds"))}
+        {_metric("Last seen", user.last_seen_at.isoformat(timespec="seconds"))}
       </div>
     </section>
     <section class="panel table-panel">
-      <table class="log-table">
+      <h3>Recent translations</h3>
+      <table class="log-table support-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Outcome</th>
+            <th>Job</th>
+            <th>File</th>
+            <th>Choice</th>
+            <th>Stage / error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{translation_rows}</tbody>
+      </table>
+    </section>
+    <section class="panel table-panel">
+      <h3>Recent activity</h3>
+      <table class="log-table support-table">
         <thead>
           <tr>
             <th>Time</th>
@@ -2679,13 +3229,167 @@ def user_detail_body(
             <th>Target</th>
             <th>Outcome</th>
             <th>Job</th>
-            <th>Metadata</th>
+            <th>Safe detail</th>
           </tr>
         </thead>
-        <tbody>{rows}</tbody>
+        <tbody>{activity_rows}</tbody>
       </table>
     </section>
     """
+
+
+def _support_translation_rows(
+    translations: tuple[TranslationRunSummary, ...],
+) -> str:
+    if not translations:
+        return """
+        <tr>
+          <td colspan="7" class="empty-cell">No linked translation runs found.</td>
+        </tr>
+        """
+    return "\n".join(_support_translation_row(row) for row in translations)
+
+
+def _support_translation_row(row: TranslationRunSummary) -> str:
+    run_id = Path(row.run_dir).name
+    started = _format_datetime(row.started_at)
+    file_name = _safe_support_text(row.file_name) or "unknown"
+    result_file_name = _safe_support_text(row.result_file_name)
+    result = f"<span>{escape(result_file_name)}</span>" if result_file_name else ""
+    source = _safe_support_text(row.source_language) or "unknown"
+    target = _safe_support_text(row.target_language) or "unknown"
+    document_kind = _safe_support_text(row.document_kind) or "unknown"
+    choice = f"{source} -> {target} · {document_kind}"
+    detail = _support_translation_stage(row)
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    details_link = _action_link(
+        "Details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
+    return f"""
+    <tr>
+      <td data-label="Started">{escape(started)}</td>
+      <td data-label="Outcome"><span class="status">{escape(row.status)}</span></td>
+      <td data-label="Job"><code>{escape(row.job_id)}</code></td>
+      <td data-label="File">
+        <strong>{escape(file_name)}</strong>
+        {result}
+      </td>
+      <td data-label="Choice">{escape(choice)}</td>
+      <td data-label="Stage / error">{escape(detail)}</td>
+      <td data-label="Actions">
+        <div class="job-actions">{trace_link}{details_link}</div>
+      </td>
+    </tr>
+    """
+
+
+def _support_translation_stage(row: TranslationRunSummary) -> str:
+    stage = _safe_support_text(row.current_stage) or row.status or "n/a"
+    if row.status in _FAILED_SUPPORT_TRANSLATION_STATUSES and row.error_message:
+        return f"{stage} (redacted error)"
+    return stage
+
+
+def _support_activity_rows(events: tuple[UserActivityEvent, ...]) -> str:
+    if not events:
+        return """
+        <tr>
+          <td colspan="7" class="empty-cell">No recent activity found.</td>
+        </tr>
+        """
+    return "\n".join(_support_activity_row(event) for event in events)
+
+
+def _support_activity_row(event: UserActivityEvent) -> str:
+    created = event.created_at.isoformat(timespec="seconds")
+    target = _safe_support_target(event)
+    detail = _safe_support_event_detail(event)
+    return f"""
+    <tr>
+      <td data-label="Time">{escape(created)}</td>
+      <td data-label="Surface">{escape(event.surface)}</td>
+      <td data-label="Event">
+        <strong>{escape(event.event_type)}</strong>
+        <span>{escape(event.action)}</span>
+      </td>
+      <td data-label="Target">{escape(target or "n/a")}</td>
+      <td data-label="Outcome"><span class="status">{escape(event.outcome)}</span></td>
+      <td data-label="Job"><code>{escape(event.job_id or "")}</code></td>
+      <td data-label="Safe detail">{escape(detail or "n/a")}</td>
+    </tr>
+    """
+
+
+def _safe_support_target(event: UserActivityEvent) -> str:
+    target_type = _safe_support_text(event.target_type)
+    target_id = _safe_support_text(event.target_id)
+    return " / ".join(part for part in (target_type, target_id) if part)
+
+
+def _safe_support_event_detail(event: UserActivityEvent) -> str:
+    details: list[str] = []
+    for key, label in _SUPPORT_METADATA_FIELDS:
+        value = event.metadata.get(key)
+        safe_value = _safe_support_metadata_value(key, value)
+        if safe_value:
+            details.append(f"{label}: {safe_value}")
+    return ", ".join(details[:5])
+
+
+def _safe_support_metadata_value(key: str, value: object) -> str:
+    if _has_unsafe_support_key(key):
+        return ""
+    return _safe_support_text(value)
+
+
+def _latest_support_metadata_value(
+    events: tuple[UserActivityEvent, ...],
+    key: str,
+    *,
+    fallback_target_type: str | None = None,
+) -> str | None:
+    for event in events:
+        safe_value = _safe_support_metadata_value(key, event.metadata.get(key))
+        if safe_value:
+            return safe_value
+        if fallback_target_type and event.target_type == fallback_target_type:
+            safe_target = _safe_support_text(event.target_id)
+            if safe_target:
+                return safe_target
+    return None
+
+
+def _safe_support_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return _bool_label(value)
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict | list | tuple | set):
+        return ""
+    text = " ".join(str(value).split())
+    if not text:
+        return ""
+    lowered = text.lower()
+    if any(marker in lowered for marker in _UNSAFE_SUPPORT_VALUE_MARKERS):
+        return ""
+    if len(text) > 240:
+        return f"{text[:237]}..."
+    return text
+
+
+def _has_unsafe_support_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(marker in lowered for marker in _UNSAFE_SUPPORT_KEY_MARKERS)
 
 
 def security_events_body(events: tuple[UserActivityEvent, ...]) -> str:
@@ -2790,7 +3494,7 @@ def upload_safety_body(
           <input name="date_to" type="date"
             value="{escape(filters.date_to or "")}">
         </label>
-        <button type="submit">Apply filters</button>
+        {_action_button("Apply filters", "refresh")}
       </form>
     </section>
     <section class="panel table-panel">
@@ -2994,10 +3698,105 @@ def _metric(label: str, value: str, *, field: str | None = None) -> str:
     """
 
 
+def _trace_fact_section(
+    title: str,
+    facts: tuple[TranslationTraceFact, ...],
+) -> str:
+    return f"""
+      <div>
+        <h4>{escape(title)}</h4>
+        {_definition_table({fact.label: fact.value for fact in facts})}
+      </div>
+    """
+
+
+def _trace_timeline(items: tuple[TranslationTraceTimelineItem, ...]) -> str:
+    if not items:
+        rows = """
+        <tr>
+          <td colspan="3" class="empty-cell">No safe trace timeline found.</td>
+        </tr>
+        """
+    else:
+        rows = "\n".join(_trace_timeline_row(item) for item in items)
+    return f"""
+    <section class="panel table-panel">
+      <h4>Timeline</h4>
+      <table class="log-table trace-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Safe detail</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _trace_timeline_row(item: TranslationTraceTimelineItem) -> str:
+    return f"""
+    <tr>
+      <td>{escape(_format_datetime(item.timestamp))}</td>
+      <td><strong>{escape(item.label)}</strong></td>
+      <td>{escape(item.detail)}</td>
+    </tr>
+    """
+
+
+def _trace_provider_panel(provider: TranslationTraceProviderSignal | None) -> str:
+    if provider is None:
+        facts = (
+            TranslationTraceFact("Provider", "Unknown"),
+            TranslationTraceFact("Runtime status", "Unknown"),
+            TranslationTraceFact("Failure categories", "Unknown"),
+        )
+    else:
+        facts = (
+            TranslationTraceFact("Provider", provider.provider_id),
+            TranslationTraceFact("Runtime status", provider.status),
+            TranslationTraceFact("Active channels", str(provider.active_channels)),
+            TranslationTraceFact("Degraded channels", str(provider.degraded_channels)),
+            TranslationTraceFact(
+                "Failure categories",
+                ", ".join(provider.safe_failure_categories),
+            ),
+            TranslationTraceFact("Balance status", provider.balance_status),
+        )
+    return f"""
+    <section class="panel">
+      <h4>Provider</h4>
+      {_definition_table({fact.label: fact.value for fact in facts})}
+    </section>
+    """
+
+
+def _trace_link_group(links: tuple[TranslationTraceLink, ...]) -> str:
+    return "\n".join(
+        _action_link(link.label, link.href, "view", extra_class="trace-link")
+        for link in links
+    )
+
+
 def _log_row(row: TranslationRunSummary) -> str:
     started = row.started_at.isoformat(timespec="seconds") if row.started_at else "n/a"
     direction = f"{row.source_language} -> {row.target_language}"
     error = row.error_message or ""
+    run_id = Path(row.run_dir).name
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    details_link = _action_link(
+        "Details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -3012,14 +3811,8 @@ def _log_row(row: TranslationRunSummary) -> str:
       <td>{row.total_tokens}</td>
       <td>{escape(error)}</td>
       <td>
-        <a class="table-action"
-          href="/admin/logs/{escape(Path(row.run_dir).name)}">
-          Details
-        </a>
-        <a class="table-action"
-          href="/admin/logs/{escape(Path(row.run_dir).name)}/download">
-          Download
-        </a>
+        {trace_link}
+        {details_link}
       </td>
     </tr>
     """
@@ -3191,7 +3984,7 @@ def _integration_card(
           <input name="label" type="text" placeholder="stable" required>
         </label>
         {fields}
-        <button type="submit">Add connection</button>
+        {_action_button("Add connection", "change")}
       </form>
     </details>
     """
@@ -3246,7 +4039,7 @@ def _integration_connection_remove_control(
           name="connection_id"
           value="{escape(connection.connection_id)}"
         >
-        <button class="danger" type="submit">Remove</button>
+        {_action_button("Remove", "danger")}
       </form>
     """
 
@@ -3303,6 +4096,7 @@ body {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
 }
+body > * { min-width: 0; }
 .login-screen {
   display: grid;
   grid-template-columns: 1fr;
@@ -3310,6 +4104,7 @@ body {
   padding: 24px;
 }
 .login-panel, .panel, .toolbar-panel, .integration-card, .metric {
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -3320,6 +4115,7 @@ body {
   padding: 28px;
 }
 .sidebar {
+  min-width: 0;
   min-height: 100vh;
   padding: 24px 18px;
   background: #111827;
@@ -3329,18 +4125,67 @@ body {
   gap: 24px;
 }
 .sidebar h1, .workspace h2, .panel h3 { margin: 0; }
-.sidebar nav { display: grid; gap: 6px; }
+.sidebar-nav {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+.primary-nav,
+.advanced-nav {
+  min-width: 0;
+}
+.primary-nav,
+.advanced-nav[open] {
+  display: grid;
+  gap: 6px;
+}
+.advanced-nav {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.nav-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d1d5db;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+.nav-summary::-webkit-details-marker {
+  display: none;
+}
+.nav-summary::after {
+  content: "+";
+  color: #9ca3af;
+  font-weight: 800;
+}
+.advanced-nav[open] .nav-summary::after {
+  content: "-";
+}
+.advanced-nav:not([open]) > a {
+  display: none;
+}
 .sidebar a {
+  display: block;
   color: #d1d5db;
   text-decoration: none;
   padding: 10px 12px;
   border-radius: 6px;
+  white-space: nowrap;
 }
-.sidebar a.active, .sidebar a:hover {
+.sidebar a.active,
+.sidebar a:hover,
+.nav-summary:hover,
+.advanced-nav.active-group .nav-summary {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.12);
 }
 .workspace {
+  min-width: 0;
   padding: 28px;
   display: grid;
   align-content: start;
@@ -3359,11 +4204,18 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.toolbar-actions .secret-form {
+  border-top: 0;
+  padding-top: 0;
 }
 .secondary-action {
   border: 1px solid var(--line);
@@ -3504,32 +4356,77 @@ header {
 }
 .action-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 14px;
-  align-items: start;
+  align-items: center;
   padding: 16px 20px;
   color: inherit;
-  text-decoration: none;
   border-bottom: 1px solid var(--line);
 }
 .action-item:last-child { border-bottom: 0; }
 .action-item:hover {
   background: #fbfcfd;
 }
-.action-item span:last-child {
+.action-copy {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
 }
-.action-item strong {
+.action-copy strong {
   overflow-wrap: anywhere;
 }
-.action-item small {
+.action-copy small,
+.action-meta dd {
   color: var(--muted);
   line-height: 1.45;
 }
-.action-critical .status {
+.action-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.action-meta div {
+  min-width: 0;
+}
+.action-meta dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.action-meta dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.action-next {
+  align-self: center;
+  justify-self: end;
+  white-space: nowrap;
+}
+.action-blocked .status,
+.action-action_needed .status {
   color: var(--warn);
   border-color: rgba(163, 61, 42, 0.35);
+}
+.action-investigate .status {
+  color: #3730a3;
+  border-color: rgba(55, 48, 163, 0.28);
+}
+.action-watch .status {
+  color: #9a5b00;
+  border-color: rgba(154, 91, 0, 0.3);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .status {
   width: fit-content;
@@ -3616,6 +4513,109 @@ button.danger {
   color: #ffffff;
   background: var(--warn);
 }
+.action-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: var(--ink);
+  background: #ffffff;
+  text-align: center;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 750;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.action-control:hover {
+  text-decoration: none;
+}
+.action-control-compact {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+}
+.action-control-view {
+  border-color: var(--line);
+  color: #174b46;
+  background: #ffffff;
+}
+.action-control-view:hover {
+  border-color: #9fb7b4;
+  background: #f4faf9;
+}
+.action-control-copy {
+  border-color: #c9c7ee;
+  color: #3730a3;
+  background: #f7f7ff;
+}
+.action-control-copy:hover {
+  background: #efefff;
+}
+.action-control-refresh {
+  border-color: #adc6ea;
+  color: #1f4f86;
+  background: #f2f7fd;
+}
+.action-control-refresh:hover {
+  background: #e8f1fb;
+}
+.action-control-probe {
+  border-color: #d2b8e8;
+  color: #6d3a91;
+  background: #fbf6ff;
+}
+.action-control-probe:hover {
+  background: #f3e8ff;
+}
+.action-control-change {
+  border-color: #256f68;
+  color: #ffffff;
+  background: var(--accent);
+}
+.action-control-change:hover {
+  background: var(--accent-strong);
+}
+.action-control-danger {
+  border-color: #a33d2a;
+  color: #ffffff;
+  background: var(--warn);
+}
+.action-control-danger:hover {
+  background: #7f2f21;
+}
+.action-control[disabled],
+.action-control[aria-disabled="true"] {
+  border-color: #d8dee8;
+  color: #667085;
+  background: #eef1f5;
+  cursor: not-allowed;
+}
+.action-control[disabled]:hover,
+.action-control[aria-disabled="true"]:hover {
+  border-color: #d8dee8;
+  background: #eef1f5;
+}
+.action-control[disabled] {
+  display: inline-grid;
+  justify-items: center;
+}
+.action-disabled-reason {
+  display: block;
+  max-width: 220px;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
 .job-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3674,14 +4674,54 @@ button.danger {
   overflow-wrap: anywhere;
 }
 .metric-card small,
-.processing-summary p {
+.processing-summary p,
+.provider-incident-state p,
+.incident-state-row small {
   color: var(--muted);
   line-height: 1.45;
 }
-.processing-summary {
+.processing-summary,
+.provider-incident-state {
   display: grid;
   gap: 12px;
   margin: 14px 0;
+}
+.provider-incident-state {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+.provider-incident-state h4,
+.provider-incident-state p {
+  margin: 0;
+}
+.incident-state-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+.incident-state-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.incident-state-row > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.incident-state-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.incident-state-row strong {
+  overflow-wrap: anywhere;
 }
 .progress-bar {
   height: 10px;
@@ -3725,6 +4765,42 @@ button.danger {
 .detail-grid h4,
 .table-panel h4 {
   margin: 0 0 12px;
+}
+.trace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 18px;
+  align-items: start;
+}
+.trace-main,
+.trace-rail {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.trace-rail {
+  position: sticky;
+  top: 18px;
+}
+.trace-summary-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.trace-summary-strip strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trace-link {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.trace-table {
+  min-width: 720px;
 }
 .definition-table {
   width: 100%;
@@ -3774,6 +4850,24 @@ button.danger {
   line-height: 1.4;
 }
 @media (max-width: 760px) {
+  .action-item,
+  .action-meta {
+    grid-template-columns: 1fr;
+  }
+  .action-next {
+    justify-self: start;
+    white-space: normal;
+  }
+  .trace-layout {
+    grid-template-columns: 1fr;
+  }
+  .trace-rail {
+    position: static;
+  }
+  .incident-state-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
   .definition-table tr {
     grid-template-columns: 1fr;
     gap: 4px;
@@ -3789,12 +4883,20 @@ button.danger {
   border-collapse: collapse;
   min-width: 980px;
 }
+.support-table {
+  min-width: 0;
+  table-layout: fixed;
+}
 .log-table th,
 .log-table td {
   border-bottom: 1px solid var(--line);
   padding: 10px 8px;
   text-align: left;
   vertical-align: top;
+}
+.support-table th,
+.support-table td {
+  overflow-wrap: anywhere;
 }
 .log-table th {
   color: var(--muted);
@@ -3809,6 +4911,9 @@ button.danger {
 .log-table td .progress-mini span {
   color: var(--ink);
   font-size: 0.9rem;
+}
+.support-table .job-actions {
+  min-width: 0;
 }
 .empty-cell {
   color: var(--muted);
@@ -3834,14 +4939,93 @@ button.danger {
 }
 .error { color: var(--warn); }
 @media (max-width: 760px) {
+  .support-table,
+  .support-table thead,
+  .support-table tbody,
+  .support-table tr,
+  .support-table th,
+  .support-table td {
+    display: block;
+    width: 100%;
+  }
+  .support-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .support-table tr {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .support-table th,
+  .support-table td {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .support-table td {
+    display: grid;
+    grid-template-columns: minmax(82px, 0.36fr) minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+  }
+  .support-table td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .support-table td > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .support-table .job-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+  }
   body { grid-template-columns: 1fr; }
   .sidebar {
     min-height: auto;
     padding: 16px;
   }
-  .sidebar nav {
-    display: flex;
-    overflow-x: auto;
+  .sidebar-nav {
+    display: grid;
+    overflow-x: visible;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .sidebar-nav > *,
+  .primary-nav a,
+  .advanced-nav a,
+  .nav-summary {
+    min-width: 0;
+  }
+  .primary-nav,
+  .advanced-nav[open] {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 138px), 1fr));
+    gap: 6px;
+  }
+  .sidebar a,
+  .nav-summary {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .advanced-nav {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .advanced-nav[open] .nav-summary {
+    grid-column: 1 / -1;
   }
   .sidebar form { display: none; }
   .workspace { padding: 18px; }
