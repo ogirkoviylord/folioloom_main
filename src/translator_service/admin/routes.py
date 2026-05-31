@@ -45,9 +45,11 @@ from translator_service.admin.integrations import (
     DEFAULT_INTEGRATION_REGISTRY,
     IntegrationRegistry,
 )
-from translator_service.admin.live import build_live_monitor_snapshot
+from translator_service.admin.live import (
+    ServerHealthSnapshot,
+    build_live_monitor_snapshot,
+)
 from translator_service.admin.operations import (
-    JOB_STATE_RUNNING,
     build_persistent_operations_overview,
 )
 from translator_service.admin.provider_balance import (
@@ -138,15 +140,6 @@ from translator_service.user_activity import (
 
 SESSION_COOKIE = "folioloom_admin_session"
 _UPLOAD_SAFETY_EVENT_PAGE_SIZE = 500
-_ACTIVE_TRANSLATION_STATUSES = {
-    "active",
-    "cancel_requested",
-    "in_progress",
-    "processing",
-    "running",
-    "started",
-    "translating",
-}
 _FAILED_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
@@ -1798,25 +1791,12 @@ def _ai_provider_test_all_guard(
 def _active_translation_metadata(settings: Settings) -> tuple[int, str]:
     try:
         operations = _operations_overview(settings)
-        running_job_ids = {
-            job.id for job in operations.jobs if job.state == JOB_STATE_RUNNING
-        }
-        active_run_job_ids: set[str] = set()
-        active_runs_without_job_id = 0
-        for run in list_translation_run_summaries(
+        snapshot = build_live_monitor_snapshot(
             settings.translation_run_log_root,
-            limit=200,
-        ):
-            if run.status not in _ACTIVE_TRANSLATION_STATUSES:
-                continue
-            if run.job_id:
-                active_run_job_ids.add(run.job_id)
-            else:
-                active_runs_without_job_id += 1
-        return (
-            len(running_job_ids | active_run_job_ids) + active_runs_without_job_id,
-            "known",
+            operations=operations,
+            server=ServerHealthSnapshot(),
         )
+        return (snapshot.active_translations, "known")
     except Exception:
         return 0, "unknown"
 
