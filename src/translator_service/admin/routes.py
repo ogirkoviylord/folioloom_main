@@ -146,6 +146,7 @@ _ACTIVE_TRANSLATION_STATUSES = {
     "started",
     "translating",
 }
+_FAILED_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
 def create_admin_router(settings: Settings) -> APIRouter:
@@ -1989,14 +1990,21 @@ def _overview_action_center(settings: Settings):
     integration_summaries = _integration_summaries(settings)
     integration_connections = _integration_connection_groups(settings)
     ai_provider_key_pools = _ai_provider_key_pools(settings)
-    live_snapshot = _live_snapshot(settings)
+    operations = _operations_overview(settings)
+    live_snapshot = _live_snapshot(settings, operations=operations)
     secret_safety_report = _secret_safety_report(settings)
     return build_action_center(
         integration_summaries=integration_summaries,
         integration_connections=integration_connections,
         failed_today=live_snapshot.failed_today,
+        failed_translation_runs=_overview_failed_translation_runs(
+            settings,
+            now=live_snapshot.generated_at,
+        ),
         tokens_today=live_snapshot.tokens_today,
         disk_percent=live_snapshot.server.disk_percent,
+        queued_translations=live_snapshot.queued_translations,
+        oldest_pending_age_seconds=operations.oldest_pending_age_seconds,
         deepseek_key_count=_deepseek_key_count(ai_provider_key_pools),
         secret_safety_issue_count=secret_safety_report.issue_count,
         bootstrap_config=bootstrap_config,
@@ -2017,6 +2025,21 @@ def _decimal_setting(value: str) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _overview_failed_translation_runs(settings: Settings, *, now: datetime):
+    today = now.astimezone(UTC).date()
+    return tuple(
+        run
+        for run in list_translation_run_summaries(
+            settings.translation_run_log_root,
+            limit=25,
+            now=now,
+        )
+        if run.status in _FAILED_TRANSLATION_STATUSES
+        and run.started_at is not None
+        and run.started_at.astimezone(UTC).date() == today
+    )
 
 
 def _secret_safety_report(settings: Settings):
@@ -2061,10 +2084,13 @@ def _deepseek_key_count(ai_provider_key_pools) -> int:
     )
 
 
-def _live_snapshot(settings: Settings):
+def _live_snapshot(settings: Settings, *, operations=None):
+    active_operations = (
+        operations if operations is not None else _operations_overview(settings)
+    )
     return build_live_monitor_snapshot(
         settings.translation_run_log_root,
-        operations=_operations_overview(settings),
+        operations=active_operations,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
     )
 

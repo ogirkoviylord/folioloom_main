@@ -178,16 +178,16 @@ def overview_body(action_center: ActionCenter) -> str:
     else:
         rows = """
         <div class="empty-state">
-          No urgent admin actions right now.
+          Everything quiet. No actionable beta operations items right now.
         </div>
         """
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Action Center</h3>
+        <h3>Triage inbox</h3>
         <p>
-          Prioritized operations signals from integrations, translation runs,
-          provider keys, token spend, and server health.
+          Actionable beta operations items only. Each row explains what
+          happened, why it is shown now, what is affected, and the next step.
         </p>
       </div>
     </section>
@@ -200,18 +200,32 @@ def overview_body(action_center: ActionCenter) -> str:
 def _action_item(item: ActionItem) -> str:
     severity = _safe_action_severity(item.severity)
     href = _safe_action_href(item.href)
+    next_action = item.next_action.strip() or "Open"
     return f"""
-    <a
+    <article
       class="action-item action-{escape(severity)}"
       data-action-key="{escape(item.key)}"
-      href="{escape(href)}"
     >
-      <span class="status">{escape(severity)}</span>
-      <span>
+      <span class="status">{escape(_action_severity_label(severity))}</span>
+      <div class="action-copy">
         <strong>{escape(item.title)}</strong>
         <small>{escape(item.detail)}</small>
-      </span>
-    </a>
+        <dl class="action-meta">
+          <div>
+            <dt>Affected</dt>
+            <dd>{escape(item.affected)}</dd>
+          </div>
+          <div>
+            <dt>Why now</dt>
+            <dd>{escape(item.reason)}</dd>
+          </div>
+        </dl>
+      </div>
+      <a class="button-link compact-action action-next" href="{escape(href)}">
+        {escape(next_action)}
+      </a>
+      <span class="sr-only">Next step</span>
+    </article>
     """
 
 
@@ -222,9 +236,24 @@ def _safe_action_href(href: str) -> str:
 
 
 def _safe_action_severity(severity: str) -> str:
-    if severity in {"critical", "warning", "info"}:
-        return severity
+    aliases = {
+        "critical": "blocked",
+        "warning": "watch",
+    }
+    normalized = aliases.get(severity, severity)
+    if normalized in {"info", "watch", "investigate", "action_needed", "blocked"}:
+        return normalized
     return "info"
+
+
+def _action_severity_label(severity: str) -> str:
+    return {
+        "info": "Info",
+        "watch": "Watch",
+        "investigate": "Investigate",
+        "action_needed": "Action needed",
+        "blocked": "Blocked",
+    }.get(severity, "Info")
 
 
 def settings_body(
@@ -861,7 +890,10 @@ def _safe_provider_failure_category_label(
         ("auth", sum(channel.total_auth_failures for channel in channels)),
         ("billing", sum(channel.total_billing_failures for channel in channels)),
         ("timeout", sum(channel.total_timeout_failures for channel in channels)),
-        ("unavailable", sum(channel.total_unavailable_failures for channel in channels)),
+        (
+            "unavailable",
+            sum(channel.total_unavailable_failures for channel in channels),
+        ),
         (
             "malformed",
             sum(channel.total_malformed_response_failures for channel in channels),
@@ -870,7 +902,10 @@ def _safe_provider_failure_category_label(
             "unsafe_model_output",
             sum(channel.total_unsafe_model_output_failures for channel in channels),
         ),
-        ("other_provider", sum(channel.total_other_provider_failures for channel in channels)),
+        (
+            "other_provider",
+            sum(channel.total_other_provider_failures for channel in channels),
+        ),
     )
     visible = [f"{label} {value}" for label, value in counters if value > 0]
     return " / ".join(visible) if visible else "none"
@@ -886,7 +921,8 @@ def _fallback_capacity_label(runtime: AIProviderRuntimeStatus | None) -> str:
         for channel in runtime.active_channels
         if channel.health.lower() not in {"disabled", "missing"}
     )
-    return f"{runtime.provider_state.available_slots} slots / {usable_channels} usable channels"
+    available_slots = runtime.provider_state.available_slots
+    return f"{available_slots} slots / {usable_channels} usable channels"
 
 
 def _degraded_runtime_channel_count(runtime: AIProviderRuntimeStatus) -> int:
@@ -3887,32 +3923,77 @@ header {
 }
 .action-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 14px;
-  align-items: start;
+  align-items: center;
   padding: 16px 20px;
   color: inherit;
-  text-decoration: none;
   border-bottom: 1px solid var(--line);
 }
 .action-item:last-child { border-bottom: 0; }
 .action-item:hover {
   background: #fbfcfd;
 }
-.action-item span:last-child {
+.action-copy {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
 }
-.action-item strong {
+.action-copy strong {
   overflow-wrap: anywhere;
 }
-.action-item small {
+.action-copy small,
+.action-meta dd {
   color: var(--muted);
   line-height: 1.45;
 }
-.action-critical .status {
+.action-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.action-meta div {
+  min-width: 0;
+}
+.action-meta dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.action-meta dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.action-next {
+  align-self: center;
+  justify-self: end;
+  white-space: nowrap;
+}
+.action-blocked .status,
+.action-action_needed .status {
   color: var(--warn);
   border-color: rgba(163, 61, 42, 0.35);
+}
+.action-investigate .status {
+  color: #3730a3;
+  border-color: rgba(55, 48, 163, 0.28);
+}
+.action-watch .status {
+  color: #9a5b00;
+  border-color: rgba(154, 91, 0, 0.3);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .status {
   width: fit-content;
@@ -4233,6 +4314,14 @@ button.danger {
   line-height: 1.4;
 }
 @media (max-width: 760px) {
+  .action-item,
+  .action-meta {
+    grid-template-columns: 1fr;
+  }
+  .action-next {
+    justify-self: start;
+    white-space: normal;
+  }
   .trace-layout {
     grid-template-columns: 1fr;
   }

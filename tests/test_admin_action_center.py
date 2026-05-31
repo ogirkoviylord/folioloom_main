@@ -24,6 +24,7 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeReloadRequest,
     AIProviderRuntimeStatus,
 )
+from translator_service.admin.translation_logs import TranslationRunSummary
 from translator_service.admin.views import overview_body
 
 
@@ -58,6 +59,37 @@ class AdminActionCenterTest(unittest.TestCase):
         )
 
         self.assertEqual(center.items, ())
+
+    def test_failed_translation_run_becomes_trace_triage_item(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=1,
+            failed_translation_runs=(
+                _run_summary(
+                    run_id="run-failed-1",
+                    job_id="job-failed-1",
+                    status="failed",
+                    file_name="book.txt",
+                    started_at=now,
+                ),
+            ),
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            now=now,
+        )
+
+        self.assertEqual(len(center.items), 1)
+        item = center.items[0]
+        self.assertEqual(item.key, "failed_translation:run-failed-1")
+        self.assertEqual(item.severity, "investigate")
+        self.assertEqual(item.title, "Translation failed")
+        self.assertEqual(item.affected, "book.txt · job job-failed-1")
+        self.assertIn("failed today", item.reason)
+        self.assertEqual(item.next_action, "Open trace")
+        self.assertEqual(item.href, "/admin/translations/run-failed-1/trace")
 
     def test_healthy_connection_row_satisfies_missing_legacy_secret(self):
         center = build_action_center(
@@ -276,13 +308,80 @@ class AdminActionCenterTest(unittest.TestCase):
         self.assertIn("ai_provider_runtime_degraded", by_key)
         self.assertNotIn("ai_provider_runtime_missing_channels", by_key)
         self.assertEqual(
+            by_key["ai_provider_runtime_degraded"].severity,
+            "investigate",
+        )
+        self.assertEqual(
             by_key["ai_provider_runtime_degraded"].title,
             "DeepSeek runtime is degraded",
+        )
+        self.assertEqual(
+            by_key["ai_provider_runtime_degraded"].affected,
+            "DeepSeek provider",
         )
         self.assertIn(
             "active DeepSeek channels",
             by_key["ai_provider_runtime_degraded"].detail,
         )
+        self.assertIn(
+            "active channels",
+            by_key["ai_provider_runtime_degraded"].reason,
+        )
+        self.assertEqual(
+            by_key["ai_provider_runtime_degraded"].next_action,
+            "Open provider",
+        )
+
+    def test_missing_runtime_channels_are_blocked_triage_item(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="missing_keys",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=now,
+                    active_channels=(),
+                ),
+            ),
+            now=now,
+        )
+
+        item = center.items[0]
+
+        self.assertEqual(item.key, "ai_provider_runtime_missing_channels")
+        self.assertEqual(item.severity, "blocked")
+        self.assertEqual(item.affected, "DeepSeek runtime")
+        self.assertIn("cannot use", item.reason)
+        self.assertEqual(item.next_action, "Open provider")
+
+    def test_stalled_queue_becomes_investigate_triage_item(self):
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            queued_translations=4,
+            oldest_pending_age_seconds=3600.0,
+        )
+
+        item = center.items[0]
+
+        self.assertEqual(item.key, "translation_queue_stalled")
+        self.assertEqual(item.severity, "investigate")
+        self.assertEqual(item.affected, "4 queued translations")
+        self.assertIn("60m", item.reason)
+        self.assertEqual(item.next_action, "Open operations")
+        self.assertEqual(item.href, "/admin/operations/jobs")
 
     def test_runtime_not_reporting_is_action_when_keys_exist(self):
         center = build_action_center(
@@ -447,13 +546,23 @@ class AdminActionCenterTest(unittest.TestCase):
                         title="<script>alert(1)</script>",
                         detail="Use <admin> & check",
                         href="javascript:alert(1)",
+                        affected="<job>",
+                        reason="Bad <reason>",
+                        next_action="Open <trace>",
                     ),
                 )
             )
         )
 
+        self.assertIn("Triage inbox", html)
+        self.assertIn("Affected", html)
+        self.assertIn("Why now", html)
+        self.assertIn("Next step", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertIn("Use &lt;admin&gt; &amp; check", html)
+        self.assertIn("&lt;job&gt;", html)
+        self.assertIn("Bad &lt;reason&gt;", html)
+        self.assertIn("Open &lt;trace&gt;", html)
         self.assertIn("action-info", html)
         self.assertIn('href="/admin/overview"', html)
         self.assertNotIn("<script>", html)
@@ -503,6 +612,40 @@ def _connection_secrets(
             configured=configured,
             disabled=disabled,
         ),
+    )
+
+
+def _run_summary(
+    *,
+    run_id: str,
+    job_id: str,
+    status: str,
+    file_name: str,
+    started_at: datetime,
+) -> TranslationRunSummary:
+    return TranslationRunSummary(
+        job_id=job_id,
+        status=status,
+        started_at=started_at,
+        finished_at=None,
+        order_id="order-1",
+        user_id="telegram:42",
+        file_name=file_name,
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        translator_model="deepseek",
+        result_file_name=None,
+        error_message="provider timeout",
+        fragment_count=0,
+        total_fragment_count=1,
+        progress_percent=0.0,
+        eta_seconds=None,
+        current_stage=status,
+        last_event_at=started_at,
+        total_tokens=0,
+        elapsed_seconds=0.0,
+        run_dir=f"/tmp/translation-runs/{run_id}",
     )
 
 

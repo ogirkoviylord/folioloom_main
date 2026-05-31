@@ -698,10 +698,59 @@ class AdminRoutesTest(unittest.TestCase):
         response = self.client.get("/admin/overview")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Action Center", response.text)
+        self.assertIn("Triage inbox", response.text)
         self.assertIn("integrations_missing", response.text)
         self.assertIn("/admin/integrations", response.text)
         self.assertNotIn("pending actions will live here", response.text)
+
+    def test_overview_links_failed_translation_to_trace_triage(self):
+        with TemporaryDirectory() as temp_dir:
+            log_root = Path(temp_dir) / "translation-runs"
+            logger = TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-overview-failed",
+                    order_id="order-overview-failed",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                ),
+            )
+            logger.finish(
+                status="failed",
+                error_message=(
+                    "Provider failed with Bearer overview-trace-token "
+                    "api_key=sk-overview-trace-secret"
+                ),
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Triage inbox", response.text)
+        self.assertIn("Translation failed", response.text)
+        self.assertIn("book.txt", response.text)
+        self.assertIn("job-overview-failed", response.text)
+        self.assertIn("Open trace", response.text)
+        self.assertIn(
+            f'href="/admin/translations/{logger.run_dir.name}/trace"',
+            response.text,
+        )
+        self.assertNotIn("overview-trace-token", response.text)
+        self.assertNotIn("sk-overview-trace-secret", response.text)
 
     def test_overview_action_center_redacts_deepseek_balance_error(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
