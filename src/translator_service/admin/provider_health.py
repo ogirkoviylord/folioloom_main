@@ -141,13 +141,14 @@ def _runtime_error_excerpt(runtime: AIProviderRuntimeStatus | None) -> str:
         return _DEFAULT_ERROR_EXCERPT
     summaries: list[str] = []
     if runtime.status.lower() != "ok" and runtime.error:
-        summaries.append(f"runtime status {runtime.status}: {runtime.error}")
+        summaries.append(f"runtime status {runtime.status}: [redacted]")
     provider_state = runtime.provider_state
     if provider_state.circuit_state.lower() in {"open", "half_open"}:
+        reason = "[redacted]" if provider_state.last_reason else "n/a"
         summaries.append(
             "provider circuit "
             f"{provider_state.circuit_state}; "
-            f"reason {provider_state.last_reason or 'n/a'}"
+            f"reason {reason}"
         )
     for channel in runtime.active_channels:
         channel_health = channel.health.lower()
@@ -167,7 +168,7 @@ def _runtime_error_excerpt(runtime: AIProviderRuntimeStatus | None) -> str:
         if channel.error_kind:
             parts.append(f"error_kind {channel.error_kind}")
         if channel.last_error_excerpt:
-            parts.append(f"error {channel.last_error_excerpt}")
+            parts.append("error [redacted]")
         summaries.append("; ".join(parts))
     if not summaries:
         return _DEFAULT_ERROR_EXCERPT
