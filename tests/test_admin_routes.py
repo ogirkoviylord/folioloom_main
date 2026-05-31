@@ -3047,6 +3047,112 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-main-secret", event.metadata_json)
             self.assertNotIn(".api_keys.", event.metadata_json)
 
+    def test_test_all_ai_provider_keys_ignores_stale_run_log_for_ready_job(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            jobs_path = Path(temp_dir) / "jobs.sqlite3"
+            log_root = Path(temp_dir) / "translation-runs"
+            store = SQLiteTranslationJobStore(jobs_path)
+            try:
+                ready = _persistent_job(store, order_id="order-ready")
+                _add_units(store, ready.id)
+                unit = store.claim_next_work_unit(ready.id, worker_id="worker-a")
+                store.complete_work_unit(
+                    unit.id,
+                    translated_text="translated",
+                    prompt_tokens=12,
+                    completion_tokens=9,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=0,
+                )
+            finally:
+                store.close()
+            TranslationRunLogger.start(
+                root=log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=ready.id,
+                    order_id=ready.order_id,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        persistent_jobs_db_path=str(jobs_path),
+                        translation_run_log_root=str(log_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get("/admin/ai-providers")
+            csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            self.assertIsNotNone(csrf)
+            added = client.post(
+                "/admin/ai-providers/deepseek/keys",
+                data={
+                    "csrf_token": csrf.group(1),
+                    "label": "main",
+                    "value": "sk-main-secret",
+                    "weight": "1",
+                    "max_parallel_requests": "1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(added.status_code, 303)
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=1,
+                            active_requests=0,
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=2,
+                        max_capacity=3,
+                        active_requests=0,
+                        available_slots=2,
+                    ),
+                    error=None,
+                )
+
+            with patch(
+                "translator_service.admin.routes.validate_ai_provider_key",
+                return_value=AIProviderProbeResult(
+                    status="provider_check_passed",
+                    error=None,
+                ),
+            ) as probe:
+                tested = client.post(
+                    "/admin/ai-providers/deepseek/keys/test-all",
+                    data={"csrf_token": csrf.group(1)},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(tested.status_code, 303)
+            self.assertEqual(
+                tested.headers["location"],
+                "/admin/ai-providers/deepseek/keys",
+            )
+            probe.assert_called_once()
+            self.assertNotIn("sk-main-secret", tested.text)
+            self.assertNotIn(".api_keys.", tested.text)
+
     def test_test_all_ai_provider_keys_skips_disabled_keys(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
