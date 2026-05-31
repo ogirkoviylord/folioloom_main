@@ -17,6 +17,7 @@ from translator_service.admin.upload_safety import (
 )
 from translator_service.api import create_app
 from translator_service.config import Settings
+from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.upload_safety_ledger import (
     InMemoryUploadSafetyLedger,
     UploadSafetyMetadata,
@@ -77,6 +78,182 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("upload-activity", page.text)
         self.assertIn("scan_blocked", page.text)
+        _assert_no_sensitive_upload_metadata(page.text)
+
+    def test_upload_safety_list_shows_clean_accepted_activity_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(admin_db_path) as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-clean",
+                        created_job_id="job-clean",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="clean-book.txt",
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_db_path=str(admin_db_path),
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/upload-safety")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("upload-clean", page.text)
+        self.assertIn("clean-book.txt", page.text)
+        self.assertIn("job-clean", page.text)
+        self.assertIn("accepted_source_created", page.text)
+        _assert_no_sensitive_upload_metadata(page.text)
+
+    def test_upload_safety_list_falls_back_to_job_file_name(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            jobs_db_path = Path(temp_dir) / "jobs.sqlite3"
+            jobs = SQLiteTranslationJobStore(jobs_db_path)
+            job = jobs.create_job(
+                order_id="order-safe",
+                user_id="telegram:42",
+                file_id="file-safe",
+                file_name="../clean-book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-v1",
+                source_object_key="original/private-object-key.txt",
+            )
+            jobs.close()
+            with SQLiteUserActivityStore(admin_db_path) as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-clean",
+                        created_job_id=job.id,
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename=None,
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_db_path=str(admin_db_path),
+                        persistent_jobs_db_path=str(jobs_db_path),
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/upload-safety")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("clean-book.txt", page.text)
+        self.assertIn(job.id, page.text)
+        self.assertNotIn("../clean-book.txt", page.text)
+        _assert_no_sensitive_upload_metadata(page.text)
+
+    def test_upload_safety_list_skips_cross_user_job_file_fallback(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            jobs_db_path = Path(temp_dir) / "jobs.sqlite3"
+            jobs = SQLiteTranslationJobStore(jobs_db_path)
+            job = jobs.create_job(
+                order_id="order-safe",
+                user_id="telegram:99",
+                file_id="file-safe",
+                file_name="other-user-book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-v1",
+                source_object_key="original/private-object-key.txt",
+            )
+            jobs.close()
+            with SQLiteUserActivityStore(admin_db_path) as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-clean",
+                        created_job_id=job.id,
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename=None,
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_db_path=str(admin_db_path),
+                        persistent_jobs_db_path=str(jobs_db_path),
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/upload-safety")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(job.id, page.text)
+        self.assertNotIn("other-user-book.txt", page.text)
+        _assert_no_sensitive_upload_metadata(page.text)
+
+    def test_upload_safety_list_does_not_create_missing_jobs_db(self):
+        with TemporaryDirectory() as temp_dir:
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            jobs_db_path = Path(temp_dir) / "missing-jobs.sqlite3"
+            with SQLiteUserActivityStore(admin_db_path) as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-clean",
+                        created_job_id="job-missing",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename=None,
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_db_path=str(admin_db_path),
+                        persistent_jobs_db_path=str(jobs_db_path),
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/upload-safety")
+
+            self.assertFalse(jobs_db_path.exists())
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("job-missing", page.text)
         _assert_no_sensitive_upload_metadata(page.text)
 
     def test_upload_safety_filters_include_records_older_than_first_page(self):
@@ -150,7 +327,7 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertIn("Access violations", page.text)
         self.assertIn("upload-blocked", page.text)
         self.assertNotIn("upload-accepted", page.text)
-        self.assertNotIn("blocked-book.txt", page.text)
+        self.assertIn("blocked-book.txt", page.text)
         self.assertNotIn("accepted-book.txt", page.text)
         _assert_no_sensitive_upload_metadata(page.text)
 
@@ -306,7 +483,46 @@ class AdminUploadSafetyRoutesTest(unittest.TestCase):
         self.assertEqual(record.short_hash, "01234567")
         self.assertEqual(record.job_id, "job-safe")
         self.assertEqual([event.state for event in record.timeline], ["scan_blocked"])
-        self.assertIsNone(record.sanitized_original_filename)
+        self.assertEqual(record.sanitized_original_filename, "safe-book.txt")
+
+    def test_upload_safety_read_model_keeps_latest_safe_correlation_event(self):
+        with TemporaryDirectory() as temp_dir:
+            with SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3") as store:
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-accepted",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="safe-book.txt",
+                    )
+                )
+                store.record_event(
+                    _activity_event_input(
+                        upload_id="upload-accepted",
+                        created_job_id="job-safe",
+                        final_action="accepted",
+                        av_verdict="clean",
+                        container_verdict="clean",
+                        reason_code="accepted_source_created",
+                        outcome=ActivityOutcome.SUCCESS,
+                        sanitized_original_filename="safe-book.txt",
+                    )
+                )
+                events = store.list_events(surface=ActivitySurface.SECURITY)
+
+        read_model = upload_safety_read_model_from_activity_events(events)
+        records = read_model.list_records()
+        record = read_model.get_record("upload-accepted")
+
+        self.assertEqual(len(records), 1)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.final_action, "accepted")
+        self.assertEqual(record.job_id, "job-safe")
+        self.assertEqual(record.sanitized_original_filename, "safe-book.txt")
+        self.assertEqual(read_model.summarize().accepted_count, 1)
 
 
 def _record(
@@ -360,6 +576,7 @@ def _activity_event_input(
     container_verdict: str = "not_checked",
     reason_code: str = "scan_blocked",
     outcome: ActivityOutcome = ActivityOutcome.BLOCKED,
+    sanitized_original_filename: str | None = "safe-book.txt",
 ) -> UserActivityEventInput:
     return UserActivityEventInput(
         actor_type=ActivityActorType.USER,
@@ -390,6 +607,7 @@ def _activity_event_input(
             "scanner_version": "1.0",
             "signature_database_version": "daily-test",
             "signature_database_age_seconds": None,
+            "sanitized_original_filename": sanitized_original_filename,
             "short_hash": "01234567",
         },
     )
@@ -453,10 +671,14 @@ def _assert_no_sensitive_upload_metadata(html: str) -> None:
         "quarantine/telegram-42/upload-blocked.txt",
         "quarantine/secret-object-key.txt",
         "accepted/source/upload-accepted.txt",
+        "original/private-object-key.txt",
         "/var/lib/folioloom/quarantine/upload-blocked.txt",
         "Eicar-Test-Signature raw scanner output",
         "Traceback (most recent call last)",
         "raw document text",
+        "raw prompt text",
+        "translated secret text",
+        "sk-test-api-key-like-value",
     )
     for value in forbidden:
         if value in html:

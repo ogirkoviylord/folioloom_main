@@ -362,6 +362,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                     total_fragment_count=1,
                 ),
             )
+            guard = RecordingBetaSafetyGuard(allowed=True)
 
             with self.assertLogs("translator_service.worker", level="ERROR"):
                 summary = run_scheduler_once(
@@ -374,6 +375,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                     retry_base_delay_seconds=0,
                     retry_max_delay_seconds=0,
                     translation_run_log_root=run_log_root,
+                    beta_safety_guard=guard,
                 )
 
             snapshot = json.loads((logger.run_dir / "run.json").read_text())
@@ -401,6 +403,8 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertNotIn("/var/private/source.txt", json.dumps(snapshot))
             self.assertNotIn("provider read timeout", events_jsonl)
             self.assertNotIn("provider read timeout", json.dumps(snapshot))
+            self.assertEqual(guard.released_jobs, [(job.id, "terminal_failure")])
+            self.assertEqual(guard.consumed_jobs, [])
 
     def test_run_once_keeps_run_log_running_when_scheduled_unit_retries(self):
         with TemporaryDirectory() as temp_dir:
@@ -430,6 +434,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                     total_fragment_count=1,
                 ),
             )
+            guard = RecordingBetaSafetyGuard(allowed=True)
 
             with self.assertLogs("translator_service.worker", level="ERROR"):
                 summary = run_scheduler_once(
@@ -442,6 +447,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                     retry_base_delay_seconds=60,
                     retry_max_delay_seconds=60,
                     translation_run_log_root=run_log_root,
+                    beta_safety_guard=guard,
                 )
 
             [unit] = store.list_work_units(job.id)
@@ -457,6 +463,8 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(snapshot["status"], "running")
             self.assertIsNone(snapshot["finished_at"])
             self.assertNotIn("run_failed", events_jsonl)
+            self.assertEqual(guard.released_jobs, [])
+            self.assertEqual(guard.consumed_jobs, [])
 
     def test_beta_safety_guard_preserves_capacity_one_serial_success_path(self):
         with TemporaryDirectory() as temp_dir:
