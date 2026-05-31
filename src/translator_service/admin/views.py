@@ -4484,25 +4484,34 @@ button.danger {
     padding: 16px;
   }
   .sidebar-nav {
-    display: flex;
-    overflow-x: auto;
-    gap: 8px;
-    align-items: flex-start;
+    display: grid;
+    overflow-x: visible;
+    gap: 10px;
+    align-items: stretch;
   }
   .sidebar-nav > *,
   .primary-nav a,
   .advanced-nav a,
   .nav-summary {
-    flex: 0 0 auto;
+    min-width: 0;
   }
   .primary-nav,
   .advanced-nav[open] {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 138px), 1fr));
     gap: 6px;
+  }
+  .sidebar a,
+  .nav-summary {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .advanced-nav {
     padding-top: 0;
     border-top: 0;
+  }
+  .advanced-nav[open] .nav-summary {
+    grid-column: 1 / -1;
   }
   .sidebar form { display: none; }
   .workspace { padding: 18px; }
