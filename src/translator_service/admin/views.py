@@ -3203,7 +3203,7 @@ def user_detail_body(
     </section>
     <section class="panel table-panel">
       <h3>Recent translations</h3>
-      <table class="log-table">
+      <table class="log-table support-table">
         <thead>
           <tr>
             <th>Started</th>
@@ -3220,7 +3220,7 @@ def user_detail_body(
     </section>
     <section class="panel table-panel">
       <h3>Recent activity</h3>
-      <table class="log-table">
+      <table class="log-table support-table">
         <thead>
           <tr>
             <th>Time</th>
@@ -3275,16 +3275,18 @@ def _support_translation_row(row: TranslationRunSummary) -> str:
     )
     return f"""
     <tr>
-      <td>{escape(started)}</td>
-      <td><span class="status">{escape(row.status)}</span></td>
-      <td><code>{escape(row.job_id)}</code></td>
-      <td>
+      <td data-label="Started">{escape(started)}</td>
+      <td data-label="Outcome"><span class="status">{escape(row.status)}</span></td>
+      <td data-label="Job"><code>{escape(row.job_id)}</code></td>
+      <td data-label="File">
         <strong>{escape(file_name)}</strong>
         {result}
       </td>
-      <td>{escape(choice)}</td>
-      <td>{escape(detail)}</td>
-      <td><div class="job-actions">{trace_link}{details_link}</div></td>
+      <td data-label="Choice">{escape(choice)}</td>
+      <td data-label="Stage / error">{escape(detail)}</td>
+      <td data-label="Actions">
+        <div class="job-actions">{trace_link}{details_link}</div>
+      </td>
     </tr>
     """
 
@@ -3312,16 +3314,16 @@ def _support_activity_row(event: UserActivityEvent) -> str:
     detail = _safe_support_event_detail(event)
     return f"""
     <tr>
-      <td>{escape(created)}</td>
-      <td>{escape(event.surface)}</td>
-      <td>
+      <td data-label="Time">{escape(created)}</td>
+      <td data-label="Surface">{escape(event.surface)}</td>
+      <td data-label="Event">
         <strong>{escape(event.event_type)}</strong>
         <span>{escape(event.action)}</span>
       </td>
-      <td>{escape(target or "n/a")}</td>
-      <td><span class="status">{escape(event.outcome)}</span></td>
-      <td><code>{escape(event.job_id or "")}</code></td>
-      <td>{escape(detail or "n/a")}</td>
+      <td data-label="Target">{escape(target or "n/a")}</td>
+      <td data-label="Outcome"><span class="status">{escape(event.outcome)}</span></td>
+      <td data-label="Job"><code>{escape(event.job_id or "")}</code></td>
+      <td data-label="Safe detail">{escape(detail or "n/a")}</td>
     </tr>
     """
 
@@ -4881,12 +4883,20 @@ button.danger {
   border-collapse: collapse;
   min-width: 980px;
 }
+.support-table {
+  min-width: 0;
+  table-layout: fixed;
+}
 .log-table th,
 .log-table td {
   border-bottom: 1px solid var(--line);
   padding: 10px 8px;
   text-align: left;
   vertical-align: top;
+}
+.support-table th,
+.support-table td {
+  overflow-wrap: anywhere;
 }
 .log-table th {
   color: var(--muted);
@@ -4901,6 +4911,9 @@ button.danger {
 .log-table td .progress-mini span {
   color: var(--ink);
   font-size: 0.9rem;
+}
+.support-table .job-actions {
+  min-width: 0;
 }
 .empty-cell {
   color: var(--muted);
@@ -4926,6 +4939,59 @@ button.danger {
 }
 .error { color: var(--warn); }
 @media (max-width: 760px) {
+  .support-table,
+  .support-table thead,
+  .support-table tbody,
+  .support-table tr,
+  .support-table th,
+  .support-table td {
+    display: block;
+    width: 100%;
+  }
+  .support-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .support-table tr {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .support-table th,
+  .support-table td {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .support-table td {
+    display: grid;
+    grid-template-columns: minmax(82px, 0.36fr) minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+  }
+  .support-table td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .support-table td > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .support-table .job-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+  }
   body { grid-template-columns: 1fr; }
   .sidebar {
     min-height: auto;
