@@ -65,6 +65,32 @@ from translator_service.admin.upload_safety import (
 )
 from translator_service.user_activity import UserActivityEvent, UserProfile
 
+_PRIMARY_NAV_ITEMS = (
+    ("overview", "/admin/overview", "Overview"),
+    ("live", "/admin/live", "Live"),
+    ("translations", "/admin/translations", "Translations"),
+    ("users", "/admin/users", "Users"),
+    ("providers", "/admin/ai-providers", "Providers"),
+    ("beta_controls", "/admin/beta-controls", "Beta Controls"),
+    ("safety", "/admin/upload-safety", "Safety"),
+    ("settings", "/admin/settings", "Settings"),
+)
+_ADVANCED_NAV_ITEMS = (
+    ("logs", "/admin/logs", "Logs"),
+    ("activity", "/admin/activity", "Activity"),
+    ("operations", "/admin/operations/jobs", "Operations"),
+    ("audit", "/admin/audit", "Audit"),
+    ("integrations", "/admin/integrations", "Integrations"),
+    ("billing", "/admin/billing", "Billing"),
+    ("costs", "/admin/costs", "Costs"),
+    ("quality", "/admin/quality", "Quality"),
+    ("security", "/admin/security/events", "Security Events"),
+)
+_NAV_ACTIVE_ALIASES = {
+    "providers": ("ai_providers",),
+    "safety": ("upload_safety",),
+}
+
 
 def login_page(*, error: str | None = None) -> str:
     error_html = f'<p class="error">{escape(error)}</p>' if error else ""
@@ -101,27 +127,7 @@ def admin_page(
     body: str,
     environment: str | None = None,
 ) -> str:
-    nav_items = (
-        ("overview", "/admin/overview", "Overview"),
-        ("integrations", "/admin/integrations", "Integrations"),
-        ("ai_providers", "/admin/ai-providers", "AI Providers"),
-        ("billing", "/admin/billing", "Billing"),
-        ("costs", "/admin/costs", "Costs"),
-        ("quality", "/admin/quality", "Quality"),
-        ("live", "/admin/live", "Live"),
-        ("logs", "/admin/logs", "Logs"),
-        ("activity", "/admin/activity", "Activity"),
-        ("users", "/admin/users", "Users"),
-        ("settings", "/admin/settings", "Settings"),
-        ("operations", "/admin/operations/jobs", "Operations"),
-        ("upload_safety", "/admin/upload-safety", "Upload Safety"),
-        ("security", "/admin/security/events", "Security"),
-        ("audit", "/admin/audit", "Audit"),
-    )
-    nav = "\n".join(
-        f'<a href="{href}" class="{"active" if key == active else ""}">{label}</a>'
-        for key, href, label in nav_items
-    )
+    nav = _admin_nav(active)
     csrf_token = escape(session.csrf_token)
     actor_id = escape(session.actor_id)
     environment_badge = ""
@@ -143,7 +149,7 @@ def admin_page(
       <p class="eyebrow">FolioLoom</p>
       <h1>Admin Console</h1>
     </div>
-    <nav>{nav}</nav>
+    {nav}
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf_token" value="{csrf_token}">
       <button type="submit" class="secondary">Sign out</button>
@@ -161,6 +167,41 @@ def admin_page(
   </main>
 </body>
 </html>"""
+
+
+def _admin_nav(active: str) -> str:
+    primary = "\n".join(_nav_link(item, active) for item in _PRIMARY_NAV_ITEMS)
+    advanced = "\n".join(_nav_link(item, active) for item in _ADVANCED_NAV_ITEMS)
+    advanced_is_active = any(
+        _nav_item_is_active(key, active) for key, _href, _label in _ADVANCED_NAV_ITEMS
+    )
+    advanced_open = " open" if advanced_is_active else ""
+    advanced_class = "nav-section advanced-nav"
+    if advanced_is_active:
+        advanced_class += " active-group"
+    return f"""
+    <nav class="sidebar-nav" aria-label="Admin navigation">
+      <div class="nav-section primary-nav" aria-label="Primary workflows">
+        {primary}
+      </div>
+      <details class="{advanced_class}"{advanced_open}>
+        <summary class="nav-summary">Advanced</summary>
+        {advanced}
+      </details>
+    </nav>
+    """
+
+
+def _nav_link(item: tuple[str, str, str], active: str) -> str:
+    key, href, label = item
+    class_name = "active" if _nav_item_is_active(key, active) else ""
+    return f'<a href="{href}" class="{class_name}">{label}</a>'
+
+
+def _nav_item_is_active(key: str, active: str) -> bool:
+    if key == active:
+        return True
+    return active in _NAV_ACTIVE_ALIASES.get(key, ())
 
 
 def section_body(title: str, copy: str) -> str:
@@ -281,7 +322,7 @@ def settings_body(
         </p>
       </div>
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel" id="beta-controls">
       <h3>Closed Beta Allowlist</h3>
       <p>
         Add trusted Telegram numeric user IDs now, then enable enforcement when
@@ -299,7 +340,7 @@ def settings_body(
       </form>
       {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel" id="beta-safety-controls">
       <h3>Beta Safety Controls</h3>
       <p>
         Live budget guardrails for the closed beta. These values protect beta
@@ -2514,6 +2555,8 @@ def logs_body(
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = 100,
+    title: str = "Translation Logs",
+    form_action: str = "/admin/logs",
 ) -> str:
     rows = "\n".join(_log_row(row) for row in logs)
     if not rows:
@@ -2525,7 +2568,7 @@ def logs_body(
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Translation Logs</h3>
+        <h3>{escape(title)}</h3>
         <p>
           Review translation runs by date, state, file, language direction,
           token usage, and safe error metadata.
@@ -2533,7 +2576,7 @@ def logs_body(
       </div>
     </section>
     <section class="panel">
-      <form class="filter-form" method="get" action="/admin/logs">
+      <form class="filter-form" method="get" action="{escape(form_action)}">
         <label>
           <span>Status</span>
           <select name="status">
@@ -3740,19 +3783,62 @@ body > * { min-width: 0; }
   gap: 24px;
 }
 .sidebar h1, .workspace h2, .panel h3 { margin: 0; }
-.sidebar nav {
+.sidebar-nav {
   display: grid;
-  gap: 6px;
+  gap: 14px;
   min-width: 0;
   max-width: 100%;
 }
+.primary-nav,
+.advanced-nav {
+  min-width: 0;
+}
+.primary-nav,
+.advanced-nav[open] {
+  display: grid;
+  gap: 6px;
+}
+.advanced-nav {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.nav-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d1d5db;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+.nav-summary::-webkit-details-marker {
+  display: none;
+}
+.nav-summary::after {
+  content: "+";
+  color: #9ca3af;
+  font-weight: 800;
+}
+.advanced-nav[open] .nav-summary::after {
+  content: "-";
+}
+.advanced-nav:not([open]) > a {
+  display: none;
+}
 .sidebar a {
+  display: block;
   color: #d1d5db;
   text-decoration: none;
   padding: 10px 12px;
   border-radius: 6px;
+  white-space: nowrap;
 }
-.sidebar a.active, .sidebar a:hover {
+.sidebar a.active,
+.sidebar a:hover,
+.nav-summary:hover,
+.advanced-nav.active-group .nav-summary {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.12);
 }
@@ -4397,9 +4483,35 @@ button.danger {
     min-height: auto;
     padding: 16px;
   }
-  .sidebar nav {
-    display: flex;
-    overflow-x: auto;
+  .sidebar-nav {
+    display: grid;
+    overflow-x: visible;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .sidebar-nav > *,
+  .primary-nav a,
+  .advanced-nav a,
+  .nav-summary {
+    min-width: 0;
+  }
+  .primary-nav,
+  .advanced-nav[open] {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 138px), 1fr));
+    gap: 6px;
+  }
+  .sidebar a,
+  .nav-summary {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .advanced-nav {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .advanced-nav[open] .nav-summary {
+    grid-column: 1 / -1;
   }
   .sidebar form { display: none; }
   .workspace { padding: 18px; }
