@@ -20,6 +20,7 @@ from translator_service.admin.costs import (
     CostRunSummary,
     CostUserSummary,
 )
+from translator_service.admin.operations import build_operations_overview
 from translator_service.admin.provider_probe import AIProviderProbeResult
 from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
@@ -1815,6 +1816,109 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(summaries.call_args_list[0].kwargs["limit"], 200)
         self.assertEqual(summaries.call_args_list[1].kwargs["limit"], 500)
+
+    def test_translation_logs_overlay_active_scheduler_progress(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-scheduled-progress",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="scheduled.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=4,
+                ),
+            )
+            logger.record_event(
+                "job_queued",
+                {"job_id": "job-scheduled-progress", "fragment_count": 4},
+            )
+            operations = build_operations_overview(
+                jobs=[
+                    {
+                        "id": "job-scheduled-progress",
+                        "status": "translating",
+                        "file_name": "scheduled.epub",
+                        "document_kind": "epub",
+                        "source_language": "en",
+                        "target_language": "uk",
+                        "created_at": datetime(2026, 5, 31, 9, 0, tzinfo=UTC),
+                        "updated_at": datetime(2026, 5, 31, 9, 10, tzinfo=UTC),
+                    }
+                ],
+                work_units_by_job_id={
+                    "job-scheduled-progress": (
+                        {
+                            "status": "translated",
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                        },
+                        {
+                            "status": "translated",
+                            "prompt_tokens": 13,
+                            "completion_tokens": 5,
+                        },
+                        {"status": "translating"},
+                        {"status": "pending"},
+                    )
+                },
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=temp_dir,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            with patch(
+                "translator_service.admin.routes._operations_overview",
+                return_value=operations,
+            ):
+                page = client.get("/admin/logs")
+                api = client.get("/admin/api/logs")
+                details = client.get(f"/admin/logs/{logger.run_dir.name}")
+                details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+                trace = client.get(
+                    f"/admin/translations/{logger.run_dir.name}/trace"
+                )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("job-scheduled-progress", page.text)
+        self.assertIn(">2</td>", page.text)
+        self.assertIn(">36</td>", page.text)
+        self.assertNotIn("source_text", page.text)
+        self.assertEqual(api.status_code, 200)
+        self.assertEqual(api.json()["logs"][0]["fragment_count"], 2)
+        self.assertEqual(api.json()["logs"][0]["total_fragment_count"], 4)
+        self.assertEqual(api.json()["logs"][0]["progress_percent"], 50.0)
+        self.assertEqual(api.json()["logs"][0]["total_tokens"], 36)
+        self.assertEqual(details.status_code, 200)
+        self.assertIn("2/4", details.text)
+        self.assertIn("50.0%", details.text)
+        self.assertIn("36", details.text)
+        self.assertEqual(details_api.status_code, 200)
+        self.assertEqual(
+            details_api.json()["details"]["summary"]["fragment_count"],
+            2,
+        )
+        self.assertEqual(
+            details_api.json()["details"]["summary"]["total_tokens"],
+            36,
+        )
+        self.assertEqual(
+            details_api.json()["details"]["totals"]["total_tokens"],
+            36,
+        )
+        self.assertEqual(trace.status_code, 200)
+        self.assertIn("2/4", trace.text)
+        self.assertIn("36", trace.text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
