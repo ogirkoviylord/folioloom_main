@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
@@ -119,7 +120,10 @@ from translator_service.beta_access import (
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage
-from translator_service.persistent_job_store import open_persistent_job_store
+from translator_service.persistent_job_store import (
+    open_persistent_job_store,
+    sqlite_store_exists,
+)
 from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
 )
@@ -1892,7 +1896,7 @@ def _ai_provider_runtime_payload(
         "provider_state": _ai_provider_runtime_provider_state_payload(
             status.provider_state
         ),
-        "error": _safe_runtime_text(status.error),
+        "error": _safe_runtime_error_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
         "reload_requested_by": (
             reload_state.actor_id if reload_state is not None else None
@@ -1917,7 +1921,7 @@ def _ai_provider_runtime_provider_state_payload(state):
         "available_slots": state.available_slots,
         "circuit_state": _safe_runtime_text(state.circuit_state),
         "circuit_open_remaining_seconds": state.circuit_open_remaining_seconds,
-        "last_reason": _safe_runtime_text(state.last_reason),
+        "last_reason": _safe_runtime_error_text(state.last_reason),
         "total_ramp_ups": state.total_ramp_ups,
         "total_decreases": state.total_decreases,
         "total_circuit_opened": state.total_circuit_opened,
@@ -1951,7 +1955,7 @@ def _ai_provider_runtime_channel_payload(channel):
         "average_latency_ms": channel.average_latency_ms,
         "last_latency_ms": channel.last_latency_ms,
         "error_kind": _safe_runtime_text(channel.error_kind),
-        "last_error_excerpt": _safe_runtime_text(channel.last_error_excerpt),
+        "last_error_excerpt": _safe_runtime_error_text(channel.last_error_excerpt),
     }
 
 
@@ -1959,6 +1963,12 @@ def _safe_runtime_text(value: str | None) -> str | None:
     if value is None:
         return None
     return _redact_sensitive_text(value)
+
+
+def _safe_runtime_error_text(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    return "[redacted]"
 
 
 def _deepseek_balance_snapshot(settings: Settings) -> ProviderBalanceSnapshot | None:
@@ -2431,7 +2441,148 @@ def _security_events_body(settings: Settings) -> str:
 def _upload_safety_read_model(settings: Settings):
     with _activity_store(settings) as store:
         events = _upload_safety_activity_events(store)
-    return upload_safety_read_model_from_activity_events(events)
+    return upload_safety_read_model_from_activity_events(
+        events,
+        job_file_names_by_event_id=_upload_safety_job_file_names(settings, events),
+    )
+
+
+def _upload_safety_job_file_names(
+    settings: Settings,
+    events: tuple[UserActivityEvent, ...],
+) -> dict[str, str]:
+    missing_file_events = tuple(
+        event
+        for event in events
+        if event.job_id
+        and not (
+            event.metadata.get("sanitized_original_filename")
+            or event.metadata.get("original_file_name")
+            or event.metadata.get("file_name")
+        )
+    )
+    if not missing_file_events:
+        return {}
+
+    job_rows = _upload_safety_read_job_rows(
+        settings,
+        tuple({event.job_id for event in missing_file_events if event.job_id}),
+    )
+    file_names: dict[str, str] = {}
+    for event in missing_file_events:
+        if not event.job_id:
+            continue
+        job_row = job_rows.get(event.job_id)
+        if job_row is None:
+            continue
+        user_id, file_name = job_row
+        if file_name and _upload_safety_event_matches_job_user(event, user_id):
+            file_names[event.id] = file_name
+    return file_names
+
+
+def _upload_safety_read_job_rows(
+    settings: Settings,
+    job_ids: tuple[str, ...],
+) -> dict[str, tuple[str, str]]:
+    if not job_ids:
+        return {}
+    if settings.scheduler_backend == "sqlite":
+        return _upload_safety_read_sqlite_job_rows(
+            settings.persistent_jobs_db_path,
+            job_ids,
+        )
+    if settings.scheduler_backend == "postgres":
+        return _upload_safety_read_postgres_job_rows(settings.postgres_dsn, job_ids)
+    return {}
+
+
+def _upload_safety_read_sqlite_job_rows(
+    db_path: str,
+    job_ids: tuple[str, ...],
+) -> dict[str, tuple[str, str]]:
+    if db_path == ":memory:" or not sqlite_store_exists(db_path):
+        return {}
+    placeholders = ", ".join("?" for _ in job_ids)
+    try:
+        connection = sqlite3.connect(_sqlite_read_only_uri(db_path), uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT id, user_id, file_name
+                FROM translation_jobs
+                WHERE id IN ({placeholders})
+                """,
+                job_ids,
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return {}
+    return {
+        str(row["id"]): (str(row["user_id"]), str(row["file_name"]))
+        for row in rows
+        if row["id"] is not None
+    }
+
+
+def _sqlite_read_only_uri(db_path: str) -> str:
+    path = Path(db_path).resolve().as_posix()
+    return f"file:{quote(path, safe='/:')}?mode=ro"
+
+
+def _upload_safety_read_postgres_job_rows(
+    postgres_dsn: str,
+    job_ids: tuple[str, ...],
+) -> dict[str, tuple[str, str]]:
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except ModuleNotFoundError:
+        return {}
+
+    params = {f"job_id_{index}": job_id for index, job_id in enumerate(job_ids)}
+    placeholders = ", ".join(f"%({key})s" for key in params)
+    try:
+        with psycopg.connect(
+            postgres_dsn,
+            autocommit=True,
+            row_factory=dict_row,
+        ) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, user_id, file_name
+                FROM translation_jobs
+                WHERE id IN ({placeholders})
+                """,
+                params,
+            ).fetchall()
+    except Exception:
+        return {}
+    return {
+        str(row["id"]): (str(row["user_id"]), str(row["file_name"]))
+        for row in rows
+        if row.get("id") is not None
+    }
+
+
+def _upload_safety_event_matches_job_user(
+    event: UserActivityEvent,
+    job_user_id: str,
+) -> bool:
+    return job_user_id in _upload_safety_event_user_ids(event)
+
+
+def _upload_safety_event_user_ids(event: UserActivityEvent) -> set[str]:
+    user_ids: set[str] = set()
+    if event.actor_id:
+        user_ids.add(event.actor_id)
+        if event.actor_id.isdecimal():
+            user_ids.add(f"telegram:{event.actor_id}")
+    if event.channel == "telegram" and event.channel_user_id:
+        user_ids.add(f"telegram:{event.channel_user_id}")
+    return user_ids
 
 
 def _upload_safety_activity_events(

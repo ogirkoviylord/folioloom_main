@@ -174,6 +174,33 @@ class AdminTranslationTraceTest(unittest.TestCase):
         self.assertNotIn("RAW ACTIVITY TEXT", html)
         self.assertNotIn("sk-activity-secret", html)
 
+    def test_failed_run_without_safe_cause_stays_unknown(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-trace-unknown",
+                    order_id="order-trace-unknown",
+                    user_id="telegram:99",
+                    file_name="unknown.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            logger.finish(status="failed", error_message="opaque failure")
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            self.assertIsNotNone(details)
+            assert details is not None
+
+            trace = build_translation_trace(details)
+            html = translation_trace_body(trace)
+
+        self.assertEqual(trace.failure_category, "Unknown")
+        self.assertEqual(trace.next_action.label, "Review advanced log")
+        self.assertIn("Unknown", html)
+        self.assertIn("Review advanced log", html)
+
 
 if __name__ == "__main__":
     unittest.main()

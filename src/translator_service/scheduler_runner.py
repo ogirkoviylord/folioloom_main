@@ -119,6 +119,7 @@ def run_scheduler_once(
                 _finish_failed_translation_run_for_work_unit(
                     translation_run_log_root,
                     work_unit=completed,
+                    beta_safety_guard=beta_safety_guard,
                 )
     else:
         completed_units, failed_units = _run_scheduled_parallel_once(
@@ -136,6 +137,7 @@ def run_scheduler_once(
             translation_run_log_root=translation_run_log_root,
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
+            beta_safety_guard=beta_safety_guard,
         )
 
     assembled_jobs = assemble_due_jobs(
@@ -166,6 +168,7 @@ def _run_scheduled_parallel_once(
     translation_run_log_root: str | Path | None,
     allowed_source_object_keys: Container[str] | None,
     require_upload_safety_policy: bool,
+    beta_safety_guard: BetaSafetyGuard | None,
 ) -> tuple[int, int]:
     completed_units = 0
     failed_units = 0
@@ -225,6 +228,7 @@ def _run_scheduled_parallel_once(
                     _finish_failed_translation_run_for_work_unit(
                         translation_run_log_root,
                         work_unit=failed,
+                        beta_safety_guard=beta_safety_guard,
                     )
                     continue
                 except ValueError as error:
@@ -240,6 +244,7 @@ def _run_scheduled_parallel_once(
                     _finish_failed_translation_run_for_work_unit(
                         translation_run_log_root,
                         work_unit=failed,
+                        beta_safety_guard=beta_safety_guard,
                     )
                     continue
 
@@ -280,6 +285,7 @@ def _run_scheduled_parallel_once(
                     _finish_failed_translation_run_for_work_unit(
                         translation_run_log_root,
                         work_unit=failed,
+                        beta_safety_guard=beta_safety_guard,
                     )
                     continue
 
@@ -359,20 +365,27 @@ def _finish_failed_translation_run_for_work_unit(
     root: str | Path | None,
     *,
     work_unit: PersistentWorkUnit | None,
+    beta_safety_guard: BetaSafetyGuard | None,
 ) -> None:
-    if root is None or work_unit is None:
+    if work_unit is None:
         return
     if work_unit.status not in {
         PersistentWorkUnitStatus.FAILED,
         PersistentWorkUnitStatus.FAILED_TERMINAL,
     }:
         return
-    finish_running_translation_runs_for_job(
-        root,
-        job_id=work_unit.job_id,
-        status="failed",
-        error_message=SAFE_DEFERRED_WORKER_FAILURE_MESSAGE,
-    )
+    if root is not None:
+        finish_running_translation_runs_for_job(
+            root,
+            job_id=work_unit.job_id,
+            status="failed",
+            error_message=SAFE_DEFERRED_WORKER_FAILURE_MESSAGE,
+        )
+    if beta_safety_guard is not None:
+        beta_safety_guard.release_job(
+            job_id=work_unit.job_id,
+            reason="terminal_failure",
+        )
 
 
 def assemble_due_jobs(
