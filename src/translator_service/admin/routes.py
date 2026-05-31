@@ -75,10 +75,15 @@ from translator_service.admin.secrets import (
 )
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
+    TranslationRunDetails,
     TranslationRunSummary,
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
+)
+from translator_service.admin.translation_progress import (
+    overlay_translation_run_details,
+    overlay_translation_run_summaries,
 )
 from translator_service.admin.translation_trace import build_translation_trace
 from translator_service.admin.upload_safety import (
@@ -536,10 +541,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Logs",
             active="logs",
             body=lambda session: logs_body(
-                list_translation_run_summaries(
-                    settings.translation_run_log_root,
-                    **filters,
-                ),
+                _translation_run_summaries(settings, **filters),
                 **filters,
             ),
         )
@@ -554,10 +556,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translations",
             active="translations",
             body=lambda session: logs_body(
-                list_translation_run_summaries(
-                    settings.translation_run_log_root,
-                    **filters,
-                ),
+                _translation_run_summaries(settings, **filters),
                 title="Translations",
                 form_action="/admin/translations",
                 **filters,
@@ -568,10 +567,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def log_detail(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        details = get_translation_run_details(
-            settings.translation_run_log_root,
-            run_id,
-        )
+        details = _translation_run_details(settings, run_id)
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         return _protected_page(
@@ -587,10 +583,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def translation_trace(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        details = get_translation_run_details(
-            settings.translation_run_log_root,
-            run_id,
-        )
+        details = _translation_run_details(settings, run_id)
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         activity_events: tuple[UserActivityEvent, ...] = ()
@@ -791,8 +784,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
         return _json(
             {
-                "logs": list_translation_run_summaries(
-                    settings.translation_run_log_root,
+                "logs": _translation_run_summaries(
+                    settings,
                     **_log_filters(request),
                 )
             }
@@ -802,10 +795,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def log_detail_api(run_id: str, request: Request) -> JSONResponse:
         if _session_or_none(request, session_manager) is None:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
-        details = get_translation_run_details(
-            settings.translation_run_log_root,
-            run_id,
-        )
+        details = _translation_run_details(settings, run_id)
         if details is None:
             return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
         return _json({"details": details})
@@ -2399,6 +2389,38 @@ def _user_detail_body(settings: Settings, user_id: str) -> str:
     return user_detail_body(profile, events, translations=translations)
 
 
+def _translation_run_summaries(
+    settings: Settings,
+    **filters,
+) -> tuple[TranslationRunSummary, ...]:
+    current_time = filters.get("now") or datetime.now(UTC)
+    summaries = list_translation_run_summaries(
+        settings.translation_run_log_root,
+        **{**filters, "now": current_time},
+    )
+    return overlay_translation_run_summaries(
+        summaries,
+        operations=_operations_overview(settings),
+        now=current_time,
+    )
+
+
+def _translation_run_details(
+    settings: Settings,
+    run_id: str,
+) -> TranslationRunDetails | None:
+    details = get_translation_run_details(
+        settings.translation_run_log_root,
+        run_id,
+    )
+    if details is None:
+        return None
+    return overlay_translation_run_details(
+        details,
+        operations=_operations_overview(settings),
+    )
+
+
 def _user_translation_summaries(
     settings: Settings,
     user_id: str,
@@ -2412,10 +2434,7 @@ def _user_translation_summaries(
     }
     rows: list[TranslationRunSummary] = []
     seen_run_ids: set[str] = set()
-    for summary in list_translation_run_summaries(
-        settings.translation_run_log_root,
-        limit=500,
-    ):
+    for summary in _translation_run_summaries(settings, limit=500):
         run_id = Path(summary.run_dir).name
         if (
             summary.user_id != user_id
