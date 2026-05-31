@@ -1122,6 +1122,9 @@ Decision:
 
 Evidence:
 - GitHub issue #120 records the accepted duplicate/retry idea.
+- GitHub issue #120 was closed on 2026-05-30 after the approved first-slice
+  child issues #122, #124, #121, #123 and #125 were closed and PRs #126-#130
+  were merged.
 - GitHub issue #124 records the architecture note, Reviewer critique and owner
   approval on 2026-05-28.
 - Owner explicitly approved following the corrected recommendation in chat on
