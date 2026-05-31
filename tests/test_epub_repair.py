@@ -76,6 +76,27 @@ class EpubRepairTests(unittest.TestCase):
         ):
             repair_epub_for_processing(content)
 
+    def test_strips_simple_html_doctype(self):
+        content = _make_epub(
+            {
+                "OPS/cover.xhtml": """
+                <!DOCTYPE html>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Cover</p></body>
+                </html>
+                """,
+            }
+        )
+
+        repaired = repair_epub_for_processing(content)
+
+        action_kinds = {action.kind for action in repaired.report.actions}
+        self.assertIn("strip_simple_doctype", action_kinds)
+        with ZipFile(BytesIO(repaired.content)) as epub:
+            cover = epub.read("OPS/cover.xhtml")
+        self.assertNotIn(b"<!DOCTYPE", cover)
+        self.assertIn(b"<p>Cover</p>", cover)
+
     def test_rejects_epub_zip_path_traversal_members(self):
         archive = BytesIO()
         with ZipFile(archive, "w") as epub:

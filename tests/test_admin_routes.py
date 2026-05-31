@@ -3240,7 +3240,8 @@ class AdminRoutesTest(unittest.TestCase):
                             error_kind="rate_limit",
                             last_error_excerpt=(
                                 "HTTP 429 Bearer sk-runtime-secret "
-                                "secret_id=deepseek.api_keys.key-1"
+                                "secret_id=deepseek.api_keys.key-1 "
+                                "FORBIDDEN_PROVIDER_PROMPT"
                             ),
                         ),
                     ),
@@ -3254,7 +3255,8 @@ class AdminRoutesTest(unittest.TestCase):
                         circuit_open_remaining_seconds=90.0,
                         last_reason=(
                             "billing Bearer sk-runtime-secret "
-                            "secret_id=deepseek.api_keys.key-1"
+                            "secret_id=deepseek.api_keys.key-1 "
+                            "FORBIDDEN_PROVIDER_PROMPT"
                         ),
                         total_ramp_ups=2,
                         total_decreases=3,
@@ -3333,6 +3335,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-runtime-secret", page.text)
             self.assertNotIn("Bearer", page.text)
             self.assertNotIn(".api_keys.", page.text)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", page.text)
             reload_response = client.post(
                 "/admin/ai-providers/deepseek/runtime/reload",
                 data={"csrf_token": csrf.group(1)},
@@ -3388,6 +3391,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-runtime-secret", serialized_payload)
             self.assertNotIn("Bearer", serialized_payload)
             self.assertNotIn(".api_keys.", serialized_payload)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", serialized_payload)
             self.assertIn("DeepSeek runtime", live_page.text)
             self.assertIn("admin_store", live_page.text)
             self.assertIn("Reload pending", live_page.text)
@@ -3497,7 +3501,10 @@ class AdminRoutesTest(unittest.TestCase):
                         active_requests=0,
                         available_slots=1,
                     ),
-                    error="provider degraded Bearer sk-runtime-secret",
+                    error=(
+                        "provider degraded Bearer sk-runtime-secret "
+                        "FORBIDDEN_PROVIDER_PROMPT"
+                    ),
                 )
             client = TestClient(
                 create_app(
@@ -3521,6 +3528,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("1 slots / 1 usable channels", page.text)
             self.assertNotIn("sk-runtime-secret", page.text)
             self.assertNotIn("Bearer", page.text)
+            self.assertNotIn("FORBIDDEN_PROVIDER_PROMPT", page.text)
 
     def test_failed_ai_provider_key_test_is_recorded_as_audit_failure(self):
         with TemporaryDirectory() as temp_dir:
