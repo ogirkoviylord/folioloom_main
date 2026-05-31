@@ -20,7 +20,8 @@ from translator_service.admin.provider_runtime import (
 )
 
 _REQUIRED_INTEGRATION_IDS = frozenset({"telegram"})
-_RUNTIME_DEGRADED_STATUSES = frozenset({"degraded", "error", "failed", "missing_keys"})
+_RUNTIME_MISSING_CHANNEL_STATUSES = frozenset({"missing_keys"})
+_RUNTIME_DEGRADED_STATUSES = frozenset({"degraded", "error", "failed"})
 
 
 @dataclass(frozen=True)
@@ -207,7 +208,10 @@ def _runtime_action_items(
                     href="/admin/live",
                 )
             )
-        if not runtime.active_channels or runtime.status == "missing_keys":
+        if (
+            not runtime.active_channels
+            or runtime.status in _RUNTIME_MISSING_CHANNEL_STATUSES
+        ):
             items.append(
                 ActionItem(
                     key="ai_provider_runtime_missing_channels",
@@ -224,7 +228,7 @@ def _runtime_action_items(
                     severity="warning",
                     title="DeepSeek runtime is degraded",
                     detail=(
-                        "Runtime still reports active channels; review "
+                        "Runtime still reports active DeepSeek channels; review "
                         "provider/channel warning categories."
                     ),
                     href="/admin/ai-providers",
