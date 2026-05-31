@@ -3705,6 +3705,86 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertTrue(detail.has_partial_result)
             self.assertTrue(detail.can_resume)
 
+    def test_user_book_detail_includes_active_work_unit_progress(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="active.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"One.\n\nTwo.\n\nThree.\n\nFour.\n\nFive.",
+            )
+            unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="active-unit.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Unit",
+            )
+            job = persistent_store.create_job(
+                order_id="order-progress",
+                user_id="telegram:42",
+                file_id=original.object_key,
+                file_name="active.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=original.object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=sequence,
+                        source_block_ids=(f"txt:{sequence}",),
+                        source_object_key=unit_source.object_key,
+                        source_text_hash=f"hash-{sequence}",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                    )
+                    for sequence in range(1, 6)
+                ],
+            )
+            for index in range(1, 3):
+                unit = persistent_store.claim_next_work_unit(
+                    job.id,
+                    worker_id=f"worker-{index}",
+                )
+                self.assertIsNotNone(unit)
+                persistent_store.complete_work_unit(
+                    unit.id,
+                    translated_text=f"Translated {index}",
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=1,
+                )
+
+            detail = service.get_user_book_detail(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertEqual(detail.status, "translating")
+            self.assertEqual(detail.progress_completed_fragments, 2)
+            self.assertEqual(detail.progress_total_fragments, 5)
+            self.assertEqual(detail.progress_percent, 40)
+
     def test_user_book_detail_resume_visibility_follows_recoverable_state_matrix(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
