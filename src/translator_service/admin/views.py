@@ -100,6 +100,46 @@ _ACTION_VARIANTS = frozenset(
         "danger",
     }
 )
+_SUPPORT_METADATA_FIELDS = (
+    ("file_name", "File"),
+    ("result_file_name", "Result"),
+    ("document_kind", "Format"),
+    ("source_language", "Source"),
+    ("target_language", "Target"),
+    ("translation_mode", "Mode"),
+    ("language_code", "Language"),
+    ("declared_format", "Declared format"),
+    ("detected_format", "Detected format"),
+    ("reason_code", "Reason"),
+    ("security_state", "Security"),
+    ("status", "Status"),
+)
+_UNSAFE_SUPPORT_KEY_MARKERS = (
+    "source_text",
+    "translated_text",
+    "prompt",
+    "plaintext",
+    "api_key",
+    "secret",
+    "token",
+    "password",
+    "authorization",
+    "traceback",
+    "stack_trace",
+    "object_storage",
+    "storage_path",
+    "path",
+)
+_UNSAFE_SUPPORT_VALUE_MARKERS = (
+    "sk-",
+    ".api_keys.",
+    "traceback",
+    "bearer ",
+    "/object-storage",
+    "\\object-storage",
+    "/var/",
+)
+_FAILED_SUPPORT_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
 def login_page(*, error: str | None = None) -> str:
@@ -3121,33 +3161,66 @@ def users_body(users: tuple[UserProfile, ...]) -> str:
 def user_detail_body(
     user: UserProfile | None,
     events: tuple[UserActivityEvent, ...],
+    *,
+    translations: tuple[TranslationRunSummary, ...] = (),
 ) -> str:
     if user is None:
         return section_body(
             "User not found",
             "No activity profile exists for this user.",
         )
-    rows = "".join(_activity_row(event, include_user=False) for event in events)
+    translation_rows = _support_translation_rows(translations)
+    activity_rows = _support_activity_rows(events)
+    translation_mode = _latest_support_metadata_value(
+        events,
+        "translation_mode",
+        fallback_target_type="translation_mode",
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>{escape(user.user_id)}</h3>
+        <h3>Support profile</h3>
         <p>
+          {escape(user.user_id)} ·
           {escape(user.channel)} user {escape(user.channel_user_id)} ·
           security {escape(user.security_state)}
         </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link("Back to users", "/admin/users", "view")}
       </div>
     </section>
     <section class="panel">
       <div class="metric-grid">
         {_metric("Interface", user.interface_language or "n/a")}
         {_metric("Last target", user.last_target_language or "n/a")}
+        {_metric("Translation mode", translation_mode or "Unknown")}
         {_metric("Progress preview", _bool_label(user.progress_preview_enabled))}
+        {_metric("Support reports", "Unknown")}
         {_metric("First seen", user.first_seen_at.isoformat(timespec="seconds"))}
+        {_metric("Last seen", user.last_seen_at.isoformat(timespec="seconds"))}
       </div>
     </section>
     <section class="panel table-panel">
-      <table class="log-table">
+      <h3>Recent translations</h3>
+      <table class="log-table support-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Outcome</th>
+            <th>Job</th>
+            <th>File</th>
+            <th>Choice</th>
+            <th>Stage / error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{translation_rows}</tbody>
+      </table>
+    </section>
+    <section class="panel table-panel">
+      <h3>Recent activity</h3>
+      <table class="log-table support-table">
         <thead>
           <tr>
             <th>Time</th>
@@ -3156,13 +3229,167 @@ def user_detail_body(
             <th>Target</th>
             <th>Outcome</th>
             <th>Job</th>
-            <th>Metadata</th>
+            <th>Safe detail</th>
           </tr>
         </thead>
-        <tbody>{rows}</tbody>
+        <tbody>{activity_rows}</tbody>
       </table>
     </section>
     """
+
+
+def _support_translation_rows(
+    translations: tuple[TranslationRunSummary, ...],
+) -> str:
+    if not translations:
+        return """
+        <tr>
+          <td colspan="7" class="empty-cell">No linked translation runs found.</td>
+        </tr>
+        """
+    return "\n".join(_support_translation_row(row) for row in translations)
+
+
+def _support_translation_row(row: TranslationRunSummary) -> str:
+    run_id = Path(row.run_dir).name
+    started = _format_datetime(row.started_at)
+    file_name = _safe_support_text(row.file_name) or "unknown"
+    result_file_name = _safe_support_text(row.result_file_name)
+    result = f"<span>{escape(result_file_name)}</span>" if result_file_name else ""
+    source = _safe_support_text(row.source_language) or "unknown"
+    target = _safe_support_text(row.target_language) or "unknown"
+    document_kind = _safe_support_text(row.document_kind) or "unknown"
+    choice = f"{source} -> {target} · {document_kind}"
+    detail = _support_translation_stage(row)
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    details_link = _action_link(
+        "Details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
+    return f"""
+    <tr>
+      <td data-label="Started">{escape(started)}</td>
+      <td data-label="Outcome"><span class="status">{escape(row.status)}</span></td>
+      <td data-label="Job"><code>{escape(row.job_id)}</code></td>
+      <td data-label="File">
+        <strong>{escape(file_name)}</strong>
+        {result}
+      </td>
+      <td data-label="Choice">{escape(choice)}</td>
+      <td data-label="Stage / error">{escape(detail)}</td>
+      <td data-label="Actions">
+        <div class="job-actions">{trace_link}{details_link}</div>
+      </td>
+    </tr>
+    """
+
+
+def _support_translation_stage(row: TranslationRunSummary) -> str:
+    stage = _safe_support_text(row.current_stage) or row.status or "n/a"
+    if row.status in _FAILED_SUPPORT_TRANSLATION_STATUSES and row.error_message:
+        return f"{stage} (redacted error)"
+    return stage
+
+
+def _support_activity_rows(events: tuple[UserActivityEvent, ...]) -> str:
+    if not events:
+        return """
+        <tr>
+          <td colspan="7" class="empty-cell">No recent activity found.</td>
+        </tr>
+        """
+    return "\n".join(_support_activity_row(event) for event in events)
+
+
+def _support_activity_row(event: UserActivityEvent) -> str:
+    created = event.created_at.isoformat(timespec="seconds")
+    target = _safe_support_target(event)
+    detail = _safe_support_event_detail(event)
+    return f"""
+    <tr>
+      <td data-label="Time">{escape(created)}</td>
+      <td data-label="Surface">{escape(event.surface)}</td>
+      <td data-label="Event">
+        <strong>{escape(event.event_type)}</strong>
+        <span>{escape(event.action)}</span>
+      </td>
+      <td data-label="Target">{escape(target or "n/a")}</td>
+      <td data-label="Outcome"><span class="status">{escape(event.outcome)}</span></td>
+      <td data-label="Job"><code>{escape(event.job_id or "")}</code></td>
+      <td data-label="Safe detail">{escape(detail or "n/a")}</td>
+    </tr>
+    """
+
+
+def _safe_support_target(event: UserActivityEvent) -> str:
+    target_type = _safe_support_text(event.target_type)
+    target_id = _safe_support_text(event.target_id)
+    return " / ".join(part for part in (target_type, target_id) if part)
+
+
+def _safe_support_event_detail(event: UserActivityEvent) -> str:
+    details: list[str] = []
+    for key, label in _SUPPORT_METADATA_FIELDS:
+        value = event.metadata.get(key)
+        safe_value = _safe_support_metadata_value(key, value)
+        if safe_value:
+            details.append(f"{label}: {safe_value}")
+    return ", ".join(details[:5])
+
+
+def _safe_support_metadata_value(key: str, value: object) -> str:
+    if _has_unsafe_support_key(key):
+        return ""
+    return _safe_support_text(value)
+
+
+def _latest_support_metadata_value(
+    events: tuple[UserActivityEvent, ...],
+    key: str,
+    *,
+    fallback_target_type: str | None = None,
+) -> str | None:
+    for event in events:
+        safe_value = _safe_support_metadata_value(key, event.metadata.get(key))
+        if safe_value:
+            return safe_value
+        if fallback_target_type and event.target_type == fallback_target_type:
+            safe_target = _safe_support_text(event.target_id)
+            if safe_target:
+                return safe_target
+    return None
+
+
+def _safe_support_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return _bool_label(value)
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict | list | tuple | set):
+        return ""
+    text = " ".join(str(value).split())
+    if not text:
+        return ""
+    lowered = text.lower()
+    if any(marker in lowered for marker in _UNSAFE_SUPPORT_VALUE_MARKERS):
+        return ""
+    if len(text) > 240:
+        return f"{text[:237]}..."
+    return text
+
+
+def _has_unsafe_support_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(marker in lowered for marker in _UNSAFE_SUPPORT_KEY_MARKERS)
 
 
 def security_events_body(events: tuple[UserActivityEvent, ...]) -> str:
@@ -4656,12 +4883,20 @@ button.danger {
   border-collapse: collapse;
   min-width: 980px;
 }
+.support-table {
+  min-width: 0;
+  table-layout: fixed;
+}
 .log-table th,
 .log-table td {
   border-bottom: 1px solid var(--line);
   padding: 10px 8px;
   text-align: left;
   vertical-align: top;
+}
+.support-table th,
+.support-table td {
+  overflow-wrap: anywhere;
 }
 .log-table th {
   color: var(--muted);
@@ -4676,6 +4911,9 @@ button.danger {
 .log-table td .progress-mini span {
   color: var(--ink);
   font-size: 0.9rem;
+}
+.support-table .job-actions {
+  min-width: 0;
 }
 .empty-cell {
   color: var(--muted);
@@ -4701,6 +4939,59 @@ button.danger {
 }
 .error { color: var(--warn); }
 @media (max-width: 760px) {
+  .support-table,
+  .support-table thead,
+  .support-table tbody,
+  .support-table tr,
+  .support-table th,
+  .support-table td {
+    display: block;
+    width: 100%;
+  }
+  .support-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .support-table tr {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .support-table th,
+  .support-table td {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .support-table td {
+    display: grid;
+    grid-template-columns: minmax(82px, 0.36fr) minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+  }
+  .support-table td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .support-table td > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .support-table .job-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+  }
   body { grid-template-columns: 1fr; }
   .sidebar {
     min-height: auto;

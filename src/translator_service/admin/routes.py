@@ -75,6 +75,7 @@ from translator_service.admin.secrets import (
 )
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
+    TranslationRunSummary,
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
@@ -2394,7 +2395,41 @@ def _user_detail_body(settings: Settings, user_id: str) -> str:
     with _activity_store(settings) as store:
         profile = store.get_user_profile(user_id)
         events = store.list_events(actor_id=user_id)
-    return user_detail_body(profile, events)
+    translations = _user_translation_summaries(settings, user_id, events)
+    return user_detail_body(profile, events, translations=translations)
+
+
+def _user_translation_summaries(
+    settings: Settings,
+    user_id: str,
+    events: tuple[UserActivityEvent, ...],
+) -> tuple[TranslationRunSummary, ...]:
+    job_ids = {event.job_id for event in events if event.job_id}
+    run_ids = {
+        Path(event.translation_run_dir).name
+        for event in events
+        if event.translation_run_dir
+    }
+    rows: list[TranslationRunSummary] = []
+    seen_run_ids: set[str] = set()
+    for summary in list_translation_run_summaries(
+        settings.translation_run_log_root,
+        limit=500,
+    ):
+        run_id = Path(summary.run_dir).name
+        if (
+            summary.user_id != user_id
+            and summary.job_id not in job_ids
+            and run_id not in run_ids
+        ):
+            continue
+        if run_id in seen_run_ids:
+            continue
+        rows.append(summary)
+        seen_run_ids.add(run_id)
+        if len(rows) >= 25:
+            break
+    return tuple(rows)
 
 
 def _security_events_body(settings: Settings) -> str:
