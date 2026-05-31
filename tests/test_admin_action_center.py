@@ -264,6 +264,14 @@ class AdminActionCenterTest(unittest.TestCase):
         self.assertIn("ai_provider_runtime_stale", keys)
         self.assertIn("ai_provider_runtime_reload_pending", keys)
         self.assertIn("ai_provider_runtime_missing_channels", keys)
+        self.assertNotIn("ai_provider_runtime_degraded", keys)
+        missing_item = next(
+            item
+            for item in center.items
+            if item.key == "ai_provider_runtime_missing_channels"
+        )
+        self.assertEqual(missing_item.href, "/admin/ai-providers")
+        self.assertEqual(missing_item.title, "DeepSeek runtime has no active channels")
 
     def test_degraded_runtime_with_channels_gets_distinct_action(self):
         now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
@@ -312,7 +320,7 @@ class AdminActionCenterTest(unittest.TestCase):
             "DeepSeek provider",
         )
         self.assertIn(
-            "active channels",
+            "active DeepSeek channels",
             by_key["ai_provider_runtime_degraded"].detail,
         )
         self.assertIn(
@@ -391,6 +399,53 @@ class AdminActionCenterTest(unittest.TestCase):
             ["ai_provider_runtime_not_reporting"],
         )
         self.assertEqual(center.items[0].href, "/admin/ai-providers")
+
+    def test_degraded_runtime_with_active_channels_creates_distinct_action(self):
+        now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        raw_secret = "sk-runtime-secret"
+        raw_prompt = "Translate this private source text"
+        center = build_action_center(
+            integration_summaries=(),
+            integration_connections={},
+            failed_today=0,
+            tokens_today=0,
+            disk_percent=10.0,
+            deepseek_key_count=1,
+            runtime_statuses=(
+                AIProviderRuntimeStatus(
+                    provider_id="deepseek",
+                    source="admin_store",
+                    status="degraded",
+                    reload_interval_seconds=30.0,
+                    last_reloaded_at=now,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="stable",
+                            weight=1,
+                            max_parallel_requests=1,
+                            health="cooling_down",
+                            error_kind="provider_error",
+                            last_error_excerpt=f"{raw_secret} {raw_prompt}",
+                        ),
+                    ),
+                    error=f"{raw_secret} {raw_prompt}",
+                ),
+            ),
+            now=now,
+        )
+
+        self.assertEqual(
+            [item.key for item in center.items],
+            ["ai_provider_runtime_degraded"],
+        )
+        item = center.items[0]
+        rendered_action_text = f"{item.title} {item.detail}"
+        self.assertEqual(item.href, "/admin/ai-providers")
+        self.assertEqual(item.title, "DeepSeek runtime is degraded")
+        self.assertIn("active DeepSeek channels", item.detail)
+        self.assertNotIn("DeepSeek runtime has no active channels", rendered_action_text)
+        self.assertNotIn(raw_secret, rendered_action_text)
+        self.assertNotIn(raw_prompt, rendered_action_text)
 
     def test_healthy_runtime_does_not_create_action(self):
         now = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
