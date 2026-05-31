@@ -235,6 +235,23 @@ Owner decisions recorded during issue #71:
   reservations in live runtime data, change beta limits/pricing/provider
   behavior, alter schema/state, perform deployment/server operations, read real
   `.env*`, or claim release readiness.
+- 2026-05-31: Issue
+  [#161](https://github.com/ogirkoviylord/folioloom_main/issues/161)
+  implementation slice is locally verified on branch
+  `codex/issue-161-scheduled-progress-mismatch`. Admin translation logs,
+  translation details, trace and user support translation summaries now overlay
+  active scheduled-job progress from the read-only operations/work-unit view
+  when the run artifact still shows stale `0/N` fragments and `0` tokens.
+  The run artifacts remain unchanged; the admin read model reports metadata-only
+  counts, progress percent, token totals, timestamps, status and safe error
+  excerpt from scheduler state. Local verification: focused admin routes/live/
+  logs/trace/operations/action-center tests passed, full unittest discover ran
+  1161 tests with `OK (skipped=13)`, compileall passed, and targeted
+  `ruff --select F,I` on changed Python files passed. CI status remains Unknown
+  until a PR/checks page is inspected. This does not perform live runtime-data
+  repair, mutate scheduler/job/work-unit state, change schema, deploy or
+  restart server services, change provider behavior, read real `.env*`, or
+  claim release readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
