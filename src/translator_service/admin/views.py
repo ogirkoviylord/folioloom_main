@@ -2866,7 +2866,7 @@ def upload_safety_body(
     if not rows:
         rows = """
         <tr>
-          <td colspan="9" class="empty-cell">No upload safety records found.</td>
+          <td colspan="10" class="empty-cell">No upload safety records found.</td>
         </tr>
         """
     top_reason_codes = ", ".join(
@@ -2929,6 +2929,7 @@ def upload_safety_body(
           <tr>
             <th>Time</th>
             <th>User</th>
+            <th>File / Job</th>
             <th>Format</th>
             <th>Size</th>
             <th>AV</th>
@@ -3014,12 +3015,16 @@ def _upload_safety_row(record: UploadSafetyAdminRecord) -> str:
         access = ", ".join(part for part in (access, "worker") if part)
     if not access:
         access = "none"
+    file_or_job = record.sanitized_original_filename or "n/a"
+    if record.job_id:
+        file_or_job = f"{file_or_job} / {record.job_id}"
     return f"""
       <tr>
         <td><a href="/admin/upload-safety/{escape(record.upload_id)}">
           {escape(_format_datetime(record.created_at))}
         </a></td>
         <td>{escape(record.channel_user_id)}</td>
+        <td>{escape(file_or_job)}</td>
         <td>{escape(record.declared_format)} / {escape(record.detected_format)}</td>
         <td>{escape(str(record.size_bytes))}</td>
         <td>{escape(record.av_verdict)}</td>

@@ -36,6 +36,7 @@ from translator_service.translation_policy import (
 class PersistentJobPlan:
     job: PersistentTranslationJob
     work_units: list[PersistentWorkUnit]
+    estimated_input_tokens: int
 
 
 def create_persistent_txt_job_plan(
@@ -104,6 +105,7 @@ def create_persistent_txt_job_plan(
     return PersistentJobPlan(
         job=job,
         work_units=store.add_work_units(job.id, plans),
+        estimated_input_tokens=adapter_plan.estimated_input_tokens,
     )
 
 
@@ -174,6 +176,7 @@ def create_persistent_docx_job_plan(
     return PersistentJobPlan(
         job=job,
         work_units=store.add_work_units(job.id, plans),
+        estimated_input_tokens=adapter_plan.estimated_input_tokens,
     )
 
 
@@ -240,6 +243,7 @@ def create_persistent_epub_job_plan(
     return PersistentJobPlan(
         job=job,
         work_units=store.add_work_units(job.id, plans),
+        estimated_input_tokens=adapter_plan.estimated_input_tokens,
     )
 
 
