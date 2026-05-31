@@ -14,7 +14,12 @@ from tempfile import TemporaryDirectory
 
 from translator_service.admin.translation_logs import list_translation_run_summaries
 from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
-from translator_service.beta_safety import BetaSafetyDecision, JobCostEstimate
+from translator_service.beta_safety import (
+    BetaSafetyDecision,
+    BetaSafetyRates,
+    JobCostEstimate,
+    estimate_cost_usd,
+)
 from translator_service.bot_translation_service import (
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
@@ -43,6 +48,8 @@ from translator_service.format_adapters import (
     DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
     DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     TXT_ADAPTER_VERSION,
+    plan_epub_translation,
+    plan_txt_translation,
 )
 from translator_service.job_runner import (
     DocumentKind,
@@ -190,6 +197,28 @@ class RecordingBetaSafetyGuard:
         self.usage_events.append(
             (job_id, user_id, work_unit_id, prompt_tokens, completion_tokens)
         )
+
+
+class CostCapRecordingBetaSafetyGuard(RecordingBetaSafetyGuard):
+    def __init__(self, *, max_estimated_cost_usd: float) -> None:
+        super().__init__()
+        self.max_estimated_cost_usd = max_estimated_cost_usd
+
+    def reserve_job(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        estimate: JobCostEstimate,
+    ) -> BetaSafetyDecision:
+        self.reservations.append((job_id, user_id, estimate))
+        if estimate.estimated_cost_usd > self.max_estimated_cost_usd:
+            return BetaSafetyDecision(
+                allowed=False,
+                reason_code="job_estimate_cap",
+                safe_message="This translation cannot start under the current beta limits.",
+            )
+        return self.can_start_new_work()
 
 
 class SecurityEventTranslator(RecordingTranslator):
@@ -614,9 +643,14 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(events[0].target_id, upload.upload_safety_id)
             self.assertEqual(events[0].metadata["final_action"], "accepted")
             self.assertEqual(events[0].metadata["av_verdict"], "clean")
+            self.assertEqual(
+                events[0].metadata["sanitized_original_filename"],
+                "notes.txt",
+            )
             upload_digest_prefix = upload.upload_safety_id.split(":")[2][:8]
             self.assertEqual(events[0].metadata["short_hash"], upload_digest_prefix)
-            self.assertNotIn("notes.txt", json.dumps(events[0].metadata))
+            self.assertNotIn("This is an English document", json.dumps(events[0].metadata))
+            self.assertNotIn("original/", json.dumps(events[0].metadata))
             self.assertEqual(service.get_pending_upload(42), upload)
 
     def test_required_blocked_scan_records_upload_safety_activity_metadata(self):
@@ -656,11 +690,15 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertEqual(events[0].metadata["final_action"], "blocked")
             self.assertEqual(events[0].metadata["reason_code"], "infected")
             self.assertEqual(events[0].metadata["av_verdict"], "infected")
+            self.assertEqual(
+                events[0].metadata["sanitized_original_filename"],
+                "notes.txt",
+            )
             self.assertFalse(events[0].metadata["parser_access_granted"])
             self.assertFalse(events[0].metadata["worker_access_granted"])
             serialized_metadata = json.dumps(events[0].metadata)
-            self.assertNotIn("notes.txt", serialized_metadata)
             self.assertNotIn("Private source text", serialized_metadata)
+            self.assertNotIn("quarantine/", serialized_metadata)
 
     def test_required_missing_scan_fails_before_parser_or_pending_upload(self):
         sandbox = RecordingDocumentSandbox()
@@ -807,8 +845,12 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             self.assertEqual(events[0].metadata["reason_code"], "zip_invalid_signature")
             serialized_metadata = json.dumps(events[0].metadata)
-            self.assertNotIn("book.docx", serialized_metadata)
+            self.assertEqual(
+                events[0].metadata["sanitized_original_filename"],
+                "book.docx",
+            )
             self.assertNotIn("plain text", serialized_metadata)
+            self.assertNotIn("quarantine/", serialized_metadata)
 
     def test_clean_scanned_unsafe_zip_container_records_metadata_only_block(self):
         with TemporaryDirectory() as temp_dir:
@@ -3209,6 +3251,8 @@ class BotTranslationServiceTest(unittest.TestCase):
             persistent_store = SQLiteTranslationJobStore(db_path)
             self.addCleanup(persistent_store.close)
             ledger = InMemoryUploadSafetyLedger()
+            activity_store = SQLiteUserActivityStore(Path(temp_dir) / "admin.sqlite3")
+            self.addCleanup(activity_store.close)
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -3216,11 +3260,13 @@ class BotTranslationServiceTest(unittest.TestCase):
                 max_fragment_chars=20,
                 file_storage=storage,
                 persistent_job_store=persistent_store,
+                translation_run_log_root=Path(temp_dir) / "translation-runs",
                 document_scanner=FakeDocumentScanner(
                     default_verdict=ScannerVerdict.CLEAN
                 ),
                 require_upload_scan=True,
                 upload_safety_ledger=ledger,
+                activity_store=activity_store,
             )
             uploaded = service.store_uploaded_document(
                 user_telegram_id=42,
@@ -3246,6 +3292,14 @@ class BotTranslationServiceTest(unittest.TestCase):
 
             persisted_job = persistent_store.get_job(job.id)
             translation_policy = json.loads(persisted_job.translation_policy)
+            run_dir = next((Path(temp_dir) / "translation-runs").iterdir())
+            run_snapshot = json.loads(
+                (run_dir / "run.json").read_text(encoding="utf-8")
+            )
+            run_policy = json.loads(run_snapshot["translation_policy"])
+            activity_events = activity_store.list_events(
+                event_type="security.upload_safety.summary"
+            )
             self.assertEqual(
                 translation_policy["upload_safety"],
                 {
@@ -3253,6 +3307,19 @@ class BotTranslationServiceTest(unittest.TestCase):
                     "source_gate": "upload_safety_ledger",
                     "upload_safety_id": uploaded.upload_safety_id,
                 },
+            )
+            self.assertEqual(
+                run_policy["upload_safety"],
+                {
+                    "source_gate": "upload_safety_ledger",
+                    "upload_safety_id": uploaded.upload_safety_id,
+                },
+            )
+            self.assertNotIn("accepted_source_object_key", run_policy["upload_safety"])
+            self.assertEqual(activity_events[0].job_id, job.id)
+            self.assertEqual(
+                activity_events[0].translation_run_dir,
+                str(run_dir),
             )
 
     def test_persistent_confirmation_reserves_beta_safety_before_deferred_queue(self):
@@ -3274,10 +3341,11 @@ class BotTranslationServiceTest(unittest.TestCase):
                 defer_persistent_jobs_to_worker=True,
                 beta_safety_guard=guard,
             )
+            content = b"One.\n\nTwo."
             service.store_uploaded_document(
                 user_telegram_id=42,
                 file_name="notes.txt",
-                content=b"One.\n\nTwo.",
+                content=content,
                 source_language="en",
             )
             service.confirm_pending_upload_rights(user_telegram_id=42)
@@ -3300,8 +3368,109 @@ class BotTranslationServiceTest(unittest.TestCase):
             reserved_job_id, reserved_user_id, estimate = guard.reservations[0]
             self.assertEqual(reserved_job_id, job.id)
             self.assertEqual(reserved_user_id, persisted.user_id)
-            self.assertEqual(estimate.prompt_tokens, 3)
-            self.assertEqual(estimate.completion_tokens, 3)
+            planned = plan_txt_translation(
+                content=content,
+                max_fragment_chars=5,
+            )
+            self.assertEqual(estimate.prompt_tokens, planned.estimated_input_tokens)
+            self.assertEqual(
+                estimate.completion_tokens,
+                planned.estimated_input_tokens,
+            )
+            self.assertEqual(guard.releases, [])
+
+    def test_persistent_epub_beta_safety_uses_planned_tokens_not_fragment_capacity(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            max_fragment_chars = 4000
+            body = "".join(
+                (
+                    "<p><span>a</span><span>b</span>"
+                    f"<span>c</span><span>d</span> unit {index}</p>"
+                )
+                for index in range(1500)
+            )
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": (
+                        '<html xmlns="http://www.w3.org/1999/xhtml">'
+                        f"<body>{body}</body></html>"
+                    ),
+                }
+            )
+            planned = plan_epub_translation(
+                content=content,
+                max_fragment_chars=max_fragment_chars,
+            )
+            rates = BetaSafetyRates()
+            old_capacity_tokens = (
+                planned.fragment_count * max_fragment_chars + 3
+            ) // 4
+            old_capacity_cost = estimate_cost_usd(
+                prompt_tokens=old_capacity_tokens,
+                completion_tokens=old_capacity_tokens,
+                rates=rates,
+            )
+            planned_cost = estimate_cost_usd(
+                prompt_tokens=planned.estimated_input_tokens,
+                completion_tokens=planned.estimated_input_tokens,
+                rates=rates,
+            )
+            self.assertGreater(planned.fragment_count, 1000)
+            self.assertGreater(old_capacity_cost, 2.0)
+            self.assertLessEqual(planned_cost, 2.0)
+
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            guard = CostCapRecordingBetaSafetyGuard(max_estimated_cost_usd=2.0)
+            translator = RecordingTranslator()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=max_fragment_chars,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                defer_persistent_jobs_to_worker=True,
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="many-small-units.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(len(guard.reservations), 1)
+            _, _, estimate = guard.reservations[0]
+            self.assertEqual(estimate.prompt_tokens, planned.estimated_input_tokens)
+            self.assertEqual(
+                estimate.completion_tokens,
+                planned.estimated_input_tokens,
+            )
+            self.assertLessEqual(estimate.estimated_cost_usd, 2.0)
+            self.assertEqual(
+                len(persistent_store.list_work_units(job.id)),
+                planned.fragment_count,
+            )
             self.assertEqual(guard.releases, [])
 
     def test_repeated_persistent_translation_creates_distinct_attempt_jobs(self):
