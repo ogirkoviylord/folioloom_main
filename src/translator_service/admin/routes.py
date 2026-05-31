@@ -75,10 +75,12 @@ from translator_service.admin.secrets import (
 )
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
+    TranslationRunSummary,
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
 )
+from translator_service.admin.translation_trace import build_translation_trace
 from translator_service.admin.upload_safety import (
     UPLOAD_SAFETY_ACTIVITY_EVENT_TYPE,
     UploadSafetyFilters,
@@ -102,6 +104,7 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    translation_trace_body,
     upload_safety_body,
     upload_safety_detail_body,
     user_detail_body,
@@ -144,6 +147,7 @@ _ACTIVE_TRANSLATION_STATUSES = {
     "started",
     "translating",
 }
+_FAILED_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
 def create_admin_router(settings: Settings) -> APIRouter:
@@ -364,6 +368,23 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/beta-controls", response_class=HTMLResponse)
+    async def beta_controls(request: Request) -> Response:
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Beta Controls",
+            active="beta_controls",
+            body=lambda session: settings_body(
+                _secret_safety_report(settings),
+                beta_allowlist_enabled=_beta_allowlist_policy(settings).enabled,
+                beta_allowlist_ids=_beta_allowlist_ids(settings),
+                beta_safety_settings=_beta_safety_setting_values(settings),
+                csrf_token=session.csrf_token,
+            ),
+        )
+
     @router.post("/settings/beta-allowlist/toggle")
     async def toggle_beta_allowlist(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
@@ -523,6 +544,26 @@ def create_admin_router(settings: Settings) -> APIRouter:
             ),
         )
 
+    @router.get("/translations", response_class=HTMLResponse)
+    async def translations(request: Request) -> Response:
+        filters = _log_filters(request)
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translations",
+            active="translations",
+            body=lambda session: logs_body(
+                list_translation_run_summaries(
+                    settings.translation_run_log_root,
+                    **filters,
+                ),
+                title="Translations",
+                form_action="/admin/translations",
+                **filters,
+            ),
+        )
+
     @router.get("/logs/{run_id}", response_class=HTMLResponse)
     async def log_detail(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
@@ -540,6 +581,39 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Details",
             active="logs",
             body=log_detail_body(details),
+        )
+
+    @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
+    async def translation_trace(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = get_translation_run_details(
+            settings.translation_run_log_root,
+            run_id,
+        )
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        activity_events: tuple[UserActivityEvent, ...] = ()
+        if details.summary.job_id:
+            with _activity_store(settings) as store:
+                activity_events = store.list_events(
+                    job_id=details.summary.job_id,
+                    limit=25,
+                )
+        trace = build_translation_trace(
+            details,
+            operations=_operations_overview(settings),
+            activity_events=activity_events,
+            runtime_statuses=_ai_provider_runtime_statuses(settings),
+            balance_snapshot=_deepseek_balance_snapshot(settings),
+        )
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Trace",
+            active="translations",
+            body=translation_trace_body(trace),
         )
 
     @router.get("/logs/{run_id}/download")
@@ -1822,7 +1896,7 @@ def _ai_provider_runtime_payload(
         "provider_state": _ai_provider_runtime_provider_state_payload(
             status.provider_state
         ),
-        "error": _safe_runtime_text(status.error),
+        "error": _safe_runtime_error_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
         "reload_requested_by": (
             reload_state.actor_id if reload_state is not None else None
@@ -1847,7 +1921,7 @@ def _ai_provider_runtime_provider_state_payload(state):
         "available_slots": state.available_slots,
         "circuit_state": _safe_runtime_text(state.circuit_state),
         "circuit_open_remaining_seconds": state.circuit_open_remaining_seconds,
-        "last_reason": _safe_runtime_text(state.last_reason),
+        "last_reason": _safe_runtime_error_text(state.last_reason),
         "total_ramp_ups": state.total_ramp_ups,
         "total_decreases": state.total_decreases,
         "total_circuit_opened": state.total_circuit_opened,
@@ -1881,7 +1955,7 @@ def _ai_provider_runtime_channel_payload(channel):
         "average_latency_ms": channel.average_latency_ms,
         "last_latency_ms": channel.last_latency_ms,
         "error_kind": _safe_runtime_text(channel.error_kind),
-        "last_error_excerpt": _safe_runtime_text(channel.last_error_excerpt),
+        "last_error_excerpt": _safe_runtime_error_text(channel.last_error_excerpt),
     }
 
 
@@ -1889,6 +1963,12 @@ def _safe_runtime_text(value: str | None) -> str | None:
     if value is None:
         return None
     return _redact_sensitive_text(value)
+
+
+def _safe_runtime_error_text(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    return "[redacted]"
 
 
 def _deepseek_balance_snapshot(settings: Settings) -> ProviderBalanceSnapshot | None:
@@ -1948,14 +2028,21 @@ def _overview_action_center(settings: Settings):
     integration_summaries = _integration_summaries(settings)
     integration_connections = _integration_connection_groups(settings)
     ai_provider_key_pools = _ai_provider_key_pools(settings)
-    live_snapshot = _live_snapshot(settings)
+    operations = _operations_overview(settings)
+    live_snapshot = _live_snapshot(settings, operations=operations)
     secret_safety_report = _secret_safety_report(settings)
     return build_action_center(
         integration_summaries=integration_summaries,
         integration_connections=integration_connections,
         failed_today=live_snapshot.failed_today,
+        failed_translation_runs=_overview_failed_translation_runs(
+            settings,
+            now=live_snapshot.generated_at,
+        ),
         tokens_today=live_snapshot.tokens_today,
         disk_percent=live_snapshot.server.disk_percent,
+        queued_translations=live_snapshot.queued_translations,
+        oldest_pending_age_seconds=operations.oldest_pending_age_seconds,
         deepseek_key_count=_deepseek_key_count(ai_provider_key_pools),
         secret_safety_issue_count=secret_safety_report.issue_count,
         bootstrap_config=bootstrap_config,
@@ -1976,6 +2063,21 @@ def _decimal_setting(value: str) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _overview_failed_translation_runs(settings: Settings, *, now: datetime):
+    today = now.astimezone(UTC).date()
+    return tuple(
+        run
+        for run in list_translation_run_summaries(
+            settings.translation_run_log_root,
+            limit=25,
+            now=now,
+        )
+        if run.status in _FAILED_TRANSLATION_STATUSES
+        and run.started_at is not None
+        and run.started_at.astimezone(UTC).date() == today
+    )
 
 
 def _secret_safety_report(settings: Settings):
@@ -2020,10 +2122,13 @@ def _deepseek_key_count(ai_provider_key_pools) -> int:
     )
 
 
-def _live_snapshot(settings: Settings):
+def _live_snapshot(settings: Settings, *, operations=None):
+    active_operations = (
+        operations if operations is not None else _operations_overview(settings)
+    )
     return build_live_monitor_snapshot(
         settings.translation_run_log_root,
-        operations=_operations_overview(settings),
+        operations=active_operations,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
     )
 
@@ -2290,7 +2395,41 @@ def _user_detail_body(settings: Settings, user_id: str) -> str:
     with _activity_store(settings) as store:
         profile = store.get_user_profile(user_id)
         events = store.list_events(actor_id=user_id)
-    return user_detail_body(profile, events)
+    translations = _user_translation_summaries(settings, user_id, events)
+    return user_detail_body(profile, events, translations=translations)
+
+
+def _user_translation_summaries(
+    settings: Settings,
+    user_id: str,
+    events: tuple[UserActivityEvent, ...],
+) -> tuple[TranslationRunSummary, ...]:
+    job_ids = {event.job_id for event in events if event.job_id}
+    run_ids = {
+        Path(event.translation_run_dir).name
+        for event in events
+        if event.translation_run_dir
+    }
+    rows: list[TranslationRunSummary] = []
+    seen_run_ids: set[str] = set()
+    for summary in list_translation_run_summaries(
+        settings.translation_run_log_root,
+        limit=500,
+    ):
+        run_id = Path(summary.run_dir).name
+        if (
+            summary.user_id != user_id
+            and summary.job_id not in job_ids
+            and run_id not in run_ids
+        ):
+            continue
+        if run_id in seen_run_ids:
+            continue
+        rows.append(summary)
+        seen_run_ids.add(run_id)
+        if len(rows) >= 25:
+            break
+    return tuple(rows)
 
 
 def _security_events_body(settings: Settings) -> str:

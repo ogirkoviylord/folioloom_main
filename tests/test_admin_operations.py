@@ -256,7 +256,7 @@ class AdminOperationsTest(unittest.TestCase):
                     },
                 ),
             },
-            job_log_hrefs={"job-ready": "/admin/logs"},
+            job_log_hrefs={"job-ready": "/admin/logs/run-ready"},
         )
 
         by_id = {job.id: job for job in overview.jobs}
@@ -271,7 +271,7 @@ class AdminOperationsTest(unittest.TestCase):
         self.assertNotIn("sk-live", by_id["job-failed"].error_excerpt)
         self.assertTrue(by_id["job-failed"].error_excerpt.endswith("..."))
         self.assertEqual(by_id["job-ready"].state, JOB_STATE_SUCCEEDED)
-        self.assertEqual(by_id["job-ready"].log_href, "/admin/logs")
+        self.assertEqual(by_id["job-ready"].log_href, "/admin/logs/run-ready")
 
     def test_operations_body_renders_jobs_table_with_safe_actions_and_logs(self):
         overview = build_operations_overview(
@@ -296,7 +296,7 @@ class AdminOperationsTest(unittest.TestCase):
                     },
                 ),
             },
-            job_log_hrefs={"job-ready": "/admin/logs"},
+            job_log_hrefs={"job-ready": "/admin/logs/run-ready"},
         )
 
         html = operations_body(overview)
@@ -306,7 +306,7 @@ class AdminOperationsTest(unittest.TestCase):
         self.assertIn("order-1", html)
         self.assertIn("worker-a", html)
         self.assertIn("10", html)
-        self.assertIn('href="/admin/logs"', html)
+        self.assertIn('href="/admin/translations/run-ready/trace"', html)
         self.assertIn(">Retry unavailable<", html)
         self.assertIn(">Pause<", html)
         self.assertIn(">Cancel<", html)
@@ -317,7 +317,11 @@ class AdminOperationsTest(unittest.TestCase):
         self.assertNotIn("sk-live", html)
 
     def test_operations_body_rejects_unsafe_log_href(self):
-        for unsafe_href in ("javascript:alert(1)", "https://example.test/logs"):
+        for unsafe_href in (
+            "javascript:alert(1)",
+            "https://example.test/logs",
+            "/admin/logs",
+        ):
             with self.subTest(unsafe_href=unsafe_href):
                 overview = build_operations_overview(
                     jobs=[
@@ -333,7 +337,7 @@ class AdminOperationsTest(unittest.TestCase):
                 html = operations_body(overview)
 
                 self.assertNotIn(unsafe_href, html)
-                self.assertIn('href="/admin/logs"', html)
+                self.assertIn("No run", html)
 
     def test_persistent_overview_includes_cancelled_and_expired_jobs(self):
         with TemporaryDirectory() as temp_dir:
