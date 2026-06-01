@@ -166,10 +166,19 @@ separate owner approval.
 
 ### Later EPUB renderer spike
 
-Evaluate whether the semantic/block preview is enough or whether a book-like
-reader such as `epub.js` is worth adding later. EPUBCheck remains the approved
-local/offline validation reference for Gate B, not a production dependency by
-default.
+Issue [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184)
+records the current EPUB renderer recommendation in
+`docs/superpowers/specs/2026-06-01-epub-internal-reader-rendering-spike.md`:
+keep EPUB on the semantic/block reader for now, consider a generated
+XHTML/spine/chapter local report before adding a book-like reader dependency,
+and keep EPUBCheck as validation/reference only.
+
+Options considered:
+
+- semantic/block preview from existing adapter plans;
+- generated XHTML/spine/chapter preview;
+- `epub.js`-style book-like rendering;
+- local/offline EPUBCheck validation relationship.
 
 ## Suggested Task Breakdown
 
