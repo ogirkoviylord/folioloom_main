@@ -88,7 +88,9 @@ Default design direction:
   verdict, scanner name/version, signature database version and safe error
   class;
 - keep raw document text, extracted snippets, prompts, translations and secrets
-  out of logs, admin views and release artifacts.
+  out of logs, release artifacts and normal admin views. The approved
+  owner-only translation Text diagnostics surface is the only raw-text admin
+  exception and is not an upload-safety surface.
 
 Suggested verdict handling for closed beta:
 
@@ -180,13 +182,16 @@ Do not show stack traces, parser internals or extracted raw document text.
 
 ## Logs And Admin Safety
 
-- Logs/admin must not contain raw document text.
+- Logs/admin must not contain raw document text outside the approved
+  owner-only translation Text diagnostics surface.
 - Logs may contain safe metadata: job id, user id, format, file size, work-unit
   counts, status, error class, adapter/profile/model versions and safe
   diagnostics.
 - Secrets must remain masked.
 - Provider prompts/responses must not be stored in admin by default.
 - Downloadable run archives must be checked for raw text leakage before beta.
+  They must not include the owner-only Text diagnostics raw source/translation
+  payloads.
 
 ## Closed-Beta TTL Defaults
 
@@ -232,4 +237,5 @@ exposure; and no impact on live runtime data.
   enabled.
 - [ ] Explicit delete removes or schedules removal of source/final/partial
   objects according to policy.
-- [x] Logs/admin contain metadata only, no raw document text.
+- [x] Logs/admin contain metadata only, no raw document text, except for the
+  approved owner-only translation Text diagnostics surface.

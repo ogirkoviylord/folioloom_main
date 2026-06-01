@@ -96,7 +96,9 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [ ] Admin remains SSH-tunnel-only.
 - [ ] No payment UI is exposed.
 - [ ] No paid job can be started.
-- [ ] Logs/admin do not expose raw document text.
+- [ ] Logs/admin do not expose raw document text outside the approved
+  owner-only Text diagnostics surface; safe archives, telemetry, normal admin
+  pages and support artifacts remain redacted.
 - [x] Beta safety telemetry stores safe budget metadata only: job/user ids,
   reservations, usage counts, costs, statuses and reason codes. It does not
   store raw document text, prompts, translations or API keys.

@@ -133,7 +133,9 @@ rights basis, dependency impact and verification plan.
 - Admin settings include closed-beta allowlist ID add/remove controls and a
   live enforcement toggle. The toggle defaults off so the bot remains open
   while the owner collects candidate IDs.
-- Admin must not show raw document text by default.
+- Admin must not show raw document text by default. The approved exception is
+  the SSH-tunneled owner-only Text diagnostics surface for translation incident
+  debugging.
 - Admin must not show real secrets.
 - DeepSeek keys added through admin and DeepSeek keys from `.env` are additive
   sources for runtime/balance use; admin keys do not disable existing env keys.
