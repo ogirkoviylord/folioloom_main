@@ -56,6 +56,7 @@ from translator_service.bot.runtime import (
     _settings_keyboard,
     _should_schedule_progress_edit,
     _UserActionInFlightGuard,
+    bot_runtime_config_from_settings,
     build_beta_safety_guard,
     build_deepseek_translator,
     build_default_pricing_rules,
@@ -419,6 +420,42 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.callback_spam_burst_limit, 20)
         self.assertEqual(config.callback_spam_burst_window_seconds, 10.0)
         self.assertEqual(config.user_action_lock_ttl_seconds, 900.0)
+
+    def test_runtime_config_maps_production_scanner_fail_closed_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+            },
+            clear=True,
+        ):
+            config = bot_runtime_config_from_settings(Settings())
+
+        self.assertTrue(config.require_upload_scan)
+        self.assertEqual(config.upload_scanner_backend, "clamd")
+        self.assertEqual(config.clamd_host, "clamd")
+        self.assertIsInstance(
+            build_document_scanner(config),
+            LimitedConcurrencyDocumentScanner,
+        )
+
+    def test_runtime_config_maps_server_beta_scanner_fail_closed_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "server-beta",
+            },
+            clear=True,
+        ):
+            config = bot_runtime_config_from_settings(Settings())
+
+        self.assertTrue(config.require_upload_scan)
+        self.assertEqual(config.upload_scanner_backend, "clamd")
+        self.assertEqual(config.clamd_host, "clamd")
+        self.assertIsInstance(
+            build_document_scanner(config),
+            LimitedConcurrencyDocumentScanner,
+        )
 
     def test_translation_service_uses_postgres_store_for_postgres_backend(self):
         fake_store = _FakePostgresStore()
