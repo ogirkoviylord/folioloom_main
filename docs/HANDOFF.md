@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## 1. Текущее состояние проекта
 
@@ -328,6 +328,22 @@ core flow, release gates, operational visibility and documentation.
   the upload hardening/quarantine baseline checked for local synthetic evidence.
   This does not close TTL cleanup, approved beta-server smoke or full Gate B
   readiness;
+- GitHub issue [#173](https://github.com/ogirkoviylord/folioloom_main/issues/173)
+  is approved for a focused implementation slice as of 2026-06-01. Owner
+  approved fail-closed beta upload scanning, Docker/env scanner config updates,
+  focused tests and docs, while forbidding real `.env*` access, live runtime
+  data operations and server smoke without separate exact approval. The slice
+  restores production-like runtime scanner defaults to local/internal `clamd`
+  when scanner env is absent and raises the documented beta `clamd` memory
+  default above the OOM-prone `1g` limit. Owner-approved metadata-only 173D
+  server smoke on 2026-06-01 found the current beta runtime still mismatched:
+  `folioloom-clamd-1` was `unhealthy`, app settings inside the running bot
+  container reported scanner enforcement disabled with backend `none` and
+  `clamd_host=127.0.0.1`, scanner env names were absent, and the internal
+  `clamd` EICAR check failed with `clamd is unavailable`. No real `.env*`,
+  runtime files, object keys, user files or raw document text were read or
+  printed. Target-host adequacy for the new `2g` default remains Unknown until
+  the fixed config is deployed and re-smoked with owner approval;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
 - выполнить owner-approved Beta Operations Console redesign in small scoped

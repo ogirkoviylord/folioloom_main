@@ -53,12 +53,36 @@ if [ "${ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS:-0}" = "1" ]; then
 fi
 docker compose exec -T api python -m translator_service.admin.deployment_smoke
 docker compose exec -T bot python -m translator_service.admin.deployment_smoke $admin_smoke_args
+scanner_settings=$(
+  docker compose exec -T bot python - <<'PY'
+from translator_service.config import Settings
+
+settings = Settings()
+print(f"require_upload_scan={'true' if settings.require_upload_scan else 'false'}")
+print(f"upload_scanner_backend={settings.upload_scanner_backend}")
+print(f"clamd_host={settings.clamd_host}")
+print(f"clamd_port={settings.clamd_port}")
+print(f"clamd_timeout_seconds={settings.clamd_timeout_seconds}")
+print(f"clamd_response_limit_bytes={settings.clamd_response_limit_bytes}")
+PY
+)
+printf '%s\n' "$scanner_settings"
+app_require_upload_scan=$(printf '%s\n' "$scanner_settings" | sed -n 's/^require_upload_scan=//p')
+app_upload_scanner_backend=$(printf '%s\n' "$scanner_settings" | sed -n 's/^upload_scanner_backend=//p')
+app_clamd_host=$(printf '%s\n' "$scanner_settings" | sed -n 's/^clamd_host=//p')
+app_clamd_port=$(printf '%s\n' "$scanner_settings" | sed -n 's/^clamd_port=//p')
+app_clamd_timeout_seconds=$(printf '%s\n' "$scanner_settings" | sed -n 's/^clamd_timeout_seconds=//p')
+app_clamd_response_limit_bytes=$(printf '%s\n' "$scanner_settings" | sed -n 's/^clamd_response_limit_bytes=//p')
+if [ "$app_require_upload_scan" = "true" ] && [ "$app_upload_scanner_backend" != "clamd" ]; then
+  echo "App Settings require upload scan but upload_scanner_backend is not clamd." >&2
+  exit 2
+fi
 set -- \
-  --host "${CLAMD_HOST:-clamd}" \
-  --port "${CLAMD_PORT:-3310}" \
-  --timeout "${CLAMD_TIMEOUT_SECONDS:-10.0}" \
-  --response-limit-bytes "${CLAMD_RESPONSE_LIMIT_BYTES:-4096}"
-if [ "${REQUIRE_UPLOAD_SCAN:-false}" = "true" ]; then
+  --host "${app_clamd_host:-clamd}" \
+  --port "${app_clamd_port:-3310}" \
+  --timeout "${app_clamd_timeout_seconds:-10.0}" \
+  --response-limit-bytes "${app_clamd_response_limit_bytes:-4096}"
+if [ "$app_require_upload_scan" = "true" ]; then
   set -- "$@" --scan-eicar
 fi
 docker compose exec -T bot python -m translator_service.clamd_runtime "$@"
