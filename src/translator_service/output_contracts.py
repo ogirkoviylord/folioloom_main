@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from enum import StrEnum
 from xml.etree import ElementTree
@@ -23,6 +24,7 @@ class TranslationBatchRejectionReason(StrEnum):
 class TranslationBatchValidationResult:
     translated_texts: tuple[str, ...] | None
     rejection_reason: TranslationBatchRejectionReason | None = None
+    normalized_text: str | None = None
 
 
 def parse_translation_batch_contract(
@@ -43,6 +45,35 @@ def validate_translation_batch_contract(
     *,
     expected_count: int,
     required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> TranslationBatchValidationResult:
+    return _validate_translation_batch_contract(
+        translated_text,
+        expected_count=expected_count,
+        required_markers=required_markers,
+        allow_provider_language_metadata=False,
+    )
+
+
+def normalize_provider_translation_batch_contract(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> TranslationBatchValidationResult:
+    return _validate_translation_batch_contract(
+        translated_text,
+        expected_count=expected_count,
+        required_markers=required_markers,
+        allow_provider_language_metadata=True,
+    )
+
+
+def _validate_translation_batch_contract(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None,
+    allow_provider_language_metadata: bool,
 ) -> TranslationBatchValidationResult:
     stripped = translated_text.strip()
     if not (
@@ -68,11 +99,17 @@ def validate_translation_batch_contract(
             rejection_reason=TranslationBatchRejectionReason.WRONG_ROOT,
         )
 
-    if document.attrib:
+    normalized = False
+    if _unexpected_root_attributes(
+        document.attrib,
+        allow_provider_language_metadata=allow_provider_language_metadata,
+    ):
         return TranslationBatchValidationResult(
             translated_texts=None,
             rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE,
         )
+    if document.attrib:
+        normalized = True
 
     if _has_non_whitespace_text(document.text):
         return TranslationBatchValidationResult(
@@ -88,17 +125,23 @@ def validate_translation_batch_contract(
         )
 
     parsed: list[str] = []
+    source_language_hints: list[str | None] = []
     for expected_index, block in enumerate(blocks):
         if _local_name(block.tag) != "translation_block":
             return TranslationBatchValidationResult(
                 translated_texts=None,
                 rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_CHILD,
             )
-        if set(block.attrib) - {"id", "source_language"}:
+        if _unexpected_block_attributes(
+            block.attrib,
+            allow_provider_language_metadata=allow_provider_language_metadata,
+        ):
             return TranslationBatchValidationResult(
                 translated_texts=None,
                 rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE,
             )
+        if set(block.attrib) - {"id", "source_language"}:
+            normalized = True
         if block.attrib.get("id") != str(expected_index):
             return TranslationBatchValidationResult(
                 translated_texts=None,
@@ -130,8 +173,65 @@ def validate_translation_batch_contract(
                 rejection_reason=TranslationBatchRejectionReason.MISSING_PROTECTED_MARKER,
             )
         parsed.append(translated_block_text)
+        source_language_hints.append(block.attrib.get("source_language"))
 
-    return TranslationBatchValidationResult(translated_texts=tuple(parsed))
+    return TranslationBatchValidationResult(
+        translated_texts=tuple(parsed),
+        normalized_text=(
+            _format_normalized_translation_batch(
+                parsed,
+                source_language_hints=source_language_hints,
+            )
+            if normalized
+            else None
+        ),
+    )
+
+
+def _unexpected_root_attributes(
+    attributes: dict[str, str],
+    *,
+    allow_provider_language_metadata: bool,
+) -> set[str]:
+    allowed = (
+        _PROVIDER_LANGUAGE_METADATA_ATTRIBUTES
+        if allow_provider_language_metadata
+        else set()
+    )
+    return set(attributes) - allowed
+
+
+def _unexpected_block_attributes(
+    attributes: dict[str, str],
+    *,
+    allow_provider_language_metadata: bool,
+) -> set[str]:
+    allowed = {"id", "source_language"}
+    if allow_provider_language_metadata:
+        allowed = allowed | _PROVIDER_LANGUAGE_METADATA_ATTRIBUTES
+    return set(attributes) - allowed
+
+
+def _format_normalized_translation_batch(
+    translated_texts: list[str],
+    *,
+    source_language_hints: list[str | None],
+) -> str:
+    lines = ["<translation_batch>"]
+    for index, translated_text in enumerate(translated_texts):
+        attributes = [f'id="{index}"']
+        source_language = source_language_hints[index]
+        if source_language:
+            attributes.append(
+                f'source_language="{html.escape(source_language, quote=True)}"'
+            )
+        lines.append(
+            f"<translation_block {' '.join(attributes)}>"
+            f"{html.escape(translated_text, quote=False)}"
+            "</translation_block>"
+        )
+    lines.append("</translation_batch>")
+    return "".join(lines)
 
 
 def _markers_for_index(
@@ -159,3 +259,11 @@ def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
+
+
+_XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
+_PROVIDER_LANGUAGE_METADATA_ATTRIBUTES = {
+    "target_language",
+    "lang",
+    _XML_LANG_ATTRIBUTE,
+}
