@@ -13,7 +13,7 @@ from xml.etree import ElementTree
 from translator_service.model_output_safety import validate_model_output_safety
 from translator_service.output_contracts import (
     TranslationBatchRejectionReason,
-    validate_translation_batch_contract,
+    normalize_provider_translation_batch_contract,
 )
 from translator_service.security_telemetry import record_security_event
 from translator_service.translation_context import TranslationContextMemory
@@ -248,11 +248,22 @@ class DeepSeekClient:
             if safety.reason is not None:
                 raise DeepSeekUnsafeModelOutputError(safety.reason.value)
             if batch_expected_count is not None:
-                batch_validation = validate_translation_batch_contract(
+                batch_validation = normalize_provider_translation_batch_contract(
                     result.content,
                     expected_count=batch_expected_count,
                 )
-                if batch_validation.rejection_reason is not None:
+                if batch_validation.normalized_text is not None:
+                    record_model_security_event(
+                        "translation_batch_normalized",
+                        reason=TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE.value,
+                        expected_count=batch_expected_count,
+                        output_chars=len(result.content),
+                    )
+                    result = DeepSeekChatResult(
+                        content=batch_validation.normalized_text,
+                        usage=result.usage,
+                    )
+                elif batch_validation.rejection_reason is not None:
                     record_model_security_event(
                         "translation_batch_rejected",
                         reason=batch_validation.rejection_reason.value,
@@ -274,11 +285,25 @@ class DeepSeekClient:
                     )
                     total_usage = _add_usage(total_usage, result.usage)
                     self._last_usage.value = total_usage
-                    batch_validation = validate_translation_batch_contract(
+                    batch_validation = normalize_provider_translation_batch_contract(
                         result.content,
                         expected_count=batch_expected_count,
                     )
-                    if batch_validation.rejection_reason is not None:
+                    if batch_validation.normalized_text is not None:
+                        record_model_security_event(
+                            "translation_batch_normalized",
+                            reason=(
+                                TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE.value
+                            ),
+                            expected_count=batch_expected_count,
+                            output_chars=len(result.content),
+                            phase="repair",
+                        )
+                        result = DeepSeekChatResult(
+                            content=batch_validation.normalized_text,
+                            usage=result.usage,
+                        )
+                    elif batch_validation.rejection_reason is not None:
                         record_model_security_event(
                             "translation_batch_rejected",
                             reason=batch_validation.rejection_reason.value,

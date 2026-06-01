@@ -293,6 +293,31 @@ Owner decisions recorded during issue #71:
   provider prompts, repair existing failed jobs, change scanner/upload
   enforcement, mutate scheduler/database/runtime state, change payments,
   deployment, auth/RBAC, legal/privacy copy or claim release readiness.
+- 2026-06-01: Issue
+  [#175](https://github.com/ogirkoviylord/folioloom_main/issues/175)
+  implementation slice is locally verified on branch
+  `codex/issue-175-epub-unexpected-xml-attributes`. The provider batch-output
+  path now uses a narrow provider-only normalization step for otherwise valid
+  `translation_batch` XML that adds harmless language metadata attributes
+  `target_language`, `lang` or `xml:lang` on the allowed root/block tags. The
+  strict validator remains strict by default; normalized provider output strips
+  those metadata attributes before return/storage, preserves required block ids
+  and existing `source_language` hints, and still rejects control/unknown
+  attributes such as `role` or `override`, unexpected elements, malformed XML,
+  wrong ids/counts, external text, unsafe output/tool claims and missing
+  protected markers. A metadata-only `translation_batch_normalized` security
+  event records the normalization without raw source text, translations, prompts
+  or provider internals. Local verification: focused output-contract,
+  DeepSeek-client and prompt-security regression tests ran 38 tests with `OK`;
+  full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1182 tests
+  with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src` passed;
+  targeted `ruff --select F,I` on changed Python files passed; `git diff
+  --check` passed. CI status remains Unknown until a PR/checks page is
+  inspected. This does not repair the existing failed EPUB job, change
+  scheduler/worker retry semantics, mutate database/runtime state, deploy or
+  restart services, change provider keys/prompts, expand EPUB book-mode scope,
+  alter payments/auth/legal/privacy/deployment, or claim Gate B/release
+  readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
