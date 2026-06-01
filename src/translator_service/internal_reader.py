@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import html
 import json
+import re
+from base64 import b64encode
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
 from translator_service.format_adapters.contracts import FormatAdapterPlan
@@ -20,6 +22,19 @@ READER_STATUS_DONE = "done"
 READER_STATUS_MISSING = "missing"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EPUB_TEXT_EXTENSIONS = (".xhtml", ".html", ".htm")
+_EPUB_SAFE_IMAGE_MEDIA_TYPES = {
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_EPUB_LINK_TAG_RE = re.compile(r"<link\b[^>]*>", flags=re.IGNORECASE)
+_EPUB_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", flags=re.IGNORECASE)
+_EPUB_ATTR_RE = re.compile(
+    r"""(?P<name>[\w:.-]+)\s*=\s*(?P<quote>["'])(?P<value>.*?)(?P=quote)""",
+    flags=re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -195,8 +210,14 @@ def build_epub_chapter_previews(
                 EpubChapterPreview(
                     sequence=sequence,
                     file_name=file_name,
-                    source_xhtml=_read_zip_text(source_epub, file_name),
-                    translated_xhtml=_read_zip_text(translated_epub, file_name),
+                    source_xhtml=_prepare_epub_preview_xhtml(
+                        epub=source_epub,
+                        file_name=file_name,
+                    ),
+                    translated_xhtml=_prepare_epub_preview_xhtml(
+                        epub=translated_epub,
+                        file_name=file_name,
+                    ),
                 )
             )
     return tuple(previews)
@@ -531,8 +552,144 @@ def _ordered_epub_text_files(document: ReaderDocument) -> tuple[str, ...]:
     return tuple(ordered)
 
 
+def _prepare_epub_preview_xhtml(*, epub: ZipFile, file_name: str) -> str:
+    xhtml = _read_zip_text(epub, file_name)
+    xhtml = _inline_epub_stylesheets(epub=epub, file_name=file_name, xhtml=xhtml)
+    xhtml = _inline_epub_raster_images(epub=epub, file_name=file_name, xhtml=xhtml)
+    return _inject_epub_preview_csp(xhtml)
+
+
+def _inline_epub_stylesheets(*, epub: ZipFile, file_name: str, xhtml: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        attrs = _html_tag_attrs(tag)
+        if attrs.get("rel", "").lower() != "stylesheet":
+            return tag
+        href = attrs.get("href")
+        if not href:
+            return tag
+        resource_name = _resolve_epub_resource_name(
+            file_name=file_name,
+            reference=href,
+            epub=epub,
+        )
+        if resource_name is None:
+            return tag
+        css = _read_zip_text(epub, resource_name)
+        return f"<style>{_safe_style_text(css)}</style>"
+
+    return _EPUB_LINK_TAG_RE.sub(replace, xhtml)
+
+
+def _inline_epub_raster_images(*, epub: ZipFile, file_name: str, xhtml: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        attrs = _html_tag_attrs(tag)
+        src = attrs.get("src")
+        if not src:
+            return tag
+        resource_name = _resolve_epub_resource_name(
+            file_name=file_name,
+            reference=src,
+            epub=epub,
+        )
+        if resource_name is None:
+            return tag
+        media_type = _safe_epub_image_media_type(resource_name)
+        if media_type is None:
+            return tag
+        encoded = b64encode(epub.read(resource_name)).decode("ascii")
+        data_uri = f"data:{media_type};base64,{encoded}"
+        return _replace_html_attr(tag=tag, name="src", value=data_uri)
+
+    return _EPUB_IMG_TAG_RE.sub(replace, xhtml)
+
+
+def _inject_epub_preview_csp(xhtml: str) -> str:
+    csp = (
+        '<meta http-equiv="Content-Security-Policy" '
+        'content="default-src &#39;none&#39;; img-src data:; '
+        'style-src &#39;unsafe-inline&#39;">'
+    )
+    head_match = re.search(r"<head\b[^>]*>", xhtml, flags=re.IGNORECASE)
+    if head_match is None:
+        return f"{csp}\n{xhtml}"
+    return f"{xhtml[: head_match.end()]}{csp}{xhtml[head_match.end():]}"
+
+
 def _read_zip_text(epub: ZipFile, file_name: str) -> str:
     return epub.read(file_name).decode("utf-8", errors="replace")
+
+
+def _html_tag_attrs(tag: str) -> dict[str, str]:
+    return {
+        match.group("name").lower(): html.unescape(match.group("value"))
+        for match in _EPUB_ATTR_RE.finditer(tag)
+    }
+
+
+def _replace_html_attr(*, tag: str, name: str, value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        if match.group("name").lower() != name.lower():
+            return match.group(0)
+        quote = match.group("quote")
+        return f'{match.group("name")}={quote}{_escape(value)}{quote}'
+
+    return _EPUB_ATTR_RE.sub(replace, tag)
+
+
+def _safe_style_text(css: str) -> str:
+    return css.replace("</", "<\\/")
+
+
+def _resolve_epub_resource_name(
+    *,
+    file_name: str,
+    reference: str,
+    epub: ZipFile,
+) -> str | None:
+    if _is_external_epub_reference(reference):
+        return None
+    resource_reference = reference.split("#", 1)[0].split("?", 1)[0]
+    if not resource_reference:
+        return None
+    base_path = PurePosixPath(file_name).parent
+    candidate = _normalize_epub_resource_name(str(base_path / resource_reference))
+    if candidate in epub.namelist():
+        return candidate
+    fallback = _normalize_epub_resource_name(resource_reference)
+    if fallback in epub.namelist():
+        return fallback
+    return None
+
+
+def _normalize_epub_resource_name(value: str) -> str:
+    parts: list[str] = []
+    for part in PurePosixPath(value).parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _is_external_epub_reference(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        lowered.startswith("//")
+        or lowered.startswith("http:")
+        or lowered.startswith("https:")
+        or lowered.startswith("data:")
+        or lowered.startswith("javascript:")
+        or lowered.startswith("mailto:")
+    )
+
+
+def _safe_epub_image_media_type(file_name: str) -> str | None:
+    return _EPUB_SAFE_IMAGE_MEDIA_TYPES.get(PurePosixPath(file_name).suffix.lower())
 
 
 def _escape(value: object) -> str:

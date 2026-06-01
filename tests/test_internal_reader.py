@@ -367,6 +367,55 @@ class InternalReaderTest(unittest.TestCase):
         self.assertIn("status-done", rendered)
         self.assertIn("status-missing", rendered)
 
+    def test_epub_xhtml_preview_inlines_css_and_safe_raster_images(self):
+        content = _make_epub(
+            {
+                "OPS/chapter1.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <head>
+                        <link href="style.css" rel="stylesheet" />
+                      </head>
+                      <body>
+                        <h1>Chapter One</h1>
+                        <img alt="cover" src="cover.png" />
+                        <img alt="vector" src="vector.svg" />
+                        <img alt="missing" src="missing.png" />
+                        <p>First chapter body.</p>
+                      </body>
+                    </html>
+                """,
+            },
+            spine=("chapter1",),
+            extra_items={
+                "OPS/style.css": b"body { color: #123456; }",
+                "OPS/cover.png": b"\x89PNG\r\n\x1a\nfake",
+                "OPS/vector.svg": b"<svg><script>alert(1)</script></svg>",
+            },
+        )
+        document = build_epub_reader_document(
+            content=content,
+            source_name="sample.epub",
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+        previews = build_epub_chapter_previews(content=content, document=document)
+
+        self.assertEqual(len(previews), 1)
+        preview = previews[0].source_xhtml
+        self.assertIn("Content-Security-Policy", preview)
+        self.assertIn("<style>body { color: #123456; }</style>", preview)
+        self.assertIn("data:image/png;base64,", preview)
+        self.assertIn('src="vector.svg"', preview)
+        self.assertIn('src="missing.png"', preview)
+        self.assertNotIn("data:image/svg+xml", preview)
+
+        rendered = render_epub_reader_html(
+            document=document,
+            chapter_previews=previews,
+        )
+
+        self.assertIn("&lt;style&gt;body { color: #123456; }&lt;/style&gt;", rendered)
+        self.assertNotIn("<style>body { color: #123456; }</style>", rendered)
+
     def test_render_html_escapes_text_metadata_and_translation(self):
         document = build_txt_reader_document(
             content=b"# <script>alert(1)</script>",
@@ -421,6 +470,7 @@ def _make_epub(
     xhtml_items: dict[str, str],
     *,
     spine: tuple[str, ...],
+    extra_items: dict[str, bytes] | None = None,
 ) -> bytes:
     archive = BytesIO()
     manifest_items_by_file = {
@@ -460,6 +510,8 @@ def _make_epub(
             """,
         )
         for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
+        for file_name, content in (extra_items or {}).items():
             epub.writestr(file_name, content)
     return archive.getvalue()
 

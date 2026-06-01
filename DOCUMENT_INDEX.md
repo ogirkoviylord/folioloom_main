@@ -80,8 +80,9 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/specs/2026-06-01-epub-internal-reader-rendering-spike.md` -
   active issue #184 Architect spike note. It recommends keeping EPUB on the
   semantic/block reader for now, using the issue #189 explicit-input local
-  report and issue #191 sandboxed XHTML chapter preview before any book-like
-  reader dependency, and keeping EPUBCheck as validation/reference only.
+  report, issue #191 sandboxed XHTML chapter preview and issue #193 limited
+  CSS/raster resource inlining before any book-like reader dependency, and
+  keeping EPUBCheck as validation/reference only.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
