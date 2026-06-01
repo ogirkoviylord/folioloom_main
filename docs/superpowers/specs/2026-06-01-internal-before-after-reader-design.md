@@ -1,7 +1,7 @@
 # Internal Before/After Reader Design
 
-Status: Approved internal/dev design direction; issues #181-#184, #189, #191
-and #193 are open as a stacked PR sequence.
+Status: Approved internal/dev design direction; issues #181-#184, #189, #191,
+#193 and #195 are open as a stacked PR sequence.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
@@ -65,6 +65,14 @@ adds limited local resource inlining for that sandboxed preview: linked CSS and
 safe raster images are embedded into the `srcdoc` output so approved fixtures
 look closer to their EPUB XHTML presentation. SVG, remote resources, fonts,
 media overlays, pagination and fixed-layout support remain out of scope.
+
+Issue [#195](https://github.com/ogirkoviylord/folioloom_main/issues/195)
+adds the next safe DOCX implementation slice: an explicit-input local report
+with a semantic DOCX structure preview before the block report. It uses the
+existing DOCX adapter plan, groups table/list-like runs from adapter `group_id`
+metadata, keeps stable ids and metadata in the block report, and does not add
+`docx-preview`, Mammoth, LibreOffice automation or full DOCX visual fidelity
+claims.
 
 This status does not add an admin or public route, does not authorize live
 runtime `var/` reads, does not add a production dependency and does not claim
@@ -277,6 +285,38 @@ Output:
 - EPUB fixture notes;
 - EPUBCheck relationship;
 - dependency/licensing/deployment impact.
+
+### 5. Internal reader: DOCX structure preview report
+
+GitHub issue:
+[#195](https://github.com/ogirkoviylord/folioloom_main/issues/195)
+
+Goal: make the DOCX internal reader more useful than a raw block list while
+staying inside the semantic adapter model.
+
+Scope:
+
+- explicit local DOCX input path only;
+- use existing DOCX adapter planning and `ReaderDocument`;
+- show a semantic structure preview above the block report;
+- render heading/plain/list blocks as document flow;
+- group table/list-like runs by adapter `group_id` metadata;
+- preserve the block report with stable ids, kind, group id, metadata and
+  done/missing status;
+- reject repo-local runtime `var/` source/mapping/output paths;
+- no admin/public route, live runtime data, deployment change or new
+  dependency.
+
+Verification:
+
+- focused tests for DOCX document building, structure preview rendering,
+  escaping and runtime `var` rejection;
+- `PYTHONPATH=src python3 -m unittest tests.test_internal_reader`;
+- `PYTHONPATH=src python3 -m unittest tests.test_format_adapters`;
+- `PYTHONPATH=src python3 -m compileall src`;
+- targeted `python3 -m ruff check` on changed Python files;
+- CLI smoke with `test_samples/sample_book.en.docx` writing to a temporary
+  output path.
 
 ## Required Guardrails
 
