@@ -1,7 +1,7 @@
 # Internal Before/After Reader Design
 
 Status: Approved internal/dev design direction; issues #181-#184, #189, #191,
-#193 and #195 are open as a stacked PR sequence.
+#193, #195 and #197 are open as a stacked PR sequence.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
@@ -73,6 +73,13 @@ existing DOCX adapter plan, groups table/list-like runs from adapter `group_id`
 metadata, keeps stable ids and metadata in the block report, and does not add
 `docx-preview`, Mammoth, LibreOffice automation or full DOCX visual fidelity
 claims.
+
+Issue [#197](https://github.com/ogirkoviylord/folioloom_main/issues/197)
+improves the local CLI ergonomics: `tools/internal_reader_report.py` now
+defaults to auto-detecting `.txt`, `.docx` and `.epub` source formats by
+extension, while explicit `--format` values still override detection.
+Unknown extensions fail with a clear error asking for a supported explicit
+format.
 
 This status does not add an admin or public route, does not authorize live
 runtime `var/` reads, does not add a production dependency and does not claim
@@ -317,6 +324,35 @@ Verification:
 - targeted `python3 -m ruff check` on changed Python files;
 - CLI smoke with `test_samples/sample_book.en.docx` writing to a temporary
   output path.
+
+### 6. Internal reader: auto-detect report format in CLI
+
+GitHub issue:
+[#197](https://github.com/ogirkoviylord/folioloom_main/issues/197)
+
+Goal: let the owner and agents generate reports for TXT, DOCX and EPUB with one
+command shape instead of remembering the `--format` switch for common files.
+
+Scope:
+
+- default `tools/internal_reader_report.py` to format auto-detection;
+- detect `.txt`, `.docx` and `.epub` suffixes case-insensitively;
+- keep explicit `--format txt`, `--format docx` and `--format epub` as
+  overrides;
+- fail clearly for unknown extensions;
+- no content sniffing, admin/public route, live runtime data access,
+  deployment change or new dependency.
+
+Verification:
+
+- focused tests for supported suffixes, explicit overrides and unknown suffix
+  failure;
+- `PYTHONPATH=src python3 -m unittest tests.test_internal_reader`;
+- targeted `python3 -m ruff check` on changed files;
+- `PYTHONPATH=src python3 -m compileall src`;
+- `python3 -m py_compile tools/internal_reader_report.py`;
+- CLI smokes generating TXT, DOCX and EPUB reports without `--format` into a
+  temporary output directory.
 
 ## Required Guardrails
 

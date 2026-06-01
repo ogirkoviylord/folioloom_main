@@ -69,7 +69,7 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   active owner-approved internal/dev design direction for a local before-after
   reader over TXT/DOCX/EPUB adapter blocks, with issue/PR status for the first
   TXT/generic/DOCX/EPUB slices, including the DOCX structure preview in issue
-  #195. First scope is local QA on
+  #195 and CLI format auto-detection in issue #197. First scope is local QA on
   synthetic/test/public-domain/permissive or owner-approved files, not a
   user-facing reader, publisher workspace, admin route or production-readiness
   claim.

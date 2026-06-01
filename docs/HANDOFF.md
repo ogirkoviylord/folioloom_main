@@ -369,9 +369,10 @@ Owner decisions recorded during issue #71:
   are future work. The design is recorded in
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   GitHub issues
-  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#195](https://github.com/ogirkoviylord/folioloom_main/issues/195)
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#197](https://github.com/ogirkoviylord/folioloom_main/issues/197)
   split the first implementation, renderer spikes, EPUB local report and EPUB
-  XHTML preview/resource slices, and the DOCX structure preview slice.
+  XHTML preview/resource slices, the DOCX structure preview slice and the
+  format auto-detection CLI slice.
   This does not authorize live runtime `var/` reads, add admin/public routes,
   add production dependencies, change legal/privacy policy or claim release
   readiness.
@@ -481,6 +482,19 @@ Owner decisions recorded during issue #71:
   to a temporary directory. This does not claim full DOCX/Word visual fidelity,
   add `docx-preview`/Mammoth/LibreOffice automation, add admin/public UI, read
   live runtime data, change legal/privacy policy or claim release readiness.
+- 2026-06-01: Issue
+  [#197](https://github.com/ogirkoviylord/folioloom_main/issues/197)
+  implementation slice is locally verified on branch
+  `codex/issue-197-reader-format-auto`, stacked on the #196 branch. The
+  explicit-input internal reader CLI now defaults to format auto-detection by
+  `.txt`, `.docx` or `.epub` extension, case-insensitively. Explicit
+  `--format txt`, `--format docx` and `--format epub` still override extension
+  detection, and unknown extensions fail with a clear error asking for an
+  explicit supported format. Local verification passed focused internal-reader
+  tests, compileall, targeted ruff, `py_compile` for the CLI and CLI smokes
+  generating TXT, DOCX and EPUB reports without `--format` into a temporary
+  directory. This does not add content sniffing, admin/public UI, live runtime
+  data access, dependencies, renderer fidelity changes or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
