@@ -1204,6 +1204,57 @@ Human approval required to change:
 - yes; this affects user-data semantics, job/retry behavior, beta-safety
   accounting and implementation order.
 
+### 2026-06-01 - Architecture decisions: provider batch XML language metadata normalization
+
+Status: Active
+
+Decision:
+- Provider `translation_batch` output may be normalized only when the XML is
+  otherwise valid and the only unexpected attributes are harmless language
+  metadata hints: `target_language`, `lang` or `xml:lang` on
+  `translation_batch` / `translation_block`.
+- The strict output-contract validator remains strict by default and continues
+  to reject those attributes outside the provider-normalization path.
+- Normalized provider output must be canonicalized before return/storage by
+  stripping the allowed language metadata attributes, preserving required block
+  ids and existing `source_language` hints.
+- Control/unknown attributes such as `role` or `override`, unexpected elements,
+  malformed XML, wrong ids/counts, external text, unsafe model-output/tool
+  claims and missing protected markers remain rejected.
+- Scheduler/worker retry semantics, database/runtime state, provider keys,
+  deployment, prompts, EPUB book-mode scope, payments, auth/RBAC and
+  legal/privacy copy are out of scope for this decision.
+
+Evidence:
+- GitHub issue #175 records the EPUB batch failure caused by provider output
+  with unexpected language metadata attributes.
+- Architecture review in the current thread recommended the narrow
+  provider-output normalization path.
+- Owner explicitly approved the recommended path in the current thread on
+  2026-06-01.
+- Local implementation verification on branch
+  `codex/issue-175-epub-unexpected-xml-attributes`: focused
+  output-contract/DeepSeek-client/prompt-security tests passed, full unittest
+  discover ran 1182 tests with `OK (skipped=13)`, compileall passed, targeted
+  ruff passed and `git diff --check` passed.
+
+Reason:
+- Some provider responses can include inert language metadata while still
+  preserving the requested XML structure and block content.
+- Canonicalizing the narrow metadata-only case avoids aborting otherwise usable
+  EPUB work units without weakening prompt-injection, structure, marker,
+  redaction or provider-safety guardrails.
+
+Consequences:
+  fresh architecture review and owner approval.
+- Rejections for control attributes, unsafe output or structural mismatches
+  should continue to use the existing repair/reject path.
+- This decision does not repair already failed live jobs and does not prove CI,
+  Gate B, server smoke, real-file matrix or release readiness.
+
+Human approval required to change:
+- yes; this affects the external provider output contract and safety boundary.
+
 ## Decisions that still need human approval
 
 - Decision recorded: free closed beta waits for complete Gate B evidence.
