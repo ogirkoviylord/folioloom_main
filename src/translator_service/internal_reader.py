@@ -5,15 +5,21 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 from translator_service.format_adapters.contracts import FormatAdapterPlan
-from translator_service.format_adapters.epub import plan_epub_translation
+from translator_service.format_adapters.epub import (
+    assemble_epub_content_from_block_translations,
+    plan_epub_translation,
+)
 from translator_service.format_adapters.txt import plan_txt_translation
 
 READER_STATUS_DONE = "done"
 READER_STATUS_MISSING = "missing"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_EPUB_TEXT_EXTENSIONS = (".xhtml", ".html", ".htm")
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,14 @@ class ReaderDocument:
     source_name: str
     generated_at: str
     sections: tuple[ReaderSection, ...]
+
+
+@dataclass(frozen=True)
+class EpubChapterPreview:
+    sequence: int
+    file_name: str
+    source_xhtml: str
+    translated_xhtml: str
 
 
 def build_reader_document(
@@ -160,8 +174,104 @@ def build_epub_reader_document(
     )
 
 
+def build_epub_chapter_previews(
+    *,
+    content: bytes,
+    document: ReaderDocument,
+    translated_by_block_id: Mapping[str, str] | None = None,
+) -> tuple[EpubChapterPreview, ...]:
+    translations = dict(translated_by_block_id or {})
+    translated_content = assemble_epub_content_from_block_translations(
+        source_content=content,
+        translated_by_block_id=translations,
+    )
+    source_files = _ordered_epub_text_files(document)
+    previews: list[EpubChapterPreview] = []
+    with ZipFile(BytesIO(content)) as source_epub, ZipFile(
+        BytesIO(translated_content)
+    ) as translated_epub:
+        for sequence, file_name in enumerate(source_files, start=1):
+            previews.append(
+                EpubChapterPreview(
+                    sequence=sequence,
+                    file_name=file_name,
+                    source_xhtml=_read_zip_text(source_epub, file_name),
+                    translated_xhtml=_read_zip_text(translated_epub, file_name),
+                )
+            )
+    return tuple(previews)
+
+
 def render_reader_html(document: ReaderDocument) -> str:
     section_html = "\n".join(_render_section(section) for section in document.sections)
+    return _render_reader_page(document=document, body_html=section_html)
+
+
+def render_epub_reader_html(
+    *,
+    document: ReaderDocument,
+    chapter_previews: tuple[EpubChapterPreview, ...],
+) -> str:
+    preview_html = "\n".join(
+        _render_epub_chapter_preview(preview) for preview in chapter_previews
+    )
+    block_report_html = "\n".join(
+        _render_section(section) for section in document.sections
+    )
+    return _render_reader_page(
+        document=document,
+        body_html=f"""    <section class="chapter-previews">
+      <h2>Chapter previews</h2>
+{preview_html}
+    </section>
+    <section class="block-report">
+      <h2>Block report</h2>
+{block_report_html}
+    </section>""",
+        extra_css="""
+    .chapter-preview {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 0 0 16px;
+      overflow: hidden;
+    }
+    .chapter-head {
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      padding: 8px 10px;
+    }
+    .preview-columns {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 320px;
+    }
+    .preview-pane { padding: 10px; }
+    .preview-pane + .preview-pane { border-left: 1px solid var(--line); }
+    .preview-frame {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      height: 320px;
+      width: 100%;
+    }
+    @media (max-width: 760px) {
+      .preview-columns { grid-template-columns: 1fr; }
+      .preview-pane + .preview-pane {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+""",
+    )
+
+
+def _render_reader_page(
+    *,
+    document: ReaderDocument,
+    body_html: str,
+    extra_css: str = "",
+) -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -252,6 +362,7 @@ def render_reader_html(document: ReaderDocument) -> str:
       padding: 8px 10px;
       font-size: 12px;
     }}
+{extra_css}
     @media (max-width: 760px) {{
       .columns {{ grid-template-columns: 1fr; }}
       .pane + .pane {{
@@ -272,7 +383,7 @@ def render_reader_html(document: ReaderDocument) -> str:
     </div>
   </header>
   <main>
-{section_html}
+{body_html}
   </main>
 </body>
 </html>
@@ -318,14 +429,52 @@ def generate_epub_reader_html_from_path(
     generated_at: datetime | None = None,
 ) -> str:
     reject_runtime_var_path(source_path)
+    content = source_path.read_bytes()
     document = build_epub_reader_document(
-        content=source_path.read_bytes(),
+        content=content,
         translated_by_block_id=translated_by_block_id,
         source_name=source_path.name,
         max_fragment_chars=max_fragment_chars,
         generated_at=generated_at,
     )
-    return render_reader_html(document)
+    chapter_previews = build_epub_chapter_previews(
+        content=content,
+        document=document,
+        translated_by_block_id=translated_by_block_id,
+    )
+    return render_epub_reader_html(
+        document=document,
+        chapter_previews=chapter_previews,
+    )
+
+
+def _render_epub_chapter_preview(preview: EpubChapterPreview) -> str:
+    file_name = _escape(preview.file_name)
+    source_srcdoc = _escape(preview.source_xhtml)
+    translated_srcdoc = _escape(preview.translated_xhtml)
+    return f"""      <article class="chapter-preview" data-file-name="{file_name}">
+        <div class="chapter-head">#{preview.sequence} {file_name}</div>
+        <div class="preview-columns">
+          <div class="preview-pane">
+            <div class="pane-title">Source XHTML</div>
+            <iframe
+              class="preview-frame"
+              sandbox=""
+              referrerpolicy="no-referrer"
+              srcdoc="{source_srcdoc}"
+            ></iframe>
+          </div>
+          <div class="preview-pane">
+            <div class="pane-title">Translated XHTML</div>
+            <iframe
+              class="preview-frame"
+              sandbox=""
+              referrerpolicy="no-referrer"
+              srcdoc="{translated_srcdoc}"
+            ></iframe>
+          </div>
+        </div>
+      </article>"""
 
 
 def _render_section(section: ReaderSection) -> str:
@@ -365,6 +514,25 @@ def _render_block(block: ReaderBlock) -> str:
         </div>
         <div class="metadata">{metadata}</div>
       </article>"""
+
+
+def _ordered_epub_text_files(document: ReaderDocument) -> tuple[str, ...]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for section in document.sections:
+        file_name = section.source_file_name
+        if (
+            file_name is not None
+            and file_name.lower().endswith(_EPUB_TEXT_EXTENSIONS)
+            and file_name not in seen
+        ):
+            ordered.append(file_name)
+            seen.add(file_name)
+    return tuple(ordered)
+
+
+def _read_zip_text(epub: ZipFile, file_name: str) -> str:
+    return epub.read(file_name).decode("utf-8", errors="replace")
 
 
 def _escape(value: object) -> str:
