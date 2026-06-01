@@ -2784,9 +2784,17 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         events = '<tr><td colspan="3" class="empty-cell">No events recorded.</td></tr>'
     fragments = "\n".join(_run_fragment_row(fragment) for fragment in details.fragments)
     if not fragments:
-        fragments = """
+        if summary.fragment_count > 0:
+            fragment_message = (
+                "No run-log fragment records found. Scheduler state reports "
+                f"{summary.fragment_count}/{summary.total_fragment_count} "
+                "completed work units."
+            )
+        else:
+            fragment_message = "No fragment records found."
+        fragments = f"""
         <tr>
-          <td colspan="9" class="empty-cell">No fragment records found.</td>
+          <td colspan="9" class="empty-cell">{escape(fragment_message)}</td>
         </tr>
         """
     return f"""
@@ -2800,6 +2808,11 @@ def log_detail_body(details: TranslationRunDetails) -> str:
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to logs", "/admin/logs", "view")}
+        {_action_link(
+            "Text diagnostics",
+            f"/admin/logs/{run_id}/text-diagnostics",
+            "view",
+        )}
         {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
     </section>
@@ -2824,6 +2837,9 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         {_metric("Tokens", str(summary.total_tokens), field="tokens")}
       </div>
       {_progress_bar(summary)}
+    </section>
+    <section class="panel" data-detail-work-unit-diagnostic>
+      {_work_unit_diagnostic_panel(details, run_id)}
     </section>
     <section class="panel detail-grid">
       <div>
@@ -2917,6 +2933,39 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           if (total > 0) return `${{done}}/${{total}}`;
           return `${{done}}/?`;
         }};
+        const diagnosticHtml = (diagnostic) => {{
+          if (!diagnostic) {{
+            return `
+              <h4>Work unit needing attention</h4>
+              <p>No failed, retrying or active work unit found.</p>
+            `;
+          }}
+          const sequence = diagnostic.sequence ?? 0;
+          const blocks = (diagnostic.source_block_ids || []).join(", ") || "n/a";
+          const attempts = [
+            diagnostic.attempt_count ?? 0,
+            diagnostic.max_attempts ?? 0
+          ].join("/");
+          const textHref = [
+            `/admin/logs/${{encodeURIComponent(runId)}}/text-diagnostics`,
+            `?sequence=${{encodeURIComponent(sequence)}}&limit=1`
+          ].join("");
+          return `
+            <div class="split-heading">
+              <h4>Work unit needing attention</h4>
+              <a href="${{textHref}}">Open text diagnostics</a>
+            </div>
+            <dl class="definition-list">
+              <dt>Sequence</dt><dd>${{escapeHtml(sequence)}}</dd>
+              <dt>Status</dt><dd>${{escapeHtml(diagnostic.status || "unknown")}}</dd>
+              <dt>Attempts</dt><dd>${{escapeHtml(attempts)}}</dd>
+              <dt>Blocks</dt><dd>${{escapeHtml(blocks)}}</dd>
+              <dt>Updated</dt><dd>${{escapeHtml(diagnostic.updated_at || "n/a")}}</dd>
+              <dt>Last error</dt>
+              <dd>${{escapeHtml(diagnostic.last_error || "n/a")}}</dd>
+            </dl>
+          `;
+        }};
         const eventRows = (events) => (events || []).map((event) => `
           <tr>
             <td>${{escapeHtml(event.timestamp || "n/a")}}</td>
@@ -2981,6 +3030,12 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           if (fragmentBody && details.fragments) {{
             fragmentBody.innerHTML = fragmentRows(details.fragments);
           }}
+          const diagnosticBody = document.querySelector(
+            "[data-detail-work-unit-diagnostic]"
+          );
+          if (diagnosticBody) {{
+            diagnosticBody.innerHTML = diagnosticHtml(details.work_unit_diagnostic);
+          }}
           const eventBody = document.querySelector("[data-detail-events]");
           if (eventBody && details.events) {{
             eventBody.innerHTML = eventRows(details.events);
@@ -2989,6 +3044,136 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         setInterval(refreshTranslationDetails, 3000);
       }})();
     </script>
+    """
+
+
+def _work_unit_diagnostic_panel(details: TranslationRunDetails, run_id: str) -> str:
+    diagnostic = details.work_unit_diagnostic
+    if diagnostic is None:
+        return """
+        <h4>Work unit needing attention</h4>
+        <p>No failed, retrying or active work unit found.</p>
+        """
+    blocks = ", ".join(diagnostic.source_block_ids) or "n/a"
+    attempts = f"{diagnostic.attempt_count}/{diagnostic.max_attempts}"
+    text_href = (
+        f"/admin/logs/{run_id}/text-diagnostics"
+        f"?sequence={diagnostic.sequence}&limit=1"
+    )
+    updated_at = _format_datetime(diagnostic.updated_at)
+    last_error = diagnostic.last_error or "n/a"
+    return f"""
+    <div class="split-heading">
+      <h4>Work unit needing attention</h4>
+      <a href="{escape(text_href)}">Open text diagnostics</a>
+    </div>
+    <dl class="definition-list">
+      <dt>Sequence</dt><dd>{escape(str(diagnostic.sequence))}</dd>
+      <dt>Status</dt><dd>{escape(diagnostic.status)}</dd>
+      <dt>Attempts</dt><dd>{escape(attempts)}</dd>
+      <dt>Blocks</dt><dd>{escape(blocks)}</dd>
+      <dt>Updated</dt><dd>{escape(updated_at)}</dd>
+      <dt>Last error</dt><dd>{escape(last_error)}</dd>
+    </dl>
+    """
+
+
+def translation_text_diagnostics_body(
+    details: TranslationRunDetails,
+    rows: tuple[dict[str, object], ...],
+    *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+) -> str:
+    summary = details.summary
+    next_sequence = start_sequence + limit
+    previous_sequence = max(1, start_sequence - limit)
+    row_html = "\n".join(_translation_text_diagnostic_row(row) for row in rows)
+    if not row_html:
+        row_html = """
+        <tr>
+          <td colspan="5" class="empty-cell">No work units found.</td>
+        </tr>
+        """
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translation Text Diagnostics</h3>
+        <p>
+          {escape(summary.file_name)} · {escape(summary.job_id)}
+        </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
+        {_action_link(
+            "Previous",
+            f"/admin/logs/{run_id}/text-diagnostics?sequence={previous_sequence}&limit={limit}",
+            "view",
+        )}
+        {_action_link(
+            "Next",
+            f"/admin/logs/{run_id}/text-diagnostics?sequence={next_sequence}&limit={limit}",
+            "view",
+        )}
+      </div>
+    </section>
+    <section class="panel warning-panel">
+      <h3>Raw text visibility is enabled for this diagnostic page only.</h3>
+      <p>
+        This page may show user document text and translated output. Keep it
+        out of issues, PRs, safe log archives, screenshots and support notes
+        unless the owner explicitly approves that exact excerpt.
+      </p>
+    </section>
+    <section class="panel table-panel">
+      <h4>Work units</h4>
+      <table class="log-table raw-text-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Status</th>
+            <th>Blocks</th>
+            <th>Source text</th>
+            <th>Translated text</th>
+          </tr>
+        </thead>
+        <tbody>{row_html}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
+    blocks = row.get("source_block_ids")
+    if isinstance(blocks, (list, tuple)):
+        block_label = ", ".join(str(item) for item in blocks) or "n/a"
+    else:
+        block_label = str(blocks or "n/a")
+    notes = []
+    last_error = row.get("last_error")
+    if last_error:
+        notes.append(f"error: {last_error}")
+    attempt_count = row.get("attempt_count")
+    max_attempts = row.get("max_attempts")
+    if attempt_count or max_attempts:
+        notes.append(f"attempts: {attempt_count}/{max_attempts}")
+    note_html = ""
+    if notes:
+        note_text = " · ".join(escape(str(note)) for note in notes)
+        note_html = f'<p class="muted">{note_text}</p>'
+    sequence = escape(str(row.get("sequence") or 0))
+    status = escape(str(row.get("status") or "unknown"))
+    source_text = escape(str(row.get("source_text") or ""))
+    translated_text = escape(str(row.get("translated_text") or ""))
+    return f"""
+    <tr>
+      <td>{sequence}</td>
+      <td><span class="status">{status}</span>{note_html}</td>
+      <td>{escape(block_label)}</td>
+      <td><pre class="detail-json raw-text-cell">{source_text}</pre></td>
+      <td><pre class="detail-json raw-text-cell">{translated_text}</pre></td>
+    </tr>
     """
 
 
@@ -4200,6 +4385,43 @@ header {
 }
 .panel, .toolbar-panel, .integration-card, .metric { padding: 20px; }
 .panel p, .login-panel p { color: var(--muted); line-height: 1.55; }
+.split-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.split-heading h4 { margin: 0; }
+.definition-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 14px 0 0;
+}
+.definition-list dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+.definition-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.warning-panel {
+  border-color: #d98b4a;
+  background: #fff8ef;
+}
+.raw-text-cell {
+  max-height: 320px;
+  overflow: auto;
+}
+.raw-text-table th:nth-child(4),
+.raw-text-table th:nth-child(5),
+.raw-text-table td:nth-child(4),
+.raw-text-table td:nth-child(5) {
+  min-width: 280px;
+}
 .toolbar-panel {
   display: flex;
   align-items: center;
