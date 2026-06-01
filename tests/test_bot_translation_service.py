@@ -1544,6 +1544,40 @@ class BotTranslationServiceTest(unittest.TestCase):
             "Russian (admixtures: English, Polish, Dutch)",
         )
 
+    def test_same_language_auto_display_with_admixtures_is_blocked_before_preview(self):
+        guard = RecordingBetaSafetyGuard()
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+            beta_safety_guard=guard,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="mixed.txt",
+            content=(
+                "Русский текст документа. Это большая часть книги, "
+                "русский язык здесь основной, это документ для перевода.\n"
+                "English: The quick brown fox jumps over the lazy dog."
+            ).encode(),
+            source_language="auto",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+
+        with self.assertRaisesRegex(ValueError, "already.*Russian"):
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+            )
+
+        self.assertIsNotNone(service.get_pending_upload(42))
+        self.assertIsNone(service.get_pending(42))
+        self.assertEqual(guard.reservations, [])
+        self.assertEqual(guard.usage_events, [])
+        self.assertEqual(guard.consumed, [])
+
     def test_prepares_estimate_from_pending_upload_after_translation_language_choice(
         self,
     ):

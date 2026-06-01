@@ -48,6 +48,7 @@ from translator_service.bot.messages import (
     build_preview_required_message,
     build_preview_translation_message,
     build_rights_confirmation_message,
+    build_same_language_translation_blocked_message,
     build_settings_message,
     build_settings_reset_message,
     build_start_message,
@@ -101,6 +102,7 @@ from translator_service.bot_translation_service import (
     PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
+    SameLanguageTranslationBlocked,
     TranslationModeRequired,
 )
 from translator_service.config import Settings
@@ -2592,10 +2594,21 @@ async def _prepare_and_send_translation_preview(
     target_language: str,
     interface_language: str,
 ) -> None:
-    service.prepare_pending_upload(
-        user_telegram_id=message.from_user.id,
-        target_language=target_language,
-    )
+    try:
+        service.prepare_pending_upload(
+            user_telegram_id=message.from_user.id,
+            target_language=target_language,
+        )
+    except SameLanguageTranslationBlocked as error:
+        await message.answer(
+            build_same_language_translation_blocked_message(
+                source_language_code=error.source_language_code,
+                target_language_code=error.target_language_code,
+                interface_language=interface_language,
+            ),
+            reply_markup=_target_language_keyboard(interface_language),
+        )
+        return
     duplicate = service.find_pending_translation_duplicate(
         user_telegram_id=message.from_user.id,
     )

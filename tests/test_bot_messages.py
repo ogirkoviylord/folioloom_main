@@ -1,6 +1,7 @@
 import unittest
 from importlib.util import find_spec
 
+import translator_service.bot.messages as bot_messages
 from translator_service.bot.messages import (
     build_back_to_menu_message,
     build_cancel_requested_message,
@@ -867,6 +868,25 @@ class BotMessagesTest(unittest.TestCase):
             "Язык оригинала: Русский; примеси: Английский, Нидерландский",
             message,
         )
+
+    def test_same_language_blocked_message_is_neutral(self):
+        builder = getattr(
+            bot_messages,
+            "build_same_language_translation_blocked_message",
+            None,
+        )
+        self.assertIsNotNone(builder)
+
+        message = builder(
+            source_language_code="ru",
+            target_language_code="ru",
+            interface_language="en",
+        )
+
+        self.assertIn("already appears to be Russian", message)
+        self.assertIn("Choose a different target language", message)
+        self.assertNotIn("rewrite", message.lower())
+        self.assertNotIn("provider", message.lower())
 
     def test_translation_progress_message_shows_percent_and_bar_without_fragment_count(self):
         message = build_translation_progress_message(

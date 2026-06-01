@@ -272,6 +272,27 @@ Owner decisions recorded during issue #71:
   runtime data, provider behavior, beta caps, deployment, payments, auth/RBAC,
   legal/privacy copy, upload-flow resume, duplicate-upload behavior or release
   readiness.
+- 2026-06-01: Issue
+  [#174](https://github.com/ogirkoviylord/folioloom_main/issues/174)
+  implementation slice is locally verified on branch
+  `codex/174-same-language-guard`. The upload/preview path now blocks
+  accidental same-language translation attempts when `source_language=auto`
+  resolves to the same base language as the selected target, including detected
+  displays with admixtures such as `Russian (admixtures: English, Polish)`.
+  The bot keeps the upload in language-selection state, shows neutral user copy
+  to choose a different target language or cancel, and does not start preview,
+  provider work, full translation or beta-safety reservation/consumption for
+  the blocked attempt. Local verification: focused new RED/GREEN tests passed;
+  `PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service
+  tests.test_bot_runtime tests.test_bot_messages` ran 264 tests with `OK`;
+  full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1177 tests
+  with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src` passed;
+  targeted `ruff --select F,I` on changed Python files passed; `git diff
+  --check` passed. CI status remains Unknown until a PR/checks page is
+  inspected. This does not add same-language rewrite/polish mode, change
+  provider prompts, repair existing failed jobs, change scanner/upload
+  enforcement, mutate scheduler/database/runtime state, change payments,
+  deployment, auth/RBAC, legal/privacy copy or claim release readiness.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
