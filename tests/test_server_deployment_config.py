@@ -64,7 +64,8 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("platform: ${CLAMD_PLATFORM:-linux/amd64}", clamd_block)
         self.assertIn('expose:\n      - "3310"', clamd_block)
         self.assertIn("clamav-db:/var/lib/clamav", clamd_block)
-        self.assertIn("mem_limit: ${CLAMD_MEM_LIMIT:-1g}", clamd_block)
+        self.assertIn("mem_limit: ${CLAMD_MEM_LIMIT:-2g}", clamd_block)
+        self.assertNotIn("CLAMD_MEM_LIMIT:-1g", clamd_block)
         self.assertIn('cpus: "${CLAMD_CPUS:-1.0}"', clamd_block)
         self.assertIn("pids_limit: 256", clamd_block)
         self.assertNotIn("ports:", clamd_block)
@@ -114,7 +115,7 @@ class ServerDeploymentConfigTest(unittest.TestCase):
             "CLAMD_CHUNK_SIZE_BYTES=65536",
             "CLAMD_RESPONSE_LIMIT_BYTES=4096",
             "CLAMD_STARTUP_TIMEOUT=1800",
-            "CLAMD_MEM_LIMIT=1g",
+            "CLAMD_MEM_LIMIT=2g",
             "CLAMD_CPUS=1.0",
             "ADMIN_DB_PATH=/data/runtime/admin.sqlite3",
             "ADMIN_SESSION_SECRET=",
@@ -189,8 +190,16 @@ class ServerDeploymentConfigTest(unittest.TestCase):
         self.assertIn("POSTGRES_PASSWORD=translator", smoke_content)
         self.assertIn("UPLOAD_SCANNER_BACKEND=clamd", smoke_content)
         self.assertIn("translator_service.clamd_runtime", smoke_content)
-        self.assertIn("CLAMD_HOST", smoke_content)
+        self.assertIn("from translator_service.config import Settings", smoke_content)
+        self.assertIn("app_require_upload_scan", smoke_content)
+        self.assertIn("app_upload_scanner_backend", smoke_content)
+        self.assertIn("clamd_host", smoke_content)
         self.assertIn("--scan-eicar", smoke_content)
+        self.assertNotIn(
+            'if [ "${REQUIRE_UPLOAD_SCAN:-false}" = "true" ]; then\n'
+            '  set -- "$@" --scan-eicar',
+            smoke_content,
+        )
         self.assertIn("ADMIN_SMOKE_REQUIRE_PROVIDER_KEYS", smoke_content)
         self.assertIn(
             "docker compose exec -T api python -m "

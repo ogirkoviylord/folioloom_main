@@ -29,6 +29,16 @@ enables the runtime gate with `UPLOAD_SCANNER_BACKEND=clamd`. Issue #95 records
 metadata-only Gate B malware/AV scanning evidence for these slices. This does
 not by itself make quarantine retention, durable upload-safety ledger
 persistence, approved beta-server smoke or full Gate B readiness complete.
+Issue #173 restores the intended beta fail-closed scanner contract for
+production-like runtime defaults: when scanner env is absent in production, the
+app defaults to requiring local `clamd` scanning on the internal Docker service
+instead of silently using the development `none` backend. The issue also raises
+the documented beta `clamd` memory default above the OOM-prone `1g` limit; the
+exact target-host adequacy remains Unknown until an owner-approved runtime
+smoke check runs. Metadata-only 173D smoke on 2026-06-01 did not verify the
+current beta runtime as healthy: the running bot app settings were still
+scanner-disabled and internal `clamd` was unavailable. No real `.env*`, runtime
+files, object keys, user files or raw document text were inspected.
 
 ## Accept / Reject Policy
 

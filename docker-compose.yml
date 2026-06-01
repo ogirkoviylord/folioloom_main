@@ -103,7 +103,7 @@ services:
       - clamav-db:/var/lib/clamav
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${CLAMD_MEM_LIMIT:-1g}
+    mem_limit: ${CLAMD_MEM_LIMIT:-2g}
     cpus: "${CLAMD_CPUS:-1.0}"
     pids_limit: 256
     healthcheck:
