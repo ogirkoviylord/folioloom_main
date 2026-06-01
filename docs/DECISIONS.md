@@ -1328,6 +1328,49 @@ Consequences:
 Human approval required to change:
 - yes; this affects the external provider output contract and safety boundary.
 
+### 2026-06-01 - Temporary owner-only raw translation text diagnostics
+
+Status: Active / Temporary
+
+Decision:
+- The owner approved a narrow, temporary admin diagnostic path that can display
+  stored work-unit source text and translated output for a specific translation
+  run while investigating failed/stuck translations.
+- The diagnostic path must stay behind the existing SSH-tunneled admin session
+  model and must not be added to safe log archives, telemetry, JSON APIs,
+  release artifacts, GitHub issues, PR descriptions or support notes.
+- Normal admin log details and downloadable diagnostics remain metadata-only and
+  redacted by default.
+- Removing this temporary raw-text diagnostic path, replacing it with a safer
+  metadata-only workflow, or expanding it to other users/surfaces requires a
+  follow-up owner decision.
+
+Evidence:
+- Owner explicitly requested temporary access to translation texts in the
+  2026-06-01 incident-investigation thread because the existing safe export did
+  not contain enough information to diagnose the failed EPUB translation.
+- Local implementation adds a dedicated admin-only text diagnostics page and a
+  regression test proving raw text stays out of the normal details page and
+  safe archive download.
+
+Reason:
+- The failed translation incident required comparing source work units,
+  translated output and retry/error state. The safe export intentionally
+  excludes raw source and translated text, so it cannot answer that question by
+  itself.
+
+Consequences:
+- This is an owner-approved exception to the normal "no raw text in admin"
+  guardrail for one dedicated diagnostic surface.
+- Agents must still treat raw document text and translated output as sensitive
+  user data and avoid copying excerpts into logs, docs, issues or chat unless
+  the owner approves that exact excerpt.
+- This decision does not relax public admin, release, legal/privacy, telemetry,
+  archive-redaction or Gate B requirements.
+
+Human approval required to change:
+- yes; this affects privacy, admin diagnostics and user-data handling.
+
 ## Decisions that still need human approval
 
 - Decision recorded: free closed beta waits for complete Gate B evidence.
