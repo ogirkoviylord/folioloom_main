@@ -41,6 +41,7 @@ from translator_service.beta_safety import (
 )
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
+from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
@@ -1919,6 +1920,269 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(trace.status_code, 200)
         self.assertIn("2/4", trace.text)
         self.assertIn("36", trace.text)
+
+    def test_translation_log_details_show_failed_work_unit_without_raw_text(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            source_file = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Private failing source paragraph",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-failed-unit",
+                    user_id="telegram:42",
+                    file_id="file-failed-unit",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="epub-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("block-1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                        ),
+                        WorkUnitPlan(
+                            sequence=2,
+                            source_block_ids=("block-2",),
+                            source_text_hash="hash-2",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file.object_key,
+                        ),
+                    ],
+                )
+                first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert first is not None
+                store.complete_work_unit(
+                    first.id,
+                    translated_text="Translated first block",
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=11,
+                )
+                second = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert second is not None
+                store.fail_work_unit(
+                    second.id,
+                    error_message=(
+                        "provider failure on Private failing source paragraph "
+                        "Bearer sk-review-secret"
+                    ),
+                    retry_count=3,
+                )
+                logger = TranslationRunLogger.start(
+                    root=run_root,
+                    metadata=TranslationRunMetadata(
+                        job_id=job.id,
+                        order_id="order-failed-unit",
+                        user_id="telegram:42",
+                        file_name="book.epub",
+                        document_kind="epub",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=2,
+                    ),
+                )
+                logger.record_event("job_queued", {"fragment_count": 2})
+            finally:
+                store.close()
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+
+        self.assertEqual(details.status_code, 200)
+        self.assertIn("Work unit needing attention", details.text)
+        self.assertIn("error recorded; open text diagnostics", details.text)
+        self.assertIn("sequence=2&amp;limit=1", details.text)
+        self.assertNotIn("Private failing source paragraph", details.text)
+        self.assertNotIn("sk-review-secret", details.text)
+        self.assertEqual(details_api.status_code, 200)
+        details_api_text = json.dumps(details_api.json(), ensure_ascii=False)
+        self.assertNotIn("Private failing source paragraph", details_api_text)
+        self.assertNotIn("sk-review-secret", details_api_text)
+        diagnostic = details_api.json()["details"]["work_unit_diagnostic"]
+        self.assertEqual(diagnostic["sequence"], 2)
+        self.assertEqual(diagnostic["status"], "failed")
+        self.assertEqual(diagnostic["source_block_ids"], ["block-2"])
+        self.assertEqual(
+            diagnostic["last_error"],
+            "error recorded; open text diagnostics",
+        )
+
+    def test_translation_text_diagnostics_missing_store_does_not_create_db(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "missing" / "jobs.sqlite3"
+            run_root = root / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-missing-store",
+                    order_id="order-missing-store",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.record_event("job_queued", {"fragment_count": 1})
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(root / "objects"),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = client.get(f"/admin/logs/{logger.run_dir.name}/text-diagnostics")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No work units found.", response.text)
+        self.assertFalse(job_db.exists())
+
+    def test_translation_text_diagnostics_is_dedicated_raw_text_view(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            source_file = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Private source paragraph",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-text",
+                    user_id="telegram:42",
+                    file_id="file-text",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="txt-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("block-1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file.object_key,
+                        )
+                    ],
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="Приватний перекладений абзац",
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=11,
+                )
+                logger = TranslationRunLogger.start(
+                    root=run_root,
+                    metadata=TranslationRunMetadata(
+                        job_id=job.id,
+                        order_id="order-text",
+                        user_id="telegram:42",
+                        file_name="book.txt",
+                        document_kind="txt",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=1,
+                    ),
+                )
+                logger.record_event("job_queued", {"fragment_count": 1})
+            finally:
+                store.close()
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            diagnostics = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+            )
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(details.status_code, 200)
+        self.assertIn("Text diagnostics", details.text)
+        self.assertNotIn("Private source paragraph", details.text)
+        self.assertNotIn("Приватний перекладений абзац", details.text)
+        self.assertEqual(diagnostics.status_code, 200)
+        self.assertIn("Raw text visibility is enabled", diagnostics.text)
+        self.assertIn("Private source paragraph", diagnostics.text)
+        self.assertIn("Приватний перекладений абзац", diagnostics.text)
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+            )
+        self.assertNotIn("Private source paragraph", archive_text)
+        self.assertNotIn("Приватний перекладений абзац", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

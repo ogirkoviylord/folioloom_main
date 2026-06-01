@@ -318,6 +318,18 @@ Owner decisions recorded during issue #71:
   restart services, change provider keys/prompts, expand EPUB book-mode scope,
   alter payments/auth/legal/privacy/deployment, or claim Gate B/release
   readiness.
+- 2026-06-01: Owner approved a temporary, owner-only raw translation text
+  diagnostics path for incident investigation after a failed EPUB translation
+  showed that safe exports did not contain enough information to compare source
+  work units, translated output and retry/error state. Local code now adds a
+  metadata-only work-unit snapshot to normal translation details, plus a
+  dedicated SSH-tunneled admin-session page for stored source/translated
+  work-unit text. The normal details page and downloadable diagnostics remain
+  metadata-only/redacted. Local verification for this slice is recorded in the
+  task response. This does not deploy or restart server services, expose raw
+  text through safe archives/telemetry/JSON APIs, authorize copying excerpts to
+  issues/PRs/support notes, relax public admin restrictions or change Gate B
+  release requirements.
 - 2026-05-30: Umbrella issue
   [#120](https://github.com/ogirkoviylord/folioloom_main/issues/120)
   is closed after the planned first-slice work was completed and merged.
