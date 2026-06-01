@@ -157,7 +157,10 @@ Future owner-approved prototype:
 ## Follow-Up Task Shape
 
 Suggested issue title:
-`Prototype local EPUB spine/chapter preview from approved fixtures`
+`Internal reader: generate EPUB side-by-side local report`
+
+GitHub issue:
+[#189](https://github.com/ogirkoviylord/folioloom_main/issues/189)
 
 Scope:
 - local/dev-only explicit-input report;

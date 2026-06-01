@@ -1,8 +1,7 @@
 # Internal Before/After Reader Design
 
-Status: Approved internal/dev design direction; issue #181 TXT report slice and
-issue #182 generic semantic block mapping slice are implemented locally on
-stacked branches.
+Status: Approved internal/dev design direction; issues #181-#184 are open as a
+stacked PR sequence, and issue #189 is the next local EPUB report slice.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
@@ -44,9 +43,19 @@ Local verification on 2026-06-01:
   passed, `PYTHONPATH=src python3 -m compileall src` passed and targeted ruff
   passed.
 
-This status does not implement issue #183 or #184, does not add an admin or
-public route, does not authorize live runtime `var/` reads, does not add a
-production dependency and does not claim release readiness.
+Issues [#183](https://github.com/ogirkoviylord/folioloom_main/issues/183)
+and [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184)
+record DOCX and EPUB renderer spike recommendations on stacked PR branches.
+
+Issue [#189](https://github.com/ogirkoviylord/folioloom_main/issues/189)
+adds the next safe implementation slice: an explicit-input local EPUB HTML
+report using the existing EPUB adapter plan and the same side-by-side reader
+renderer. It keeps EPUBCheck, `epub.js` and book-like rendering out of the
+runtime path.
+
+This status does not add an admin or public route, does not authorize live
+runtime `var/` reads, does not add a production dependency and does not claim
+release readiness.
 
 ## Goal
 
