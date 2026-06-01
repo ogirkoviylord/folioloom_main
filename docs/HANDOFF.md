@@ -369,11 +369,11 @@ Owner decisions recorded during issue #71:
   are future work. The design is recorded in
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   GitHub issues
-  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#184](https://github.com/ogirkoviylord/folioloom_main/issues/184)
-  split the first implementation and renderer spikes.
-  This is a design/roadmap decision only; it does not implement the reader,
-  authorize live runtime `var/` reads, add admin/public routes, add production
-  dependencies, change legal/privacy policy or claim release readiness.
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#189](https://github.com/ogirkoviylord/folioloom_main/issues/189)
+  split the first implementation, renderer spikes and EPUB local report slice.
+  This does not authorize live runtime `var/` reads, add admin/public routes,
+  add production dependencies, change legal/privacy policy or claim release
+  readiness.
 - 2026-06-01: Issue
   [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)
   implementation slice is locally verified on branch
@@ -423,6 +423,20 @@ Owner decisions recorded during issue #71:
   keep EPUBCheck as validation/reference only. This does not implement EPUB
   book-like rendering, add a dependency, change deployment, add admin/public UI,
   read live runtime data or claim EPUB Gate B validation/release readiness.
+- 2026-06-01: Issue
+  [#189](https://github.com/ogirkoviylord/folioloom_main/issues/189)
+  implementation slice is locally verified on branch
+  `codex/issue-189-epub-reader-report`, stacked on the #184 branch. The branch
+  adds `build_epub_reader_document()` and `--format epub` support to the
+  explicit-input internal reader CLI. The EPUB report uses the existing adapter
+  plan, preserves spine/file order exposed by the adapter, keeps body and
+  auxiliary metadata in the side-by-side HTML report, marks done/missing block
+  translations and rejects repo-local runtime `var/` source paths. Local
+  verification passed focused internal-reader tests, format-adapter tests,
+  compileall, targeted ruff, `git diff --check` and an EPUB CLI smoke writing
+  to a temporary directory. This does not implement book-like EPUB rendering,
+  add `epub.js`/Readium, run EPUBCheck, add admin/public UI, read live runtime
+  data or claim release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

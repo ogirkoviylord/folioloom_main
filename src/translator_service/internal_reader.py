@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from translator_service.format_adapters.contracts import FormatAdapterPlan
+from translator_service.format_adapters.epub import plan_epub_translation
 from translator_service.format_adapters.txt import plan_txt_translation
 
 READER_STATUS_DONE = "done"
@@ -128,6 +129,26 @@ def build_txt_reader_document(
     generated_at: datetime | None = None,
 ) -> ReaderDocument:
     plan = plan_txt_translation(
+        content=content,
+        max_fragment_chars=max_fragment_chars,
+    )
+    return build_reader_document(
+        plan=plan,
+        translated_by_block_id=translated_by_block_id,
+        source_name=source_name,
+        generated_at=generated_at,
+    )
+
+
+def build_epub_reader_document(
+    *,
+    content: bytes,
+    translated_by_block_id: Mapping[str, str] | None = None,
+    source_name: str = "Document",
+    max_fragment_chars: int = 5_000,
+    generated_at: datetime | None = None,
+) -> ReaderDocument:
+    plan = plan_epub_translation(
         content=content,
         max_fragment_chars=max_fragment_chars,
     )
@@ -280,6 +301,24 @@ def generate_txt_reader_html_from_path(
 ) -> str:
     reject_runtime_var_path(source_path)
     document = build_txt_reader_document(
+        content=source_path.read_bytes(),
+        translated_by_block_id=translated_by_block_id,
+        source_name=source_path.name,
+        max_fragment_chars=max_fragment_chars,
+        generated_at=generated_at,
+    )
+    return render_reader_html(document)
+
+
+def generate_epub_reader_html_from_path(
+    *,
+    source_path: Path,
+    translated_by_block_id: Mapping[str, str] | None = None,
+    max_fragment_chars: int = 5_000,
+    generated_at: datetime | None = None,
+) -> str:
+    reject_runtime_var_path(source_path)
+    document = build_epub_reader_document(
         content=source_path.read_bytes(),
         translated_by_block_id=translated_by_block_id,
         source_name=source_path.name,

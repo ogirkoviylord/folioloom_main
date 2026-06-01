@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from translator_service.internal_reader import (
+    generate_epub_reader_html_from_path,
     generate_txt_reader_html_from_path,
     load_translation_mapping,
     reject_runtime_var_path,
@@ -13,9 +14,19 @@ from translator_service.internal_reader import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate an internal/dev before-after HTML report for TXT files.",
+        description="Generate an internal/dev before-after HTML report.",
     )
-    parser.add_argument("source", type=Path, help="Explicit local TXT input path.")
+    parser.add_argument(
+        "source",
+        type=Path,
+        help="Explicit local TXT or EPUB input path.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("txt", "epub"),
+        default="txt",
+        help="Source format. Defaults to txt.",
+    )
     parser.add_argument(
         "--translations",
         type=Path,
@@ -31,7 +42,7 @@ def parse_args() -> argparse.Namespace:
         "--max-fragment-chars",
         type=int,
         default=5_000,
-        help="TXT adapter planning limit. Defaults to 5000.",
+        help="Adapter planning limit. Defaults to 5000.",
     )
     return parser.parse_args()
 
@@ -44,11 +55,18 @@ def main() -> None:
         if args.translations is not None
         else None
     )
-    html = generate_txt_reader_html_from_path(
-        source_path=args.source,
-        translated_by_block_id=translations,
-        max_fragment_chars=args.max_fragment_chars,
-    )
+    if args.format == "epub":
+        html = generate_epub_reader_html_from_path(
+            source_path=args.source,
+            translated_by_block_id=translations,
+            max_fragment_chars=args.max_fragment_chars,
+        )
+    else:
+        html = generate_txt_reader_html_from_path(
+            source_path=args.source,
+            translated_by_block_id=translations,
+            max_fragment_chars=args.max_fragment_chars,
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote internal reader report: {args.out}")
