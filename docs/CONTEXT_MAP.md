@@ -40,7 +40,7 @@
 | `.agents/skills/` | Repo-level skill instructions for Idea Intake, Orchestrator, Architect, Implementer, Reviewer, Scribe and Release Readiness roles. | Все агенты при выборе или применении роли. | medium; keep aligned with `AGENTS.md` and `docs/AGENT_SKILL_ROUTING.md`. |
 | `docs/` | Project docs, restart docs, deployment runbooks, specs/plans archive. | Scribe, Orchestrator, Architect, Reviewer. | medium; high для deployment, release gates, legal/privacy/safety текста. |
 | `src/translator_service/` | Основной Python package: backend, bot, worker, translation core, persistence, safety. | Implementer, Architect, Reviewer. | medium/high по зоне. |
-| `src/translator_service/admin/` | FastAPI admin console: auth, settings, secrets, provider keys, costs, audit, live, operations. | Admin/backend agents. | human approval required для auth, secrets, security, provider keys, user data. |
+| `src/translator_service/admin/` | FastAPI admin console: auth, settings, secrets, provider keys, costs, audit, live, operations and owner-only text diagnostics. | Admin/backend agents. | human approval required для auth, secrets, security, provider keys, user data and any raw-text diagnostic expansion. |
 | `src/translator_service/bot/` | aiogram Telegram runtime, messages, activity phrases. | Bot/UI agents. | high; затрагивает UX, Telegram API, user data, payments-adjacent flows. |
 | `src/translator_service/format_adapters/` | TXT/DOCX/EPUB adapters, contracts, EPUB repair, TXT layout. | Translation/file-format agents. | medium/high; file parsing and output fidelity. |
 | `tests/` | Unit/regression tests for admin, bot, scheduler, worker, provider, translation, deployment smoke. | Reviewer, QA, Implementer. | low/medium; high если меняются safety/payment/auth expectations. |
@@ -133,7 +133,9 @@
 - Any database schema/state layer: `postgres_scheduler.py`, `persistent_job_store.py`, `beta_safety_store.py`, new migrations or DB directories.
 - Payment/pricing/order zones: `pricing.py`, `billing.py`, `orders.py`, `order_estimates.py`, `order_payments.py`, payment/pricing docs/specs. Paid beta is gated.
 - Auth/security/secrets zones: `src/translator_service/admin/auth.py`, `rbac.py`, `secrets.py`, `secret_safety.py`, `security_telemetry.py`, `security_summary.py`, admin session/secret settings.
-- Legal/privacy/user-data handling: upload safety/retention docs, file storage, user activity, raw document handling, rights confirmation, logs/admin display of document text.
+- Legal/privacy/user-data handling: upload safety/retention docs, file storage,
+  user activity, raw document handling, rights confirmation, logs/admin display
+  of document text and the approved owner-only Text diagnostics exception.
 - External API integrations: Telegram bot runtime, DeepSeek client/key pool/provider runtime, provider validation/probe/balance/key management.
 - Destructive operations: deleting runtime data, changing retention/TTL, modifying backup/restore, force-resetting git, removing artifacts unless explicitly approved.
 

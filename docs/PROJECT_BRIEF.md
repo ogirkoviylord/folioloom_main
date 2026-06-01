@@ -16,7 +16,12 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 
 - Кто это: owner/admin проекта.
 - Зачем им продукт: запускать и контролировать закрытую beta, управлять allowlist, лимитами, kill switch, DeepSeek-ключами, диагностикой, бэкапами и release gates.
-- Ограничения и ожидания: admin должен оставаться SSH-tunnel-only; секреты и raw document text не должны показываться в админке или логах; deployment и payment/readiness gates требуют ручного контроля.
+- Ограничения и ожидания: admin должен оставаться SSH-tunnel-only; секреты не
+  должны показываться в админке или логах; raw document/translation text
+  доступен владельцу только через dedicated owner-only text diagnostics и не
+  должен попадать в обычные admin pages, логи, архивы, telemetry, issues/PRs
+  или support notes; deployment и payment/readiness gates требуют ручного
+  контроля.
 
 ### Будущие платные пользователи
 
@@ -114,7 +119,10 @@ FolioLoom - это Telegram-first сервис для перевода авто�
 - Не выполнять production deployment без явного human approval.
 - Не добавлять production dependencies без явного human approval.
 - Не пушить и не мержить напрямую в `main`.
-- Не ослаблять guardrails вокруг прав на документы, beta allowlist, cost caps, kill switch, secret redaction и raw document text redaction.
+- Не ослаблять guardrails вокруг прав на документы, beta allowlist, cost caps,
+  kill switch, secret redaction и raw document text handling. Dedicated
+  owner-only text diagnostics остается утвержденным исключением; остальные
+  admin/log/archive/telemetry surfaces остаются redacted/metadata-only.
 - Не показывать payment UI и не запускать paid jobs до Gate C.
 - Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения владельца.
 - Не реализовывать FB2 из GitHub issue

@@ -1328,36 +1328,42 @@ Consequences:
 Human approval required to change:
 - yes; this affects the external provider output contract and safety boundary.
 
-### 2026-06-01 - Temporary owner-only raw translation text diagnostics
+### 2026-06-01 - Permanent owner-only raw translation text diagnostics
 
-Status: Active / Temporary
+Status: Active
 
 Decision:
-- The owner approved a narrow, temporary admin diagnostic path that can display
-  stored work-unit source text and translated output for a specific translation
-  run while investigating failed/stuck translations.
+- The owner approved a permanent admin diagnostic path that can display stored
+  work-unit source text and translated output for a specific translation run
+  while investigating failed/stuck translations.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model and must not be added to safe log archives, telemetry, JSON APIs,
   release artifacts, GitHub issues, PR descriptions or support notes.
 - Normal admin log details and downloadable diagnostics remain metadata-only and
   redacted by default.
-- Removing this temporary raw-text diagnostic path, replacing it with a safer
-  metadata-only workflow, or expanding it to other users/surfaces requires a
-  follow-up owner decision.
+- Removing this raw-text diagnostic path, hiding it from the owner, replacing it
+  with a metadata-only workflow, or expanding raw-text access beyond the
+  dedicated owner/admin diagnostic surface requires a follow-up owner decision.
 
 Evidence:
-- Owner explicitly requested temporary access to translation texts in the
+- Owner explicitly requested access to translation texts in the
   2026-06-01 incident-investigation thread because the existing safe export did
   not contain enough information to diagnose the failed EPUB translation.
 - Local implementation adds a dedicated admin-only text diagnostics page and a
   regression test proving raw text stays out of the normal details page and
   safe archive download.
+- After PR #179 was merged and deployed, the owner explicitly stated on
+  2026-06-01 that this first version is accepted as the direction and that the
+  owner should have ongoing access to raw translation texts for diagnostics.
 
 Reason:
 - The failed translation incident required comparing source work units,
   translated output and retry/error state. The safe export intentionally
   excludes raw source and translated text, so it cannot answer that question by
   itself.
+- Keeping the owner-only raw text view in admin avoids repeated archive
+  downloads and duplicate local book files during development and incident
+  triage.
 
 Consequences:
 - This is an owner-approved exception to the normal "no raw text in admin"

@@ -109,6 +109,17 @@ class EditableMessage:
         return TelegramMethodLikeAwaitable(record)
 
 
+class NotModifiedOnDuplicateEditableMessage(EditableMessage):
+    def edit_text(self, text: str, reply_markup=None):
+        def record() -> None:
+            if self.edited_texts and self.edited_texts[-1] == text:
+                raise RuntimeError("Bad Request: message is not modified")
+            self.edited_texts.append(text)
+            self.edited_reply_markups.append(reply_markup)
+
+        return TelegramMethodLikeAwaitable(record)
+
+
 class RecordingBot:
     def __init__(self) -> None:
         self.edits: list[tuple[str, int, int, object, str | None]] = []
@@ -165,6 +176,14 @@ class RecordingMessage:
 
     async def answer_document(self, document) -> None:
         self.documents.append(document)
+
+
+class NotModifiedOnDuplicateRecordingMessage(RecordingMessage):
+    async def answer(self, text: str, reply_markup=None, **kwargs):
+        self.answers.append((text, reply_markup))
+        message = NotModifiedOnDuplicateEditableMessage()
+        self.answer_messages.append(message)
+        return message
 
 
 class FailingOnceRecordingMessage(RecordingMessage):
@@ -265,6 +284,13 @@ class _QueuedThenReadyService:
             "can_resume": False,
             "can_cancel": False,
         }
+
+
+class _QueuedTwiceThenReadyService(_QueuedThenReadyService):
+    def get_user_book_translation_job(self, **kwargs):
+        if self.progress_calls <= 1:
+            return _runtime_job(status=TranslationJobStatus.QUEUED)
+        return _runtime_job(status=TranslationJobStatus.READY)
 
 
 class _CancelWithResultService:
@@ -1239,6 +1265,25 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             message.answer_messages[0].edited_texts[-1],
         )
         self.assertEqual(service.progress_calls, 1)
+
+    async def test_resume_translation_ignores_duplicate_queued_message_edit(self):
+        message = NotModifiedOnDuplicateRecordingMessage()
+        service = _QueuedTwiceThenReadyService()
+
+        await _resume_user_book_translation(
+            message=message,
+            user_telegram_id=42,
+            job_id="job-1",
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            queued_poll_interval_seconds=0.01,
+        )
+
+        self.assertGreaterEqual(service.progress_calls, 2)
+        self.assertIn(
+            "Your translation is ready",
+            message.answer_messages[0].edited_texts[-1],
+        )
 
     async def test_book_detail_callback_renders_persistent_progress(self):
         class BookDetailProgressService:
