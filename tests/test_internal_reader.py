@@ -15,14 +15,17 @@ from translator_service.format_adapters.contracts import (
 from translator_service.internal_reader import (
     READER_STATUS_DONE,
     READER_STATUS_MISSING,
+    build_docx_reader_document,
     build_epub_chapter_previews,
     build_epub_reader_document,
     build_reader_document,
     build_txt_reader_document,
+    generate_docx_reader_html_from_path,
     generate_epub_reader_html_from_path,
     generate_txt_reader_html_from_path,
     load_translation_mapping,
     reject_runtime_var_path,
+    render_docx_reader_html,
     render_epub_reader_html,
     render_reader_html,
 )
@@ -135,6 +138,130 @@ class InternalReaderTest(unittest.TestCase):
             READER_STATUS_DONE,
             READER_STATUS_MISSING,
         ])
+
+    def test_builds_docx_reader_document_from_content(self):
+        document = build_docx_reader_document(
+            content=_make_docx(
+                """
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p>
+                      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+                      <w:r><w:t>Chapter One</w:t></w:r>
+                    </w:p>
+                    <w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>
+                    <w:tbl>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Cell A</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Cell B</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                    </w:tbl>
+                  </w:body>
+                </w:document>
+                """
+            ),
+            translated_by_block_id={
+                "docx:word/document.xml:0": "Глава перша",
+            },
+            source_name="sample.docx",
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+
+        blocks = document.sections[0].blocks
+        self.assertEqual(document.document_format, "docx")
+        self.assertEqual(document.source_name, "sample.docx")
+        self.assertEqual(
+            [block.kind for block in blocks],
+            ["heading", "plain", "table", "table"],
+        )
+        self.assertEqual(blocks[0].status, READER_STATUS_DONE)
+        self.assertEqual(blocks[1].status, READER_STATUS_MISSING)
+        self.assertEqual(blocks[2].group_id, "word/document.xml:table:0")
+        self.assertEqual(blocks[3].group_id, "word/document.xml:table:0")
+
+    def test_renders_docx_structure_preview_and_block_report(self):
+        plan = FormatAdapterPlan(
+            document_format=DocumentFormat.DOCX,
+            adapter_version="docx-adapter-test",
+            character_count=77,
+            estimated_input_tokens=30,
+            units=(
+                FormatTranslationUnit(
+                    sequence=1,
+                    prompt_tier=PromptTier.STRICT,
+                    blocks=(
+                        FormatTextBlock(
+                            index=0,
+                            source_block_id="docx:word/document.xml:0",
+                            text="Chapter <One>",
+                            kind=TextBlockKind.HEADING,
+                            metadata=(
+                                ("file_name", "word/document.xml"),
+                                ("block_index", "0"),
+                            ),
+                        ),
+                        FormatTextBlock(
+                            index=1,
+                            source_block_id="docx:word/document.xml:1",
+                            text="Cell <A>",
+                            kind=TextBlockKind.TABLE,
+                            group_id="word/document.xml:table:0",
+                            metadata=(
+                                ("file_name", "word/document.xml"),
+                                ("block_index", "1"),
+                                ("fixed_width_pseudo_table", "False"),
+                            ),
+                        ),
+                        FormatTextBlock(
+                            index=2,
+                            source_block_id="docx:word/document.xml:2",
+                            text="Cell B",
+                            kind=TextBlockKind.TABLE,
+                            group_id="word/document.xml:table:0",
+                            metadata=(
+                                ("file_name", "word/document.xml"),
+                                ("block_index", "2"),
+                                ("fixed_width_pseudo_table", "False"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        document = build_reader_document(
+            plan=plan,
+            translated_by_block_id={
+                "docx:word/document.xml:0": "<b>Глава</b>",
+                "docx:word/document.xml:1": "Комірка A",
+            },
+            source_name='sample "docx".docx',
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+
+        rendered = render_docx_reader_html(document)
+
+        self.assertIn("DOCX structure preview", rendered)
+        self.assertIn('class="docx-table-like"', rendered)
+        self.assertIn("word/document.xml:table:0", rendered)
+        self.assertIn("&lt;b&gt;Глава&lt;/b&gt;", rendered)
+        self.assertIn("Chapter &lt;One&gt;", rendered)
+        self.assertIn("Cell &lt;A&gt;", rendered)
+        self.assertIn("[missing translation]", rendered)
+        self.assertIn('class="block-report"', rendered)
+        self.assertIn("docx:word/document.xml:2", rendered)
+        self.assertIn("sample &quot;docx&quot;.docx", rendered)
+        self.assertNotIn("<b>Глава</b>", rendered)
+        self.assertLess(
+            rendered.index("DOCX structure preview"),
+            rendered.index("Block report"),
+        )
+
+    def test_generate_docx_reader_html_from_path_rejects_runtime_var_paths(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        var_path = repo_root / "var" / "internal-reader-test.docx"
+
+        with self.assertRaisesRegex(ValueError, "runtime var"):
+            generate_docx_reader_html_from_path(source_path=var_path)
 
     def test_maps_epub_adapter_plan_to_ordered_sections_with_roles(self):
         plan = FormatAdapterPlan(
@@ -513,6 +640,14 @@ def _make_epub(
             epub.writestr(file_name, content)
         for file_name, content in (extra_items or {}).items():
             epub.writestr(file_name, content)
+    return archive.getvalue()
+
+
+def _make_docx(document_xml: str) -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as docx:
+        docx.writestr("[Content_Types].xml", "<Types />")
+        docx.writestr("word/document.xml", document_xml)
     return archive.getvalue()
 
 

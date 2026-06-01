@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from translator_service.internal_reader import (
+    generate_docx_reader_html_from_path,
     generate_epub_reader_html_from_path,
     generate_txt_reader_html_from_path,
     load_translation_mapping,
@@ -19,11 +20,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "source",
         type=Path,
-        help="Explicit local TXT or EPUB input path.",
+        help="Explicit local TXT, DOCX or EPUB input path.",
     )
     parser.add_argument(
         "--format",
-        choices=("txt", "epub"),
+        choices=("txt", "docx", "epub"),
         default="txt",
         help="Source format. Defaults to txt.",
     )
@@ -57,6 +58,12 @@ def main() -> None:
     )
     if args.format == "epub":
         html = generate_epub_reader_html_from_path(
+            source_path=args.source,
+            translated_by_block_id=translations,
+            max_fragment_chars=args.max_fragment_chars,
+        )
+    elif args.format == "docx":
+        html = generate_docx_reader_html_from_path(
             source_path=args.source,
             translated_by_block_id=translations,
             max_fragment_chars=args.max_fragment_chars,
