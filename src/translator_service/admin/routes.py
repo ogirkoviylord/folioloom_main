@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
@@ -79,6 +80,7 @@ from translator_service.admin.settings import SettingValueType, SQLiteAdminSetti
 from translator_service.admin.translation_logs import (
     TranslationRunDetails,
     TranslationRunSummary,
+    TranslationWorkUnitDiagnostic,
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
@@ -111,6 +113,7 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    translation_text_diagnostics_body,
     translation_trace_body,
     upload_safety_body,
     upload_safety_detail_body,
@@ -570,6 +573,36 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Details",
             active="logs",
             body=log_detail_body(details),
+        )
+
+    @router.get("/logs/{run_id}/text-diagnostics", response_class=HTMLResponse)
+    async def log_text_diagnostics(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
+        limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
+        rows = _translation_text_diagnostics(
+            settings,
+            job_id=details.summary.job_id,
+            start_sequence=start_sequence,
+            limit=limit,
+        )
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Text Diagnostics",
+            active="logs",
+            body=translation_text_diagnostics_body(
+                details,
+                rows,
+                run_id=run_id,
+                start_sequence=start_sequence,
+                limit=limit,
+            ),
         )
 
     @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
@@ -2395,10 +2428,151 @@ def _translation_run_details(
     )
     if details is None:
         return None
-    return overlay_translation_run_details(
+    details = overlay_translation_run_details(
         details,
         operations=_operations_overview(settings),
     )
+    details = replace(
+        details,
+        summary=replace(
+            details.summary,
+            error_message=_safe_work_unit_error_summary(details.summary.error_message),
+        ),
+    )
+    diagnostic = _translation_work_unit_diagnostic(
+        settings,
+        job_id=details.summary.job_id,
+    )
+    if diagnostic is None:
+        return details
+    return replace(details, work_unit_diagnostic=diagnostic)
+
+
+def _translation_text_diagnostics(
+    settings: Settings,
+    *,
+    job_id: str,
+    start_sequence: int,
+    limit: int,
+) -> tuple[dict[str, object], ...]:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return ()
+    store = open_persistent_job_store(settings)
+    storage = LocalObjectStorage(settings.object_storage_root)
+    try:
+        units = store.list_work_units(job_id)
+        selected = [
+            unit
+            for unit in units
+            if unit.sequence >= start_sequence
+        ][:limit]
+        rows = []
+        for unit in selected:
+            rows.append(
+                {
+                    "sequence": unit.sequence,
+                    "status": getattr(unit.status, "value", str(unit.status)),
+                    "source_block_ids": unit.source_block_ids,
+                    "source_text": _diagnostic_source_text(storage, unit),
+                    "translated_text": unit.translated_text or "",
+                    "attempt_count": unit.attempt_count,
+                    "max_attempts": unit.max_attempts,
+                    "last_error": (
+                        _redact_sensitive_text(unit.last_error)
+                        if unit.last_error
+                        else None
+                    ),
+                }
+            )
+        return tuple(rows)
+    finally:
+        store.close()
+
+
+def _translation_work_unit_diagnostic(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> TranslationWorkUnitDiagnostic | None:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return None
+    store = open_persistent_job_store(settings)
+    try:
+        units = sorted(
+            store.list_work_units(job_id),
+            key=lambda unit: getattr(unit, "sequence", 0),
+        )
+    finally:
+        store.close()
+    selected = _select_diagnostic_work_unit(units)
+    if selected is None:
+        return None
+    last_error = getattr(selected, "last_error", None)
+    return TranslationWorkUnitDiagnostic(
+        sequence=getattr(selected, "sequence", 0),
+        status=_status_value(getattr(selected, "status", "unknown")),
+        source_block_ids=tuple(getattr(selected, "source_block_ids", ()) or ()),
+        attempt_count=max(0, int(getattr(selected, "attempt_count", 0) or 0)),
+        max_attempts=max(0, int(getattr(selected, "max_attempts", 0) or 0)),
+        last_error=_safe_work_unit_error_summary(last_error),
+        updated_at=getattr(selected, "updated_at", None),
+    )
+
+
+def _persistent_job_store_readable(settings: Settings) -> bool:
+    if settings.scheduler_backend == "sqlite":
+        db_path = settings.persistent_jobs_db_path
+        return db_path != ":memory:" and sqlite_store_exists(db_path)
+    return settings.scheduler_backend == "postgres"
+
+
+def _select_diagnostic_work_unit(units: list[object]) -> object | None:
+    status_priority = (
+        {"failed_terminal", "failed"},
+        {"failed_retryable"},
+        {"translating"},
+        {"pending", "queued"},
+    )
+    for statuses in status_priority:
+        for unit in units:
+            if _status_value(getattr(unit, "status", "unknown")) in statuses:
+                return unit
+    return None
+
+
+def _status_value(status: object) -> str:
+    return getattr(status, "value", str(status))
+
+
+def _safe_work_unit_error_summary(error: object | None) -> str | None:
+    if error is None:
+        return None
+    redacted = _redact_sensitive_text(str(error))
+    normalized = " ".join(redacted.split())
+    known_safe = {
+        "retryable provider failure",
+        "source object missing",
+        "source object not found",
+        "source object key rejected",
+        "source object unavailable",
+    }
+    if normalized in known_safe:
+        return normalized
+    return "error recorded; open text diagnostics"
+
+
+def _diagnostic_source_text(storage: LocalObjectStorage, unit) -> str:
+    object_key = getattr(unit, "source_object_key", None)
+    if not object_key:
+        return "[source object missing]"
+    try:
+        return storage.get_bytes(object_key).decode("utf-8", errors="replace")
+    except FileNotFoundError:
+        return "[source object not found]"
+    except ValueError:
+        return "[source object key rejected]"
+    except OSError:
+        return "[source object unavailable]"
 
 
 def _user_translation_summaries(
@@ -2790,3 +2964,21 @@ def _safe_limit(value: str | None) -> int:
         return max(1, min(int(value), 500))
     except ValueError:
         return 100
+
+
+def _positive_int(value: str | None, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return default
+
+
+def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
+    if value is None:
+        return default
+    try:
+        return max(1, min(int(value), maximum))
+    except ValueError:
+        return default

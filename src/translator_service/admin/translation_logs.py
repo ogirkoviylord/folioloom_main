@@ -74,6 +74,17 @@ class TranslationRunFragmentDetail:
 
 
 @dataclass(frozen=True)
+class TranslationWorkUnitDiagnostic:
+    sequence: int
+    status: str
+    source_block_ids: tuple[str, ...]
+    attempt_count: int
+    max_attempts: int
+    last_error: str | None
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True)
 class TranslationRunDetails:
     summary: TranslationRunSummary
     metadata: dict[str, Any]
@@ -83,6 +94,7 @@ class TranslationRunDetails:
     events: tuple[TranslationRunEvent, ...]
     fragments: tuple[TranslationRunFragmentDetail, ...]
     run_dir: str
+    work_unit_diagnostic: TranslationWorkUnitDiagnostic | None = None
 
 
 def list_translation_run_summaries(
@@ -398,7 +410,10 @@ def _eta_seconds(
 
 
 def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, ...]:
-    return tuple(_fragment_detail(data) for data in _read_fragment_records(fragments_dir))
+    return tuple(
+        _fragment_detail(data)
+        for data in _read_fragment_records(fragments_dir)
+    )
 
 
 def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
