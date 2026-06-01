@@ -17,6 +17,46 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-01 - Product/architecture decision: internal before-after reader first
+
+Status: Active
+
+Decision:
+- FolioLoom may explore a before-after reader first as an internal/dev QA tool.
+- The first reader scope is limited to synthetic fixtures, repository test
+  samples, public-domain/permissive authorized fixtures and explicitly
+  owner-approved local files.
+- The first implementation direction is a local report/tool over existing
+  TXT/DOCX/EPUB adapter blocks, starting with TXT.
+- User-facing reader and publisher/editor workspace are deferred future work.
+
+Evidence:
+- Owner clarified in conversation on 2026-06-01 that only the internal/dev
+  reader should be pursued now, while user-facing and publisher/editor versions
+  are future work.
+- `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`
+  records the design direction and task breakdown.
+
+Reason:
+- The existing format adapter contract already exposes stable block ids,
+  text, kind, group id and metadata that can support side-by-side QA.
+- A local internal/dev report provides immediate quality and structure insight
+  without expanding public/user data, admin exposure, legal/privacy or publisher
+  product scope.
+
+Consequences:
+- Agents may plan and implement focused internal/dev reader slices that stay
+  within the documented guardrails.
+  expose ordinary admin raw-text views, add production dependencies, or claim
+  release/production/legal/privacy readiness as part of the first slice.
+- DOCX visual fidelity, EPUB book-like rendering, user-facing reader and
+  publisher/editor workspace require separate spikes or owner-approved issues.
+
+Human approval required to change:
+- yes; broadening this into user-facing access, publisher workspace, admin
+  route, production dependency, runtime data access or legal/privacy copy
+  changes affects product scope and user-data/privacy guardrails.
+
 ### 2026-05-10 - Product decisions: free closed beta first
 
 Status: Active
