@@ -68,6 +68,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   QA on synthetic/test/public-domain/permissive or owner-approved files, not a
   user-facing reader, publisher workspace, admin route or production-readiness
   claim.
+- `docs/superpowers/specs/2026-06-01-docx-internal-preview-renderer-spike.md` -
+  active issue #183 Architect spike note. It recommends keeping DOCX on the
+  semantic/block reader for now, using local LibreOffice only as a reference/QA
+  path, and deferring `docx-preview`/Mammoth/LibreOffice runtime dependencies
+  to separately approved prototype or implementation issues.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
