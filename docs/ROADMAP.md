@@ -55,7 +55,10 @@ evidence, а не создание документов с нуля.
   deployment, database/state, retention/user data, legal/privacy/security,
   external provider behavior.
 - Не ослаблять guardrails: rights confirmation, beta allowlist, cost caps, kill
-  switch, SSH-tunnel-only admin, redaction of raw document text/prompts/keys.
+  switch, SSH-tunnel-only admin, secret/prompt/key redaction and approved
+  raw-text handling. Dedicated owner-only text diagnostics is the accepted
+  exception; safe archives, telemetry, normal admin pages and support artifacts
+  remain metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.
 
 ## 4. Phase 0 - Documentation and agent readiness
@@ -204,7 +207,9 @@ Acceptance criteria:
   open.
 - Accepted jobs не теряются при worker/bot restart по release evidence.
 - Provider failures дают safe user messaging и diagnosable metadata.
-- Logs/admin не содержат raw document text, prompts, translations или keys.
+- Logs/admin do not expose raw document text, prompts, translations or keys
+  outside the approved owner-only text diagnostics surface; safe archives,
+  telemetry, normal details and support artifacts remain redacted/metadata-only.
 
 Обязательные тесты:
 
@@ -240,8 +245,10 @@ Acceptance criteria:
 
 ## 6. Phase 2 - Improve observability and admin/debugging
 
-Цель: дать owner/admin достаточно visibility для free closed beta без чтения
-сырых логов и без утечки secrets/raw document text.
+Цель: дать owner/admin достаточно visibility для free closed beta without
+digging through raw logs or duplicate downloaded archives, while keeping
+secrets/prompts/keys redacted and raw document/translation text confined to the
+approved owner-only text diagnostics surface.
 
 Tasks:
 
@@ -271,7 +278,9 @@ Acceptance criteria:
   provider/key and failure-category evidence without hunting through multiple
   log-like pages.
 - Backup/restore состояние видно через admin или documented owner report.
-- Любые новые debug surfaces проходят redaction review.
+- Любые новые debug surfaces проходят redaction review. Raw text access remains
+  limited to the approved owner-only text diagnostics surface unless the owner
+  records another decision.
 
 Later:
 
@@ -331,7 +340,9 @@ Acceptance criteria:
 
 - Пользователь видит безопасные, понятные сообщения без stack traces/provider
   internals/raw text.
-- Owner/admin видит operational state без раскрытия secrets.
+- Owner/admin видит operational state без раскрытия secrets; raw
+  source/translated text is available through the approved owner-only text
+  diagnostics surface for incident debugging.
 - UX polish не добавляет payments, public signup, new formats или public admin.
 
 ## 9. Phase 5 - Release readiness

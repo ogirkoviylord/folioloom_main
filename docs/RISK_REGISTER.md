@@ -32,7 +32,7 @@
 | R-011 | Background jobs and scheduler concurrency/race conditions | Technical | High | `worker.py`, `scheduler.py`, `postgres_scheduler.py`; docs mention leases, capacity, fairness, provider caps | Duplicate claims, stuck leases, over-capacity provider calls, inconsistent usage accounting | Changes require targeted scheduler/worker/Postgres tests and Architect review | Architect / Reviewer | Open |
 | R-012 | Storage/runtime data under `var/` and local object storage are high-risk | User data / Operational | High | `docker-compose.yml` mounts `./var`; `file_storage.py`; `docs/CONTEXT_MAP.md` marks `var/` as user/runtime data | Accidental edits/deletes can affect uploaded docs, results, DBs, logs | Do not edit runtime data without approval; backup before destructive operations | Human / Reviewer | Open |
 | R-013 | Database/schema changes have no migrations directory | Database | High | `postgres_scheduler.py` contains schema SQL; no `migrations/`, `database/`, `db/` directories found | Manual schema drift or incompatible runtime state | Any schema/state change needs plan, tests, backup/restore impact review | Architect / Human | Unknown |
-| R-014 | Error handling can leak unsafe details if new paths bypass redaction | Security / Privacy | High | `security_telemetry.py` safe payload allowlist; `admin/translation_logs.py` redacts sensitive keys; issue #78 synthetic local evidence fixed translation run artifact/archive redaction and created bug #117 for the found archive leak risk; docs forbid raw text | Raw document text, prompts, translations, secrets or tracebacks could appear in new logs/admin/user-message paths if future changes bypass redaction | Reviewer checks redaction tests and admin/log/archive outputs for touched path | Reviewer / Implementer | Mitigated / watch |
+| R-014 | Error handling can leak unsafe details if new paths bypass redaction | Security / Privacy | High | `security_telemetry.py` safe payload allowlist; `admin/translation_logs.py` redacts sensitive keys; issue #78 synthetic local evidence fixed translation run artifact/archive redaction and created bug #117 for the found archive leak risk; docs allow raw text only in the approved owner-only Text diagnostics surface | Raw document text, prompts, translations, secrets or tracebacks could appear in new logs/admin/user-message paths if future changes bypass redaction | Reviewer checks redaction tests and admin/log/archive outputs for touched path; raw source/translated text must stay confined to owner-only Text diagnostics | Reviewer / Implementer | Mitigated / watch |
 | R-015 | Observability gaps: Alerts MVP and Backups visibility incomplete | Operational | Medium | `CURRENT_PROJECT_STATE.md`, `DOCUMENT_INDEX.md`, Gate B unchecked; issue #71 approved metadata-only owner runbook/report for Gate B with admin UI later | Owner may miss provider, queue, worker, disk, backup or restore problems | Add metadata-only owner runbook/report covering provider, queue/worker, disk/storage, failed jobs and backup/restore; defer admin UI expansion | Implementer / Reviewer | Open |
 | R-016 | Admin auth/security is sensitive and tunnel-only | Security / Auth | High | `admin/auth.py`, `admin/rbac.py`, `docker-compose.yml` binds `127.0.0.1:62062`, docs say SSH tunnel only | Public exposure or auth weakening can compromise admin/runtime data | No bind/auth/RBAC changes without approval; keep SSH tunnel model until Gate D | Human / Architect | Open |
 | R-017 | Permissions/RBAC model may be foundation-only | Security | Medium | `admin/rbac.py`, `admin/auth.py`, docs call owner/admin console closed-beta and SSH-only | Future named admins or public exposure could need stronger access policy | Treat public/named-admin changes as High; require security review | Architect / Human | Unknown |
@@ -55,6 +55,7 @@
 | R-034 | Malware/AV scanning can regress or be misrepresented as broader Gate B readiness | Security / Privacy / User data / Deployment | High | Owner accepted local malware scanning on 2026-05-22; Gate B requires local malware/AV scanning or explicit owner deferral; issue #93 adds the app `clamd` adapter, issue #94 wires ledger-backed upload gating, issue #103 adds metadata-only admin visibility, issue #109 adds internal-only runtime shape and local runtime smoke, issue #95 records metadata-only Gate B malware/AV evidence on 2026-05-27, and issue #173 records a beta runtime mismatch where `clamd` was unhealthy/OOM-killed while bot scanner settings were not enforcing scanning. Metadata-only 173D smoke on 2026-06-01 found the running beta `clamd` still `unhealthy`, bot app settings still scanner-disabled, scanner env names absent and internal `clamd` unavailable. | Unsafe files may reach parsers/workers if the runtime gate is misconfigured or regresses, or private books/manuscripts may be submitted to inappropriate public scanning services; agents may mistake the malware/AV item pass for full upload safety or Gate B readiness | Keep local/internal scanning, quarantine-first flow, Upload Safety Ledger accepted-source gating, fail-closed beta errors and metadata-only logs/admin; production-like runtime defaults should require local `clamd` when scanner env is absent; keep public scanning services out of the default path; preserve #95 evidence scope and keep issue #73 upload-hardening scope, TTL/quarantine cleanup, real-file matrix, approved beta-server smoke and #173 target-host memory adequacy as separate evidence items | Human / Architect / Reviewer | Open |
 | R-035 | Skill dispatch bypass or docs drift | AI workflow | Medium | `AGENTS.md` defines Skill Dispatch Contract; `docs/AGENT_SKILL_ROUTING.md` defines primary routing plus supporting skill domain catalog; `.agents/skills/*` must stay aligned | Agents may choose the wrong role/skill, skip approval evidence, overuse supporting skills, or read excessive docs if routing guidance drifts | Keep dispatcher compact in `AGENTS.md`, use 0-2 supporting skills by default, require routing receipts in final reports, and have Reviewer check route/approval consistency | Reviewer / Scribe | Open |
 | R-036 | Beta Operations Console redesign can become a broad admin rewrite or add confusing/risky controls | Admin / Operational / AI workflow | Medium | Owner approved `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md` as a before-beta design direction; admin auth/security, provider controls and user data remain high-risk zones | A broad redesign could delay Gate B work, hide existing diagnostic detail, weaken redaction, or put state-changing controls too close to read-only incident investigation | Split into small issues; start with Translation Failure Trace and safe evidence packet; keep advanced/raw views available; keep state-changing actions deeper and clearly classified; require Architect review for provider controls, auth/security, user data, database/state, deployment or dependency changes | Orchestrator / Architect / Reviewer | Open |
+| R-037 | Owner-only raw translation text diagnostics can leak sensitive user text if copied or exposed outside admin | Privacy / User data / Admin | High | Owner approved permanent raw translation text diagnostics on 2026-06-01; normal details, safe archives, telemetry and APIs are intended to remain redacted/metadata-only | Screenshots, copied excerpts, support notes, PRs/issues, public admin exposure or broadened routes could leak source/translated document text | Keep the route SSH-tunneled and owner-only; do not include raw excerpts in docs/issues/PRs/support notes without exact owner approval; keep safe archives/telemetry/normal admin/API surfaces redacted; require review for new raw-text surfaces | Human / Architect / Reviewer | Open |
 
 ## 4. Обязательные категории рисков
 
@@ -104,6 +105,9 @@
 - Secrets: Critical; real `.env*` files are present locally and must not be read/edited casually.
 - Env files: Critical for real env files; example env files are documentation/config references only.
 - User data: Critical; uploaded documents, generated files, runtime DBs and logs are sensitive.
+- Raw translation text diagnostics: High; owner-approved permanent access exists
+  only in the dedicated SSH-tunneled Text diagnostics surface. Safe
+  logs/archives/telemetry/normal admin/API surfaces must remain redacted.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,
@@ -174,8 +178,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
 
 - Area: User data, storage, retention, TTL, backup/restore and destructive operations.
   Why approval is required: affects uploaded documents, generated outputs, runtime DBs, logs and recoverability.
-  What must be reviewed: data classes touched, delete/retention semantics, backup/restore impact, safe metadata rules.
-  Minimum evidence before approval: dry run or test fixtures, backup status, restore/rollback path, privacy-safe logs.
+  What must be reviewed: data classes touched, delete/retention semantics,
+  backup/restore impact, safe metadata rules and whether raw text remains
+  confined to the approved owner-only diagnostic surface.
+  Minimum evidence before approval: dry run or test fixtures, backup status,
+  restore/rollback path, privacy-safe logs and redaction coverage for
+  non-diagnostic admin/archive/API surfaces.
 
 - Area: Database schema/state, scheduler/job/work-unit state.
   Why approval is required: durable state correctness affects accepted jobs and restart recovery.
@@ -308,9 +316,10 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Acceptance criteria: first slice provides Translation Failure Trace and a
   safe evidence packet; provider/key incident clarity follows; overview triage
   links to trace views; state-changing admin actions remain deeper and clearly
-  classified; advanced/raw views remain available; no raw document text,
-  prompts, translations, API keys, stack traces, public admin exposure, payment
-  readiness or production-readiness claims are introduced.
+  classified; the approved owner-only raw Text diagnostics view remains
+  available; no additional raw document text, prompts, translations, API keys,
+  stack traces, public admin exposure, payment readiness or
+  production-readiness claims are introduced.
 
 - Task: Define paid-beta plan only when owner chooses Gate C work.
   Risk reduced: R-024.
@@ -329,7 +338,9 @@ If a payment/provider/business zone is not implemented as a production-ready pat
 - Проверить high-risk files: secrets/env, deployment, payments/pricing, auth/security, legal/privacy, user data, database/state, external integrations.
 - Проверить tests: relevant focused tests, full suite/predeploy when scope is broad or release-adjacent, and honest "not run" note for docs-only work.
 - Проверить docs: no invented features, CI, deployment steps, production readiness or legal/privacy/payment claims.
-- Проверить security/privacy/legal/payment/deployment: no weakened guardrails, no raw text/secrets, no public admin, no paid flow before Gate C.
+- Проверить security/privacy/legal/payment/deployment: no weakened guardrails,
+  no raw text outside approved owner-only diagnostics, no secrets, no public
+  admin, no paid flow before Gate C.
 - Проверить unintended behavior changes: bot flow, rights confirmation, scheduler/job state, storage paths, provider/cost caps and admin redaction.
 - Проверить approvals: High/Critical zones must have explicit human approval before changes.
 - Проверить parallel conflicts: shared state machines, bot/backend contracts, provider/admin telemetry, auth/admin views and deployment docs/scripts.
