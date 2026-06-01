@@ -147,8 +147,15 @@ For DOCX, section grouping can initially use file name and block order.
 
 ### Later DOCX renderer spike
 
-Do not write a custom DOCX visual renderer first. Compare options in a separate
-spike:
+Do not write a custom DOCX visual renderer first. Issue
+[#183](https://github.com/ogirkoviylord/folioloom_main/issues/183) records the
+current spike recommendation in
+`docs/superpowers/specs/2026-06-01-docx-internal-preview-renderer-spike.md`:
+keep DOCX on the semantic/block reader for now, use local LibreOffice as a
+reference/QA path, and defer renderer dependencies to separate owner-approved
+prototype or implementation issues.
+
+Options considered:
 
 - `docx-preview`/`docxjs` for browser-oriented DOCX preview.
 - `Mammoth` for semantic DOCX-to-HTML, not exact visual fidelity.

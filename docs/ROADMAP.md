@@ -555,8 +555,9 @@ Acceptance criteria:
   Status: issue #181 first TXT local HTML report slice is ready for review in
   PR #185 on branch `codex/issue-181-internal-reader-txt-report`; issue #182
   generic semantic block mapping slice is locally verified on stacked branch
-  `codex/issue-182-generic-reader-block-model`; issues #183-#184 remain open
-  renderer/fidelity spikes.
+  `codex/issue-182-generic-reader-block-model`; issue #183 DOCX renderer spike
+  recommendation is recorded on branch `codex/issue-183-docx-renderer-spike`;
+  issue #184 remains an open EPUB renderer/fidelity spike.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:
@@ -568,6 +569,11 @@ Acceptance criteria:
   DOCX renderer spike and
   [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184) for the
   EPUB renderer spike.
+  DOCX recommendation: keep semantic/block preview as the default for now, use
+  local LibreOffice only as reference/QA on approved fixtures, and require a
+  separate owner-approved prototype/implementation issue before adding
+  `docx-preview`, Mammoth or LibreOffice automation as a dependency/runtime
+  path.
   Suggested acceptance criteria: local tool generates a side-by-side
   source/translation report from existing adapter blocks for explicit
   synthetic/test/public-domain/permissive or owner-approved files, starts with

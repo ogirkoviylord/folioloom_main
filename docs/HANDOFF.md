@@ -401,6 +401,18 @@ Owner decisions recorded during issue #71:
   format-adapter tests, compileall and targeted ruff. This does not implement
   DOCX visual rendering, EPUB book-like rendering, admin/public UI, live
   runtime data access, production dependency or release readiness.
+- 2026-06-01: Issue
+  [#183](https://github.com/ogirkoviylord/folioloom_main/issues/183)
+  DOCX renderer spike recommendation is recorded in
+  `docs/superpowers/specs/2026-06-01-docx-internal-preview-renderer-spike.md`
+  on branch `codex/issue-183-docx-renderer-spike`. Recommendation: keep DOCX
+  on the semantic/block reader for now, use local LibreOffice Writer/headless
+  conversion only as a reference/QA path on approved fixtures, and do not add
+  `docx-preview`, Mammoth or LibreOffice automation as a production dependency
+  without a separate owner-approved prototype/implementation issue. This does
+  not implement DOCX visual rendering, add a dependency, change deployment,
+  add admin/public UI, read live runtime data or claim DOCX fidelity/release
+  readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
