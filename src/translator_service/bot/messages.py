@@ -122,6 +122,11 @@ MESSAGES = {
             "Review the translation preview first, then choose Continue "
             "Translation to start the full translation."
         ),
+        "same_language_blocked": (
+            "This file already appears to be {source_language}, which matches "
+            "the selected target language ({target_language}). "
+            "Choose a different target language or cancel this upload."
+        ),
         "preview_already_generated": (
             "A preview for this same document, language, and mode is already "
             "prepared. I cannot start another identical preview yet. Go back "
@@ -382,6 +387,11 @@ MESSAGES = {
         "preview_required": (
             "Сначала посмотрите предпросмотр, затем нажмите "
             "«Продолжить перевод», чтобы начать полный перевод."
+        ),
+        "same_language_blocked": (
+            "Похоже, этот файл уже на языке: {source_language}, и это "
+            "совпадает с выбранным языком перевода ({target_language}). "
+            "Выберите другой язык перевода или отмените эту загрузку."
         ),
         "preview_already_generated": (
             "Предпросмотр для этого же документа, языка и режима уже "
@@ -1612,6 +1622,26 @@ def build_preview_translation_message(
 
 def build_preview_required_message(interface_language: str = "en") -> str:
     return _messages(interface_language)["preview_required"]
+
+
+def build_same_language_translation_blocked_message(
+    *,
+    source_language_code: str,
+    target_language_code: str,
+    interface_language: str = "en",
+) -> str:
+    messages = _messages(interface_language)
+    source_language = localized_language_name_for_code(
+        source_language_code,
+        interface_language,
+    )
+    return messages["same_language_blocked"].format(
+        source_language=source_language,
+        target_language=localized_language_name_for_code(
+            target_language_code,
+            interface_language,
+        ),
+    )
 
 
 def build_duplicate_upload_message(match, interface_language: str = "en") -> str:
