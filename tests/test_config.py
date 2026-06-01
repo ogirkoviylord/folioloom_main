@@ -96,6 +96,86 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.clamd_chunk_size_bytes, 8192)
         self.assertEqual(settings.clamd_response_limit_bytes, 1024)
 
+    def test_production_runtime_defaults_to_fail_closed_clamd_scanning(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+            },
+            clear=True,
+        ):
+            settings = Settings()
+
+        self.assertTrue(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "clamd")
+        self.assertEqual(settings.clamd_host, "clamd")
+        self.assertEqual(settings.clamd_port, 3310)
+
+    def test_server_beta_runtime_defaults_to_fail_closed_clamd_scanning(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "server-beta",
+            },
+            clear=True,
+        ):
+            settings = Settings()
+
+        self.assertEqual(settings.environment, "server-beta")
+        self.assertTrue(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "clamd")
+        self.assertEqual(settings.clamd_host, "clamd")
+        self.assertEqual(settings.clamd_port, 3310)
+
+    def test_blank_production_scanner_env_uses_fail_closed_clamd_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+                "REQUIRE_UPLOAD_SCAN": "",
+                "UPLOAD_SCANNER_BACKEND": "",
+                "CLAMD_HOST": "",
+            },
+            clear=True,
+        ):
+            settings = Settings()
+
+        self.assertTrue(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "clamd")
+        self.assertEqual(settings.clamd_host, "clamd")
+
+    def test_blank_server_beta_scanner_env_uses_fail_closed_clamd_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "server-beta",
+                "REQUIRE_UPLOAD_SCAN": "",
+                "UPLOAD_SCANNER_BACKEND": "",
+                "CLAMD_HOST": "",
+            },
+            clear=True,
+        ):
+            settings = Settings()
+
+        self.assertTrue(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "clamd")
+        self.assertEqual(settings.clamd_host, "clamd")
+
+    def test_explicit_production_scanner_deferral_overrides_default(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+                "REQUIRE_UPLOAD_SCAN": "false",
+                "UPLOAD_SCANNER_BACKEND": "none",
+            },
+            clear=True,
+        ):
+            settings = Settings()
+
+        self.assertFalse(settings.require_upload_scan)
+        self.assertEqual(settings.upload_scanner_backend, "none")
+
     def test_security_thresholds_can_be_configured_from_environment(self):
         with patch.dict(
             "os.environ",

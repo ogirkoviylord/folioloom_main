@@ -967,6 +967,58 @@ Human approval required to change:
 - yes; this touches security, privacy, user data, deployment and dependency
   boundaries.
 
+### 2026-06-01 - Risk / safety decisions: beta upload scanning fails closed
+
+Status: Active
+
+Decision:
+- Beta upload malware/AV scanning must fail closed. If the scanner is required
+  but unavailable, times out, errors, or is not configured, uploaded files must
+  not reach parser, preview, persistent-job or worker paths.
+- Production-like runtime defaults use local/internal `clamd` when scanner env
+  is absent: `REQUIRE_UPLOAD_SCAN=true`, `UPLOAD_SCANNER_BACKEND=clamd` and
+  `CLAMD_HOST=clamd`.
+- The beta `clamd` memory default must not remain at the OOM-prone `1g` value
+  reported in issue #173. The documented default is raised to `2g`; target-host
+  adequacy remains Unknown until an owner-approved runtime smoke verifies it.
+
+Evidence:
+- Owner approved issue #173 implementation in chat on 2026-06-01.
+- GitHub issue #173 records that the beta `clamd` container was unhealthy,
+  had a `1GiB` memory limit and had been OOM-killed, while bot runtime settings
+  reported `require_upload_scan=False`, `upload_scanner_backend='none'` and
+  `clamd_host='127.0.0.1'`.
+- Owner-approved metadata-only 173D server smoke on 2026-06-01 confirmed the
+  running beta stack was still mismatched before this fix is deployed: `clamd`
+  was unhealthy/unavailable from the bot container, app settings still disabled
+  upload scanning, and scanner env names were absent. No real `.env*`, runtime
+  files, object keys, user files or raw document text were inspected.
+- `docs/restart/upload-safety-and-retention.md` and
+  `docs/restart/local-malware-scanning-design.md` define the fail-closed local
+  scanner contract and metadata-only evidence rules.
+
+Reason:
+- A runtime that silently falls back to development scanner settings can accept
+  unscanned files despite the intended beta scanner gate.
+- A `1g` `clamd` memory limit is known from issue #173 evidence to be too low
+  for the observed beta refresh/runtime path.
+
+Consequences:
+- Development defaults may remain scanner-disabled for local prototyping, but
+  production-like runtime must require `clamd` unless an explicit
+  owner-approved deferral sets otherwise.
+- Any server/runtime operation, real `.env*` inspection, live data audit,
+  rescan, quarantine/delete, deployment, or beta smoke check still requires
+  separate exact owner approval.
+- This decision does not prove full Gate B readiness, TTL/quarantine cleanup,
+  approved beta-server smoke, real-file matrix, backup/restore, or production
+  readiness.
+- Target-host adequacy for the `2g` default remains Unknown until the fixed
+  config is deployed and re-smoked with owner approval.
+
+Human approval required to change:
+- yes; this changes security, user-data and deployment/runtime guardrails.
+
 ### 2026-05-10 - Risk / safety decisions: payments and pricing are gated
 
 Status: Active

@@ -152,13 +152,15 @@ internal `clamd` service:
 - `CLAMD_HOST=clamd`
 - `CLAMD_PORT=3310`
 - `CLAMD_PLATFORM=linux/amd64`
+- `CLAMD_MEM_LIMIT=2g`
 - `UPLOAD_SCAN_MAX_CONCURRENCY=1`
 
 `scripts/server_smoke_check.sh` verifies that the bot container can reach
 `clamd`, reads safe version metadata and checks that the safe EICAR test
-signature is detected when upload scanning is enabled. Issue #95 records the
-metadata-only malware/AV Gate B evidence for this path; broader Gate B readiness
-still requires the remaining release-gate evidence.
+signature is detected when app-level `Settings` require upload scanning, rather
+than relying only on shell env variables. Issue #95 records the metadata-only
+malware/AV Gate B evidence for this path; broader Gate B readiness still
+requires the remaining release-gate evidence.
 
 `ADMIN_SECRET_MASTER_KEY` enables encrypted admin-managed secrets. DeepSeek
 keys added in the admin UI are additive with `DEEPSEEK_API_KEY` /

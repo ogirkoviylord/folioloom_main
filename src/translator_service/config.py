@@ -10,6 +10,29 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_text(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip()
+
+
+def _production_like_runtime() -> bool:
+    return os.getenv("ENVIRONMENT", "development").strip().lower() in {
+        "prod",
+        "production",
+        "server-beta",
+    }
+
+
+def _default_upload_scanner_backend() -> str:
+    return "clamd" if _production_like_runtime() else "none"
+
+
+def _default_clamd_host() -> str:
+    return "clamd" if _production_like_runtime() else "127.0.0.1"
+
+
 def _env_float(name: str, default: float, *, minimum: float | None = None) -> float:
     raw = os.getenv(name)
     value = default if raw is None or not raw.strip() else float(raw)
@@ -50,14 +73,29 @@ def _env_telegram_ids(name: str) -> tuple[int, ...]:
 
 @dataclass(frozen=True)
 class Settings:
-    service_name: str = os.getenv("SERVICE_NAME", "DeepSeek Document Translator")
-    environment: str = os.getenv("ENVIRONMENT", "development")
-    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+    service_name: str = field(
+        default_factory=lambda: _env_text(
+            "SERVICE_NAME",
+            "DeepSeek Document Translator",
+        )
+    )
+    environment: str = field(
+        default_factory=lambda: _env_text("ENVIRONMENT", "development")
+    )
+    max_upload_mb: int = field(
+        default_factory=lambda: _env_int("MAX_UPLOAD_MB", 50, minimum=1)
+    )
     require_upload_scan: bool = field(
-        default_factory=lambda: _env_bool("REQUIRE_UPLOAD_SCAN", False)
+        default_factory=lambda: _env_bool(
+            "REQUIRE_UPLOAD_SCAN",
+            _production_like_runtime(),
+        )
     )
     upload_scanner_backend: str = field(
-        default_factory=lambda: os.getenv("UPLOAD_SCANNER_BACKEND", "none").lower()
+        default_factory=lambda: _env_text(
+            "UPLOAD_SCANNER_BACKEND",
+            _default_upload_scanner_backend(),
+        ).lower()
     )
     upload_scan_max_concurrency: int = field(
         default_factory=lambda: _env_int("UPLOAD_SCAN_MAX_CONCURRENCY", 1, minimum=1)
@@ -70,7 +108,7 @@ class Settings:
         )
     )
     clamd_host: str = field(
-        default_factory=lambda: os.getenv("CLAMD_HOST", "127.0.0.1")
+        default_factory=lambda: _env_text("CLAMD_HOST", _default_clamd_host())
     )
     clamd_port: int = field(
         default_factory=lambda: _env_int("CLAMD_PORT", 3310, minimum=1)
