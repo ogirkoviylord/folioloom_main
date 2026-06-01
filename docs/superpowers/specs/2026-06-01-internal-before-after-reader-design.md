@@ -1,15 +1,16 @@
 # Internal Before/After Reader Design
 
-Status: Approved internal/dev design direction; first TXT report slice
-implemented locally for issue #181 on branch
-`codex/issue-181-internal-reader-txt-report`.
+Status: Approved internal/dev design direction; issue #181 TXT report slice and
+issue #182 generic semantic block mapping slice are implemented locally on
+stacked branches.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
 ## Current Implementation Status
 
 Issue [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)
-implements the first local TXT HTML report slice in the current branch:
+implements the first local TXT HTML report slice on branch
+`codex/issue-181-internal-reader-txt-report`:
 
 - reusable internal reader model and HTML renderer in
   `src/translator_service/internal_reader.py`;
@@ -17,6 +18,18 @@ implements the first local TXT HTML report slice in the current branch:
 - focused tests in `tests/test_internal_reader.py`.
 - source, translation mapping and output paths are rejected when they point
   inside repo-local runtime `var/`.
+
+Issue [#182](https://github.com/ogirkoviylord/folioloom_main/issues/182)
+implements generic semantic `FormatAdapterPlan` mapping on branch
+`codex/issue-182-generic-reader-block-model`:
+
+- `build_reader_document()` groups contiguous adapter blocks into reader
+  sections using `file_name` metadata when present and preserves plan order;
+- DOCX semantic reader output preserves stable block ids, kind, group id and
+  metadata;
+- EPUB semantic reader output preserves stable block ids, file names,
+  role/group metadata and body/auxiliary distinction through existing adapter
+  metadata.
 
 Local verification on 2026-06-01:
 
@@ -26,9 +39,13 @@ Local verification on 2026-06-01:
 - `python3 -m ruff check src/translator_service/internal_reader.py tools/internal_reader_report.py tests/test_internal_reader.py` passed;
 - CLI smoke generated a report from `test_samples/sample_book.en.txt` into a
   temporary directory.
+- #182 verification: `PYTHONPATH=src python3 -m unittest tests.test_internal_reader`
+  passed, `PYTHONPATH=src python3 -m unittest tests.test_format_adapters`
+  passed, `PYTHONPATH=src python3 -m compileall src` passed and targeted ruff
+  passed.
 
-This status does not implement issue #182, #183 or #184, does not add an admin
-or public route, does not authorize live runtime `var/` reads, does not add a
+This status does not implement issue #183 or #184, does not add an admin or
+public route, does not authorize live runtime `var/` reads, does not add a
 production dependency and does not claim release readiness.
 
 ## Goal
