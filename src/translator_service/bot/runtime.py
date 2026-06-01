@@ -2505,6 +2505,24 @@ async def _edit_callback_message(message, text: str, reply_markup=None) -> None:
         await result
 
 
+async def _edit_progress_message_if_changed(
+    message,
+    text: str,
+    reply_markup=None,
+) -> None:
+    try:
+        await _edit_callback_message(message, text, reply_markup=reply_markup)
+    except Exception as error:
+        if _is_message_not_modified_error(error):
+            logger.debug("Skipping unchanged translation progress message edit")
+            return
+        raise
+
+
+def _is_message_not_modified_error(error: Exception) -> bool:
+    return "message is not modified" in str(error).lower()
+
+
 def _inline_reply_markup_or_none(reply_markup):
     if reply_markup is None:
         return None
@@ -3365,7 +3383,7 @@ async def _watch_worker_translation_progress(
                 ),
                 activity_phrase_index=int(progress_stats["spinner_index"]),
             )
-        await _edit_callback_message(
+        await _edit_progress_message_if_changed(
             message,
             progress_text,
             reply_markup=_cancel_inline_keyboard(

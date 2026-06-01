@@ -344,7 +344,9 @@ See `docs/restart/release-gates.md` for the canonical checklists.
   owner explicitly approves a scope change and an Architect reviews the format
   safety plan.
 - Do not expose admin publicly in closed beta.
-- Do not log or show raw document text in admin/run logs.
+- Do not log raw document text in run logs or safe archives. Raw
+  source/translated work-unit text may be shown only in the approved
+  SSH-tunneled owner/admin Text diagnostics surface for incident debugging.
 - Do not use global ruff cleanup as a release blocker.
 
 ## Clean-Room Note
