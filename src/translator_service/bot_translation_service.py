@@ -57,6 +57,7 @@ from translator_service.job_runner import (
     run_translation_job,
 )
 from translator_service.language_detection import (
+    LANGUAGE_NAMES,
     detect_language_from_text,
     detect_languages_from_text,
     format_detected_source_languages,
@@ -149,6 +150,10 @@ SUPPORTED_TRANSLATION_MODES = (
     TRANSLATION_MODE_DOCUMENT_FORM,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
 )
+_LANGUAGE_NAME_TO_CODE = {
+    language_name.casefold(): language_code
+    for language_code, language_name in LANGUAGE_NAMES.items()
+}
 _MY_BOOK_DETAIL_PROGRESS_STATUSES = {
     PersistentTranslationJobStatus.QUEUED.value,
     PersistentTranslationJobStatus.TRANSLATING.value,
@@ -173,6 +178,22 @@ class PreviewAcceptanceRequired(ValueError):
 
 class TranslationModeRequired(ValueError):
     """Raised when a translation mode is required before continuing."""
+
+
+class SameLanguageTranslationBlocked(ValueError):
+    """Raised when source and target resolve to the same language."""
+
+    def __init__(self, *, source_language_code: str, target_language_code: str) -> None:
+        self.source_language_code = source_language_code
+        self.target_language_code = target_language_code
+        source_language_name = LANGUAGE_NAMES.get(
+            source_language_code,
+            source_language_code.upper(),
+        )
+        super().__init__(
+            f"This file already appears to be {source_language_name}. "
+            "Choose a different target language or cancel this upload."
+        )
 
 
 class DocumentScanRejectedError(ValueError):
@@ -1202,6 +1223,19 @@ class BotTranslationService:
             document_sandbox=self._document_sandbox,
             translation_mode=normalized_mode,
         )
+        resolved_source_language_display = source_language_display or (
+            _source_language_display(
+                document_format=upload.document_format,
+                content=content,
+                source_language=source_language,
+                document_sandbox=self._document_sandbox,
+            )
+        )
+        _raise_if_same_language_translation(
+            source_language=source_language,
+            source_language_display=resolved_source_language_display,
+            target_language=target_language,
+        )
         pending = PendingTranslation(
             user_telegram_id=user_telegram_id,
             file_name=file_name,
@@ -1210,13 +1244,7 @@ class BotTranslationService:
             target_language=target_language,
             price_usd=estimate.price_usd,
             fragment_count=estimate.fragment_count,
-            source_language_display=source_language_display
-            or _source_language_display(
-                document_format=upload.document_format,
-                content=content,
-                source_language=source_language,
-                document_sandbox=self._document_sandbox,
-            ),
+            source_language_display=resolved_source_language_display,
             estimated_seconds=estimate_translation_seconds(
                 estimate.fragment_count,
                 max_parallel_work_units=self._max_parallel_work_units,
@@ -4976,6 +5004,44 @@ def _source_language_display(
         detected_languages=detect_languages_from_text(text),
         primary_language=detect_language_from_text(text),
     )
+
+
+def _raise_if_same_language_translation(
+    *,
+    source_language: str,
+    source_language_display: str | None,
+    target_language: str,
+) -> None:
+    source_code = _resolved_source_language_code(
+        source_language=source_language,
+        source_language_display=source_language_display,
+    )
+    target_code = _normalized_language_code(target_language)
+    if source_code is not None and source_code == target_code:
+        raise SameLanguageTranslationBlocked(
+            source_language_code=source_code,
+            target_language_code=target_code,
+        )
+
+
+def _resolved_source_language_code(
+    *,
+    source_language: str,
+    source_language_display: str | None,
+) -> str | None:
+    normalized_source = _normalized_language_code(source_language)
+    if normalized_source != "auto":
+        return normalized_source
+    if not source_language_display:
+        return None
+    primary_display = source_language_display.split("(", 1)[0].split(";", 1)[0].strip()
+    if not primary_display or primary_display.casefold().startswith("auto"):
+        return None
+    return _LANGUAGE_NAME_TO_CODE.get(primary_display.casefold())
+
+
+def _normalized_language_code(language: str) -> str:
+    return language.strip().lower()
 
 
 def _extract_text_for_language_detection(
