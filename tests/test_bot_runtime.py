@@ -801,6 +801,55 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(keyboard_texts, ["Continue Translation", "Back"])
 
+    async def test_language_choice_blocks_same_language_before_preview(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        service = build_translation_service(
+            BotRuntimeConfig(
+                admin_db_path=str(Path(temp_dir.name) / "admin.sqlite3"),
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+                object_storage_root=str(Path(temp_dir.name) / "objects"),
+            )
+        )
+        self.addCleanup(service.close)
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="ave-maria.txt",
+            content=(
+                "Русский текст документа. Это большая часть книги, "
+                "русский язык здесь основной, это документ для перевода.\n"
+                "English: The quick brown fox jumps over the lazy dog."
+            ).encode(),
+            source_language="auto",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        translator = _RuntimeRecordingTranslator()
+        message = RecordingMessage()
+
+        await _prepare_and_send_translation_preview(
+            message=message,
+            service=service,
+            translator=translator,
+            target_language="ru",
+            interface_language="en",
+        )
+
+        self.assertEqual(translator.requests, [])
+        self.assertEqual(service.list_user_books(user_telegram_id=42), [])
+        self.assertIsNone(service.get_pending(42))
+        self.assertIsNotNone(service.get_pending_upload(42))
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("already appears to be Russian", message.answers[0][0])
+        self.assertIn("Choose a different target language", message.answers[0][0])
+        keyboard_texts = [
+            button.text
+            for row in message.answers[0][1].keyboard
+            for button in row
+        ]
+        self.assertIn("Cancel", keyboard_texts)
+
     async def test_language_choice_shows_ready_duplicate_choice_without_preview(self):
         temp_dir = TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
