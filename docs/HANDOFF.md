@@ -413,6 +413,16 @@ Owner decisions recorded during issue #71:
   not implement DOCX visual rendering, add a dependency, change deployment,
   add admin/public UI, read live runtime data or claim DOCX fidelity/release
   readiness.
+- 2026-06-01: Issue
+  [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184)
+  EPUB renderer spike recommendation is recorded in
+  `docs/superpowers/specs/2026-06-01-epub-internal-reader-rendering-spike.md`
+  on branch `codex/issue-184-epub-renderer-spike`. Recommendation: keep EPUB
+  on the semantic/block reader for now, consider a generated
+  XHTML/spine/chapter local report before any book-like reader dependency, and
+  keep EPUBCheck as validation/reference only. This does not implement EPUB
+  book-like rendering, add a dependency, change deployment, add admin/public UI,
+  read live runtime data or claim EPUB Gate B validation/release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
