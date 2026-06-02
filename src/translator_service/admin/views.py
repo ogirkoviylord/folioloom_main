@@ -3338,6 +3338,7 @@ def translation_reader_body(
     show_invisibles: bool = False,
     sync_scroll: bool = True,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3352,6 +3353,7 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3363,21 +3365,28 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
-    visible_rows = _translation_filter_rows(rows, qa_filter)
+    qa_rows = _translation_filter_rows(rows, qa_filter)
+    visible_rows = (
+        _translation_filter_rows_by_search(qa_rows, search_query)
+        if search_hits_only and search_query
+        else qa_rows
+    )
+    empty_message = "No work units found."
+    if qa_filter != "all" and not qa_rows and rows:
+        empty_message = "No work units match this QA filter."
+    elif search_hits_only and search_query and not visible_rows and qa_rows:
+        empty_message = "No work units match this search in the current window."
     source_blocks = _translation_reader_blocks(
         visible_rows,
         text_key="source_text",
         pane_key="original",
         show_invisibles=show_invisibles,
         search_query=search_query,
-        empty_message=(
-            "No work units match this QA filter."
-            if qa_filter != "all" and rows
-            else "No work units found."
-        ),
+        empty_message=empty_message,
     )
     translated_blocks = _translation_reader_blocks(
         visible_rows,
@@ -3385,11 +3394,7 @@ def translation_reader_body(
         pane_key="translation",
         show_invisibles=show_invisibles,
         search_query=search_query,
-        empty_message=(
-            "No work units match this QA filter."
-            if qa_filter != "all" and rows
-            else "No work units found."
-        ),
+        empty_message=empty_message,
     )
     search_match_count = (
         _translation_search_match_count(visible_rows, search_query=search_query)
@@ -3409,6 +3414,7 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3423,6 +3429,7 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3484,6 +3491,7 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )}
@@ -3538,6 +3546,7 @@ def _translation_raw_text_tabs(
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3571,6 +3580,7 @@ def _translation_raw_text_tabs(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3604,6 +3614,7 @@ def _translation_text_controls(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3622,6 +3633,7 @@ def _translation_text_controls(
                 show_invisibles=show_invisibles,
                 sync_scroll=not sync_scroll,
                 search_query=search_query,
+                search_hits_only=search_hits_only,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3639,7 +3651,30 @@ def _translation_text_controls(
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                search_hits_only=search_hits_only,
                 indent_preview=not indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )
+    search_hits_control = ""
+    if view_name == "reader" and search_query:
+        search_hits_control = _action_link(
+            (
+                "Show all search context"
+                if search_hits_only
+                else "Show search hits only"
+            ),
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                search_hits_only=not search_hits_only,
+                indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
             "view",
@@ -3660,6 +3695,7 @@ def _translation_text_controls(
                 show_invisibles=not show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                search_hits_only=search_hits_only,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3667,6 +3703,7 @@ def _translation_text_controls(
         )}
         {sync_control}
         {indent_control}
+        {search_hits_control}
       </div>
       {_translation_page_form(
           view_name,
@@ -3676,6 +3713,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          search_hits_only=search_hits_only,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3687,6 +3725,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          search_hits_only=search_hits_only,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3698,6 +3737,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          search_hits_only=search_hits_only,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3709,6 +3749,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          search_hits_only=search_hits_only,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3725,6 +3766,7 @@ def _translation_page_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3734,6 +3776,7 @@ def _translation_page_form(
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=True,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
         include_limit=False,
@@ -3776,6 +3819,7 @@ def _translation_filter_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3785,6 +3829,7 @@ def _translation_filter_form(
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=True,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
     )
     return f"""
@@ -3815,6 +3860,7 @@ def _translation_search_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3823,7 +3869,8 @@ def _translation_search_form(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=False,
-        search_query="",
+        search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3877,6 +3924,7 @@ def _translation_jump_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3886,6 +3934,7 @@ def _translation_jump_form(
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=True,
         search_query=search_query,
+        search_hits_only=search_hits_only,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3920,6 +3969,7 @@ def _translation_raw_text_href(
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    search_hits_only: bool = False,
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3933,6 +3983,8 @@ def _translation_raw_text_href(
         query["sync"] = "0"
     if search_query:
         query["q"] = search_query
+    if view_name == "reader" and search_query and search_hits_only:
+        query["search_hits"] = "1"
     if indent_preview:
         query["indent_preview"] = "1"
     if qa_filter != "all":
@@ -3947,6 +3999,7 @@ def _translation_control_hidden_fields(
     sync_scroll: bool | None,
     include_search: bool,
     search_query: str,
+    search_hits_only: bool,
     indent_preview: bool,
     qa_filter: str = "all",
     include_limit: bool = True,
@@ -3962,6 +4015,8 @@ def _translation_control_hidden_fields(
         fields.append(
             f'<input type="hidden" name="q" value="{escape(search_query)}">'
         )
+    if search_query and search_hits_only:
+        fields.append('<input type="hidden" name="search_hits" value="1">')
     if indent_preview:
         fields.append('<input type="hidden" name="indent_preview" value="1">')
     if qa_filter != "all":
@@ -3976,6 +4031,23 @@ def _translation_filter_rows(
     if qa_filter == "all":
         return rows
     return tuple(row for row in rows if _translation_row_matches_filter(row, qa_filter))
+
+
+def _translation_filter_rows_by_search(
+    rows: tuple[dict[str, object], ...],
+    search_query: str,
+) -> tuple[dict[str, object], ...]:
+    query = search_query.lower()
+    if not query:
+        return rows
+    return tuple(row for row in rows if _translation_row_matches_search(row, query))
+
+
+def _translation_row_matches_search(row: dict[str, object], lowered_query: str) -> bool:
+    return any(
+        lowered_query in str(row.get(key) or "").lower()
+        for key in ("source_text", "translated_text")
+    )
 
 
 def _translation_row_matches_filter(row: dict[str, object], qa_filter: str) -> bool:
@@ -4216,17 +4288,23 @@ def _translation_reader_position_bar(
     show_invisibles: bool,
     sync_scroll: bool,
     search_query: str,
+    search_hits_only: bool,
     indent_preview: bool,
     qa_filter: str,
 ) -> str:
     search_label = f'Search "{search_query}"' if search_query else "Search off"
-    chips = (
+    chips = [
         ("QA", qa_filter if qa_filter != "all" else "all"),
         ("Search", search_label),
         ("Special chars", "shown" if show_invisibles else "hidden"),
         ("Sync scroll", "on" if sync_scroll else "off"),
         ("Indent preview", "on" if indent_preview else "off"),
-    )
+    ]
+    if search_query:
+        chips.insert(
+            2,
+            ("Search rows", "matches only" if search_hits_only else "all rows"),
+        )
     chip_html = "".join(
         (
             f'<span class="reader-position-chip">'
