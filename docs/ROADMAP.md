@@ -613,6 +613,11 @@ Acceptance criteria:
   `codex/issue-226-reader-paragraph-diagnostics`: source/translation line
   counts, blank-line counts, `paragraph_mismatch` QA flag/filter and Reader QA
   summary count for visible work units only.
+  Issue
+  [#228](https://github.com/ogirkoviylord/folioloom_main/issues/228) begins the
+  first QA issue navigation slice on branch
+  `codex/issue-228-reader-qa-navigation`: a Reader-only current-window issue
+  rail linking existing QA flags to comparison block anchors.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
