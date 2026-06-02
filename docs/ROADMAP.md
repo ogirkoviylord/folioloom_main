@@ -255,11 +255,10 @@ Tasks:
   blind spots.
 - Улучшить safe error reasons: provider auth/billing/rate-limit/timeout,
   parser rejection, quota/cap/kill switch.
-- Implement the owner-approved Beta Operations Console redesign from
-  `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md` in
-  small issues: Translation Failure Trace and safe evidence packet first,
-  provider/key incident clarity second, overview triage third, then navigation
-  cleanup, action semantics and user support/debug views.
+- Treat the first owner-approved Beta Operations Console redesign stack as
+  implemented by PR #160 and closed through #145-#152. Follow-up admin work
+  should be scoped separately, including raw prompt diagnostics, Alerts/Backups
+  visibility and any new release-evidence surfaces.
 - Описать support/debug workflow для owner: какие admin pages смотреть, какие
   scripts запускать, какие artifacts сохранять.
 - Preserve the issue #30 admin guardrail: bulk provider key probes should wait
@@ -271,7 +270,7 @@ Acceptance criteria:
 - Error reasons actionable и безопасны для пользователя/admin.
 - Owner can open one failed translation trace and see safe user/upload/job/run,
   provider/key and failure-category evidence without hunting through multiple
-  log-like pages.
+  log-like pages. Confirmed by the PR #160 admin redesign stack.
 - Backup/restore состояние видно через admin или documented owner report.
 - Любые новые debug surfaces проходят redaction review. Raw text access remains
   limited to the approved owner-only text diagnostics surface unless the owner
@@ -281,9 +280,9 @@ Later:
 
 - Admin UI для backups/alerts visibility remains a follow-up. Issue #71 chose
   metadata-only owner report for Gate B so new bot features do not force broad
-  admin console rewrites. The 2026-05-31 Beta Operations Console decision may
-  add admin UI in scoped redesign issues, but Gate B evidence remains separate
-  until implemented and verified.
+  admin console rewrites. The first 2026-05-31 Beta Operations Console stack is
+  implemented by PR #160, but Gate B evidence remains separate until
+  implemented and verified.
 
 ## 7. Phase 3 - Testing and reliability
 
