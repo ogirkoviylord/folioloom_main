@@ -1331,6 +1331,28 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#266](https://github.com/ogirkoviylord/folioloom_main/issues/266)
+  adds current-page keyboard shortcuts for temporary Reader review marks on
+  branch `codex/issue-266-reader-review-hotkeys`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+  Visible GitHub Python checks for PR
+  [#267](https://github.com/ogirkoviylord/folioloom_main/pull/267) passed.
+- Follow-up: keyboard-applied review marks are current-page DOM state only.
+  This slice does not persist review marks, add cross-page review state, edit
+  text, export review reports, add raw snippets to docs/issues or archives, add
+  public/user-facing reader access, change auth/RBAC, access runtime data, add
+  dependencies, deploy, or claim release readiness.
+- Owner direction: stop the current Reader ergonomics push after this slice.
+  Unfinished/deferred Reader ideas are persistent review state, cross-page
+  completion, block notes/comments, review report export, stronger chapter/page
+  outline and visual intra-block diff. Publisher/editor workspaces are not
+  planned for immediate implementation; treat them as future TBD scope only.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#264](https://github.com/ogirkoviylord/folioloom_main/issues/264)
   adds client-side unmarked review filtering and completion counts to the
   owner-only Translation Reader on branch
