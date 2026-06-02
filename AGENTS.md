@@ -91,7 +91,7 @@ If approval is missing, stop at analysis and propose a safe plan. Never treat be
 
 - Start reviews with blockers, risks, missing evidence, and required human decisions.
 - Check scope, diff, tests run, docs impact, high-risk files, approval status, and release gate impact.
-- Verify no raw document text, prompts, translations, API keys, secrets, provider internals, stack traces, or unsafe user data appear in logs, admin views, telemetry, docs, or artifacts.
+- Verify no raw document text, prompts, translations, API keys, secrets, provider internals, stack traces, or unsafe user data appear in logs, admin views, telemetry, docs, or artifacts outside explicitly owner-approved dedicated diagnostic surfaces.
 - Check that rights confirmation, beta allowlist, cost caps, kill switch, SSH-tunnel-only admin, and payment/public-production gates were not weakened.
 - For docs-only changes, confirm facts are evidenced and `TBD`/`Unknown` are used honestly.
 - For code changes, require focused tests and the relevant gates from `docs/QUALITY_GATES.md`; broader/shared changes need broader verification.
