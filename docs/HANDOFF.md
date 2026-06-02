@@ -736,6 +736,21 @@ Owner decisions recorded during issue #71:
   not add whole-book search traversal, saved searches, persistent annotations,
   public/user-facing access, publisher workspace, live runtime data operations
   or release readiness.
+- 2026-06-02: Issue
+  [#242](https://github.com/ogirkoviylord/folioloom_main/issues/242) starts the
+  first Reader search-hit row filter slice on branch
+  `codex/issue-242-reader-search-hit-filter`, stacked after #240. The slice
+  adds a Reader-only `search_hits=1` mode that narrows the already loaded
+  work-unit window to source/translation rows containing the active search
+  query, preserves existing Reader query controls and leaves Text Diagnostics
+  behavior unchanged. Local verification passed focused reader/diagnostics
+  regression coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted ruff for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. Browser
+  smoke was not available in the local app session because the browser agent
+  was unavailable. This does not add whole-book search indexing/traversal,
+  saved searches, persistent annotations, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

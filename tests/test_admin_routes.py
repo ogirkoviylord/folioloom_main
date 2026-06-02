@@ -2391,6 +2391,14 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/reader"
                 "?q=%3Cscript%3E&show_invisibles=1&sync=0"
             )
+            reader_search_hits = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?q=%3Cscript%3E&show_invisibles=1&sync=0&search_hits=1"
+            )
+            diagnostics_search_hits_param = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?q=%3Cscript%3E&search_hits=1"
+            )
             diagnostics_indent = client.get(
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
                 "?indent_preview=1"
@@ -2678,11 +2686,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("sync=0", reader_unsynced.text)
         self.assertEqual(reader_search.status_code, 200)
         self.assertIn("Clear search", reader_search.text)
+        self.assertIn("Show search hits only", reader_search.text)
         self.assertIn("Search hits", reader_search.text)
         self.assertIn("data-reader-search-hit-controls", reader_search.text)
         self.assertIn("data-reader-search-hit-navigation", reader_search.text)
         self.assertIn("data-reader-search-hit-progress", reader_search.text)
         self.assertIn("Search hits in window: 1", reader_search.text)
+        self.assertIn("Search rows</span><strong>all rows</strong>", reader_search.text)
         self.assertIn('data-reader-search-hit-step="previous"', reader_search.text)
         self.assertIn('data-reader-search-hit-step="next"', reader_search.text)
         self.assertIn("Previous hit", reader_search.text)
@@ -2694,7 +2704,35 @@ class AdminRoutesTest(unittest.TestCase):
             reader_search.text,
         )
         self.assertIn("q=%3Cscript%3E", reader_search.text)
+        self.assertIn("search_hits=1", reader_search.text)
         self.assertNotIn("<script>alert(1)</script>", reader_search.text)
+        self.assertEqual(reader_search_hits.status_code, 200)
+        self.assertIn("Show all search context", reader_search_hits.text)
+        self.assertIn(
+            "Search rows</span><strong>matches only</strong>",
+            reader_search_hits.text,
+        )
+        self.assertIn("search_hits=1", reader_search_hits.text)
+        self.assertIn("reader-original-1", reader_search_hits.text)
+        self.assertIn("Private", reader_search_hits.text)
+        self.assertIn("source", reader_search_hits.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            reader_search_hits.text,
+        )
+        self.assertIn("Search hits in window: 1", reader_search_hits.text)
+        self.assertIn("Window units", reader_search_hits.text)
+        self.assertIn("<strong>1</strong>", reader_search_hits.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_search_hits.text)
+        self.assertNotIn("Tiny source", reader_search_hits.text)
+        self.assertNotIn("<script>alert(1)</script>", reader_search_hits.text)
+        self.assertEqual(diagnostics_search_hits_param.status_code, 200)
+        self.assertIn("Translation Text Diagnostics", diagnostics_search_hits_param.text)
+        self.assertNotIn("Show all search context", diagnostics_search_hits_param.text)
+        self.assertNotIn("Show search hits only", diagnostics_search_hits_param.text)
+        self.assertNotIn("search_hits=1", diagnostics_search_hits_param.text)
+        self.assertIn("Paragraph waiting for translation", diagnostics_search_hits_param.text)
+        self.assertIn("Tiny source", diagnostics_search_hits_param.text)
         self.assertEqual(reader_indent.status_code, 200)
         self.assertIn("Plain indent", reader_indent.text)
         self.assertIn("has-indent-preview", reader_indent.text)
