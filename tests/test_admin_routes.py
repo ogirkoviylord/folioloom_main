@@ -2226,6 +2226,175 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("No work units found.", reader.text)
         self.assertFalse(job_db.exists())
 
+    def test_translation_text_diagnostics_all_issues_filter(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            clean_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="clean.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Clean source.",
+            )
+            missing_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="missing.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Needs translation.",
+            )
+            indented_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="indented.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"  Indented source.",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-issues",
+                    user_id="telegram:42",
+                    file_id="file-issues",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="txt-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("clean",),
+                            source_text_hash="hash-clean",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=clean_source.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=2,
+                            source_block_ids=("missing",),
+                            source_text_hash="hash-missing",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=missing_source.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=3,
+                            source_block_ids=("indented",),
+                            source_text_hash="hash-indented",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=indented_source.object_key,
+                        ),
+                    ],
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="Clean translation.",
+                    prompt_tokens=3,
+                    completion_tokens=3,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="",
+                    prompt_tokens=3,
+                    completion_tokens=0,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="  Indented translation.",
+                    prompt_tokens=3,
+                    completion_tokens=3,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                logger = TranslationRunLogger.start(
+                    root=run_root,
+                    metadata=TranslationRunMetadata(
+                        job_id=job.id,
+                        order_id="order-issues",
+                        user_id="telegram:42",
+                        file_name="book.txt",
+                        document_kind="txt",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=3,
+                    ),
+                )
+                logger.record_event("job_queued", {"fragment_count": 3})
+            finally:
+                store.close()
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            diagnostics = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics?qa=issues"
+            )
+            reader = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=issues&q=Indented&show_invisibles=1&sync=0"
+                "&pane_mode=translation&indent_preview=1"
+            )
+
+        self.assertEqual(diagnostics.status_code, 200)
+        self.assertIn(
+            '<option value="issues" selected>All issues</option>',
+            diagnostics.text,
+        )
+        self.assertIn("Needs translation.", diagnostics.text)
+        self.assertIn("Indented source.", diagnostics.text)
+        self.assertIn("Source literal indent", diagnostics.text)
+        self.assertNotIn("Clean source.", diagnostics.text)
+        self.assertIn("qa=issues", diagnostics.text)
+
+        self.assertEqual(reader.status_code, 200)
+        self.assertIn(
+            '<option value="issues" selected>All issues</option>',
+            reader.text,
+        )
+        self.assertIn("QA</span><strong>issues</strong>", reader.text)
+        self.assertIn("Pane</span><strong>translation focus</strong>", reader.text)
+        self.assertIn('name="qa" value="issues"', reader.text)
+        self.assertIn("qa=issues", reader.text)
+        self.assertIn("Needs", reader.text)
+        self.assertIn("translation.", reader.text)
+        self.assertIn("Indented", reader.text)
+        self.assertIn("source.", reader.text)
+        self.assertIn("Missing translation", reader.text)
+        self.assertIn("Source literal indent", reader.text)
+        self.assertIn("Translation literal indent", reader.text)
+        self.assertNotIn("Clean source.", reader.text)
+
     def test_translation_text_diagnostics_is_dedicated_raw_text_view(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -4154,6 +4154,10 @@ def _translation_row_matches_search(row: dict[str, object], lowered_query: str) 
 
 
 def _translation_row_matches_filter(row: dict[str, object], qa_filter: str) -> bool:
+    if qa_filter == "issues":
+        return bool(
+            _translation_row_qa_flags(row) or _translation_row_layout_flags(row)
+        )
     if qa_filter == "indent":
         return bool(_translation_row_layout_flags(row))
     return any(flag["kind"] == qa_filter for flag in _translation_row_qa_flags(row))
@@ -4162,6 +4166,7 @@ def _translation_row_matches_filter(row: dict[str, object], qa_filter: str) -> b
 def _translation_qa_filter_options(current_filter: str) -> str:
     options = (
         ("all", "All"),
+        ("issues", "All issues"),
         ("missing_translation", "Missing translation"),
         ("empty_source", "Empty source"),
         ("length_mismatch", "Length mismatch"),
