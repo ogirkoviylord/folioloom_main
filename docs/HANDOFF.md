@@ -533,6 +533,17 @@ Owner decisions recorded during issue #71:
   reader, publisher/editor workspace, live runtime `var/` browsing, auth/RBAC
   changes, production dependencies, legal/privacy copy changes, full
   DOCX/EPUB fidelity claims or release readiness.
+- 2026-06-02: Branch `codex/internal-reader-v2` adds a run-log Translation
+  Reader at `/admin/logs/{run_id}/reader`. It is linked from logs, translation
+  details and Text diagnostics, uses the same `run_id -> job_id` work-unit path
+  as Text diagnostics, renders owner-only `no-store` HTML with synchronized
+  Original/Translation panes, and keeps details/API/download archives
+  metadata-only/redacted. Local verification passed `tests.test_admin_routes`,
+  focused reader/diagnostics tests, targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not add public routes,
+  raw-text JSON APIs, archive raw text, arbitrary server-path browsing, runtime
+  `var/` browsing, auth/RBAC changes, dependencies, publisher workspace or
+  release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
