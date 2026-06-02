@@ -15,6 +15,7 @@ from translator_service.format_adapters.contracts import (
 from translator_service.internal_reader import (
     READER_STATUS_DONE,
     READER_STATUS_MISSING,
+    build_epub_chapter_previews,
     build_epub_reader_document,
     build_reader_document,
     build_txt_reader_document,
@@ -22,6 +23,7 @@ from translator_service.internal_reader import (
     generate_txt_reader_html_from_path,
     load_translation_mapping,
     reject_runtime_var_path,
+    render_epub_reader_html,
     render_reader_html,
 )
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
@@ -303,6 +305,67 @@ class InternalReaderTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "runtime var"):
             generate_epub_reader_html_from_path(source_path=var_path)
+
+    def test_renders_sandboxed_epub_xhtml_previews_in_spine_order(self):
+        content = _make_epub(
+            {
+                "OPS/chapter1.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Chapter One</h1>
+                        <p>First chapter body.</p>
+                      </body>
+                    </html>
+                """,
+                "OPS/chapter2.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Chapter Two</h1>
+                        <script>alert(1)</script>
+                        <p>Second chapter body.</p>
+                      </body>
+                    </html>
+                """,
+            },
+            spine=("chapter2", "chapter1"),
+        )
+        translations = {
+            "epub:OPS/chapter2.xhtml:0": "Глава вторая",
+        }
+        document = build_epub_reader_document(
+            content=content,
+            translated_by_block_id=translations,
+            source_name="sample.epub",
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+        previews = build_epub_chapter_previews(
+            content=content,
+            document=document,
+            translated_by_block_id=translations,
+        )
+
+        self.assertEqual(
+            [preview.file_name for preview in previews],
+            ["OPS/chapter2.xhtml", "OPS/chapter1.xhtml"],
+        )
+        rendered = render_epub_reader_html(
+            document=document,
+            chapter_previews=previews,
+        )
+
+        self.assertIn("Chapter previews", rendered)
+        self.assertIn('sandbox=""', rendered)
+        self.assertIn('referrerpolicy="no-referrer"', rendered)
+        self.assertIn("Глава вторая", rendered)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", rendered)
+        self.assertNotIn("<script>alert(1)</script>", rendered)
+        self.assertLess(
+            rendered.index("OPS/chapter2.xhtml"),
+            rendered.index("OPS/chapter1.xhtml"),
+        )
+        self.assertIn('class="block-report"', rendered)
+        self.assertIn("status-done", rendered)
+        self.assertIn("status-missing", rendered)
 
     def test_render_html_escapes_text_metadata_and_translation(self):
         document = build_txt_reader_document(
