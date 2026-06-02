@@ -2473,6 +2473,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Translation much longer", diagnostics.text)
         self.assertIn("Source literal indent", diagnostics.text)
         self.assertIn("Translation literal indent", diagnostics.text)
+        self.assertIn("Source chars", diagnostics.text)
+        self.assertIn("Translation chars", diagnostics.text)
+        self.assertIn("T/S ratio", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2522,6 +2525,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-search-hit", diagnostics_missing.text)
         self.assertIn("waiting", diagnostics_missing.text)
         self.assertIn("translation.", diagnostics_missing.text)
+        self.assertIn("Source chars", diagnostics_missing.text)
+        self.assertIn("Translation chars 0", diagnostics_missing.text)
+        self.assertIn("T/S ratio 0.00", diagnostics_missing.text)
         self.assertNotIn("Private source paragraph", diagnostics_missing.text)
         self.assertNotIn("Tiny source", diagnostics_missing.text)
         self.assertEqual(diagnostics_indent_filter.status_code, 200)
@@ -2564,6 +2570,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-qa-flag-length_mismatch", reader.text)
         self.assertIn("reader-qa-flag-literal_source_indent", reader.text)
         self.assertIn("reader-qa-flag-literal_translation_indent", reader.text)
+        self.assertIn("reader-block-metrics", reader.text)
+        self.assertIn("Source chars", reader.text)
+        self.assertIn("Translation chars", reader.text)
+        self.assertIn("T/S ratio", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)
@@ -2623,6 +2633,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("sync=0", reader_length_filter.text)
         self.assertIn("indent_preview=1", reader_length_filter.text)
         self.assertIn("Tiny", reader_length_filter.text)
+        self.assertIn("Source chars 12", reader_length_filter.text)
+        self.assertIn("T/S ratio", reader_length_filter.text)
         self.assertNotIn("Private source paragraph", reader_length_filter.text)
         self.assertNotIn("Paragraph waiting for translation", reader_length_filter.text)
         self.assertEqual(reader_empty_filter.status_code, 200)
@@ -2645,6 +2657,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Приватний перекладений абзац", archive_text)
         self.assertNotIn("Paragraph waiting for translation", archive_text)
         self.assertNotIn("very long translated expansion", archive_text)
+        self.assertNotIn("Source chars", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

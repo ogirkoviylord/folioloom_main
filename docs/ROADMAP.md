@@ -602,6 +602,11 @@ Acceptance criteria:
   first current-window QA filter slice on branch
   `codex/issue-222-reader-qa-filters`: filter controls for already-computed
   empty source, missing translation, length mismatch and literal indent signals.
+  Issue
+  [#224](https://github.com/ogirkoviylord/folioloom_main/issues/224) begins the
+  first per-work-unit metrics slice on branch
+  `codex/issue-224-reader-block-metrics`: source/translation character counts
+  and translation/source length ratio for visible work units.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
