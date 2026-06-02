@@ -495,6 +495,16 @@ Owner decisions recorded during issue #71:
   generating TXT, DOCX and EPUB reports without `--format` into a temporary
   directory. This does not add content sniffing, admin/public UI, live runtime
   data access, dependencies, renderer fidelity changes or release readiness.
+- 2026-06-02: Owner approved issue
+  [#199](https://github.com/ogirkoviylord/folioloom_main/issues/199)
+  for a narrow owner-only Internal Reader admin UI. The scope is an authenticated
+  internal form and preview route for approved local TXT/DOCX/EPUB files plus an
+  optional JSON block translation mapping, reusing
+  `src/translator_service/internal_reader.py`. This authorizes only the focused
+  owner-only UI slice; it does not authorize public routes, Telegram/user-facing
+  reader, publisher/editor workspace, live runtime `var/` browsing, auth/RBAC
+  changes, production dependencies, legal/privacy copy changes, full
+  DOCX/EPUB fidelity claims or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

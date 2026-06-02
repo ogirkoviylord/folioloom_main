@@ -103,6 +103,7 @@ from translator_service.admin.views import (
     costs_body,
     deepseek_keys_body,
     integrations_body,
+    internal_reader_body,
     live_body,
     log_detail_body,
     login_page,
@@ -130,6 +131,13 @@ from translator_service.beta_access import (
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage
+from translator_service.internal_reader import (
+    generate_docx_reader_html_from_path,
+    generate_epub_reader_html_from_path,
+    generate_txt_reader_html_from_path,
+    load_translation_mapping,
+    reject_runtime_var_path,
+)
 from translator_service.persistent_job_store import (
     open_persistent_job_store,
     sqlite_store_exists,
@@ -149,6 +157,14 @@ from translator_service.user_activity import (
 SESSION_COOKIE = "folioloom_admin_session"
 _UPLOAD_SAFETY_EVENT_PAGE_SIZE = 500
 _FAILED_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_INTERNAL_READER_FORMAT_AUTO = "auto"
+_INTERNAL_READER_SUPPORTED_FORMATS = ("txt", "docx", "epub")
+_INTERNAL_READER_FORMAT_BY_SUFFIX = {
+    ".txt": "txt",
+    ".docx": "docx",
+    ".epub": "epub",
+}
 
 
 def create_admin_router(settings: Settings) -> APIRouter:
@@ -308,6 +324,86 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 _quality_run_summary(),
                 csrf_token=session.csrf_token,
             ),
+        )
+
+    @router.get("/internal-reader", response_class=HTMLResponse)
+    async def internal_reader(request: Request) -> Response:
+        source_value = _internal_reader_requested_source(request)
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Internal Reader",
+            active="reader",
+            body=lambda session: internal_reader_body(
+                source_options=_internal_reader_source_options(),
+                selected_source=source_value,
+                mapping_path=request.query_params.get("mapping", ""),
+                source_format=request.query_params.get(
+                    "format",
+                    _INTERNAL_READER_FORMAT_AUTO,
+                ),
+                max_fragment_chars=_bounded_int(
+                    request.query_params.get("max_fragment_chars"),
+                    default=5000,
+                    maximum=100000,
+                ),
+            ),
+        )
+
+    @router.get("/internal-reader/preview", response_class=HTMLResponse)
+    async def internal_reader_preview(request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        source_value = _internal_reader_requested_source(request)
+        mapping_value = request.query_params.get("mapping", "")
+        requested_format = request.query_params.get(
+            "format",
+            _INTERNAL_READER_FORMAT_AUTO,
+        )
+        max_fragment_chars = _bounded_int(
+            request.query_params.get("max_fragment_chars"),
+            default=5000,
+            maximum=100000,
+        )
+        try:
+            html = _internal_reader_report_html(
+                source_value=source_value,
+                mapping_value=mapping_value,
+                requested_format=requested_format,
+                max_fragment_chars=max_fragment_chars,
+            )
+        except ValueError as exc:
+            session = _session_or_none(request, session_manager)
+            if session is None:
+                return RedirectResponse(
+                    "/admin/login",
+                    status_code=HTTPStatus.SEE_OTHER,
+                )
+            return _html(
+                admin_page(
+                    title="Internal Reader",
+                    active="reader",
+                    session=session,
+                    environment=settings.environment,
+                    body=internal_reader_body(
+                        source_options=_internal_reader_source_options(),
+                        selected_source=source_value,
+                        mapping_path=mapping_value,
+                        source_format=requested_format,
+                        max_fragment_chars=max_fragment_chars,
+                        error=str(exc),
+                    ),
+                ),
+                status_code=HTTPStatus.BAD_REQUEST,
+                headers={"Cache-Control": "no-store"},
+            )
+        return _html(
+            html,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Robots-Tag": "noindex",
+            },
         )
 
     @router.post("/quality/run")
@@ -2919,6 +3015,112 @@ def _download_file_name(value: str) -> str:
 
 def _safe_admin_next(value: str | None) -> bool:
     return bool(value) and value.startswith("/admin/") and not value.startswith("//")
+
+
+def _internal_reader_requested_source(request: Request) -> str:
+    selected_source = request.query_params.get("source_select", "").strip()
+    manual_source = request.query_params.get("source", "").strip()
+    return selected_source or manual_source
+
+
+def _internal_reader_source_options() -> tuple[tuple[str, str], ...]:
+    sample_root = _REPO_ROOT / "test_samples"
+    if not sample_root.exists():
+        return ()
+    options: list[tuple[str, str]] = []
+    for path in sorted(sample_root.iterdir()):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in _INTERNAL_READER_FORMAT_BY_SUFFIX:
+            continue
+        relative = path.relative_to(_REPO_ROOT).as_posix()
+        options.append((relative, relative))
+    return tuple(options)
+
+
+def _internal_reader_report_html(
+    *,
+    source_value: str,
+    mapping_value: str,
+    requested_format: str,
+    max_fragment_chars: int,
+) -> str:
+    source_path = _internal_reader_local_file(source_value, label="Source")
+    source_format = _internal_reader_source_format(source_path, requested_format)
+    translations = None
+    if mapping_value.strip():
+        mapping_path = _internal_reader_local_file(
+            mapping_value,
+            label="Translation mapping",
+        )
+        try:
+            translations = load_translation_mapping(mapping_path)
+        except ValueError as exc:
+            raise ValueError(f"Invalid translation mapping: {exc}") from exc
+        except OSError as exc:
+            raise ValueError("Translation mapping could not be read.") from exc
+    try:
+        if source_format == "epub":
+            return generate_epub_reader_html_from_path(
+                source_path=source_path,
+                translated_by_block_id=translations,
+                max_fragment_chars=max_fragment_chars,
+            )
+        if source_format == "docx":
+            return generate_docx_reader_html_from_path(
+                source_path=source_path,
+                translated_by_block_id=translations,
+                max_fragment_chars=max_fragment_chars,
+            )
+        return generate_txt_reader_html_from_path(
+            source_path=source_path,
+            translated_by_block_id=translations,
+            max_fragment_chars=max_fragment_chars,
+        )
+    except ValueError:
+        raise
+    except OSError as exc:
+        raise ValueError("Source file could not be read.") from exc
+
+
+def _internal_reader_local_file(value: str, *, label: str) -> Path:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError(f"{label} path is required.")
+    path = Path(stripped).expanduser()
+    if not path.is_absolute():
+        path = _REPO_ROOT / path
+    try:
+        resolved = path.resolve(strict=False)
+        reject_runtime_var_path(resolved)
+    except ValueError as exc:
+        raise ValueError(f"{label} path is not allowed: {exc}") from exc
+    if not resolved.exists():
+        raise ValueError(f"{label} file was not found.")
+    if not resolved.is_file():
+        raise ValueError(f"{label} path must point to a file.")
+    return resolved
+
+
+def _internal_reader_source_format(source_path: Path, requested_format: str) -> str:
+    if requested_format not in (
+        _INTERNAL_READER_FORMAT_AUTO,
+        *_INTERNAL_READER_SUPPORTED_FORMATS,
+    ):
+        supported = ", ".join(
+            (_INTERNAL_READER_FORMAT_AUTO, *_INTERNAL_READER_SUPPORTED_FORMATS)
+        )
+        raise ValueError(f"Unsupported source format; use one of: {supported}.")
+    if requested_format != _INTERNAL_READER_FORMAT_AUTO:
+        return requested_format
+    detected = _INTERNAL_READER_FORMAT_BY_SUFFIX.get(source_path.suffix.lower())
+    if detected is None:
+        supported = ", ".join(_INTERNAL_READER_SUPPORTED_FORMATS)
+        raise ValueError(
+            "Cannot auto-detect source format from extension; "
+            f"use an explicit format: {supported}."
+        )
+    return detected
 
 
 def _log_filters(request: Request) -> dict[str, str | int | None]:

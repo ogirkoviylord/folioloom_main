@@ -17,6 +17,39 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-02 - Product/architecture decision: owner-only internal reader UI
+
+Status: Active
+
+Decision:
+- FolioLoom may add an owner-only internal admin UI for the Internal
+  Before/After Reader.
+- The UI scope is limited to approved local TXT/DOCX/EPUB fixtures/files and
+  optional JSON block translation mappings.
+- The UI must reuse the existing internal reader report renderer and remain
+  read-only from a product/runtime-data perspective.
+- User-facing reader, Telegram reader and publisher/editor workspace remain
+  deferred future work.
+
+Evidence:
+- Owner requested an interface for the internal reader in conversation on
+  2026-06-02.
+- GitHub issue
+  [#199](https://github.com/ogirkoviylord/folioloom_main/issues/199)
+  records the scoped implementation task, acceptance criteria and guardrails.
+
+Consequences:
+- A focused owner-only admin route for approved local files is allowed.
+- Agents must not make this a public route, browse live runtime `var/` data,
+  change auth/RBAC/security, add production dependencies, log raw document text
+  or claim full DOCX/EPUB fidelity, release readiness or legal/privacy
+  readiness.
+
+Human approval required to change:
+- yes; broadening this into user-facing access, publisher workspace, runtime
+  data access, public exposure, dependency/runtime changes or legal/privacy copy
+  affects product scope and user-data/privacy guardrails.
+
 ### 2026-06-01 - Product/architecture decision: internal before-after reader first
 
 Status: Active
