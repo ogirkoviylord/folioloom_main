@@ -696,6 +696,20 @@ Owner decisions recorded during issue #71:
   not add whole-book issue traversal, persistent annotations, saved review
   state, public/user-facing access, publisher workspace, live runtime data
   operations or release readiness.
+- 2026-06-02: Issue
+  [#236](https://github.com/ogirkoviylord/folioloom_main/issues/236) starts the
+  first Reader active QA highlight slice on branch
+  `codex/issue-236-reader-active-qa-highlight`, stacked after #234. The slice
+  makes Reader QA navigation visually stateful: selecting a QA issue by issue
+  link, Previous issue / Next issue or page hash marks the active issue link
+  and highlights the matching original/translation blocks in the currently
+  loaded work-unit window. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This does not add whole-book issue traversal, persistent
+  annotations, saved review state, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

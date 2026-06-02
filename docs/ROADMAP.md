@@ -640,6 +640,12 @@ Acceptance criteria:
   `codex/issue-234-reader-qa-step-controls`: Reader-only Previous issue /
   Next issue controls that navigate through existing QA issue anchors in the
   currently loaded work-unit window.
+  Issue
+  [#236](https://github.com/ogirkoviylord/folioloom_main/issues/236) begins the
+  first Reader active QA highlight slice on branch
+  `codex/issue-236-reader-active-qa-highlight`: active issue-link state plus
+  matching original/translation block highlight for the selected current-window
+  QA issue.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.

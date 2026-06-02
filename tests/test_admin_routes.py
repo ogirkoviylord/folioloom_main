@@ -2615,6 +2615,12 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Previous issue", reader.text)
         self.assertIn("Next issue", reader.text)
         self.assertIn("data-reader-qa-issue-anchor", reader.text)
+        self.assertIn('tabindex="-1"', reader.text)
+        self.assertIn("setActiveIssue", reader.text)
+        self.assertIn("is-active-qa-issue", reader.text)
+        self.assertIn('aria-current", "true"', reader.text)
+        self.assertIn("hashchange", reader.text)
+        self.assertIn(".reader-block:target", reader.text)
         self.assertIn("scrollIntoView", reader.text)
         self.assertIn("window.history.replaceState", reader.text)
         self.assertIn('href="#reader-original-2"', reader.text)
@@ -2782,6 +2788,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("No QA issues in this window.", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
+        self.assertNotIn("setActiveIssue", reader_empty_filter.text)
         self.assertNotIn("Private source paragraph", reader_empty_filter.text)
         self.assertEqual(reader_invalid_filter.status_code, 200)
         self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
@@ -2803,6 +2810,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("reader-position-bar", archive_text)
         self.assertNotIn("data-reader-qa-step-controls", archive_text)
         self.assertNotIn("data-reader-qa-step-navigation", archive_text)
+        self.assertNotIn("is-active-qa-issue", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
