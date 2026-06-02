@@ -629,6 +629,11 @@ Acceptance criteria:
   `codex/issue-230-reader-keyboard-navigation`: ArrowLeft/ArrowRight navigation
   to the existing Previous/Next logical window URLs, ignoring interactive form
   controls.
+  Issue
+  [#232](https://github.com/ogirkoviylord/folioloom_main/issues/232) begins the
+  first Reader sticky position bar slice on branch
+  `codex/issue-232-reader-sticky-position`: a Reader-only sticky status bar for
+  current logical page, sequence range and active query/toggle states.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
