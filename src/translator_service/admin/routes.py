@@ -749,6 +749,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
         search_hits_only = bool(search_query) and _query_flag(
             request.query_params.get("search_hits")
         )
+        pane_mode = _query_choice(
+            request.query_params.get("pane_mode"),
+            choices={"split", "original", "translation"},
+            default="split",
+        )
         indent_preview = _query_flag(request.query_params.get("indent_preview"))
         qa_filter = _query_choice(
             request.query_params.get("qa"),
@@ -784,6 +789,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
