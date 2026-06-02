@@ -2578,6 +2578,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Missing translation", reader.text)
         self.assertIn("Length mismatch", reader.text)
         self.assertIn("Paragraph mismatch", reader.text)
+        self.assertIn("reader-qa-issue-nav", reader.text)
+        self.assertIn("QA issues", reader.text)
+        self.assertIn('href="#reader-original-2"', reader.text)
+        self.assertIn('href="#reader-original-3"', reader.text)
+        self.assertIn('<span class="reader-qa-issue-sequence">#2</span>', reader.text)
+        self.assertIn('<span class="reader-qa-issue-sequence">#3</span>', reader.text)
+        self.assertIn("Blocks block-3", reader.text)
         self.assertIn("Indent preview", reader.text)
         self.assertIn("Preview indents", reader.text)
         self.assertIn("Source literal indents", reader.text)
@@ -2672,6 +2679,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("indent_preview=1", reader_paragraph_filter.text)
         self.assertIn("Tiny", reader_paragraph_filter.text)
         self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
+        self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
+        self.assertIn('href="#reader-original-3"', reader_paragraph_filter.text)
+        self.assertNotIn('href="#reader-original-2"', reader_paragraph_filter.text)
         self.assertIn("Source lines 1", reader_paragraph_filter.text)
         self.assertIn("Translation lines 2", reader_paragraph_filter.text)
         self.assertIn("Source blank lines 0", reader_paragraph_filter.text)
@@ -2707,6 +2717,7 @@ class AdminRoutesTest(unittest.TestCase):
             reader_empty_filter.text,
         )
         self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
+        self.assertIn("No QA issues in this window.", reader_empty_filter.text)
         self.assertNotIn("Private source paragraph", reader_empty_filter.text)
         self.assertEqual(reader_invalid_filter.status_code, 200)
         self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
@@ -2724,6 +2735,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Source chars", archive_text)
         self.assertNotIn("Source lines", archive_text)
         self.assertNotIn("Paragraph/line break mismatch", archive_text)
+        self.assertNotIn("reader-qa-issue-nav", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
