@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 ## 1. Текущее состояние проекта
 
@@ -330,6 +330,11 @@ Owner decisions recorded during issue #71:
   through safe archives/telemetry/JSON APIs, authorize copying excerpts to
   issues/PRs/support notes, relax public admin restrictions or change Gate B
   release requirements.
+- 2026-06-02: Owner additionally approved viewing raw provider prompt bodies in
+  a dedicated owner-only diagnostic surface. This is a decision-level approval,
+  not evidence that prompt bodies are already stored or rendered. Implementers
+  should use a separate scoped issue for prompt diagnostics and keep normal
+  trace/evidence/archive/telemetry/API surfaces metadata-only/redacted.
 - 2026-06-01: During the follow-up live EPUB translation, backend/admin state
   showed the job still translating and progressing past the previously failed
   work unit, while the Telegram message could remain stuck on the queued copy.
@@ -358,9 +363,11 @@ Owner decisions recorded during issue #71:
   navigation cleanup, action semantics and user support/debug views. The design
   is recorded in
   `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md`.
-  This is a design/roadmap decision only; it does not implement the redesign,
-  satisfy Gate B, change SSH-tunnel-only admin, authorize public admin,
-  payment, deployment, auth/RBAC, database/state or user-data changes.
+  The first admin redesign stack was implemented and merged into `main` by PR
+  #160, covering #145-#151; on 2026-06-02 the owner approved closing #145-#152
+  as implemented by PR #160. This does not satisfy Gate B, change
+  SSH-tunnel-only admin, authorize public admin, payment, deployment,
+  auth/RBAC, database/state or user-data changes.
 - 2026-06-01: Owner approved the internal/dev before-after reader direction for
   the first slice only. The accepted scope is a local QA reader/report over
   existing TXT/DOCX/EPUB adapter blocks for synthetic fixtures, repository test
@@ -558,9 +565,9 @@ core flow, release gates, operational visibility and documentation.
   the fixed config is deployed and re-smoked with owner approval;
 - подтвердить scheduler/runtime consistency, restart/cancel/resume behavior и
   backup/restore readiness;
-- выполнить owner-approved Beta Operations Console redesign in small scoped
-  admin UX issues, starting with Translation Failure Trace and safe evidence
-  packet for crashed translations;
+- treat the first Beta Operations Console/admin redesign stack as implemented
+  by PR #160 and issues #145-#152 as closed; handle prompt diagnostics,
+  Alerts/Backups visibility and release evidence as separate follow-ups;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;

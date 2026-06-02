@@ -1,7 +1,11 @@
 # Beta Operations Console Redesign
 
-Status: Approved design direction, not implemented.
+Status: Approved design direction; first implementation stack merged by PR #160.
 Owner approval: approved in owner conversation on 2026-05-31.
+Implementation note: PR #160 merged the Translation Failure Trace, safe
+evidence packet, provider incident clarity, overview triage, Advanced
+navigation, action semantics and Users support/debug profile slices into
+`main`. Issues #145-#152 were closed on 2026-06-02 as implemented by PR #160.
 
 ## Goal
 
