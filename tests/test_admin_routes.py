@@ -2393,6 +2393,23 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Missing translation", reader.text)
         self.assertIn("Source literal indent", reader.text)
         self.assertIn("Translation literal indent", reader.text)
+        self.assertIn("Issues in window: 2", reader.text)
+        self.assertIn('href="#reader-original-2"', reader.text)
+        self.assertIn('href="#reader-original-3"', reader.text)
+        self.assertIn(
+            '<span class="reader-qa-issue-sequence">#3</span>',
+            reader.text,
+        )
+        self.assertIn(
+            '<span class="reader-qa-issue-labels">Source literal indent; '
+            "Translation literal indent</span>",
+            reader.text,
+        )
+        self.assertIn(
+            'title="Sequence 3: translated; Source literal indent, '
+            'Translation literal indent"',
+            reader.text,
+        )
         self.assertNotIn("Clean source.", reader.text)
 
     def test_translation_text_diagnostics_is_dedicated_raw_text_view(self):
@@ -2812,7 +2829,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("data-reader-qa-step-controls", reader.text)
         self.assertIn("data-reader-qa-step-navigation", reader.text)
         self.assertIn("data-reader-qa-progress", reader.text)
-        self.assertIn("Issues in window: 2", reader.text)
+        self.assertIn("Issues in window: 3", reader.text)
         self.assertIn("Issue ${index + 1} of ${issueHrefs.length}", reader.text)
         self.assertIn('data-reader-qa-step="previous"', reader.text)
         self.assertIn('data-reader-qa-step="next"', reader.text)
@@ -2829,8 +2846,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("window.history.replaceState", reader.text)
         self.assertNotIn("data-reader-search-hit-controls", reader.text)
         self.assertNotIn("data-reader-search-hit-navigation", reader.text)
+        self.assertIn('href="#reader-original-1"', reader.text)
         self.assertIn('href="#reader-original-2"', reader.text)
         self.assertIn('href="#reader-original-3"', reader.text)
+        self.assertIn(
+            '<span class="reader-qa-issue-sequence">#1</span>',
+            reader.text,
+        )
         self.assertIn('<span class="reader-qa-issue-sequence">#2</span>', reader.text)
         self.assertIn('<span class="reader-qa-issue-sequence">#3</span>', reader.text)
         self.assertIn("Blocks block-3", reader.text)
@@ -2841,7 +2863,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Style metadata", reader.text)
         self.assertIn("Unknown", reader.text)
         self.assertIn("reader-minimap", reader.text)
-        self.assertIn('title="Sequence 2: translated; Missing translation"', reader.text)
+        self.assertIn(
+            'title="Sequence 1: translated; Translation literal indent"',
+            reader.text,
+        )
+        self.assertIn(
+            'title="Sequence 2: translated; Missing translation, '
+            'Source literal indent"',
+            reader.text,
+        )
         self.assertIn("reader-qa-flag-missing_translation", reader.text)
         self.assertIn("reader-qa-flag-length_mismatch", reader.text)
         self.assertIn("reader-qa-flag-paragraph_mismatch", reader.text)

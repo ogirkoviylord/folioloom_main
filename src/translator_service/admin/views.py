@@ -4286,10 +4286,9 @@ def _translation_reader_block(
     status = escape(str(row.get("status") or "unknown"))
     block_label = escape(_translation_source_block_label(row))
     metrics = escape(_translation_row_metric_summary(row))
-    qa_flags = _translation_row_qa_flags(row)
-    layout_flags = _translation_row_layout_flags(row)
-    qa_class = " has-qa-warning" if qa_flags else ""
-    qa_html = _translation_row_qa_flag_html(qa_flags + layout_flags)
+    issue_flags = _translation_row_issue_flags(row)
+    qa_class = " has-qa-warning" if issue_flags else ""
+    qa_html = _translation_row_qa_flag_html(issue_flags)
     text = str(row.get(text_key) or "")
     if not text:
         text = "[empty]"
@@ -4489,7 +4488,7 @@ def _translation_reader_minimap(rows: tuple[dict[str, object], ...]) -> str:
 def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str:
     issue_items = []
     for row in rows:
-        flags = _translation_row_qa_flags(row)
+        flags = _translation_row_issue_flags(row)
         if not flags:
             continue
         sequence = str(row.get("sequence") or 0)
@@ -4552,7 +4551,7 @@ def _translation_reader_minimap_item(row: dict[str, object]) -> str:
     sequence = str(row.get("sequence") or 0)
     safe_sequence = escape(sequence)
     status = str(row.get("status") or "unknown")
-    flags = _translation_row_qa_flags(row)
+    flags = _translation_row_issue_flags(row)
     flag_class = " has-qa-warning" if flags else ""
     flag_summary = ", ".join(flag["label"] for flag in flags) if flags else "No QA flags"
     title = f"Sequence {sequence}: {status}; {flag_summary}"
@@ -4578,6 +4577,12 @@ def _translation_row_qa_flag_html(flags: tuple[dict[str, str], ...]) -> str:
         )
         for flag in flags
     ) + "</span>"
+
+
+def _translation_row_issue_flags(
+    row: dict[str, object],
+) -> tuple[dict[str, str], ...]:
+    return _translation_row_qa_flags(row) + _translation_row_layout_flags(row)
 
 
 def _translation_row_layout_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
