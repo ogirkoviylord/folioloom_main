@@ -3344,6 +3344,28 @@ def translation_reader_body(
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
+    previous_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=previous_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    next_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=next_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
     visible_rows = _translation_filter_rows(rows, qa_filter)
     source_blocks = _translation_reader_blocks(
         visible_rows,
@@ -3390,6 +3412,10 @@ def translation_reader_body(
     )
     sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
     sync_script = _reader_sync_script() if sync_scroll else ""
+    keyboard_script = _reader_keyboard_navigation_script(
+        previous_href,
+        next_href,
+    )
     compare_class = "reader-compare has-indent-preview" if indent_preview else "reader-compare"
     return f"""
     <section class="toolbar-panel">
@@ -3418,32 +3444,12 @@ def translation_reader_body(
         )}
         {_action_link(
             "← Previous",
-            _translation_raw_text_href(
-                "reader",
-                run_id,
-                sequence=previous_sequence,
-                limit=limit,
-                show_invisibles=show_invisibles,
-                sync_scroll=sync_scroll,
-                search_query=search_query,
-                indent_preview=indent_preview,
-                qa_filter=qa_filter,
-            ),
+            previous_href,
             "view",
         )}
         {_action_link(
             "Next →",
-            _translation_raw_text_href(
-                "reader",
-                run_id,
-                sequence=next_sequence,
-                limit=limit,
-                show_invisibles=show_invisibles,
-                sync_scroll=sync_scroll,
-                search_query=search_query,
-                indent_preview=indent_preview,
-                qa_filter=qa_filter,
-            ),
+            next_href,
             "view",
         )}
       </div>
@@ -3493,6 +3499,7 @@ def translation_reader_body(
     </section>
     {minimap}
     {sync_script}
+    {keyboard_script}
     """
 
 
@@ -4366,6 +4373,48 @@ def _reader_sync_script() -> str:
           }, { passive: true });
         });
       })();
+    </script>
+    """
+
+
+def _reader_keyboard_navigation_script(previous_href: str, next_href: str) -> str:
+    previous_json = json.dumps(previous_href)
+    next_json = json.dumps(next_href)
+    return f"""
+    <script data-reader-keyboard-navigation>
+      (() => {{
+        const previousHref = {previous_json};
+        const nextHref = {next_json};
+        const isInteractiveTarget = (target) => {{
+          if (!target || !(target instanceof Element)) return false;
+          return Boolean(
+            target.closest(
+              "input, textarea, select, button, a, [contenteditable='true']"
+            )
+          );
+        }};
+        document.addEventListener("keydown", (event) => {{
+          if (
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            isInteractiveTarget(event.target)
+          ) {{
+            return;
+          }}
+          if (event.key === "ArrowLeft") {{
+            event.preventDefault();
+            window.location.assign(previousHref);
+            return;
+          }}
+          if (event.key === "ArrowRight") {{
+            event.preventDefault();
+            window.location.assign(nextHref);
+          }}
+        }});
+      }})();
     </script>
     """
 

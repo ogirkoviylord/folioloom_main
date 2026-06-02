@@ -2494,6 +2494,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Source blank lines", diagnostics.text)
         self.assertIn("Translation blank lines", diagnostics.text)
         self.assertIn("Paragraph/line break mismatch", diagnostics.text)
+        self.assertNotIn("data-reader-keyboard-navigation", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2563,6 +2564,23 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Translation Reader", reader.text)
         self.assertIn("data-reader-sync-pane", reader.text)
         self.assertIn("pendingProgrammaticScrolls", reader.text)
+        self.assertIn("data-reader-keyboard-navigation", reader.text)
+        self.assertIn('event.key === "ArrowLeft"', reader.text)
+        self.assertIn('event.key === "ArrowRight"', reader.text)
+        self.assertIn(
+            "input, textarea, select, button, a, [contenteditable='true']",
+            reader.text,
+        )
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=1&limit=100";',
+            reader.text,
+        )
+        self.assertIn(
+            f'const nextHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=101&limit=100";',
+            reader.text,
+        )
         self.assertIn("Show special chars", reader.text)
         self.assertIn("Unsync scroll", reader.text)
         self.assertIn('name="sequence"', reader.text)
@@ -2651,6 +2669,19 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("show_invisibles=1", reader_page.text)
         self.assertIn("sync=0", reader_page.text)
         self.assertIn("indent_preview=1", reader_page.text)
+        self.assertIn("data-reader-keyboard-navigation", reader_page.text)
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=2&limit=1&show_invisibles=1&sync=0&q=Tiny'
+            '&indent_preview=1";',
+            reader_page.text,
+        )
+        self.assertIn(
+            f'const nextHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=4&limit=1&show_invisibles=1&sync=0&q=Tiny'
+            '&indent_preview=1";',
+            reader_page.text,
+        )
         self.assertNotIn("Private source paragraph", reader_page.text)
         self.assertEqual(reader_length_filter.status_code, 200)
         self.assertIn(
