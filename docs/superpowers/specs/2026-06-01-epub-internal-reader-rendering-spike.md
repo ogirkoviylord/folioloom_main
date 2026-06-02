@@ -163,7 +163,9 @@ GitHub issue:
 [#189](https://github.com/ogirkoviylord/folioloom_main/issues/189) implemented
 the explicit-input EPUB local report. Follow-up
 [#191](https://github.com/ogirkoviylord/folioloom_main/issues/191) adds
-sandboxed XHTML chapter preview panes inside that report.
+sandboxed XHTML chapter preview panes inside that report. Follow-up
+[#193](https://github.com/ogirkoviylord/folioloom_main/issues/193) adds limited
+CSS and safe raster image inlining for those panes.
 
 Scope:
 - local/dev-only explicit-input report;
@@ -174,6 +176,7 @@ Scope:
   metadata;
 - show original/translated XHTML snippets or chapter sections side by side;
 - render XHTML preview panes with sandboxed iframes and no script permissions;
+- inline local linked CSS and safe raster images for approved fixtures;
 - keep EPUBCheck as validation/reference only.
 
 Required approval gates:

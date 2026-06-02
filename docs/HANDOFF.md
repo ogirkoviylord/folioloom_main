@@ -369,9 +369,9 @@ Owner decisions recorded during issue #71:
   are future work. The design is recorded in
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   GitHub issues
-  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#191](https://github.com/ogirkoviylord/folioloom_main/issues/191)
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#193](https://github.com/ogirkoviylord/folioloom_main/issues/193)
   split the first implementation, renderer spikes, EPUB local report and EPUB
-  XHTML preview slices.
+  XHTML preview/resource slices.
   This does not authorize live runtime `var/` reads, add admin/public routes,
   add production dependencies, change legal/privacy policy or claim release
   readiness.
@@ -452,6 +452,20 @@ Owner decisions recorded during issue #71:
   `epub.js`/Readium, bundle EPUB CSS/images/resources, run EPUBCheck, add
   admin/public UI, read live runtime data, claim full book-like fidelity or
   claim release readiness.
+- 2026-06-01: Issue
+  [#193](https://github.com/ogirkoviylord/folioloom_main/issues/193)
+  implementation slice is locally verified on branch
+  `codex/issue-193-epub-preview-resources`, stacked on the #191 branch. The
+  branch inlines local linked CSS and safe raster images (`png`, `jpg`, `jpeg`,
+  `gif`, `webp`) into the sandboxed EPUB XHTML preview panes, using data URIs
+  and a restrictive `srcdoc` Content Security Policy. Missing resources remain
+  non-fatal, unsupported/risky resources such as SVG are not embedded, and the
+  semantic block report remains below the preview. Local verification passed
+  focused internal-reader tests, format-adapter tests, compileall, targeted
+  ruff, `git diff --check` and an EPUB CLI smoke writing to a temporary
+  directory. This does not add `epub.js`/Readium, fetch remote resources,
+  embed fonts/media overlays, run EPUBCheck, add admin/public UI, read live
+  runtime data, claim full book-like fidelity or claim release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
