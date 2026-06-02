@@ -701,6 +701,12 @@ Acceptance criteria:
   `codex/issue-254-reader-block-outline`: add a metadata-only current-window
   outline for all visible work units so the owner can navigate every loaded
   block, not only QA issue rows.
+  Issue
+  [#256](https://github.com/ogirkoviylord/folioloom_main/issues/256) begins the
+  active Reader outline navigation slice on branch
+  `codex/issue-256-reader-active-outline`: make outline clicks and QA issue
+  navigation keep the selected outline entry and matching original/translation
+  blocks visibly active.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
