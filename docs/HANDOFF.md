@@ -792,6 +792,22 @@ Owner decisions recorded during issue #71:
   annotations, editing, public/user-facing access, publisher workspace, live
   runtime data operations or release readiness. Browser smoke was not available
   in the local app session because the browser agent was unavailable.
+- 2026-06-02: Issue
+  [#250](https://github.com/ogirkoviylord/folioloom_main/issues/250) starts the
+  Reader sync-scroll drift bugfix on branch
+  `codex/issue-250-reader-scroll-drift`, stacked after #248. Root-cause
+  evidence: the previous sync script suppressed only one expected programmatic
+  scroll value, so rounded/follow-up scroll events from the synced pane could
+  be treated as user input and sync the active pane back. The slice replaces
+  that with a short programmatic-scroll lock and tolerance before writing
+  `scrollTop`. Local verification passed focused reader sync regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted `ruff --select F,I` for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not change layout controls, persisted settings, public/user-facing access,
+  publisher workspace, live runtime data operations or release readiness.
+  Browser smoke was not available in the local app session because browser
+  runtime discovery did not expose a usable JS execution tool.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
