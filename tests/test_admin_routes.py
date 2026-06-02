@@ -2521,6 +2521,8 @@ class AdminRoutesTest(unittest.TestCase):
             diagnostics_search.text,
         )
         self.assertIn("q=%3Cscript%3E", diagnostics_search.text)
+        self.assertNotIn("data-reader-search-hit-controls", diagnostics_search.text)
+        self.assertNotIn("data-reader-search-hit-navigation", diagnostics_search.text)
         self.assertNotIn("<script>alert(1)</script>", diagnostics_search.text)
         self.assertEqual(diagnostics_indent.status_code, 200)
         self.assertIn("indent_preview=1", diagnostics_indent.text)
@@ -2626,6 +2628,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn(".reader-block:target", reader.text)
         self.assertIn("scrollIntoView", reader.text)
         self.assertIn("window.history.replaceState", reader.text)
+        self.assertNotIn("data-reader-search-hit-controls", reader.text)
+        self.assertNotIn("data-reader-search-hit-navigation", reader.text)
         self.assertIn('href="#reader-original-2"', reader.text)
         self.assertIn('href="#reader-original-3"', reader.text)
         self.assertIn('<span class="reader-qa-issue-sequence">#2</span>', reader.text)
@@ -2675,6 +2679,16 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(reader_search.status_code, 200)
         self.assertIn("Clear search", reader_search.text)
         self.assertIn("Search hits", reader_search.text)
+        self.assertIn("data-reader-search-hit-controls", reader_search.text)
+        self.assertIn("data-reader-search-hit-navigation", reader_search.text)
+        self.assertIn("data-reader-search-hit-progress", reader_search.text)
+        self.assertIn("Search hits in window: 1", reader_search.text)
+        self.assertIn('data-reader-search-hit-step="previous"', reader_search.text)
+        self.assertIn('data-reader-search-hit-step="next"', reader_search.text)
+        self.assertIn("Previous hit", reader_search.text)
+        self.assertIn("Next hit", reader_search.text)
+        self.assertIn("is-active-search-hit", reader_search.text)
+        self.assertIn("Hit ${index + 1} of ${hits.length}", reader_search.text)
         self.assertIn(
             '<mark class="reader-search-hit">&lt;script&gt;</mark>',
             reader_search.text,
@@ -2818,6 +2832,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-qa-step-navigation", archive_text)
         self.assertNotIn("data-reader-qa-progress", archive_text)
         self.assertNotIn("is-active-qa-issue", archive_text)
+        self.assertNotIn("data-reader-search-hit-controls", archive_text)
+        self.assertNotIn("data-reader-search-hit-navigation", archive_text)
+        self.assertNotIn("is-active-search-hit", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
