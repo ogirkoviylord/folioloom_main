@@ -2731,6 +2731,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-keyboard-navigation", diagnostics.text)
         self.assertNotIn("data-reader-qa-step-navigation", diagnostics.text)
         self.assertNotIn("data-reader-qa-step-controls", diagnostics.text)
+        self.assertNotIn("data-reader-review-controls", diagnostics.text)
+        self.assertNotIn("data-reader-review-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-review-mark", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2938,8 +2941,28 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-outline-blocks", reader.text)
         self.assertIn("reader-outline-status", reader.text)
         self.assertIn("reader-outline-flags", reader.text)
+        self.assertIn("data-reader-outline-sequence", reader.text)
         self.assertIn("Blocks block-1", reader.text)
         self.assertIn("Status translated", reader.text)
+        self.assertIn("data-reader-review-controls", reader.text)
+        self.assertIn("data-reader-review-state", reader.text)
+        self.assertIn("Review mark: none", reader.text)
+        self.assertIn("data-reader-review-navigation", reader.text)
+        self.assertIn('data-reader-review-mark="needs_review"', reader.text)
+        self.assertIn('data-reader-review-mark="ok"', reader.text)
+        self.assertIn('data-reader-review-mark="ignore"', reader.text)
+        self.assertIn('data-reader-review-mark="clear"', reader.text)
+        self.assertIn("Needs review", reader.text)
+        self.assertIn("setReviewMark", reader.text)
+        self.assertIn("matchingBlocks", reader.text)
+        self.assertIn("matchingOutlines", reader.text)
+        self.assertIn("data-reader-review-current", reader.text)
+        self.assertIn("aria-pressed", reader.text)
+        self.assertIn("is-review-needs-review", reader.text)
+        self.assertIn("is-review-ok", reader.text)
+        self.assertIn("is-review-ignore", reader.text)
+        self.assertNotIn("localStorage", reader.text)
+        self.assertNotIn("sessionStorage", reader.text)
         self.assertIn("reader-minimap", reader.text)
         self.assertIn(
             'title="Sequence 1: translated; Translation literal indent"',
@@ -3214,6 +3237,9 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("No blocks in this reader window.", reader_empty_filter.text)
         self.assertNotIn("data-reader-outline-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-outline-anchor", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-controls", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-navigation", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-mark", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
@@ -3244,6 +3270,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-search-hit-controls", archive_text)
         self.assertNotIn("data-reader-search-hit-navigation", archive_text)
         self.assertNotIn("is-active-search-hit", archive_text)
+        self.assertNotIn("data-reader-review-controls", archive_text)
+        self.assertNotIn("data-reader-review-navigation", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

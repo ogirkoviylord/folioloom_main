@@ -1331,6 +1331,21 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#258](https://github.com/ogirkoviylord/folioloom_main/issues/258)
+  adds client-only review marks to the owner-only Translation Reader on branch
+  `codex/issue-258-reader-review-marks`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #259 passed.
+- Follow-up: review marks are current-page DOM state only. This slice does not
+  persist marks, edit text, export review notes, add raw snippets to docs/issues
+  or archives, add public/user-facing reader access, change auth/RBAC, access
+  runtime data, add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#256](https://github.com/ogirkoviylord/folioloom_main/issues/256)
   adds active current-window outline navigation to the owner-only Translation
   Reader on branch `codex/issue-256-reader-active-outline`.
