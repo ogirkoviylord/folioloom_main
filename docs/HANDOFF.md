@@ -571,6 +571,19 @@ Owner decisions recorded during issue #71:
   does not search outside the loaded window, add public/user-facing access,
   expose raw text through JSON/API/archive surfaces, add dependencies, access
   live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+- 2026-06-02: Issue
+  [#218](https://github.com/ogirkoviylord/folioloom_main/issues/218) starts the
+  first focused layout/indent diagnostics slice on branch
+  `codex/issue-218-reader-indent-diagnostics`, stacked after #216. The slice
+  adds current-window literal indentation evidence for source and translated
+  work-unit text, a metadata panel that explicitly marks source-format style
+  metadata as `Unknown`, and an opt-in editorial first-line indent preview for
+  Reader only. Local verification passed focused reader/diagnostics regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not extract EPUB CSS or
+  DOCX paragraph style metadata, change stored text, add dependencies, access
+  live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

@@ -3200,6 +3200,7 @@ def translation_text_diagnostics_body(
     limit: int,
     show_invisibles: bool = False,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
@@ -3225,6 +3226,7 @@ def translation_text_diagnostics_body(
         limit=limit,
         show_invisibles=show_invisibles,
         search_query=search_query,
+        indent_preview=indent_preview,
     )
     return f"""
     <section class="toolbar-panel">
@@ -3245,6 +3247,7 @@ def translation_text_diagnostics_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3257,6 +3260,7 @@ def translation_text_diagnostics_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3269,6 +3273,7 @@ def translation_text_diagnostics_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3281,6 +3286,7 @@ def translation_text_diagnostics_body(
         limit=limit,
         show_invisibles=show_invisibles,
         search_query=search_query,
+        indent_preview=indent_preview,
     )}
     {controls}
     <section class="panel warning-panel">
@@ -3319,6 +3325,7 @@ def translation_reader_body(
     show_invisibles: bool = False,
     sync_scroll: bool = True,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
@@ -3338,6 +3345,10 @@ def translation_reader_body(
         search_query=search_query,
     )
     qa_panel = _translation_reader_qa_panel(rows, search_query=search_query)
+    layout_panel = _translation_reader_layout_panel(
+        rows,
+        indent_preview=indent_preview,
+    )
     minimap = _translation_reader_minimap(rows)
     controls = _translation_text_controls(
         "reader",
@@ -3347,9 +3358,11 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        indent_preview=indent_preview,
     )
     sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
     sync_script = _reader_sync_script() if sync_scroll else ""
+    compare_class = "reader-compare has-indent-preview" if indent_preview else "reader-compare"
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3370,6 +3383,7 @@ def translation_reader_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3383,6 +3397,7 @@ def translation_reader_body(
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3396,6 +3411,7 @@ def translation_reader_body(
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
@@ -3409,9 +3425,11 @@ def translation_reader_body(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        indent_preview=indent_preview,
     )}
     {controls}
     {qa_panel}
+    {layout_panel}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
       <p>
@@ -3421,7 +3439,7 @@ def translation_reader_body(
       </p>
     </section>
     <section class="panel reader-panel" data-translation-reader>
-      <div class="reader-compare" data-reader-compare>
+      <div class="{compare_class}" data-reader-compare>
         <article class="reader-pane" aria-labelledby="reader-original-title">
           <div class="reader-pane-heading">
             <h4 id="reader-original-title">Original</h4>
@@ -3454,6 +3472,7 @@ def _translation_raw_text_tabs(
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
     reader_current = 'aria-current="page"' if active == "reader" else ""
@@ -3474,6 +3493,7 @@ def _translation_raw_text_tabs(
         limit=limit,
         show_invisibles=show_invisibles,
         search_query=search_query,
+        indent_preview=indent_preview,
     )
     reader_href = _translation_raw_text_href(
         "reader",
@@ -3483,6 +3503,7 @@ def _translation_raw_text_tabs(
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
         search_query=search_query,
+        indent_preview=indent_preview,
     )
     return f"""
     <nav class="reader-tabs" aria-label="Raw text views">
@@ -3513,6 +3534,7 @@ def _translation_text_controls(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     invisible_label = (
         "Hide special chars" if show_invisibles else "Show special chars"
@@ -3529,6 +3551,23 @@ def _translation_text_controls(
                 show_invisibles=show_invisibles,
                 sync_scroll=not sync_scroll,
                 search_query=search_query,
+                indent_preview=indent_preview,
+            ),
+            "view",
+        )
+    indent_control = ""
+    if view_name == "reader":
+        indent_control = _action_link(
+            "Plain indent" if indent_preview else "Preview indents",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                indent_preview=not indent_preview,
             ),
             "view",
         )
@@ -3545,10 +3584,12 @@ def _translation_text_controls(
                 show_invisibles=not show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
             "view",
         )}
         {sync_control}
+        {indent_control}
       </div>
       {_translation_search_form(
           view_name,
@@ -3558,6 +3599,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          indent_preview=indent_preview,
       )}
       {_translation_jump_form(
           view_name,
@@ -3567,6 +3609,7 @@ def _translation_text_controls(
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
           search_query=search_query,
+          indent_preview=indent_preview,
       )}
     </section>
     """
@@ -3581,6 +3624,7 @@ def _translation_search_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     hidden_fields = _translation_control_hidden_fields(
         limit=limit,
@@ -3588,6 +3632,7 @@ def _translation_search_form(
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=False,
         search_query="",
+        indent_preview=indent_preview,
     )
     clear_link = ""
     if search_query:
@@ -3600,6 +3645,7 @@ def _translation_search_form(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
+                indent_preview=indent_preview,
             ),
             "view",
             compact=True,
@@ -3637,6 +3683,7 @@ def _translation_jump_form(
     show_invisibles: bool,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     hidden_fields = _translation_control_hidden_fields(
         limit=limit,
@@ -3644,6 +3691,7 @@ def _translation_jump_form(
         sync_scroll=sync_scroll if view_name == "reader" else None,
         include_search=True,
         search_query=search_query,
+        indent_preview=indent_preview,
     )
     return f"""
     <form
@@ -3676,6 +3724,7 @@ def _translation_raw_text_href(
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
     search_query: str = "",
+    indent_preview: bool = False,
 ) -> str:
     query: dict[str, str] = {
         "sequence": str(max(1, sequence)),
@@ -3687,6 +3736,8 @@ def _translation_raw_text_href(
         query["sync"] = "0"
     if search_query:
         query["q"] = search_query
+    if indent_preview:
+        query["indent_preview"] = "1"
     return f"/admin/logs/{run_id}/{view_name}?{urlencode(query)}"
 
 
@@ -3697,6 +3748,7 @@ def _translation_control_hidden_fields(
     sync_scroll: bool | None,
     include_search: bool,
     search_query: str,
+    indent_preview: bool,
 ) -> str:
     fields = [f'<input type="hidden" name="limit" value="{limit}">']
     if show_invisibles:
@@ -3707,6 +3759,8 @@ def _translation_control_hidden_fields(
         fields.append(
             f'<input type="hidden" name="q" value="{escape(search_query)}">'
         )
+    if indent_preview:
+        fields.append('<input type="hidden" name="indent_preview" value="1">')
     return "".join(fields)
 
 
@@ -3744,8 +3798,9 @@ def _translation_reader_block(
     status = escape(str(row.get("status") or "unknown"))
     block_label = escape(_translation_source_block_label(row))
     qa_flags = _translation_row_qa_flags(row)
+    layout_flags = _translation_row_layout_flags(row)
     qa_class = " has-qa-warning" if qa_flags else ""
-    qa_html = _translation_row_qa_flag_html(qa_flags)
+    qa_html = _translation_row_qa_flag_html(qa_flags + layout_flags)
     text = str(row.get(text_key) or "")
     if not text:
         text = "[empty]"
@@ -3794,6 +3849,34 @@ def _translation_reader_qa_panel(
       {search_metric}
     </section>
     """
+
+
+def _translation_reader_layout_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    indent_preview: bool,
+) -> str:
+    counts = _translation_reader_indent_counts(rows)
+    return f"""
+    <section class="reader-layout-panel" aria-label="Reader layout diagnostics">
+      {_reader_qa_metric("Indent preview", "On" if indent_preview else "Off")}
+      {_reader_qa_metric("Source literal indents", str(counts["source"]))}
+      {_reader_qa_metric("Translation literal indents", str(counts["translation"]))}
+      {_reader_qa_metric("Style metadata", "Unknown")}
+    </section>
+    """
+
+
+def _translation_reader_indent_counts(
+    rows: tuple[dict[str, object], ...],
+) -> dict[str, int]:
+    counts = {"source": 0, "translation": 0}
+    for row in rows:
+        if _has_literal_leading_indent(str(row.get("source_text") or "")):
+            counts["source"] += 1
+        if _has_literal_leading_indent(str(row.get("translated_text") or "")):
+            counts["translation"] += 1
+    return counts
 
 
 def _reader_qa_metric(label: str, value: str) -> str:
@@ -3863,6 +3946,20 @@ def _translation_row_qa_flag_html(flags: tuple[dict[str, str], ...]) -> str:
     ) + "</span>"
 
 
+def _translation_row_layout_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
+    flags: list[dict[str, str]] = []
+    if _has_literal_leading_indent(str(row.get("source_text") or "")):
+        flags.append({"kind": "literal_source_indent", "label": "Source literal indent"})
+    if _has_literal_leading_indent(str(row.get("translated_text") or "")):
+        flags.append(
+            {
+                "kind": "literal_translation_indent",
+                "label": "Translation literal indent",
+            }
+        )
+    return tuple(flags)
+
+
 def _translation_row_qa_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
     source = str(row.get("source_text") or "")
     translated = str(row.get("translated_text") or "")
@@ -3884,6 +3981,15 @@ def _translation_row_qa_flags(row: dict[str, object]) -> tuple[dict[str, str], .
             )
             flags.append({"kind": "length_mismatch", "label": label})
     return tuple(flags)
+
+
+def _has_literal_leading_indent(text: str) -> bool:
+    for line in text.splitlines() or [text]:
+        if not line.strip():
+            continue
+        if line[0] in {" ", "\t", "\u00a0"}:
+            return True
+    return False
 
 
 def _reader_sync_script() -> str:
@@ -3951,6 +4057,9 @@ def _translation_text_diagnostic_row(
         notes.append(f"attempts: {attempt_count}/{max_attempts}")
     qa_flags = _translation_row_qa_flags(row)
     for flag in qa_flags:
+        notes.append(flag["label"])
+    layout_flags = _translation_row_layout_flags(row)
+    for flag in layout_flags:
         notes.append(flag["label"])
     note_html = ""
     if notes:
@@ -5409,7 +5518,8 @@ header {
 .reader-jump-form input {
   width: 96px;
 }
-.reader-qa-panel {
+.reader-qa-panel,
+.reader-layout-panel {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 10px;
@@ -5498,6 +5608,9 @@ header {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.reader-compare.has-indent-preview .reader-text {
+  text-indent: 1.6em;
 }
 .reader-search-hit {
   color: #111827;
