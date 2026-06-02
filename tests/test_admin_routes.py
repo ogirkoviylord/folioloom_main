@@ -2963,9 +2963,14 @@ class AdminRoutesTest(unittest.TestCase):
             reader.text,
         )
         self.assertIn("reader-outline", reader.text)
+        self.assertIn('<details class="reader-outline"', reader.text)
         self.assertIn("Reader block outline", reader.text)
         self.assertIn("Block outline", reader.text)
         self.assertIn("Visible units: 3", reader.text)
+        self.assertLess(
+            reader.text.index("data-translation-reader"),
+            reader.text.index('<details class="reader-outline"'),
+        )
         self.assertIn("reader-outline-link", reader.text)
         self.assertIn("reader-outline-link has-qa-warning", reader.text)
         self.assertIn("data-reader-outline-anchor", reader.text)
@@ -3340,6 +3345,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
         self.assertIn("No QA issues in this window.", reader_empty_filter.text)
         self.assertIn("reader-outline", reader_empty_filter.text)
+        self.assertIn('<details class="reader-outline"', reader_empty_filter.text)
         self.assertIn("Visible units: 0", reader_empty_filter.text)
         self.assertIn("No blocks in this reader window.", reader_empty_filter.text)
         self.assertNotIn("data-reader-outline-navigation", reader_empty_filter.text)
