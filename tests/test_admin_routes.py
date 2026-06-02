@@ -2496,6 +2496,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Paragraph/line break mismatch", diagnostics.text)
         self.assertNotIn('<section class="reader-position-bar"', diagnostics.text)
         self.assertNotIn("data-reader-keyboard-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-qa-step-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-qa-step-controls", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2606,6 +2608,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Paragraph mismatch", reader.text)
         self.assertIn("reader-qa-issue-nav", reader.text)
         self.assertIn("QA issues", reader.text)
+        self.assertIn("data-reader-qa-step-controls", reader.text)
+        self.assertIn("data-reader-qa-step-navigation", reader.text)
+        self.assertIn('data-reader-qa-step="previous"', reader.text)
+        self.assertIn('data-reader-qa-step="next"', reader.text)
+        self.assertIn("Previous issue", reader.text)
+        self.assertIn("Next issue", reader.text)
+        self.assertIn("data-reader-qa-issue-anchor", reader.text)
+        self.assertIn("scrollIntoView", reader.text)
+        self.assertIn("window.history.replaceState", reader.text)
         self.assertIn('href="#reader-original-2"', reader.text)
         self.assertIn('href="#reader-original-3"', reader.text)
         self.assertIn('<span class="reader-qa-issue-sequence">#2</span>', reader.text)
@@ -2731,6 +2742,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
         self.assertIn('href="#reader-original-3"', reader_paragraph_filter.text)
         self.assertNotIn('href="#reader-original-2"', reader_paragraph_filter.text)
+        self.assertIn("data-reader-qa-step-controls", reader_paragraph_filter.text)
+        self.assertIn("data-reader-qa-step-navigation", reader_paragraph_filter.text)
         self.assertIn("Source lines 1", reader_paragraph_filter.text)
         self.assertIn("Translation lines 2", reader_paragraph_filter.text)
         self.assertIn("Source blank lines 0", reader_paragraph_filter.text)
@@ -2767,6 +2780,8 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
         self.assertIn("No QA issues in this window.", reader_empty_filter.text)
+        self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
+        self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("Private source paragraph", reader_empty_filter.text)
         self.assertEqual(reader_invalid_filter.status_code, 200)
         self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
@@ -2786,6 +2801,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Paragraph/line break mismatch", archive_text)
         self.assertNotIn("reader-qa-issue-nav", archive_text)
         self.assertNotIn("reader-position-bar", archive_text)
+        self.assertNotIn("data-reader-qa-step-controls", archive_text)
+        self.assertNotIn("data-reader-qa-step-navigation", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

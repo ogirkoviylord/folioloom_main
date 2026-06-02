@@ -3426,6 +3426,11 @@ def translation_reader_body(
         previous_href,
         next_href,
     )
+    qa_step_script = (
+        _reader_qa_step_script()
+        if any(_translation_row_qa_flags(row) for row in visible_rows)
+        else ""
+    )
     compare_class = "reader-compare has-indent-preview" if indent_preview else "reader-compare"
     return f"""
     <section class="toolbar-panel">
@@ -3511,6 +3516,7 @@ def translation_reader_body(
     {minimap}
     {sync_script}
     {keyboard_script}
+    {qa_step_script}
     """
 
 
@@ -4261,7 +4267,11 @@ def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str
         flag_summary = escape("; ".join(flag["label"] for flag in flags))
         issue_items.append(
             f"""
-            <a class="reader-qa-issue-link" href="#reader-original-{safe_sequence}">
+            <a
+              class="reader-qa-issue-link"
+              href="#reader-original-{safe_sequence}"
+              data-reader-qa-issue-anchor
+            >
               <span class="reader-qa-issue-sequence">#{safe_sequence}</span>
               <span class="reader-qa-issue-labels">{flag_summary}</span>
               <span class="reader-qa-issue-blocks">Blocks {block_label}</span>
@@ -4270,11 +4280,30 @@ def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str
         )
     if not issue_items:
         body = '<p class="reader-empty">No QA issues in this window.</p>'
+        step_controls = ""
     else:
         body = "".join(issue_items)
+        button_class = escape(_action_classes("view", True, "reader-qa-step-button"))
+        step_controls = f"""
+        <div class="reader-qa-step-controls" data-reader-qa-step-controls>
+          <button
+            class="{button_class}"
+            type="button"
+            data-reader-qa-step="previous"
+          >Previous issue</button>
+          <button
+            class="{button_class}"
+            type="button"
+            data-reader-qa-step="next"
+          >Next issue</button>
+        </div>
+        """
     return f"""
     <nav class="reader-qa-issue-nav" aria-label="Reader QA issues">
-      <h4>QA issues</h4>
+      <div class="reader-qa-issue-heading">
+        <h4>QA issues</h4>
+        {step_controls}
+      </div>
       <div class="reader-qa-issue-list">
         {body}
       </div>
@@ -4464,6 +4493,59 @@ def _reader_keyboard_navigation_script(previous_href: str, next_href: str) -> st
           }}
         }});
       }})();
+    </script>
+    """
+
+
+def _reader_qa_step_script() -> str:
+    return """
+    <script data-reader-qa-step-navigation>
+      (() => {
+        const controls = document.querySelector("[data-reader-qa-step-controls]");
+        if (!controls) return;
+        const issueHrefs = Array.from(
+          document.querySelectorAll("[data-reader-qa-issue-anchor]")
+        )
+          .map((link) => link.getAttribute("href"))
+          .filter((href) => href && href.startsWith("#"));
+        if (!issueHrefs.length) return;
+        const targetForHref = (href) => document.getElementById(href.slice(1));
+        const currentIssueIndex = () => {
+          const hashIndex = issueHrefs.indexOf(window.location.hash);
+          if (hashIndex >= 0) return hashIndex;
+          let nearestIndex = 0;
+          let nearestDistance = Number.POSITIVE_INFINITY;
+          issueHrefs.forEach((href, index) => {
+            const target = targetForHref(href);
+            if (!target) return;
+            const distance = Math.abs(target.getBoundingClientRect().top - 96);
+            if (distance < nearestDistance) {
+              nearestIndex = index;
+              nearestDistance = distance;
+            }
+          });
+          return nearestIndex;
+        };
+        const goToIssue = (direction) => {
+          const currentIndex = currentIssueIndex();
+          const nextIndex = direction === "next"
+            ? Math.min(issueHrefs.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+          const href = issueHrefs[nextIndex];
+          const target = targetForHref(href);
+          if (!target) return;
+          target.scrollIntoView({ block: "start", behavior: "smooth" });
+          window.history.replaceState(null, "", href);
+          target.focus({ preventScroll: true });
+        };
+        controls.addEventListener("click", (event) => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest("[data-reader-qa-step]");
+          if (!button) return;
+          event.preventDefault();
+          goToIssue(button.getAttribute("data-reader-qa-step"));
+        });
+      })();
     </script>
     """
 
@@ -6041,8 +6123,24 @@ header {
 .reader-qa-issue-nav {
   margin: 12px 0;
 }
-.reader-qa-issue-nav h4 {
+.reader-qa-issue-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin: 0 0 8px;
+}
+.reader-qa-issue-heading h4 {
+  margin: 0;
+}
+.reader-qa-step-controls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-qa-step-button {
+  white-space: nowrap;
 }
 .reader-qa-issue-list {
   display: flex;
