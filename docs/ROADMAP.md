@@ -561,7 +561,8 @@ Acceptance criteria:
   `codex/issue-193-epub-preview-resources`; issue #195 DOCX structure preview
   slice is locally verified on branch `codex/issue-195-docx-structure-preview`;
   issue #197 format auto-detection CLI slice is locally verified on branch
-  `codex/issue-197-reader-format-auto`.
+  `codex/issue-197-reader-format-auto`; issue #199 owner-only internal admin UI
+  slice is in progress on branch `codex/issue-internal-reader-ui`.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:
@@ -582,7 +583,9 @@ Acceptance criteria:
   [#195](https://github.com/ogirkoviylord/folioloom_main/issues/195) for the
   explicit-input DOCX structure preview report,
   [#197](https://github.com/ogirkoviylord/folioloom_main/issues/197) for CLI
-  format auto-detection by `.txt`, `.docx` and `.epub` extension.
+  format auto-detection by `.txt`, `.docx` and `.epub` extension, and
+  [#199](https://github.com/ogirkoviylord/folioloom_main/issues/199) for a
+  narrow owner-only internal admin UI over the existing renderer.
   DOCX recommendation: keep semantic/block preview as the default for now, use
   the #195 explicit-input structure preview and block report, use local
   LibreOffice only as reference/QA on approved fixtures, and require a separate
@@ -595,10 +598,11 @@ Acceptance criteria:
   Suggested acceptance criteria: local tool generates a side-by-side
   source/translation report from existing adapter blocks for explicit
   synthetic/test/public-domain/permissive or owner-approved TXT/DOCX/EPUB
-  files, can auto-detect those three formats by extension in the CLI, does not
-  read live runtime `var/`, does not add an admin/public route, does not add
-  production dependencies without approval, HTML-escapes displayed text and
-  metadata, and does not claim DOCX full visual fidelity or release readiness.
+  files, can auto-detect those three formats by extension in the CLI/UI, keeps
+  any UI owner-only/internal, does not read live runtime `var/`, does not add
+  public routes, does not add production dependencies without approval,
+  HTML-escapes displayed text and metadata, and does not claim DOCX full visual
+  fidelity or release readiness.
 
 - Task: Add metadata-only Alerts/Backups owner report.
   Phase: 2

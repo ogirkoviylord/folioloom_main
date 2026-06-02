@@ -77,6 +77,7 @@ _PRIMARY_NAV_ITEMS = (
 )
 _ADVANCED_NAV_ITEMS = (
     ("logs", "/admin/logs", "Logs"),
+    ("reader", "/admin/internal-reader", "Reader"),
     ("activity", "/admin/activity", "Activity"),
     ("operations", "/admin/operations/jobs", "Operations"),
     ("audit", "/admin/audit", "Audit"),
@@ -2018,6 +2019,116 @@ def _quality_row(row: QualitySampleScore) -> str:
       <td>{escape(row.error or "")}</td>
     </tr>
     """
+
+
+def internal_reader_body(
+    *,
+    source_options: tuple[tuple[str, str], ...],
+    selected_source: str = "",
+    mapping_path: str = "",
+    source_format: str = "auto",
+    max_fragment_chars: int = 5000,
+    error: str | None = None,
+) -> str:
+    options = "\n".join(
+        _internal_reader_source_option(
+            value,
+            label,
+            selected=selected_source == value,
+        )
+        for value, label in source_options
+    )
+    if not options:
+        options = '<option value="">No sample fixtures found</option>'
+    format_options = "\n".join(
+        _status_option(value, source_format, label)
+        for value, label in (
+            ("auto", "Auto"),
+            ("txt", "TXT"),
+            ("docx", "DOCX"),
+            ("epub", "EPUB"),
+        )
+    )
+    error_html = f'<p class="error">{escape(error)}</p>' if error else ""
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Internal Reader</h3>
+        <p>
+          Generate owner-only before/after reports for approved local
+          TXT/DOCX/EPUB fixtures.
+        </p>
+      </div>
+    </section>
+    <section class="panel warning-panel">
+      <h3>Raw text visibility is enabled for this internal reader only.</h3>
+      <p>
+        Reports may show source document text and translated output. Keep them
+        out of issues, PRs, safe log archives, screenshots and support notes
+        unless the owner explicitly approves that exact excerpt.
+      </p>
+    </section>
+    <section class="panel">
+      <form class="reader-form" method="get" action="/admin/internal-reader/preview">
+        {error_html}
+        <label>
+          <span>Sample fixture</span>
+          <select name="source_select">
+            <option value="">Manual path</option>
+            {options}
+          </select>
+          <span class="field-help">
+            Pick a repository sample, or leave this on Manual path and enter an
+            approved local file below.
+          </span>
+        </label>
+        <label>
+          <span>Source path</span>
+          <input
+            name="source"
+            value="{escape(selected_source)}"
+            placeholder="test_samples/sample_book.en.epub"
+          >
+        </label>
+        <label>
+          <span>Translation mapping JSON path</span>
+          <input
+            name="mapping"
+            value="{escape(mapping_path)}"
+            placeholder="/tmp/reader-demo-translations.json"
+          >
+          <span class="field-help">
+            Optional JSON object mapping source_block_id to translated text.
+          </span>
+        </label>
+        <label>
+          <span>Format</span>
+          <select name="format">{format_options}</select>
+        </label>
+        <label>
+          <span>Max fragment chars</span>
+          <input
+            name="max_fragment_chars"
+            type="number"
+            min="1"
+            max="100000"
+            value="{escape(str(max_fragment_chars))}"
+          >
+        </label>
+        {_action_button("Open reader", "view")}
+      </form>
+    </section>
+    """
+
+
+def _internal_reader_source_option(
+    value: str,
+    label: str,
+    *,
+    selected: bool,
+) -> str:
+    selected_attr = " selected" if selected else ""
+    return f'<option value="{escape(value)}"{selected_attr}>{escape(label)}</option>'
 
 
 def _format_optional_score(value: float | None) -> str:

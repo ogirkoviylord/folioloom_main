@@ -568,11 +568,12 @@ class AdminRoutesTest(unittest.TestCase):
         primary_nav = _nav_section(overview.text, "primary-nav")
         advanced_nav = _nav_section(overview.text, "advanced-nav")
         self.assertIn(">Advanced<", overview.text)
-        for label in ("Logs", "Activity", "Operations", "Audit"):
+        for label in ("Logs", "Reader", "Activity", "Operations", "Audit"):
             self.assertNotIn(f">{label}<", primary_nav)
             self.assertIn(f">{label}<", advanced_nav)
         for href in (
             "/admin/logs",
+            "/admin/internal-reader",
             "/admin/activity",
             "/admin/operations/jobs",
             "/admin/audit",
@@ -612,6 +613,142 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(logs.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(logs.text))
+
+    def test_internal_reader_page_requires_login_and_does_not_generate_report(self):
+        with patch(
+            "translator_service.admin.routes.generate_txt_reader_html_from_path",
+            side_effect=AssertionError("reader report should be lazy"),
+        ) as generator:
+            response = self.client.get(
+                "/admin/internal-reader/preview",
+                params={"source": "test_samples/sample_book.en.txt"},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+        generator.assert_not_called()
+
+    def test_internal_reader_page_lists_sample_fixtures_under_advanced_nav(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        page = self.client.get("/admin/internal-reader")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Internal Reader", page.text)
+        self.assertIn("test_samples/sample_book.en.txt", page.text)
+        self.assertIn("test_samples/sample_book.en.docx", page.text)
+        self.assertIn("test_samples/sample_book.en.epub", page.text)
+        self.assertIn(
+            'href="/admin/internal-reader" class="active"',
+            _nav_section(page.text, "advanced-nav"),
+        )
+        self.assertIn("open", _advanced_nav_tag(page.text))
+
+    def test_internal_reader_preview_renders_txt_with_optional_mapping(self):
+        with TemporaryDirectory() as temp_dir:
+            mapping_path = Path(temp_dir) / "translations.json"
+            mapping_path.write_text(
+                json.dumps({"txt:segment:1": "Демо-переклад"}),
+                encoding="utf-8",
+            )
+            self.client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = self.client.get(
+                "/admin/internal-reader/preview",
+                params={
+                    "source": "test_samples/sample_book.en.txt",
+                    "mapping": str(mapping_path),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("Format: txt", response.text)
+        self.assertIn("Демо-переклад", response.text)
+        self.assertIn("status-done", response.text)
+        self.assertIn("status-missing", response.text)
+
+    def test_internal_reader_preview_renders_docx_and_epub_samples(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        docx = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "test_samples/sample_book.en.docx"},
+        )
+        epub = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "test_samples/sample_book.en.epub"},
+        )
+
+        self.assertEqual(docx.status_code, 200)
+        self.assertIn("Format: docx", docx.text)
+        self.assertIn("docx-structure-preview", docx.text)
+        self.assertEqual(epub.status_code, 200)
+        self.assertIn("Format: epub", epub.text)
+        self.assertIn("chapter-previews", epub.text)
+        self.assertIn('sandbox=""', epub.text)
+
+    def test_internal_reader_preview_uses_sample_selection_before_manual_source(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get(
+            "/admin/internal-reader/preview",
+            params={
+                "source_select": "test_samples/sample_book.en.txt",
+                "source": "test_samples/sample_book.en.epub",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Format: txt", response.text)
+
+    def test_internal_reader_preview_rejects_unsupported_format_and_var_paths(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        unsupported = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "test_samples/sample_book.en.txt", "format": "pdf"},
+        )
+        runtime_var = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "var/sample_book.en.txt"},
+        )
+
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertIn("Unsupported source format", unsupported.text)
+        self.assertEqual(runtime_var.status_code, 400)
+        self.assertIn("runtime var/", runtime_var.text)
+
+    def test_internal_reader_preview_reports_missing_source_file(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "test_samples/does-not-exist.epub"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Source file was not found.", response.text)
+        self.assertNotIn("Format:", response.text)
+
+    def test_internal_reader_preview_reports_invalid_mapping_without_raw_text(self):
+        with TemporaryDirectory() as temp_dir:
+            mapping_path = Path(temp_dir) / "translations.json"
+            mapping_path.write_text("[not an object]", encoding="utf-8")
+            self.client.post("/admin/login", data={"password": "owner-pass"})
+
+            response = self.client.get(
+                "/admin/internal-reader/preview",
+                params={
+                    "source": "test_samples/sample_book.en.txt",
+                    "mapping": str(mapping_path),
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid translation mapping", response.text)
+        self.assertNotIn("Format: txt", response.text)
 
     def test_owner_can_add_view_and_remove_beta_allowlist_ids_from_settings(self):
         with TemporaryDirectory() as temp_dir:
