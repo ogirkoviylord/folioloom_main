@@ -473,6 +473,9 @@ Evidence:
   redesign plan.
 - Detailed design is recorded in
   `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md`.
+- PR #160 merged the first Beta Operations Console code stack into `main` on
+  2026-05-31, covering issues #145-#151. On 2026-06-02 the owner approved
+  closing #145-#152 as implemented by PR #160.
 
 Reason:
 - The owner needs to understand "what failed, why, who/what is affected, and
@@ -489,7 +492,9 @@ Consequences:
 - Architect review is required before implementation slices that touch admin
   controls, provider behavior, auth/security boundaries, user data,
   database/state, deployment or dependencies.
-- This decision does not claim that the redesign is implemented.
+- The first admin redesign stack is implemented by PR #160; future admin
+  diagnostic work should be scoped as follow-up issues rather than reopening
+  the closed redesign epic.
 - This decision does not by itself satisfy Gate B Alerts/Backups visibility,
   closed beta readiness, public admin hardening, paid beta readiness or
   production readiness.
@@ -940,7 +945,9 @@ Human approval required to change:
 Status: Active
 
 Decision:
-- Logs/admin/safety telemetry must not expose raw document text, prompts, translations or API keys.
+- Logs/admin/safety telemetry must not expose raw document text, prompts,
+  translations or API keys outside explicitly owner-approved dedicated
+  diagnostic surfaces.
 - Admin may show metadata, provider health, costs and safe diagnostics.
 - Secrets must be masked; admin-managed DeepSeek keys are encrypted when `ADMIN_SECRET_MASTER_KEY` is configured.
 
@@ -955,7 +962,9 @@ Reason:
 - Safety and admin docs repeatedly define redaction and metadata-only visibility.
 
 Consequences:
-- AI-агентам нельзя добавлять logging/admin views with raw document text or real secrets.
+- AI-агентам нельзя добавлять logging/admin views with raw document text,
+  prompts or real secrets outside the dedicated owner-approved diagnostic
+  surfaces.
 - Debug artifacts and downloadable run archives must be checked for leakage before beta.
 
 Human approval required to change:
@@ -1362,7 +1371,7 @@ Consequences:
 Human approval required to change:
 - yes; this affects the external provider output contract and safety boundary.
 
-### 2026-06-01 - Permanent owner-only raw translation text diagnostics
+### 2026-06-01 / 2026-06-02 - Permanent owner-only raw translation text and prompt diagnostics
 
 Status: Active
 
@@ -1370,6 +1379,9 @@ Decision:
 - The owner approved a permanent admin diagnostic path that can display stored
   work-unit source text and translated output for a specific translation run
   while investigating failed/stuck translations.
+- On 2026-06-02, the owner also approved viewing raw provider prompt bodies in
+  a dedicated owner-only diagnostic surface when those prompt bodies are
+  recorded or can be reconstructed safely.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model and must not be added to safe log archives, telemetry, JSON APIs,
   release artifacts, GitHub issues, PR descriptions or support notes.
@@ -1389,21 +1401,30 @@ Evidence:
 - After PR #179 was merged and deployed, the owner explicitly stated on
   2026-06-01 that this first version is accepted as the direction and that the
   owner should have ongoing access to raw translation texts for diagnostics.
+  clarifying that raw source text and translations were already approved for
+  owner diagnostics.
 
 Reason:
 - The failed translation incident required comparing source work units,
   translated output and retry/error state. The safe export intentionally
   excludes raw source and translated text, so it cannot answer that question by
   itself.
+- Prompt bodies can be necessary to diagnose model behavior, repair prompts,
+  output-contract failures and prompt-policy regressions.
 - Keeping the owner-only raw text view in admin avoids repeated archive
   downloads and duplicate local book files during development and incident
   triage.
 
 Consequences:
 - This is an owner-approved exception to the normal "no raw text in admin"
-  guardrail for one dedicated diagnostic surface.
-  user data and avoid copying excerpts into logs, docs, issues or chat unless
-  the owner approves that exact excerpt.
+  guardrail for dedicated diagnostic surfaces.
+  bodies as sensitive data and avoid copying excerpts into logs, docs, issues
+  or chat unless the owner approves that exact excerpt.
+- Implementing prompt viewing may require a separate scoped issue because full
+  prompt bodies are not confirmed to be persisted in current run metadata.
+  If implementation changes provider request logging, storage/runtime data,
+  database/state, auth/RBAC, JSON APIs, telemetry, archives or dependencies,
+  it needs the matching approval gate and tests.
 - This decision does not relax public admin, release, legal/privacy, telemetry,
   archive-redaction or Gate B requirements.
 

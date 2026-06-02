@@ -43,10 +43,12 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   active reference, partially implemented. Immediate gaps: Alerts MVP and
   Backups visibility.
 - `docs/superpowers/specs/2026-05-31-beta-operations-console-redesign.md` -
-  active owner-approved design direction for the before-free-closed-beta admin
+  owner-approved design direction for the before-free-closed-beta admin
   redesign: incident-first Beta Operations Console, Translation Failure Trace,
   safe evidence packet, provider/key incident clarity, overview triage,
-  navigation cleanup and action semantics. Design only; implementation status
+  navigation cleanup and action semantics. The first implementation stack was
+  merged by PR #160 and issues #145-#152 are closed; follow-up admin diagnostics
+  and release-evidence surfaces need separate issues.
 - `docs/superpowers/specs/2026-05-09-deepseek-balance-admin-design.md` -
   active reference for admin-visible DeepSeek account balance, safe refresh,
   alerts and key-source behavior.
