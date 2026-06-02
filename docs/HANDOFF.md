@@ -1329,6 +1329,20 @@ Potential issues to verify:
 
 ## 9. Последние изменения
 
+- Date: 2026-06-02.
+- Change: Issue
+  [#252](https://github.com/ogirkoviylord/folioloom_main/issues/252)
+  adds clickable owner-only Translation Reader QA/Layout metric filters on
+  branch `codex/issue-252-reader-qa-metric-links`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+- Follow-up: keep future publisher/editor workspace work as separate
+  owner-approved issues. This slice does not add public/user-facing reader
+  access, new raw-text surfaces, auth/RBAC changes, runtime data access,
+  dependencies, deployment or release-readiness claims.
+
 - Date: 2026-05-23.
 - Change: Recorded dedicated local Gate B common verification baseline for issue
   #72.
