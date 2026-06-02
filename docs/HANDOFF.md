@@ -613,6 +613,19 @@ Owner decisions recorded during issue #71:
   and does not add quality scoring, cross-window scanning, saved filters,
   annotations, public/user-facing access, live runtime data operations or
   release readiness.
+- 2026-06-02: Issue
+  [#224](https://github.com/ogirkoviylord/folioloom_main/issues/224) starts the
+  first per-work-unit metrics slice on branch
+  `codex/issue-224-reader-block-metrics`, stacked after #222. The slice shows
+  source character count, translated character count and translation/source
+  length ratio in run-log Reader blocks and Text Diagnostics row notes. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. The metrics are computed only from the currently loaded
+  work-unit window and do not add semantic quality scoring, whole-book
+  aggregation, saved metrics, annotations, public/user-facing access, live
+  runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
