@@ -67,8 +67,9 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/specs/translation-language-quality-methodology.md`
 - `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md` -
   active owner-approved internal/dev design direction for a local before-after
-  reader over TXT/DOCX/EPUB adapter blocks. Design only; first scope is local
-  QA on synthetic/test/public-domain/permissive or owner-approved files, not a
+  reader over TXT/DOCX/EPUB adapter blocks, with issue/PR status for the first
+  TXT/generic/DOCX/EPUB slices. First scope is local QA on
+  synthetic/test/public-domain/permissive or owner-approved files, not a
   user-facing reader, publisher workspace, admin route or production-readiness
   claim.
 - `docs/superpowers/specs/2026-06-01-docx-internal-preview-renderer-spike.md` -
@@ -78,8 +79,8 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   to separately approved prototype or implementation issues.
 - `docs/superpowers/specs/2026-06-01-epub-internal-reader-rendering-spike.md` -
   active issue #184 Architect spike note. It recommends keeping EPUB on the
-  semantic/block reader for now, considering a generated XHTML/spine/chapter
-  local report before any book-like reader dependency, and keeping EPUBCheck as
+  semantic/block reader for now, using the issue #189 explicit-input local
+  report before any book-like reader dependency, and keeping EPUBCheck as
   validation/reference only.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
