@@ -2209,12 +2209,21 @@ class AdminRoutesTest(unittest.TestCase):
                     )
                 )
             )
+            unauthenticated = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader",
+                follow_redirects=False,
+            )
             client.post("/admin/login", data={"password": "owner-pass"})
 
             response = client.get(f"/admin/logs/{logger.run_dir.name}/text-diagnostics")
+            reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
 
+        self.assertEqual(unauthenticated.status_code, 303)
+        self.assertEqual(unauthenticated.headers["location"], "/admin/login")
         self.assertEqual(response.status_code, 200)
         self.assertIn("No work units found.", response.text)
+        self.assertEqual(reader.status_code, 200)
+        self.assertIn("No work units found.", reader.text)
         self.assertFalse(job_db.exists())
 
     def test_translation_text_diagnostics_is_dedicated_raw_text_view(self):
@@ -2228,7 +2237,7 @@ class AdminRoutesTest(unittest.TestCase):
                 kind=StoredFileKind.INTERMEDIATE,
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
-                content=b"Private source paragraph",
+                content=b"Private source paragraph <script>alert(1)</script>",
             )
             store = SQLiteTranslationJobStore(job_db)
             try:
@@ -2262,7 +2271,10 @@ class AdminRoutesTest(unittest.TestCase):
                 assert claimed is not None
                 store.complete_work_unit(
                     claimed.id,
-                    translated_text="Приватний перекладений абзац",
+                    translated_text=(
+                        "Приватний перекладений абзац "
+                        "<img src=x onerror=alert(1)>"
+                    ),
                     prompt_tokens=11,
                     completion_tokens=7,
                     cache_hit_tokens=0,
@@ -2298,15 +2310,22 @@ class AdminRoutesTest(unittest.TestCase):
             )
             client.post("/admin/login", data={"password": "owner-pass"})
 
+            logs = client.get("/admin/logs")
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             diagnostics = client.get(
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
             )
+            reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
+        self.assertEqual(logs.status_code, 200)
+        self.assertIn("Reader", logs.text)
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}/reader", logs.text)
         self.assertEqual(details.status_code, 200)
         self.assertIn("Text diagnostics", details.text)
+        self.assertIn("Reader", details.text)
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}/reader", details.text)
         self.assertIn("block-1", details.text)
         self.assertIn("translated", details.text)
         self.assertIn("11 + 7 = 18", details.text)
@@ -2328,9 +2347,32 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Private source paragraph", details_api_text)
         self.assertNotIn("Приватний перекладений абзац", details_api_text)
         self.assertEqual(diagnostics.status_code, 200)
+        self.assertEqual(diagnostics.headers["cache-control"], "no-store")
         self.assertIn("Raw text visibility is enabled", diagnostics.text)
         self.assertIn("Private source paragraph", diagnostics.text)
         self.assertIn("Приватний перекладений абзац", diagnostics.text)
+        self.assertIn("Diagnostics", diagnostics.text)
+        self.assertIn("Reader", diagnostics.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
+        self.assertIn(
+            "&lt;img src=x onerror=alert(1)&gt;",
+            diagnostics.text,
+        )
+        self.assertNotIn("<script>alert(1)</script>", diagnostics.text)
+        self.assertNotIn("<img src=x onerror=alert(1)>", diagnostics.text)
+        self.assertEqual(reader.status_code, 200)
+        self.assertEqual(reader.headers["cache-control"], "no-store")
+        self.assertIn("Translation Reader", reader.text)
+        self.assertIn("data-reader-sync-pane", reader.text)
+        self.assertIn("Original", reader.text)
+        self.assertIn("Translation", reader.text)
+        self.assertIn("Private source paragraph", reader.text)
+        self.assertIn("Приватний перекладений абзац", reader.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", reader.text)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", reader.text)
+        self.assertNotIn("<script>alert(1)</script>", reader.text)
+        self.assertNotIn("<img src=x onerror=alert(1)>", reader.text)
+        self.assertIn("Text diagnostics", reader.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(

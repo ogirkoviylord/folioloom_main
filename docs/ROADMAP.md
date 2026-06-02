@@ -574,7 +574,10 @@ Acceptance criteria:
   slice is locally verified on branch `codex/issue-195-docx-structure-preview`;
   issue #197 format auto-detection CLI slice is locally verified on branch
   `codex/issue-197-reader-format-auto`; issue #199 owner-only internal admin UI
-  slice is in progress on branch `codex/issue-internal-reader-ui`.
+  slice is in progress on branch `codex/issue-internal-reader-ui`; run-log
+  Translation Reader v2 is locally verified on branch
+  `codex/internal-reader-v2` as an owner-only diagnostic surface linked from
+  logs/details/Text diagnostics, with no raw-text API/archive expansion.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:
