@@ -4657,7 +4657,8 @@ def _reader_sync_script() -> str:
           document.querySelectorAll("[data-reader-sync-pane]")
         );
         if (panes.length < 2) return;
-        const pendingProgrammaticScrolls = new WeakMap();
+        const programmaticScrollLocks = new WeakMap();
+        const lockDurationMs = 180;
         const maxScroll = (pane) => Math.max(
           0,
           pane.scrollHeight - pane.clientHeight
@@ -4666,28 +4667,28 @@ def _reader_sync_script() -> str:
           const availableScroll = maxScroll(pane);
           return availableScroll > 0 ? pane.scrollTop / availableScroll : 0;
         };
-        const markProgrammaticScroll = (pane, scrollTop) => {
-          pendingProgrammaticScrolls.set(pane, scrollTop);
-          window.setTimeout(() => {
-            if (pendingProgrammaticScrolls.get(pane) === scrollTop) {
-              pendingProgrammaticScrolls.delete(pane);
-            }
-          }, 160);
+        const lockProgrammaticScroll = (pane) => {
+          const existingUnlock = programmaticScrollLocks.get(pane);
+          if (existingUnlock) {
+            window.clearTimeout(existingUnlock);
+          }
+          const unlock = window.setTimeout(() => {
+            programmaticScrollLocks.delete(pane);
+          }, lockDurationMs);
+          programmaticScrollLocks.set(pane, unlock);
         };
-        const isProgrammaticScroll = (pane) => {
-          const expectedTop = pendingProgrammaticScrolls.get(pane);
-          if (expectedTop == null) return false;
-          pendingProgrammaticScrolls.delete(pane);
-          return Math.abs(pane.scrollTop - expectedTop) <= 2;
+        const isLockedProgrammaticScroll = (pane) => {
+          return programmaticScrollLocks.has(pane);
         };
         panes.forEach((pane) => {
           pane.addEventListener("scroll", () => {
-            if (isProgrammaticScroll(pane)) return;
+            if (isLockedProgrammaticScroll(pane)) return;
             const ratio = scrollRatio(pane);
             panes.forEach((other) => {
               if (other === pane) return;
               const nextScrollTop = ratio * maxScroll(other);
-              markProgrammaticScroll(other, nextScrollTop);
+              if (Math.abs(other.scrollTop - nextScrollTop) <= 1) return;
+              lockProgrammaticScroll(other);
               other.scrollTop = nextScrollTop;
             });
           }, { passive: true });
