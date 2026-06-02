@@ -17,6 +17,49 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-02 - Product/architecture decision: Book/Manuscript MVP contract
+
+Status: Active
+
+Decision:
+- The first `book_manuscript` MVP bar is structure preservation plus clean
+  translation. Stricter literary/editorial quality criteria are future work.
+- The contract must be format-specific for TXT, DOCX and EPUB because
+  "structure preservation" means different things for each format.
+- Provider output must be a clean translation. Provider commentary, apologies,
+  markdown wrappers, explanations and meta comments are not acceptable output.
+- A translated document is a new document; language metadata should be updated
+  where the format supports it.
+- Terminology/name handling and glossary viewing/editing are future features,
+  not part of issue #165.
+- Current/pre-release internal direction is to use all uploaded files for
+  analytics and product improvement. Release-version analytics/consent behavior
+  remains `TBD`.
+
+Evidence:
+- Owner approved these decisions in conversation on 2026-06-02 while scoping
+  GitHub issue #165.
+- `docs/superpowers/specs/book-manuscript-translation-mvp.md` records the
+  proposed MVP contract and separates future work into issues #204-#209.
+- Existing follow-up implementation/audit issues #166-#170 cover deterministic
+  audit, policy profile, EPUB metadata/navigation/headings fidelity, safe run
+  metadata and public-domain book-mode real-file evidence.
+
+Consequences:
+- Issue #165 should stay docs-only and must not implement code, provider calls,
+  real-file runs, raw artifact retention, new formats, release readiness or
+  Gate B claims.
+- New formats beyond TXT/DOCX/EPUB remain future backlog and require separate
+  owner approval, architecture review, fixture rights basis, safety plan and
+  verification plan.
+- Analytics/product-improvement file use is a high-risk privacy/user-data area:
+  current owner direction is recorded, but release-version policy, user consent,
+  legal/privacy copy, retention and deletion behavior remain future gated work.
+
+Human approval required to change:
+- yes; this affects product scope, privacy/user-data handling, quality
+  contract and future format boundaries.
+
 ### 2026-06-02 - Operations decision: owner-approved agent-executed deploys
 
 Status: Active
