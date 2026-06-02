@@ -4429,6 +4429,9 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
           aria-live="polite"
         >Review filter: all rows</span>
       </div>
+      <p class="sr-only" data-reader-review-shortcuts>
+        Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.
+      </p>
       <div class="reader-review-counts">
         {count_chips}
       </div>
@@ -5090,6 +5093,13 @@ def _reader_review_mark_script() -> str:
           : null;
         let currentReviewFilter = "all";
         let currentReviewStepSequence = "";
+        let selectedReviewSequence = "";
+        const reviewShortcutMarks = {
+          "1": "needs_review",
+          "2": "ok",
+          "3": "ignore",
+          "0": "clear",
+        };
         const markLabels = {
           unmarked: "unmarked",
           needs_review: "needs review",
@@ -5123,6 +5133,43 @@ def _reader_review_mark_script() -> str:
           document.querySelectorAll("[data-reader-review-controls]")
         ).filter(
           (control) => control.getAttribute("data-reader-review-sequence") === sequence
+        );
+        const isInteractiveTarget = (target) => {
+          if (!target || !(target instanceof Element)) return false;
+          return Boolean(
+            target.closest(
+              "input, textarea, select, button, a, [contenteditable='true']"
+            )
+          );
+        };
+        const sequenceFromHref = (href) => (
+          href && href.startsWith("#reader-original-")
+            ? href.replace(/^#reader-original-/, "")
+            : ""
+        );
+        const visibleReviewSequence = () => {
+          const visibleControl = Array.from(
+            document.querySelectorAll("[data-reader-review-controls]")
+          ).find((control) => {
+            const block = control.closest(".reader-block");
+            return block && !block.classList.contains("is-review-filter-hidden");
+          });
+          return visibleControl
+            ? visibleControl.getAttribute("data-reader-review-sequence") || ""
+            : reviewSequences()[0] || "";
+        };
+        const activeOutlineSequence = () => {
+          const activeBlock = document.querySelector(
+            ".reader-block.is-active-outline-block[data-reader-sequence]"
+          );
+          return activeBlock ? activeBlock.getAttribute("data-reader-sequence") || "" : "";
+        };
+        const activeReviewSequence = () => (
+          currentReviewStepSequence ||
+          selectedReviewSequence ||
+          activeOutlineSequence() ||
+          sequenceFromHref(window.location.hash) ||
+          visibleReviewSequence()
         );
         const currentMarkForSequence = (sequence) => {
           const markedBlock = matchingBlocks(sequence).find(
@@ -5232,6 +5279,7 @@ def _reader_review_mark_script() -> str:
           const href = `#reader-original-${sequence}`;
           const target = document.getElementById(`reader-original-${sequence}`);
           if (!target) return;
+          selectedReviewSequence = sequence;
           window.history.replaceState(null, "", href);
           window.dispatchEvent(
             new CustomEvent("reader:block-selected", { detail: { href } })
@@ -5266,6 +5314,7 @@ def _reader_review_mark_script() -> str:
         const setReviewMark = (sequence, requestedMark) => {
           const mark = requestedMark === "clear" ? "" : requestedMark;
           if (!sequence) return;
+          selectedReviewSequence = sequence;
           matchingBlocks(sequence).forEach((block) => setTargetClasses(block, mark));
           matchingOutlines(sequence).forEach((link) => setTargetClasses(link, mark));
           matchingControls(sequence).forEach((control) => setControlState(control, mark));
@@ -5292,6 +5341,32 @@ def _reader_review_mark_script() -> str:
             event.preventDefault();
             goToReviewMark(button.getAttribute("data-reader-review-step"));
           });
+        });
+        window.addEventListener("reader:block-selected", (event) => {
+          selectedReviewSequence = sequenceFromHref(
+            event.detail && event.detail.href
+          );
+        });
+        window.addEventListener("hashchange", () => {
+          selectedReviewSequence = sequenceFromHref(window.location.hash);
+        });
+        document.addEventListener("keydown", (event) => {
+          if (
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            isInteractiveTarget(event.target)
+          ) {
+            return;
+          }
+          const requestedMark = reviewShortcutMarks[event.key];
+          if (!requestedMark) return;
+          const sequence = activeReviewSequence();
+          if (!sequence) return;
+          event.preventDefault();
+          setReviewMark(sequence, requestedMark);
         });
         updateReviewCounts();
         applyReviewFilter("all");
