@@ -1,7 +1,7 @@
 # Internal Before/After Reader Design
 
-Status: Approved internal/dev design direction; issues #181-#184 are open as a
-stacked PR sequence, and issue #189 is the next local EPUB report slice.
+Status: Approved internal/dev design direction; issues #181-#184, #189 and
+#191 are open as a stacked PR sequence.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
@@ -52,6 +52,13 @@ adds the next safe implementation slice: an explicit-input local EPUB HTML
 report using the existing EPUB adapter plan and the same side-by-side reader
 renderer. It keeps EPUBCheck, `epub.js` and book-like rendering out of the
 runtime path.
+
+Issue [#191](https://github.com/ogirkoviylord/folioloom_main/issues/191)
+adds a sandboxed EPUB XHTML chapter preview to the same local report. It renders
+source and adapter-assembled translated XHTML/HTML chapter files in side-by-side
+`iframe srcdoc` panes while keeping the semantic block report below. It still
+does not implement an EPUB reading system, external resource bundling or full
+book-like fidelity.
 
 This status does not add an admin or public route, does not authorize live
 runtime `var/` reads, does not add a production dependency and does not claim

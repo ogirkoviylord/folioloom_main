@@ -160,7 +160,10 @@ Suggested issue title:
 `Internal reader: generate EPUB side-by-side local report`
 
 GitHub issue:
-[#189](https://github.com/ogirkoviylord/folioloom_main/issues/189)
+[#189](https://github.com/ogirkoviylord/folioloom_main/issues/189) implemented
+the explicit-input EPUB local report. Follow-up
+[#191](https://github.com/ogirkoviylord/folioloom_main/issues/191) adds
+sandboxed XHTML chapter preview panes inside that report.
 
 Scope:
 - local/dev-only explicit-input report;
@@ -170,6 +173,7 @@ Scope:
 - derive reading order/chapter grouping from EPUB package/spine and adapter
   metadata;
 - show original/translated XHTML snippets or chapter sections side by side;
+- render XHTML preview panes with sandboxed iframes and no script permissions;
 - keep EPUBCheck as validation/reference only.
 
 Required approval gates:

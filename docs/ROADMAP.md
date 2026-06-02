@@ -554,7 +554,9 @@ Acceptance criteria:
   recommendation is recorded on branch `codex/issue-183-docx-renderer-spike`;
   issue #184 EPUB renderer spike recommendation is recorded on branch
   `codex/issue-184-epub-renderer-spike`; issue #189 EPUB local report slice is
-  locally verified on branch `codex/issue-189-epub-reader-report`.
+  locally verified on branch `codex/issue-189-epub-reader-report`; issue #191
+  EPUB sandboxed XHTML preview slice is locally verified on branch
+  `codex/issue-191-epub-xhtml-preview`.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:
@@ -567,15 +569,18 @@ Acceptance criteria:
   [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184) for the
   EPUB renderer spike,
   [#189](https://github.com/ogirkoviylord/folioloom_main/issues/189) for the
-  EPUB explicit-input local HTML report.
+  EPUB explicit-input local HTML report,
+  [#191](https://github.com/ogirkoviylord/folioloom_main/issues/191) for the
+  sandboxed EPUB XHTML chapter preview inside the local report.
   DOCX recommendation: keep semantic/block preview as the default for now, use
   local LibreOffice only as reference/QA on approved fixtures, and require a
   separate owner-approved prototype/implementation issue before adding
   `docx-preview`, Mammoth or LibreOffice automation as a dependency/runtime
   path.
   EPUB recommendation: keep semantic/block preview as the default for now,
-  use the #189 explicit-input local report before adding a book-like reader
-  dependency, and keep EPUBCheck as validation/reference only.
+  use the #189/#191 explicit-input local report and sandboxed XHTML preview
+  before adding a book-like reader dependency, and keep EPUBCheck as
+  validation/reference only.
   Suggested acceptance criteria: local tool generates a side-by-side
   source/translation report from existing adapter blocks for explicit
   synthetic/test/public-domain/permissive or owner-approved files, starts with
