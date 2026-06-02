@@ -680,8 +680,12 @@ def create_admin_router(settings: Settings) -> APIRouter:
         details = _translation_run_details(settings, run_id)
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
-        start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
         limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
+        start_sequence = _sequence_from_page_or_query(
+            page_value=request.query_params.get("page"),
+            sequence_value=request.query_params.get("sequence"),
+            limit=limit,
+        )
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         search_query = _query_text(request.query_params.get("q"), maximum=200)
         indent_preview = _query_flag(request.query_params.get("indent_preview"))
@@ -716,11 +720,15 @@ def create_admin_router(settings: Settings) -> APIRouter:
         details = _translation_run_details(settings, run_id)
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
-        start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
         limit = _bounded_int(
             request.query_params.get("limit"),
             default=100,
             maximum=500,
+        )
+        start_sequence = _sequence_from_page_or_query(
+            page_value=request.query_params.get("page"),
+            sequence_value=request.query_params.get("sequence"),
+            limit=limit,
         )
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
@@ -3293,6 +3301,27 @@ def _positive_int(value: str | None, *, default: int) -> int:
         return max(1, int(value))
     except ValueError:
         return default
+
+
+def _optional_positive_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return None
+
+
+def _sequence_from_page_or_query(
+    *,
+    page_value: str | None,
+    sequence_value: str | None,
+    limit: int,
+) -> int:
+    page = _optional_positive_int(page_value)
+    if page is not None:
+        return ((page - 1) * max(1, limit)) + 1
+    return _positive_int(sequence_value, default=1)
 
 
 def _query_flag(value: str | None, *, default: bool = False) -> bool:
