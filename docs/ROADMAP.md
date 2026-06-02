@@ -582,7 +582,12 @@ Acceptance criteria:
   slice is in progress on branch `codex/issue-internal-reader-ui`; run-log
   Translation Reader v2 is locally verified on branch
   `codex/internal-reader-v2` as an owner-only diagnostic surface linked from
-  logs/details/Text diagnostics, with no raw-text API/archive expansion.
+  logs/details/Text diagnostics, with no raw-text API/archive expansion. Issue
+  [#214](https://github.com/ogirkoviylord/folioloom_main/issues/214) begins the
+  first run-log Reader/Text Diagnostics controls slice on branch
+  `codex/issue-214-reader-controls`: opt-in invisible-character markers,
+  logical sequence navigation, jump-by-sequence and reader sync-scroll toggle.
+  It remains owner-only and does not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:

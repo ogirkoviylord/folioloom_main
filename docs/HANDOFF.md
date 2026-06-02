@@ -544,6 +544,20 @@ Owner decisions recorded during issue #71:
   raw-text JSON APIs, archive raw text, arbitrary server-path browsing, runtime
   `var/` browsing, auth/RBAC changes, dependencies, publisher workspace or
   release readiness.
+- 2026-06-02: Issue
+  [#214](https://github.com/ogirkoviylord/folioloom_main/issues/214) starts the
+  first focused controls slice for the run-log Reader/Text Diagnostics UX on
+  branch `codex/issue-214-reader-controls`, stacked after the scroll-fix PR.
+  The slice adds opt-in invisible/special-character markers, logical
+  sequence-window Previous/Next navigation, jump-by-sequence controls and a
+  reader sync-scroll toggle while keeping raw text confined to the same
+  owner-only `no-store` surfaces. Local verification passed
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, focused
+  regression coverage for the new controls, targeted ruff for touched Python
+  files and `PYTHONPATH=src python3 -m compileall src`. Physical book pages,
+  format-aware chapter navigation, search, anomaly filters, minimap,
+  publisher/editor workspace, live runtime data access and full DOCX/EPUB
+  fidelity remain out of scope.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
