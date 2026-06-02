@@ -689,6 +689,17 @@ def create_admin_router(settings: Settings) -> APIRouter:
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         search_query = _query_text(request.query_params.get("q"), maximum=200)
         indent_preview = _query_flag(request.query_params.get("indent_preview"))
+        qa_filter = _query_choice(
+            request.query_params.get("qa"),
+            choices={
+                "all",
+                "empty_source",
+                "missing_translation",
+                "length_mismatch",
+                "indent",
+            },
+            default="all",
+        )
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -710,6 +721,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 show_invisibles=show_invisibles,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
         )
 
@@ -734,6 +746,17 @@ def create_admin_router(settings: Settings) -> APIRouter:
         sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
         search_query = _query_text(request.query_params.get("q"), maximum=200)
         indent_preview = _query_flag(request.query_params.get("indent_preview"))
+        qa_filter = _query_choice(
+            request.query_params.get("qa"),
+            choices={
+                "all",
+                "empty_source",
+                "missing_translation",
+                "length_mismatch",
+                "indent",
+            },
+            default="all",
+        )
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -756,6 +779,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
         )
 
@@ -3334,6 +3358,20 @@ def _query_text(value: str | None, *, maximum: int) -> str:
     if value is None:
         return ""
     return value.strip()[:maximum]
+
+
+def _query_choice(
+    value: str | None,
+    *,
+    choices: set[str],
+    default: str,
+) -> str:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in choices:
+        return normalized
+    return default
 
 
 def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
