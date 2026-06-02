@@ -558,6 +558,19 @@ Owner decisions recorded during issue #71:
   format-aware chapter navigation, search, anomaly filters, minimap,
   publisher/editor workspace, live runtime data access and full DOCX/EPUB
   fidelity remain out of scope.
+- 2026-06-02: Issue
+  [#216](https://github.com/ogirkoviylord/folioloom_main/issues/216) starts the
+  second focused Reader/Text Diagnostics UX slice on branch
+  `codex/issue-216-reader-qa-aids`, stacked after #214. The slice adds
+  current-window search with safe highlighting, reader QA counts for empty
+  source, missing translation and large source/translation length mismatch, and
+  a metadata-only minimap over the loaded work-unit window. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not search outside the loaded window, add public/user-facing access,
+  expose raw text through JSON/API/archive surfaces, add dependencies, access
+  live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
