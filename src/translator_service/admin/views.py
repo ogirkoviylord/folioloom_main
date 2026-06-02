@@ -3222,6 +3222,7 @@ def translation_text_diagnostics_body(
     controls = _translation_text_controls(
         "text-diagnostics",
         run_id,
+        rows=rows,
         start_sequence=start_sequence,
         limit=limit,
         show_invisibles=show_invisibles,
@@ -3353,6 +3354,7 @@ def translation_reader_body(
     controls = _translation_text_controls(
         "reader",
         run_id,
+        rows=rows,
         start_sequence=start_sequence,
         limit=limit,
         show_invisibles=show_invisibles,
@@ -3529,6 +3531,7 @@ def _translation_text_controls(
     view_name: str,
     run_id: str,
     *,
+    rows: tuple[dict[str, object], ...],
     start_sequence: int,
     limit: int,
     show_invisibles: bool,
@@ -3574,6 +3577,9 @@ def _translation_text_controls(
     return f"""
     <section class="reader-controls" aria-label="Reader controls">
       <div class="reader-control-group">
+        <span class="reader-page-status">
+          {_translation_page_status(start_sequence, limit, rows)}
+        </span>
         {_action_link(
             invisible_label,
             _translation_raw_text_href(
@@ -3591,6 +3597,16 @@ def _translation_text_controls(
         {sync_control}
         {indent_control}
       </div>
+      {_translation_page_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          indent_preview=indent_preview,
+      )}
       {_translation_search_form(
           view_name,
           run_id,
@@ -3612,6 +3628,55 @@ def _translation_text_controls(
           indent_preview=indent_preview,
       )}
     </section>
+    """
+
+
+def _translation_page_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    indent_preview: bool = False,
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        include_limit=False,
+    )
+    current_page = _translation_current_page(start_sequence, limit)
+    return f"""
+    <form
+      class="reader-page-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <label>
+        Page
+        <input
+          type="number"
+          name="page"
+          min="1"
+          value="{current_page}"
+          inputmode="numeric"
+        >
+      </label>
+      <label>
+        Size
+        <select name="limit">
+          {_translation_limit_options(limit, maximum=500 if view_name == "reader" else 100)}
+        </select>
+      </label>
+      {_action_button("Open", "view", compact=True)}
+    </form>
     """
 
 
@@ -3749,8 +3814,11 @@ def _translation_control_hidden_fields(
     include_search: bool,
     search_query: str,
     indent_preview: bool,
+    include_limit: bool = True,
 ) -> str:
-    fields = [f'<input type="hidden" name="limit" value="{limit}">']
+    fields = []
+    if include_limit:
+        fields.append(f'<input type="hidden" name="limit" value="{limit}">')
     if show_invisibles:
         fields.append('<input type="hidden" name="show_invisibles" value="1">')
     if sync_scroll is False:
@@ -3762,6 +3830,41 @@ def _translation_control_hidden_fields(
     if indent_preview:
         fields.append('<input type="hidden" name="indent_preview" value="1">')
     return "".join(fields)
+
+
+def _translation_current_page(start_sequence: int, limit: int) -> int:
+    return ((max(1, start_sequence) - 1) // max(1, limit)) + 1
+
+
+def _translation_page_status(
+    start_sequence: int,
+    limit: int,
+    rows: tuple[dict[str, object], ...],
+) -> str:
+    current_page = _translation_current_page(start_sequence, limit)
+    end_sequence = (start_sequence + len(rows) - 1) if rows else start_sequence
+    return (
+        f"Logical page {current_page} · sequences "
+        f"{start_sequence}-{end_sequence} · size {limit}"
+    )
+
+
+def _translation_limit_options(current_limit: int, *, maximum: int) -> str:
+    options = [25, 50, 100]
+    if maximum >= 250:
+        options.append(250)
+    if maximum >= 500:
+        options.append(500)
+    if current_limit not in options:
+        options.append(current_limit)
+    return "\n".join(
+        (
+            f'<option value="{limit}"{" selected" if limit == current_limit else ""}>'
+            f'{limit}</option>'
+        )
+        for limit in sorted(set(options))
+        if limit <= maximum
+    )
 
 
 def _translation_reader_blocks(
@@ -5482,6 +5585,7 @@ header {
   margin: 12px 0;
 }
 .reader-control-group,
+.reader-page-form,
 .reader-search-form,
 .reader-jump-form {
   display: flex;
@@ -5489,10 +5593,12 @@ header {
   gap: 10px;
   flex-wrap: wrap;
 }
+.reader-page-form,
 .reader-search-form,
 .reader-jump-form {
   margin: 0;
 }
+.reader-page-form label,
 .reader-search-form label,
 .reader-jump-form label {
   display: flex;
@@ -5502,6 +5608,8 @@ header {
   font-size: 0.9rem;
   font-weight: 800;
 }
+.reader-page-form input,
+.reader-page-form select,
 .reader-search-form input,
 .reader-jump-form input {
   min-height: 38px;
@@ -5511,6 +5619,17 @@ header {
   font: inherit;
   color: var(--ink);
   background: #ffffff;
+}
+.reader-page-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+.reader-page-form input {
+  width: 82px;
+}
+.reader-page-form select {
+  width: 92px;
 }
 .reader-search-form input {
   width: min(260px, 100%);

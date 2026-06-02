@@ -584,6 +584,21 @@ Owner decisions recorded during issue #71:
   `PYTHONPATH=src python3 -m compileall src`. This does not extract EPUB CSS or
   DOCX paragraph style metadata, change stored text, add dependencies, access
   live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+- 2026-06-02: Issue
+  [#220](https://github.com/ogirkoviylord/folioloom_main/issues/220) starts the
+  first logical-page navigation slice on branch
+  `codex/issue-220-reader-logical-pages`, stacked after #218. The slice lets
+  run-log Reader/Text Diagnostics open a bounded work-unit window via a
+  logical `page` query parameter, shows the current logical page plus loaded
+  sequence range, and adds page jump/page-size controls that preserve search,
+  invisible-character, sync-scroll and indent-preview flags. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  keeps sequence-based links backwards-compatible and does not implement
+  physical book pages, EPUB spine navigation, DOCX heading/chapter navigation,
+  full-window search, public/user-facing access, live runtime data operations
+  or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
