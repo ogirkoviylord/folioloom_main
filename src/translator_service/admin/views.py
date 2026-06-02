@@ -3967,6 +3967,19 @@ def _translation_qa_filter_options(current_filter: str) -> str:
     )
 
 
+def _translation_row_metric_summary(row: dict[str, object]) -> str:
+    source_chars = len(str(row.get("source_text") or "").strip())
+    translated_chars = len(str(row.get("translated_text") or "").strip())
+    ratio = "n/a"
+    if source_chars > 0:
+        ratio = f"{translated_chars / source_chars:.2f}"
+    return (
+        f"Source chars {source_chars} · "
+        f"Translation chars {translated_chars} · "
+        f"T/S ratio {ratio}"
+    )
+
+
 def _translation_current_page(start_sequence: int, limit: int) -> int:
     return ((max(1, start_sequence) - 1) // max(1, limit)) + 1
 
@@ -4036,6 +4049,7 @@ def _translation_reader_block(
     sequence = escape(str(row.get("sequence") or 0))
     status = escape(str(row.get("status") or "unknown"))
     block_label = escape(_translation_source_block_label(row))
+    metrics = escape(_translation_row_metric_summary(row))
     qa_flags = _translation_row_qa_flags(row)
     layout_flags = _translation_row_layout_flags(row)
     qa_class = " has-qa-warning" if qa_flags else ""
@@ -4058,6 +4072,7 @@ def _translation_reader_block(
         <span>#{sequence}</span>
         <span class="status">{status}</span>
         <span>Blocks {block_label}</span>
+        <span class="reader-block-metrics">{metrics}</span>
         {qa_html}
       </header>
       <div class="reader-text">{text_html}</div>
@@ -4294,6 +4309,7 @@ def _translation_text_diagnostic_row(
     max_attempts = row.get("max_attempts")
     if attempt_count or max_attempts:
         notes.append(f"attempts: {attempt_count}/{max_attempts}")
+    notes.append(_translation_row_metric_summary(row))
     qa_flags = _translation_row_qa_flags(row)
     for flag in qa_flags:
         notes.append(flag["label"])
@@ -5862,6 +5878,10 @@ header {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
+}
+.reader-block-metrics {
+  color: var(--muted);
+  font-weight: 750;
 }
 .reader-text {
   color: var(--ink);
