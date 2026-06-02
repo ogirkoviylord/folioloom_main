@@ -85,6 +85,8 @@ from translator_service.admin.translation_logs import (
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
+    reader_review_mark_map,
+    save_reader_review_mark,
 )
 from translator_service.admin.translation_progress import (
     overlay_translation_run_details,
@@ -781,7 +783,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Translation Reader",
             active="logs",
-            body=translation_reader_body(
+            body=lambda session: translation_reader_body(
                 details,
                 rows,
                 run_id=run_id,
@@ -794,7 +796,73 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
+                review_marks=reader_review_mark_map(
+                    settings.translation_run_log_root,
+                    run_id,
+                ),
+                review_save_url=f"/admin/logs/{run_id}/reader/review-mark",
+                csrf_token=session.csrf_token,
             ),
+        )
+
+    @router.post("/logs/{run_id}/reader/review-mark")
+    async def save_log_reader_review_mark(
+        run_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _json({"error": "forbidden"}, status_code=HTTPStatus.FORBIDDEN)
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
+        sequence = _strict_positive_int(form.get("sequence"), maximum=1_000_000)
+        mark = (form.get("mark") or "").strip().lower()
+        if sequence is None or mark not in {"needs_review", "ok", "ignore", "clear"}:
+            return _json({"error": "invalid_mark"}, status_code=HTTPStatus.BAD_REQUEST)
+        row = _reader_review_mark_row(
+            settings,
+            job_id=details.summary.job_id,
+            sequence=sequence,
+        )
+        if row is None and mark != "clear":
+            return _json(
+                {"error": "sequence_not_found"},
+                status_code=HTTPStatus.NOT_FOUND,
+            )
+        try:
+            saved = save_reader_review_mark(
+                settings.translation_run_log_root,
+                run_id,
+                sequence=sequence,
+                mark=mark,
+                source_text=str((row or {}).get("source_text") or ""),
+                translated_text=str((row or {}).get("translated_text") or ""),
+                status=str((row or {}).get("status") or "unknown"),
+                source_block_ids=tuple(
+                    str(block_id)
+                    for block_id in ((row or {}).get("source_block_ids") or ())
+                    if str(block_id)
+                ),
+            )
+        except OSError:
+            return _json(
+                {"error": "save_failed"},
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+        if saved is None:
+            return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
+        return _json(
+            {
+                "ok": True,
+                "marks": reader_review_mark_map(
+                    settings.translation_run_log_root,
+                    run_id,
+                ),
+            }
         )
 
     @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
@@ -2749,6 +2817,23 @@ def _translation_text_diagnostics(
         store.close()
 
 
+def _reader_review_mark_row(
+    settings: Settings,
+    *,
+    job_id: str,
+    sequence: int,
+) -> dict[str, object] | None:
+    rows = _translation_text_diagnostics(
+        settings,
+        job_id=job_id,
+        start_sequence=sequence,
+        limit=1,
+    )
+    if not rows or rows[0].get("sequence") != sequence:
+        return None
+    return rows[0]
+
+
 def _translation_work_unit_diagnostic(
     settings: Settings,
     *,
@@ -3395,3 +3480,15 @@ def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
         return max(1, min(int(value), maximum))
     except ValueError:
         return default
+
+
+def _strict_positive_int(value: str | None, *, maximum: int) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    if parsed <= 0 or parsed > maximum:
+        return None
+    return parsed

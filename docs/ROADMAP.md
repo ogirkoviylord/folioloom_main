@@ -729,11 +729,19 @@ Acceptance criteria:
   `codex/issue-266-reader-review-hotkeys`: add current-page numeric shortcuts
   for temporary review marks without changing existing ArrowLeft/ArrowRight
   logical page navigation.
+  Issue
+  [#268](https://github.com/ogirkoviylord/folioloom_main/issues/268) resumes one
+  narrow owner-approved persistence slice on branch
+  `codex/issue-268-reader-persisted-marks`: save marked Reader work-unit
+  excerpts, including both original/source and translated text, in a run-scoped
+  owner-only raw diagnostic sidecar while keeping normal details, APIs and safe
+  archives redacted.
   Owner direction on 2026-06-02: stop this Reader ergonomics push after #266.
-  Deferred/unfinished ideas remain persistent review state, cross-page
-  completion, block notes/comments, review report export, stronger chapter/page
-  outline and visual intra-block diff. Publisher/editor workspaces are future
-  TBD scope and are not planned for immediate implementation.
+  Owner later approved only the #268 marked-fragment persistence slice.
+  Deferred/unfinished ideas remain cross-page completion, block notes/comments,
+  review report export, stronger chapter/page outline and visual intra-block
+  diff. Publisher/editor workspaces are future TBD scope and are not planned
+  for immediate implementation.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.

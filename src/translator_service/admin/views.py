@@ -3342,6 +3342,9 @@ def translation_reader_body(
     pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
+    review_marks: dict[str, str] | None = None,
+    review_save_url: str = "",
+    csrf_token: str = "",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
@@ -3449,7 +3452,11 @@ def translation_reader_body(
         qa_filter=qa_filter,
     )
     qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
-    review_panel = _translation_reader_review_panel(visible_rows)
+    review_panel = _translation_reader_review_panel(
+        visible_rows,
+        review_save_url=review_save_url,
+        csrf_token=csrf_token,
+    )
     outline = _translation_reader_outline(visible_rows)
     minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
@@ -3478,7 +3485,11 @@ def translation_reader_body(
         else ""
     )
     outline_script = _reader_outline_script() if visible_rows else ""
-    review_mark_script = _reader_review_mark_script() if visible_rows else ""
+    review_mark_script = (
+        _reader_review_mark_script(review_marks or {})
+        if visible_rows
+        else ""
+    )
     search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
     compare_classes = ["reader-compare", f"reader-pane-mode-{pane_mode}"]
     if indent_preview:
@@ -4382,7 +4393,12 @@ def _translation_reader_review_controls(sequence: str) -> str:
     """
 
 
-def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str:
+def _translation_reader_review_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    review_save_url: str,
+    csrf_token: str,
+) -> str:
     if not rows:
         return ""
     button_class = escape(_action_classes("view", True, "reader-review-filter-button"))
@@ -4420,6 +4436,8 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
       class="reader-review-panel"
       aria-label="Reader review marks"
       data-reader-review-panel
+      data-reader-review-save-url="{escape(review_save_url)}"
+      data-reader-review-csrf="{escape(csrf_token)}"
     >
       <div class="reader-review-heading">
         <h4>Review marks</h4>
@@ -4432,6 +4450,11 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
       <p class="sr-only" data-reader-review-shortcuts>
         Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.
       </p>
+      <p
+        class="reader-review-save-status"
+        data-reader-review-save-status
+        aria-live="polite"
+      >Review marks save with marked original and translation text.</p>
       <div class="reader-review-counts">
         {count_chips}
       </div>
@@ -5067,10 +5090,12 @@ def _reader_outline_script() -> str:
     """
 
 
-def _reader_review_mark_script() -> str:
-    return """
+def _reader_review_mark_script(review_marks: dict[str, str]) -> str:
+    review_marks_json = json.dumps(review_marks, ensure_ascii=False, sort_keys=True)
+    script = """
     <script data-reader-review-navigation>
       (() => {
+        const savedReviewMarks = __READER_REVIEW_MARKS__;
         const reviewButtons = Array.from(
           document.querySelectorAll("[data-reader-review-mark]")
         );
@@ -5091,6 +5116,15 @@ def _reader_review_mark_script() -> str:
         const stepProgress = stepControls
           ? stepControls.querySelector("[data-reader-review-step-progress]")
           : null;
+        const saveStatus = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-save-status]")
+          : null;
+        const reviewSaveUrl = reviewPanel
+          ? reviewPanel.getAttribute("data-reader-review-save-url")
+          : "";
+        const reviewCsrfToken = reviewPanel
+          ? reviewPanel.getAttribute("data-reader-review-csrf")
+          : "";
         let currentReviewFilter = "all";
         let currentReviewStepSequence = "";
         let selectedReviewSequence = "";
@@ -5171,6 +5205,11 @@ def _reader_review_mark_script() -> str:
           sequenceFromHref(window.location.hash) ||
           visibleReviewSequence()
         );
+        const setReviewSaveStatus = (message, isError) => {
+          if (!saveStatus) return;
+          saveStatus.textContent = message;
+          saveStatus.classList.toggle("is-error", Boolean(isError));
+        };
         const currentMarkForSequence = (sequence) => {
           const markedBlock = matchingBlocks(sequence).find(
             (block) => block.hasAttribute("data-reader-review-current")
@@ -5179,6 +5218,9 @@ def _reader_review_mark_script() -> str:
             ? markedBlock.getAttribute("data-reader-review-current")
             : "";
         };
+        const isValidReviewMark = (mark) => (
+          mark === "needs_review" || mark === "ok" || mark === "ignore"
+        );
         const markedSequencesForCurrentFilter = () => reviewSequences().filter(
           (sequence) => {
             const mark = currentMarkForSequence(sequence);
@@ -5311,7 +5353,7 @@ def _reader_review_mark_script() -> str:
               button.classList.toggle("is-active", isPressed);
             });
         };
-        const setReviewMark = (sequence, requestedMark) => {
+        const applyReviewMark = (sequence, requestedMark) => {
           const mark = requestedMark === "clear" ? "" : requestedMark;
           if (!sequence) return;
           selectedReviewSequence = sequence;
@@ -5320,6 +5362,37 @@ def _reader_review_mark_script() -> str:
           matchingControls(sequence).forEach((control) => setControlState(control, mark));
           updateReviewCounts();
           applyReviewFilter(currentReviewFilter);
+        };
+        const persistReviewMark = async (sequence, requestedMark) => {
+          if (!reviewSaveUrl || !reviewCsrfToken) return;
+          const body = new URLSearchParams();
+          body.set("csrf_token", reviewCsrfToken);
+          body.set("sequence", sequence);
+          body.set("mark", requestedMark);
+          try {
+            const response = await fetch(reviewSaveUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+              },
+              body,
+              credentials: "same-origin",
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) {
+              throw new Error(payload.error || "save_failed");
+            }
+            setReviewSaveStatus(
+              "Review mark saved with original and translation text.",
+              false
+            );
+          } catch (_error) {
+            setReviewSaveStatus("Review mark save failed.", true);
+          }
+        };
+        const setReviewMark = (sequence, requestedMark) => {
+          applyReviewMark(sequence, requestedMark);
+          persistReviewMark(sequence, requestedMark);
         };
         reviewButtons.forEach((button) => {
           button.addEventListener("click", (event) => {
@@ -5368,11 +5441,17 @@ def _reader_review_mark_script() -> str:
           event.preventDefault();
           setReviewMark(sequence, requestedMark);
         });
+        Object.entries(savedReviewMarks).forEach(([sequence, mark]) => {
+          if (isValidReviewMark(mark)) {
+            applyReviewMark(sequence, mark);
+          }
+        });
         updateReviewCounts();
         applyReviewFilter("all");
       })();
     </script>
     """
+    return script.replace("__READER_REVIEW_MARKS__", review_marks_json)
 
 
 def _reader_qa_step_script() -> str:
