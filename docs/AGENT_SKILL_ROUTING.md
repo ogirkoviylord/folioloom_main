@@ -77,7 +77,7 @@ analysis only.
 | `feature` | New behavior or user-visible capability. | Require issue/scope; escalate if risky. |
 | `spike / discovery` | Research, design, intake, or uncertainty reduction. | Analyze; do not implement. |
 | `risky task` | Touches high-risk areas, cross-component contracts, user data, or release gates. | Architecture review; stop without approval. |
-| `release-related task` | Beta, deploy, rollback, production, or go/no-go decision. | Release readiness; do not deploy or self-approve. |
+| `release-related task` | Beta, deploy, rollback, production, or go/no-go decision. | Release readiness; deploy only through the owner-approved agent-executed deploy rule; never self-approve release. |
 
 ## 6. Primary Routing Table
 
@@ -197,7 +197,7 @@ set of supporting skills that directly matches the task signal.
 | "Threat model upload scanning" | `architecture-review` | `codex-security:threat-model`, `file-uploads` | Security/privacy/user-data gates apply. |
 | "Optimize LLM cost" | `idea-intake` or `architecture-review` | `llm-cost-optimizer` | Do not change provider behavior without scoped issue/approval. |
 | "Update docs after a merged fix" | `docs-sync` | none by default | Update only docs that changed facts require. |
-| "Prepare beta go/no-go" | `release-readiness` | `pr-review` or security helpers if evidence requires | Do not deploy or self-approve release. |
+| "Prepare beta go/no-go" | `release-readiness` | `pr-review` or security helpers if evidence requires | Do not self-approve release. Agent-executed deploys require exact owner approval, documented target/ref/command, predeploy evidence, rollback expectations and server smoke/status checks. |
 
 ## 13. Routing Receipt
 

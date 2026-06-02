@@ -17,6 +17,43 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-02 - Operations decision: owner-approved agent-executed deploys
+
+Status: Active
+
+Decision:
+- The owner may explicitly ask an AI agent to deploy an already selected ref to
+  an approved server environment.
+- Agent-executed deploys are allowed only for the exact target/ref/command
+  approved by the owner in the current thread or in an owner GitHub issue/PR
+  comment.
+- The default deploy command remains the documented path
+  `scripts/deploy_server.sh`.
+- Before deploying, the agent must state the target environment, branch/ref or
+  commit, command, rollback expectations, server smoke/status checks and local
+  predeploy evidence.
+- The agent must not read or print real `.env*` files, secrets, user documents,
+  raw translations or unrelated runtime data as part of deploy.
+
+Evidence:
+- Owner asked on 2026-06-02 to make it possible for them to request and approve
+  deploy-like operations when they are away from a terminal.
+
+Consequences:
+- This decision removes the previous absolute repo-level skill prohibition on
+  agent-executed deploys.
+- It does not make the agent the release approver. The owner still owns
+  go/no-go decisions.
+- It does not claim free beta, paid beta, public production or Gate B/C/D
+  readiness.
+- It does not approve edits to deployment scripts, Docker, secrets/env,
+  runtime data, database/state, retention, backup/restore, auth/security,
+  legal/privacy, payments or provider settings without separate explicit
+  approval.
+
+Human approval required to change:
+- yes; this affects deployment and production-operations guardrails.
+
 ### 2026-06-02 - Product/architecture decision: owner-only internal reader UI
 
 Status: Active
