@@ -318,6 +318,27 @@ Owner decisions recorded during issue #71:
   restart services, change provider keys/prompts, expand EPUB book-mode scope,
   alter payments/auth/legal/privacy/deployment, or claim Gate B/release
   readiness.
+- 2026-06-02: Issue
+  [#166](https://github.com/ogirkoviylord/folioloom_main/issues/166)
+  implementation slice is locally verified on branch
+  `codex/166-book-mode-output-audit`. A new pure
+  `book_mode_output_audit` module adds deterministic, non-blocking
+  book-mode output audit primitives for Russian/Ukrainian targets. Findings are
+  structured metadata only: code, category, target language, chunk id/kind,
+  language counts, protected-marker count and safe language-metadata details.
+  The checks detect obvious English residue, English navigation/heading
+  residue, provider commentary wrappers, suspicious all-English chunks and
+  language metadata mismatch while masking URLs, code-like spans, identifiers,
+  protected markers and caller-provided expected Latin terms. Local
+  verification: focused book-mode/Russian/Ukrainian quality tests ran 28 tests
+  with `OK`; full `PYTHONPATH=src python3 -m unittest discover -s tests` ran
+  1223 tests with `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`
+  passed; targeted `python3 -m ruff check` on changed Python files passed; new
+  file whitespace checks passed. CI status remains Unknown until a PR/checks
+  page is inspected. This does not wire audit checks into runtime, block
+  translation jobs, trigger provider retries, change admin UI, use real
+  documents or runtime `var/` data, add dependencies, change legal/privacy,
+  auth/RBAC, payments, deployment, database/state or claim release readiness.
 - 2026-06-01: Owner approved permanent, owner-only raw translation text
   diagnostics after a failed EPUB translation showed that safe exports did not
   contain enough information to compare source work units, translated output and
