@@ -765,6 +765,19 @@ Owner decisions recorded during issue #71:
   because the browser agent was unavailable. This does not add persisted
   preferences, editing, annotations, public/user-facing access, publisher
   workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#246](https://github.com/ogirkoviylord/folioloom_main/issues/246) starts the
+  first all-issues QA filter slice on branch
+  `codex/issue-246-reader-all-issues-filter`, stacked after #244. The slice
+  adds a shared owner-only `qa=issues` filter for Reader and Text Diagnostics
+  so the current work-unit window can show any row with existing QA flags or
+  literal-indent layout flags. Local verification passed focused all-issues
+  filter coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted `ruff --select F,I` for touched Python
+  files, `PYTHONPATH=src python3 -m compileall src` and `git diff --check`.
+  This does not add saved review state, annotations, exports, whole-book issue
+  traversal, public/user-facing access, publisher workspace, live runtime data
+  operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
