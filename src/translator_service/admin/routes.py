@@ -746,6 +746,9 @@ def create_admin_router(settings: Settings) -> APIRouter:
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
         search_query = _query_text(request.query_params.get("q"), maximum=200)
+        search_hits_only = bool(search_query) and _query_flag(
+            request.query_params.get("search_hits")
+        )
         indent_preview = _query_flag(request.query_params.get("indent_preview"))
         qa_filter = _query_choice(
             request.query_params.get("qa"),
@@ -780,6 +783,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                search_hits_only=search_hits_only,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
