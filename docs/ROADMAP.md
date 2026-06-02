@@ -718,6 +718,11 @@ Acceptance criteria:
   client-side Reader review mark filter slice on branch
   `codex/issue-260-reader-review-mark-filters`: add current-page counts and
   DOM-only filters for temporary needs-review, OK and ignored marks.
+  Issue
+  [#262](https://github.com/ogirkoviylord/folioloom_main/issues/262) begins the
+  client-side Reader review mark navigation slice on branch
+  `codex/issue-262-reader-review-mark-navigation`: add current-page Previous
+  mark / Next mark stepping for temporary review marks.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.

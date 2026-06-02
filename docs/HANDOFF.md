@@ -1331,6 +1331,23 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#262](https://github.com/ogirkoviylord/folioloom_main/issues/262)
+  adds client-side Previous/Next navigation for temporary review marks in the
+  owner-only Translation Reader on branch
+  `codex/issue-262-reader-review-mark-navigation`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #263 passed.
+- Follow-up: review mark navigation is current-page DOM state only. This slice
+  does not persist marks, filters or current step, add cross-page navigation,
+  edit text, export review reports, add raw snippets to docs/issues or archives,
+  add public/user-facing reader access, change auth/RBAC, access runtime data,
+  add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#260](https://github.com/ogirkoviylord/folioloom_main/issues/260)
   adds client-side review mark counts and filters to the owner-only Translation
   Reader on branch `codex/issue-260-reader-review-mark-filters`.
