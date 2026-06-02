@@ -177,7 +177,7 @@ Checklist:
   readiness: TBD / not production-ready.
 - [ ] No unnecessary logging of sensitive data.
 - [ ] Logs/admin do not expose raw document text, prompts, translations or API
-  keys outside the approved owner-only Text diagnostics surface; safe archives,
+  keys outside the approved owner-only diagnostic surfaces; safe archives,
   telemetry, normal admin pages and support artifacts remain redacted.
 - [ ] Access controls reviewed, if applicable.
 - [ ] Destructive operations reviewed and approved by human owner.
@@ -201,8 +201,8 @@ Checklist:
 - [ ] Cost caps, job limits and kill switch reviewed.
 - [ ] Dependency risks reviewed.
 - [ ] No raw document text, prompts, translations or API keys appear in logs,
-  telemetry, release artifacts or normal admin views. The approved owner-only
-  Text diagnostics surface may show raw source/translated work-unit text for
+  telemetry, release artifacts or normal admin views. Approved owner-only
+  diagnostic surfaces may show raw source/translated work-unit text for
   incident debugging.
 - [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
   Current Gate B status: checked by issue #73 local synthetic evidence.

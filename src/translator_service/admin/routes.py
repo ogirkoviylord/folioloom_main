@@ -115,6 +115,7 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    translation_reader_body,
     translation_text_diagnostics_body,
     translation_trace_body,
     upload_safety_body,
@@ -694,6 +695,40 @@ def create_admin_router(settings: Settings) -> APIRouter:
             title="Translation Text Diagnostics",
             active="logs",
             body=translation_text_diagnostics_body(
+                details,
+                rows,
+                run_id=run_id,
+                start_sequence=start_sequence,
+                limit=limit,
+            ),
+        )
+
+    @router.get("/logs/{run_id}/reader", response_class=HTMLResponse)
+    async def log_reader(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
+        limit = _bounded_int(
+            request.query_params.get("limit"),
+            default=100,
+            maximum=500,
+        )
+        rows = _translation_text_diagnostics(
+            settings,
+            job_id=details.summary.job_id,
+            start_sequence=start_sequence,
+            limit=limit,
+        )
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Reader",
+            active="logs",
+            body=translation_reader_body(
                 details,
                 rows,
                 run_id=run_id,
