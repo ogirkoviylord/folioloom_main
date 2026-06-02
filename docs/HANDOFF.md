@@ -1331,6 +1331,24 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#264](https://github.com/ogirkoviylord/folioloom_main/issues/264)
+  adds client-side unmarked review filtering and completion counts to the
+  owner-only Translation Reader on branch
+  `codex/issue-264-reader-unmarked-review-filter`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+  Visible GitHub Python checks for PR
+  [#265](https://github.com/ogirkoviylord/folioloom_main/pull/265) passed.
+- Follow-up: unmarked filtering and completion counts are current-page DOM state
+  only. This slice does not persist review completion, add cross-page review
+  state, edit text, export review reports, add raw snippets to docs/issues or
+  archives, add public/user-facing reader access, change auth/RBAC, access
+  runtime data, add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#262](https://github.com/ogirkoviylord/folioloom_main/issues/262)
   adds client-side Previous/Next navigation for temporary review marks in the
   owner-only Translation Reader on branch
