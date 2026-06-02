@@ -2738,6 +2738,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-review-filter", diagnostics.text)
         self.assertNotIn("data-reader-review-step-controls", diagnostics.text)
         self.assertNotIn("data-reader-review-step", diagnostics.text)
+        self.assertNotIn("data-reader-review-shortcuts", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2955,6 +2956,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("data-reader-review-panel", reader.text)
         self.assertIn("Reader review marks", reader.text)
         self.assertIn("Review marks", reader.text)
+        self.assertIn("data-reader-review-shortcuts", reader.text)
+        self.assertIn("Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.", reader.text)
         self.assertIn("Review filter: all rows", reader.text)
         self.assertIn("data-reader-review-filter-status", reader.text)
         self.assertIn("data-reader-review-count", reader.text)
@@ -2984,6 +2987,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("setReviewMark", reader.text)
         self.assertIn("updateReviewCounts", reader.text)
         self.assertIn("applyReviewFilter", reader.text)
+        self.assertIn("reviewShortcutMarks", reader.text)
+        self.assertIn('"1": "needs_review"', reader.text)
+        self.assertIn('"2": "ok"', reader.text)
+        self.assertIn('"3": "ignore"', reader.text)
+        self.assertIn('"0": "clear"', reader.text)
+        self.assertIn("activeReviewSequence", reader.text)
+        self.assertIn("visibleReviewSequence", reader.text)
+        self.assertIn("selectedReviewSequence", reader.text)
+        self.assertIn("isInteractiveTarget(event.target)", reader.text)
         self.assertIn('unmarked: "unmarked"', reader.text)
         self.assertIn("counts.marked += 1", reader.text)
         self.assertIn("counts.unmarked += 1", reader.text)
@@ -3287,6 +3299,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-review-filter", reader_empty_filter.text)
         self.assertNotIn("data-reader-review-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-review-step", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-shortcuts", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
@@ -3323,6 +3336,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-review-filter", archive_text)
         self.assertNotIn("data-reader-review-step-controls", archive_text)
         self.assertNotIn("data-reader-review-step", archive_text)
+        self.assertNotIn("data-reader-review-shortcuts", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

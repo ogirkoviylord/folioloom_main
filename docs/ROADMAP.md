@@ -723,6 +723,17 @@ Acceptance criteria:
   client-side Reader unmarked review filter slice on branch
   `codex/issue-264-reader-unmarked-review-filter`: add current-page marked and
   unmarked completion counts plus an Unmarked DOM-only filter.
+  Issue
+  [#266](https://github.com/ogirkoviylord/folioloom_main/issues/266) begins the
+  client-side Reader review mark keyboard shortcut slice on branch
+  `codex/issue-266-reader-review-hotkeys`: add current-page numeric shortcuts
+  for temporary review marks without changing existing ArrowLeft/ArrowRight
+  logical page navigation.
+  Owner direction on 2026-06-02: stop this Reader ergonomics push after #266.
+  Deferred/unfinished ideas remain persistent review state, cross-page
+  completion, block notes/comments, review report export, stronger chapter/page
+  outline and visual intra-block diff. Publisher/editor workspaces are future
+  TBD scope and are not planned for immediate implementation.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
