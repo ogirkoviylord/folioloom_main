@@ -86,6 +86,13 @@ Notes:
 - Repo-wide `python3 -m ruff check --no-cache src tests scripts` is documented
   as debt signal, not a free closed-beta blocker.
 - Server smoke checks require an approved target environment.
+- Agent-executed deploys are allowed only for an exact owner-approved
+  target/ref/command and must use the documented deploy path, currently
+  `scripts/deploy_server.sh`. This does not approve release readiness or allow
+  secrets/env inspection, deployment-script edits, runtime-data operations,
+  database/state changes, backup/restore changes, auth/security changes,
+  legal/privacy changes, payment changes or provider-setting changes without
+  separate approval.
 
 Checklist:
 
@@ -99,6 +106,9 @@ Checklist:
 - [ ] Predeploy gate passes: `scripts/predeploy_check.sh`.
 - [ ] Smoke test performed: local/predeploy smoke, and server smoke only on an
   approved target environment.
+- [ ] For agent-executed deploys, exact owner approval, target environment,
+  branch/ref or commit, deploy command, rollback expectations and server
+  smoke/status checks are recorded.
 - [ ] No unexpected dependency changes.
 - [ ] No secrets committed.
 - [ ] No real `.env*` files read, edited or included in output.
