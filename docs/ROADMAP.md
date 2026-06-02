@@ -651,6 +651,12 @@ Acceptance criteria:
   first Reader QA issue progress slice on branch
   `codex/issue-238-reader-qa-progress`: a current-window QA progress chip that
   shows the visible issue total and selected `Issue X of N` state.
+  Issue
+  [#240](https://github.com/ogirkoviylord/folioloom_main/issues/240) begins the
+  first Reader search-hit navigation slice on branch
+  `codex/issue-240-reader-search-hit-navigation`: Reader-only Previous hit /
+  Next hit controls and selected `Hit X of N` state for already rendered
+  current-window search highlights.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
