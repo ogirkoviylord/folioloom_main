@@ -690,6 +690,12 @@ Acceptance criteria:
   Reader QA/Layout metric cards navigate to the matching Reader filters while
   preserving search, pane, special-character, sync, indent-preview and
   pagination context.
+  Issue
+  [#254](https://github.com/ogirkoviylord/folioloom_main/issues/254) begins the
+  Reader block outline slice on branch
+  `codex/issue-254-reader-block-outline`: add a metadata-only current-window
+  outline for all visible work units so the owner can navigate every loaded
+  block, not only QA issue rows.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
