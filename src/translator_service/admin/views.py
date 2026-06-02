@@ -3476,6 +3476,7 @@ def translation_reader_body(
         if any(_translation_row_qa_flags(row) for row in visible_rows)
         else ""
     )
+    outline_script = _reader_outline_script() if visible_rows else ""
     search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
     compare_classes = ["reader-compare", f"reader-pane-mode-{pane_mode}"]
     if indent_preview:
@@ -3569,6 +3570,7 @@ def translation_reader_body(
     {minimap}
     {sync_script}
     {keyboard_script}
+    {outline_script}
     {qa_step_script}
     {search_hit_script}
     """
@@ -4615,6 +4617,7 @@ def _translation_reader_outline_item(row: dict[str, object]) -> str:
       href="#reader-original-{safe_sequence}"
       title="{escape(title)}"
       aria-label="{escape(title)}"
+      data-reader-outline-anchor
     >
       <span class="reader-outline-sequence">#{safe_sequence}</span>
       <span class="reader-outline-blocks">Blocks {escape(block_label)}</span>
@@ -4879,6 +4882,77 @@ def _reader_keyboard_navigation_script(previous_href: str, next_href: str) -> st
     """
 
 
+def _reader_outline_script() -> str:
+    return """
+    <script data-reader-outline-navigation>
+      (() => {
+        const outlineLinks = Array.from(
+          document.querySelectorAll("[data-reader-outline-anchor]")
+        );
+        if (!outlineLinks.length) return;
+        const outlineHrefs = outlineLinks
+          .map((link) => link.getAttribute("href"))
+          .filter((href) => href && href.startsWith("#reader-original-"));
+        const sequenceForHref = (href) => href.replace(/^#reader-original-/, "");
+        const blocksForHref = (href) => {
+          const sequence = sequenceForHref(href);
+          return [
+            document.getElementById(`reader-original-${sequence}`),
+            document.getElementById(`reader-translation-${sequence}`),
+          ].filter(Boolean);
+        };
+        const clearActiveOutline = () => {
+          outlineLinks.forEach((link) => {
+            link.classList.remove("is-active");
+            link.removeAttribute("aria-current");
+          });
+          document
+            .querySelectorAll(".reader-block.is-active-outline-block")
+            .forEach((block) => block.classList.remove("is-active-outline-block"));
+        };
+        const setActiveOutline = (href, shouldScroll) => {
+          if (!outlineHrefs.includes(href)) {
+            clearActiveOutline();
+            return;
+          }
+          const blocks = blocksForHref(href);
+          if (!blocks.length) return;
+          clearActiveOutline();
+          outlineLinks.forEach((link) => {
+            if (link.getAttribute("href") !== href) return;
+            link.classList.add("is-active");
+            link.setAttribute("aria-current", "page");
+          });
+          blocks.forEach((block) => block.classList.add("is-active-outline-block"));
+          if (shouldScroll) {
+            blocks[0].scrollIntoView({ block: "start", behavior: "smooth" });
+          }
+          window.history.replaceState(null, "", href);
+          blocks[0].focus({ preventScroll: true });
+        };
+        outlineLinks.forEach((link) => {
+          link.addEventListener("click", (event) => {
+            const href = link.getAttribute("href");
+            if (!href) return;
+            event.preventDefault();
+            setActiveOutline(href, true);
+            window.dispatchEvent(
+              new CustomEvent("reader:block-selected", { detail: { href } })
+            );
+          });
+        });
+        window.addEventListener("hashchange", () => {
+          setActiveOutline(window.location.hash, false);
+        });
+        window.addEventListener("reader:block-selected", (event) => {
+          setActiveOutline(event.detail && event.detail.href, false);
+        });
+        setActiveOutline(window.location.hash, false);
+      })();
+    </script>
+    """
+
+
 def _reader_qa_step_script() -> str:
     return """
     <script data-reader-qa-step-navigation>
@@ -4939,6 +5013,9 @@ def _reader_qa_step_script() -> str:
             targets[0].scrollIntoView({ block: "start", behavior: "smooth" });
           }
           window.history.replaceState(null, "", href);
+          window.dispatchEvent(
+            new CustomEvent("reader:block-selected", { detail: { href } })
+          );
           targets[0].focus({ preventScroll: true });
         };
         const currentIssueIndex = () => {
@@ -6685,10 +6762,20 @@ header {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 }
+.reader-outline-link.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+  background: #eff6ff;
+}
 .reader-outline-link.has-qa-warning {
   border-color: #fed7aa;
   color: #7c2d12;
   background: #fffbeb;
+}
+.reader-outline-link.has-qa-warning.is-active {
+  border-color: #c2410c;
+  background: #fff7ed;
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.18);
 }
 .reader-outline-sequence {
   font-size: 0.82rem;
@@ -6846,7 +6933,8 @@ header {
   padding-left: 12px;
 }
 .reader-block:target,
-.reader-block.is-active-qa-issue {
+.reader-block.is-active-qa-issue,
+.reader-block.is-active-outline-block {
   border-radius: 6px;
   outline: 2px solid rgba(194, 65, 12, 0.45);
   outline-offset: 3px;

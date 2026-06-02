@@ -2927,6 +2927,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Visible units: 3", reader.text)
         self.assertIn("reader-outline-link", reader.text)
         self.assertIn("reader-outline-link has-qa-warning", reader.text)
+        self.assertIn("data-reader-outline-anchor", reader.text)
+        self.assertIn("data-reader-outline-navigation", reader.text)
+        self.assertIn("is-active-outline-block", reader.text)
+        self.assertIn("setActiveOutline", reader.text)
+        self.assertIn('link.setAttribute("aria-current", "page")', reader.text)
+        self.assertIn("reader:block-selected", reader.text)
+        self.assertIn('new CustomEvent("reader:block-selected"', reader.text)
         self.assertIn("reader-outline-sequence", reader.text)
         self.assertIn("reader-outline-blocks", reader.text)
         self.assertIn("reader-outline-status", reader.text)
@@ -3139,6 +3146,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
         self.assertIn("reader-outline", reader_paragraph_filter.text)
         self.assertIn("Visible units: 1", reader_paragraph_filter.text)
+        self.assertIn("data-reader-outline-navigation", reader_paragraph_filter.text)
+        self.assertIn("data-reader-outline-anchor", reader_paragraph_filter.text)
         self.assertIn(
             'title="Sequence 3: translated; Blocks block-3; '
             'Translation much longer; Paragraph/line break mismatch"',
@@ -3203,6 +3212,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("reader-outline", reader_empty_filter.text)
         self.assertIn("Visible units: 0", reader_empty_filter.text)
         self.assertIn("No blocks in this reader window.", reader_empty_filter.text)
+        self.assertNotIn("data-reader-outline-navigation", reader_empty_filter.text)
+        self.assertNotIn("data-reader-outline-anchor", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
