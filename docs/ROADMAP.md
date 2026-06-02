@@ -682,6 +682,12 @@ Acceptance criteria:
   `codex/issue-248-reader-layout-issue-nav`: existing literal-indent layout
   flags participate in current-window issue navigation, minimap warning state
   and block warning styling.
+  Issue
+  [#250](https://github.com/ogirkoviylord/folioloom_main/issues/250) begins the
+  Reader sync-scroll drift bugfix on branch
+  `codex/issue-250-reader-scroll-drift`: harden synced pane scrolling so
+  programmatic scroll events do not feed back into the pane the owner is
+  actively scrolling.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
