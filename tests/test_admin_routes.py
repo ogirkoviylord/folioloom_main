@@ -2404,6 +2404,25 @@ class AdminRoutesTest(unittest.TestCase):
                 "?page=3&limit=1&q=Tiny&show_invisibles=1&sync=0"
                 "&indent_preview=1"
             )
+            diagnostics_missing = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?qa=missing_translation&q=Paragraph&show_invisibles=1"
+                "&indent_preview=1"
+            )
+            diagnostics_indent_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics?qa=indent"
+            )
+            reader_length_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=length_mismatch&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
+            reader_empty_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?qa=empty_source"
+            )
+            reader_invalid_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?qa=unknown"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
         self.assertEqual(logs.status_code, 200)
@@ -2444,6 +2463,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('name="sequence"', diagnostics.text)
         self.assertIn('name="page"', diagnostics.text)
         self.assertIn('name="limit"', diagnostics.text)
+        self.assertIn('name="qa"', diagnostics.text)
+        self.assertIn('<option value="all" selected>All</option>', diagnostics.text)
         self.assertIn("Logical page 1", diagnostics.text)
         self.assertIn("sequences 1-3", diagnostics.text)
         self.assertIn("← Previous", diagnostics.text)
@@ -2489,6 +2510,29 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("q=Paragraph", diagnostics_page.text)
         self.assertIn("indent_preview=1", diagnostics_page.text)
         self.assertNotIn("Private source paragraph", diagnostics_page.text)
+        self.assertEqual(diagnostics_missing.status_code, 200)
+        self.assertIn(
+            '<option value="missing_translation" selected>Missing translation</option>',
+            diagnostics_missing.text,
+        )
+        self.assertIn("qa=missing_translation", diagnostics_missing.text)
+        self.assertIn("show_invisibles=1", diagnostics_missing.text)
+        self.assertIn("q=Paragraph", diagnostics_missing.text)
+        self.assertIn("indent_preview=1", diagnostics_missing.text)
+        self.assertIn("reader-search-hit", diagnostics_missing.text)
+        self.assertIn("waiting", diagnostics_missing.text)
+        self.assertIn("translation.", diagnostics_missing.text)
+        self.assertNotIn("Private source paragraph", diagnostics_missing.text)
+        self.assertNotIn("Tiny source", diagnostics_missing.text)
+        self.assertEqual(diagnostics_indent_filter.status_code, 200)
+        self.assertIn(
+            '<option value="indent" selected>Literal indent</option>',
+            diagnostics_indent_filter.text,
+        )
+        self.assertIn("qa=indent", diagnostics_indent_filter.text)
+        self.assertIn("Private source paragraph", diagnostics_indent_filter.text)
+        self.assertIn("Paragraph waiting for translation", diagnostics_indent_filter.text)
+        self.assertNotIn("Tiny source", diagnostics_indent_filter.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
@@ -2499,6 +2543,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('name="sequence"', reader.text)
         self.assertIn('name="page"', reader.text)
         self.assertIn('name="limit"', reader.text)
+        self.assertIn('name="qa"', reader.text)
         self.assertIn("Logical page 1", reader.text)
         self.assertIn("sequences 1-3", reader.text)
         self.assertIn("sequence=101&amp;limit=100", reader.text)
@@ -2567,6 +2612,29 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("sync=0", reader_page.text)
         self.assertIn("indent_preview=1", reader_page.text)
         self.assertNotIn("Private source paragraph", reader_page.text)
+        self.assertEqual(reader_length_filter.status_code, 200)
+        self.assertIn(
+            '<option value="length_mismatch" selected>Length mismatch</option>',
+            reader_length_filter.text,
+        )
+        self.assertIn("qa=length_mismatch", reader_length_filter.text)
+        self.assertIn("q=Tiny", reader_length_filter.text)
+        self.assertIn("show_invisibles=1", reader_length_filter.text)
+        self.assertIn("sync=0", reader_length_filter.text)
+        self.assertIn("indent_preview=1", reader_length_filter.text)
+        self.assertIn("Tiny", reader_length_filter.text)
+        self.assertNotIn("Private source paragraph", reader_length_filter.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_length_filter.text)
+        self.assertEqual(reader_empty_filter.status_code, 200)
+        self.assertIn(
+            '<option value="empty_source" selected>Empty source</option>',
+            reader_empty_filter.text,
+        )
+        self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
+        self.assertNotIn("Private source paragraph", reader_empty_filter.text)
+        self.assertEqual(reader_invalid_filter.status_code, 200)
+        self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
+        self.assertNotIn("qa=unknown", reader_invalid_filter.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(

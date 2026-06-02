@@ -599,6 +599,20 @@ Owner decisions recorded during issue #71:
   physical book pages, EPUB spine navigation, DOCX heading/chapter navigation,
   full-window search, public/user-facing access, live runtime data operations
   or release readiness.
+- 2026-06-02: Issue
+  [#222](https://github.com/ogirkoviylord/folioloom_main/issues/222) starts the
+  first current-window QA filter slice on branch
+  `codex/issue-222-reader-qa-filters`, stacked after #220. The slice adds a
+  bounded `qa` query parameter and visible filter control for already-computed
+  `all`, `empty_source`, `missing_translation`, `length_mismatch` and literal
+  indent signals in run-log Reader/Text Diagnostics. Local verification passed
+  focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This filters only the currently loaded work-unit window
+  and does not add quality scoring, cross-window scanning, saved filters,
+  annotations, public/user-facing access, live runtime data operations or
+  release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

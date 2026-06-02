@@ -602,6 +602,11 @@ Acceptance criteria:
   `codex/issue-220-reader-logical-pages`: logical `page` query support, current
   page/sequence-range status and page-size controls over bounded work-unit
   windows.
+  Issue
+  [#222](https://github.com/ogirkoviylord/folioloom_main/issues/222) begins the
+  first current-window QA filter slice on branch
+  `codex/issue-222-reader-qa-filters`: filter controls for already-computed
+  empty source, missing translation, length mismatch and literal indent signals.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
