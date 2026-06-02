@@ -702,6 +702,12 @@ Acceptance criteria:
   `codex/issue-256-reader-active-outline`: make outline clicks and QA issue
   navigation keep the selected outline entry and matching original/translation
   blocks visibly active.
+  Issue
+  [#258](https://github.com/ogirkoviylord/folioloom_main/issues/258) begins the
+  client-only Reader review marks slice on branch
+  `codex/issue-258-reader-review-marks`: add current-page DOM-only mark controls
+  for visible original/translation work-unit pairs so the owner can temporarily
+  tag blocks as needs-review, OK or ignored during side-by-side review.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
