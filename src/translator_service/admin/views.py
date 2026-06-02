@@ -4395,6 +4395,7 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
         )
         for filter_name, label in (
             ("all", "All"),
+            ("unmarked", "Unmarked"),
             ("needs_review", "Needs review"),
             ("ok", "OK"),
             ("ignore", "Ignore"),
@@ -4407,6 +4408,8 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
             f'<span>{escape(label)}</span><strong>0</strong></span>'
         )
         for mark, label in (
+            ("marked", "Marked"),
+            ("unmarked", "Unmarked"),
             ("needs_review", "Needs review"),
             ("ok", "OK"),
             ("ignore", "Ignore"),
@@ -5088,6 +5091,7 @@ def _reader_review_mark_script() -> str:
         let currentReviewFilter = "all";
         let currentReviewStepSequence = "";
         const markLabels = {
+          unmarked: "unmarked",
           needs_review: "needs review",
           ok: "OK",
           ignore: "ignored",
@@ -5157,12 +5161,19 @@ def _reader_review_mark_script() -> str:
         const updateReviewCounts = () => {
           if (!reviewPanel) return;
           const counts = {
+            marked: 0,
+            unmarked: 0,
             needs_review: 0,
             ok: 0,
             ignore: 0,
           };
           reviewSequences().forEach((sequence) => {
             const mark = currentMarkForSequence(sequence);
+            if (mark) {
+              counts.marked += 1;
+            } else {
+              counts.unmarked += 1;
+            }
             if (Object.prototype.hasOwnProperty.call(counts, mark)) {
               counts[mark] += 1;
             }
@@ -5192,8 +5203,11 @@ def _reader_review_mark_script() -> str:
           }
           reviewSequences().forEach((sequence) => {
             const mark = currentMarkForSequence(sequence);
-            const isHidden =
-              currentReviewFilter !== "all" && mark !== currentReviewFilter;
+            const isHidden = (
+              currentReviewFilter === "unmarked"
+                ? Boolean(mark)
+                : currentReviewFilter !== "all" && mark !== currentReviewFilter
+            );
             matchingBlocks(sequence).forEach((block) => setFilterHidden(block, isHidden));
             matchingOutlines(sequence).forEach((link) => setFilterHidden(link, isHidden));
           });
