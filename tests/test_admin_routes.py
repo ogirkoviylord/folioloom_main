@@ -2246,7 +2246,7 @@ class AdminRoutesTest(unittest.TestCase):
                 kind=StoredFileKind.INTERMEDIATE,
                 file_name="unit-2.txt",
                 content_type="text/plain; charset=utf-8",
-                content=b"Paragraph waiting for translation.",
+                content=b"  Paragraph waiting for translation.",
             )
             source_file_3 = storage.put_bytes(
                 kind=StoredFileKind.INTERMEDIATE,
@@ -2305,7 +2305,7 @@ class AdminRoutesTest(unittest.TestCase):
                 store.complete_work_unit(
                     claimed.id,
                     translated_text=(
-                        "Приватний перекладений абзац\tA\n"
+                        "  Приватний перекладений абзац\tA\n"
                         "Наступний\u00a0рядок "
                         "<img src=x onerror=alert(1)>"
                     ),
@@ -2387,6 +2387,14 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/reader"
                 "?q=%3Cscript%3E&show_invisibles=1&sync=0"
             )
+            diagnostics_indent = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?indent_preview=1"
+            )
+            reader_indent = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?indent_preview=1&q=%3Cscript%3E&show_invisibles=1&sync=0"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
         self.assertEqual(logs.status_code, 200)
@@ -2429,6 +2437,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Next →", diagnostics.text)
         self.assertIn("Missing translation", diagnostics.text)
         self.assertIn("Translation much longer", diagnostics.text)
+        self.assertIn("Source literal indent", diagnostics.text)
+        self.assertIn("Translation literal indent", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2453,6 +2463,9 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("q=%3Cscript%3E", diagnostics_search.text)
         self.assertNotIn("<script>alert(1)</script>", diagnostics_search.text)
+        self.assertEqual(diagnostics_indent.status_code, 200)
+        self.assertIn("indent_preview=1", diagnostics_indent.text)
+        self.assertIn("Source literal indent", diagnostics_indent.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
@@ -2463,13 +2476,22 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('name="sequence"', reader.text)
         self.assertIn("sequence=101&amp;limit=100", reader.text)
         self.assertIn("Reader QA summary", reader.text)
+        self.assertIn("Reader layout diagnostics", reader.text)
         self.assertIn("Window units", reader.text)
         self.assertIn("Missing translation", reader.text)
         self.assertIn("Length mismatch", reader.text)
+        self.assertIn("Indent preview", reader.text)
+        self.assertIn("Preview indents", reader.text)
+        self.assertIn("Source literal indents", reader.text)
+        self.assertIn("Translation literal indents", reader.text)
+        self.assertIn("Style metadata", reader.text)
+        self.assertIn("Unknown", reader.text)
         self.assertIn("reader-minimap", reader.text)
         self.assertIn('title="Sequence 2: translated; Missing translation"', reader.text)
         self.assertIn("reader-qa-flag-missing_translation", reader.text)
         self.assertIn("reader-qa-flag-length_mismatch", reader.text)
+        self.assertIn("reader-qa-flag-literal_source_indent", reader.text)
+        self.assertIn("reader-qa-flag-literal_translation_indent", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)
@@ -2501,6 +2523,13 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("q=%3Cscript%3E", reader_search.text)
         self.assertNotIn("<script>alert(1)</script>", reader_search.text)
+        self.assertEqual(reader_indent.status_code, 200)
+        self.assertIn("Plain indent", reader_indent.text)
+        self.assertIn("has-indent-preview", reader_indent.text)
+        self.assertIn("indent_preview=1", reader_indent.text)
+        self.assertIn("q=%3Cscript%3E", reader_indent.text)
+        self.assertIn("show_invisibles=1", reader_indent.text)
+        self.assertIn("sync=0", reader_indent.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(
