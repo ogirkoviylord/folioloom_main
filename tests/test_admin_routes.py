@@ -2395,6 +2395,15 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/reader"
                 "?indent_preview=1&q=%3Cscript%3E&show_invisibles=1&sync=0"
             )
+            diagnostics_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?page=2&limit=1&q=Paragraph&indent_preview=1"
+            )
+            reader_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?page=3&limit=1&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
         self.assertEqual(logs.status_code, 200)
@@ -2433,6 +2442,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Reader", diagnostics.text)
         self.assertIn("Show special chars", diagnostics.text)
         self.assertIn('name="sequence"', diagnostics.text)
+        self.assertIn('name="page"', diagnostics.text)
+        self.assertIn('name="limit"', diagnostics.text)
+        self.assertIn("Logical page 1", diagnostics.text)
+        self.assertIn("sequences 1-3", diagnostics.text)
         self.assertIn("← Previous", diagnostics.text)
         self.assertIn("Next →", diagnostics.text)
         self.assertIn("Missing translation", diagnostics.text)
@@ -2466,6 +2479,16 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(diagnostics_indent.status_code, 200)
         self.assertIn("indent_preview=1", diagnostics_indent.text)
         self.assertIn("Source literal indent", diagnostics_indent.text)
+        self.assertEqual(diagnostics_page.status_code, 200)
+        self.assertIn("Logical page 2", diagnostics_page.text)
+        self.assertIn("sequences 2-2", diagnostics_page.text)
+        self.assertIn('value="2"', diagnostics_page.text)
+        self.assertIn('<option value="1" selected>1</option>', diagnostics_page.text)
+        self.assertIn("reader-search-hit", diagnostics_page.text)
+        self.assertIn("waiting for translation", diagnostics_page.text)
+        self.assertIn("q=Paragraph", diagnostics_page.text)
+        self.assertIn("indent_preview=1", diagnostics_page.text)
+        self.assertNotIn("Private source paragraph", diagnostics_page.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
@@ -2474,6 +2497,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Show special chars", reader.text)
         self.assertIn("Unsync scroll", reader.text)
         self.assertIn('name="sequence"', reader.text)
+        self.assertIn('name="page"', reader.text)
+        self.assertIn('name="limit"', reader.text)
+        self.assertIn("Logical page 1", reader.text)
+        self.assertIn("sequences 1-3", reader.text)
         self.assertIn("sequence=101&amp;limit=100", reader.text)
         self.assertIn("Reader QA summary", reader.text)
         self.assertIn("Reader layout diagnostics", reader.text)
@@ -2530,6 +2557,16 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("q=%3Cscript%3E", reader_indent.text)
         self.assertIn("show_invisibles=1", reader_indent.text)
         self.assertIn("sync=0", reader_indent.text)
+        self.assertEqual(reader_page.status_code, 200)
+        self.assertIn("Logical page 3", reader_page.text)
+        self.assertIn("sequences 3-3", reader_page.text)
+        self.assertIn('<option value="1" selected>1</option>', reader_page.text)
+        self.assertIn("Tiny", reader_page.text)
+        self.assertIn("q=Tiny", reader_page.text)
+        self.assertIn("show_invisibles=1", reader_page.text)
+        self.assertIn("sync=0", reader_page.text)
+        self.assertIn("indent_preview=1", reader_page.text)
+        self.assertNotIn("Private source paragraph", reader_page.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(
