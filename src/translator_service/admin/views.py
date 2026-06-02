@@ -3374,6 +3374,7 @@ def translation_reader_body(
         visible_rows,
         indent_preview=indent_preview,
     )
+    qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
     minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
         "reader",
@@ -3461,6 +3462,7 @@ def translation_reader_body(
     {controls}
     {qa_panel}
     {layout_panel}
+    {qa_issue_nav}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
       <p>
@@ -4187,6 +4189,39 @@ def _translation_reader_minimap(rows: tuple[dict[str, object], ...]) -> str:
     return f"""
     <nav class="reader-minimap" aria-label="Reader QA minimap">
       {items}
+    </nav>
+    """
+
+
+def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str:
+    issue_items = []
+    for row in rows:
+        flags = _translation_row_qa_flags(row)
+        if not flags:
+            continue
+        sequence = str(row.get("sequence") or 0)
+        safe_sequence = escape(sequence)
+        block_label = escape(_translation_source_block_label(row))
+        flag_summary = escape("; ".join(flag["label"] for flag in flags))
+        issue_items.append(
+            f"""
+            <a class="reader-qa-issue-link" href="#reader-original-{safe_sequence}">
+              <span class="reader-qa-issue-sequence">#{safe_sequence}</span>
+              <span class="reader-qa-issue-labels">{flag_summary}</span>
+              <span class="reader-qa-issue-blocks">Blocks {block_label}</span>
+            </a>
+            """
+        )
+    if not issue_items:
+        body = '<p class="reader-empty">No QA issues in this window.</p>'
+    else:
+        body = "".join(issue_items)
+    return f"""
+    <nav class="reader-qa-issue-nav" aria-label="Reader QA issues">
+      <h4>QA issues</h4>
+      <div class="reader-qa-issue-list">
+        {body}
+      </div>
     </nav>
     """
 
@@ -5862,6 +5897,48 @@ header {
   margin-top: 3px;
   color: var(--ink);
   font-size: 1.2rem;
+}
+.reader-qa-issue-nav {
+  margin: 12px 0;
+}
+.reader-qa-issue-nav h4 {
+  margin: 0 0 8px;
+}
+.reader-qa-issue-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.reader-qa-issue-link {
+  min-width: min(100%, 240px);
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  color: #7c2d12;
+  background: #fffbeb;
+  text-decoration: none;
+}
+.reader-qa-issue-link:hover,
+.reader-qa-issue-link:focus {
+  border-color: #fb923c;
+  background: #fff7ed;
+}
+.reader-qa-issue-sequence {
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+.reader-qa-issue-labels {
+  color: #7c2d12;
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+.reader-qa-issue-blocks {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 .reader-panel {
   padding: 0;

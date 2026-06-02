@@ -640,6 +640,19 @@ Owner decisions recorded during issue #71:
   metrics stay current-window-only and do not add DOCX style extraction, EPUB
   CSS/layout reconstruction, semantic quality scoring, whole-book aggregation,
   public/user-facing access, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#228](https://github.com/ogirkoviylord/folioloom_main/issues/228) starts the
+  first QA issue navigation slice on branch
+  `codex/issue-228-reader-qa-navigation`, stacked after #226. The slice adds a
+  compact Reader-only QA issue rail for the currently visible work-unit window,
+  listing existing QA flag labels by sequence and linking each item to the
+  corresponding comparison block anchor. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not add persistent annotations, whole-book aggregation, keyboard
+  shortcuts, semantic quality scoring, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
