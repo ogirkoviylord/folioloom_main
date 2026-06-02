@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from translator_service.admin.action_center import ActionCenter, ActionItem
 from translator_service.admin.ai_provider_keys import AIProviderKeySummary
@@ -3197,17 +3198,28 @@ def translation_text_diagnostics_body(
     run_id: str,
     start_sequence: int,
     limit: int,
+    show_invisibles: bool = False,
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
-    row_html = "\n".join(_translation_text_diagnostic_row(row) for row in rows)
+    row_html = "\n".join(
+        _translation_text_diagnostic_row(row, show_invisibles=show_invisibles)
+        for row in rows
+    )
     if not row_html:
         row_html = """
         <tr>
           <td colspan="5" class="empty-cell">No work units found.</td>
         </tr>
         """
+    controls = _translation_text_controls(
+        "text-diagnostics",
+        run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3218,15 +3230,37 @@ def translation_text_diagnostics_body(
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
-        {_action_link("Reader", f"/admin/logs/{run_id}/reader", "view")}
         {_action_link(
-            "Previous",
-            f"/admin/logs/{run_id}/text-diagnostics?sequence={previous_sequence}&limit={limit}",
+            "Reader",
+            _translation_raw_text_href(
+                "reader",
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+            ),
             "view",
         )}
         {_action_link(
-            "Next",
-            f"/admin/logs/{run_id}/text-diagnostics?sequence={next_sequence}&limit={limit}",
+            "← Previous",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=previous_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+            ),
+            "view",
+        )}
+        {_action_link(
+            "Next →",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=next_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+            ),
             "view",
         )}
       </div>
@@ -3236,7 +3270,9 @@ def translation_text_diagnostics_body(
         active="diagnostics",
         start_sequence=start_sequence,
         limit=limit,
+        show_invisibles=show_invisibles,
     )}
+    {controls}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this diagnostic page only.</h3>
       <p>
@@ -3270,12 +3306,32 @@ def translation_reader_body(
     run_id: str,
     start_sequence: int,
     limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool = True,
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
-    source_blocks = _translation_reader_blocks(rows, text_key="source_text")
-    translated_blocks = _translation_reader_blocks(rows, text_key="translated_text")
+    source_blocks = _translation_reader_blocks(
+        rows,
+        text_key="source_text",
+        show_invisibles=show_invisibles,
+    )
+    translated_blocks = _translation_reader_blocks(
+        rows,
+        text_key="translated_text",
+        show_invisibles=show_invisibles,
+    )
+    controls = _translation_text_controls(
+        "reader",
+        run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+    )
+    sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
+    sync_script = _reader_sync_script() if sync_scroll else ""
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3289,17 +3345,37 @@ def translation_reader_body(
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
         {_action_link(
             "Text diagnostics",
-            f"/admin/logs/{run_id}/text-diagnostics",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+            ),
             "view",
         )}
         {_action_link(
-            "Previous",
-            f"/admin/logs/{run_id}/reader?sequence={previous_sequence}&limit={limit}",
+            "← Previous",
+            _translation_raw_text_href(
+                "reader",
+                run_id,
+                sequence=previous_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+            ),
             "view",
         )}
         {_action_link(
-            "Next",
-            f"/admin/logs/{run_id}/reader?sequence={next_sequence}&limit={limit}",
+            "Next →",
+            _translation_raw_text_href(
+                "reader",
+                run_id,
+                sequence=next_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+            ),
             "view",
         )}
       </div>
@@ -3309,7 +3385,10 @@ def translation_reader_body(
         active="reader",
         start_sequence=start_sequence,
         limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
     )}
+    {controls}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
       <p>
@@ -3324,7 +3403,7 @@ def translation_reader_body(
           <div class="reader-pane-heading">
             <h4 id="reader-original-title">Original</h4>
           </div>
-          <div class="reader-scroll" data-reader-sync-pane>
+          <div class="reader-scroll" {sync_attr}>
             {source_blocks}
           </div>
         </article>
@@ -3332,13 +3411,13 @@ def translation_reader_body(
           <div class="reader-pane-heading">
             <h4 id="reader-translation-title">Translation</h4>
           </div>
-          <div class="reader-scroll" data-reader-sync-pane>
+          <div class="reader-scroll" {sync_attr}>
             {translated_blocks}
           </div>
         </article>
       </div>
     </section>
-    {_reader_sync_script()}
+    {sync_script}
     """
 
 
@@ -3348,6 +3427,8 @@ def _translation_raw_text_tabs(
     active: str,
     start_sequence: int,
     limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool | None = None,
 ) -> str:
     diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
     reader_current = 'aria-current="page"' if active == "reader" else ""
@@ -3361,10 +3442,21 @@ def _translation_raw_text_tabs(
         if active == "reader"
         else "reader-tab"
     )
-    diagnostics_href = (
-        f"/admin/logs/{run_id}/text-diagnostics?sequence={start_sequence}&limit={limit}"
+    diagnostics_href = _translation_raw_text_href(
+        "text-diagnostics",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
     )
-    reader_href = f"/admin/logs/{run_id}/reader?sequence={start_sequence}&limit={limit}"
+    reader_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+    )
     return f"""
     <nav class="reader-tabs" aria-label="Raw text views">
       <a
@@ -3385,26 +3477,148 @@ def _translation_raw_text_tabs(
     """
 
 
+def _translation_text_controls(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+) -> str:
+    invisible_label = (
+        "Hide special chars" if show_invisibles else "Show special chars"
+    )
+    sync_control = ""
+    if view_name == "reader" and sync_scroll is not None:
+        sync_control = _action_link(
+            "Unsync scroll" if sync_scroll else "Sync scroll",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=not sync_scroll,
+            ),
+            "view",
+        )
+    return f"""
+    <section class="reader-controls" aria-label="Reader controls">
+      <div class="reader-control-group">
+        {_action_link(
+            invisible_label,
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=not show_invisibles,
+                sync_scroll=sync_scroll,
+            ),
+            "view",
+        )}
+        {sync_control}
+      </div>
+      {_translation_jump_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+      )}
+    </section>
+    """
+
+
+def _translation_jump_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+) -> str:
+    hidden_fields = [f'<input type="hidden" name="limit" value="{limit}">']
+    if show_invisibles:
+        hidden_fields.append('<input type="hidden" name="show_invisibles" value="1">')
+    if view_name == "reader" and sync_scroll is False:
+        hidden_fields.append('<input type="hidden" name="sync" value="0">')
+    return f"""
+    <form
+      class="reader-jump-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {"".join(hidden_fields)}
+      <label>
+        Sequence
+        <input
+          type="number"
+          name="sequence"
+          min="1"
+          value="{start_sequence}"
+          inputmode="numeric"
+        >
+      </label>
+      {_action_button("Go", "view", compact=True)}
+    </form>
+    """
+
+
+def _translation_raw_text_href(
+    view_name: str,
+    run_id: str,
+    *,
+    sequence: int,
+    limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool | None = None,
+) -> str:
+    query: dict[str, str] = {
+        "sequence": str(max(1, sequence)),
+        "limit": str(max(1, limit)),
+    }
+    if show_invisibles:
+        query["show_invisibles"] = "1"
+    if view_name == "reader" and sync_scroll is False:
+        query["sync"] = "0"
+    return f"/admin/logs/{run_id}/{view_name}?{urlencode(query)}"
+
+
 def _translation_reader_blocks(
     rows: tuple[dict[str, object], ...],
     *,
     text_key: str,
+    show_invisibles: bool = False,
 ) -> str:
     if not rows:
         return '<p class="reader-empty">No work units found.</p>'
     return "\n".join(
-        _translation_reader_block(row, text_key=text_key)
+        _translation_reader_block(
+            row,
+            text_key=text_key,
+            show_invisibles=show_invisibles,
+        )
         for row in rows
     )
 
 
-def _translation_reader_block(row: dict[str, object], *, text_key: str) -> str:
+def _translation_reader_block(
+    row: dict[str, object],
+    *,
+    text_key: str,
+    show_invisibles: bool = False,
+) -> str:
     sequence = escape(str(row.get("sequence") or 0))
     status = escape(str(row.get("status") or "unknown"))
     block_label = escape(_translation_source_block_label(row))
     text = str(row.get(text_key) or "")
     if not text:
         text = "[empty]"
+    text_html = _diagnostic_text_html(text, show_invisibles=show_invisibles)
     return f"""
     <article class="reader-block" data-reader-sequence="{sequence}">
       <header>
@@ -3412,7 +3626,7 @@ def _translation_reader_block(row: dict[str, object], *, text_key: str) -> str:
         <span class="status">{status}</span>
         <span>Blocks {block_label}</span>
       </header>
-      <div class="reader-text">{escape(text)}</div>
+      <div class="reader-text">{text_html}</div>
     </article>
     """
 
@@ -3465,7 +3679,11 @@ def _reader_sync_script() -> str:
     """
 
 
-def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
+def _translation_text_diagnostic_row(
+    row: dict[str, object],
+    *,
+    show_invisibles: bool = False,
+) -> str:
     block_label = _translation_source_block_label(row)
     notes = []
     last_error = row.get("last_error")
@@ -3481,8 +3699,14 @@ def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
         note_html = f'<p class="muted">{note_text}</p>'
     sequence = escape(str(row.get("sequence") or 0))
     status = escape(str(row.get("status") or "unknown"))
-    source_text = escape(str(row.get("source_text") or ""))
-    translated_text = escape(str(row.get("translated_text") or ""))
+    source_text = _diagnostic_text_html(
+        str(row.get("source_text") or ""),
+        show_invisibles=show_invisibles,
+    )
+    translated_text = _diagnostic_text_html(
+        str(row.get("translated_text") or ""),
+        show_invisibles=show_invisibles,
+    )
     return f"""
     <tr>
       <td>{sequence}</td>
@@ -3492,6 +3716,50 @@ def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
       <td><pre class="detail-json raw-text-cell">{translated_text}</pre></td>
     </tr>
     """
+
+
+_ZERO_WIDTH_CHAR_LABELS = {
+    "\u200b": "ZWSP",
+    "\u200c": "ZWNJ",
+    "\u200d": "ZWJ",
+    "\ufeff": "BOM",
+}
+
+
+def _diagnostic_text_html(text: str, *, show_invisibles: bool) -> str:
+    if not show_invisibles:
+        return escape(text)
+    parts: list[str] = []
+    for char in text:
+        if char == " ":
+            parts.append(_invisible_marker("&middot;", "space"))
+        elif char == "\t":
+            parts.append(_invisible_marker("&rarr;", "tab"))
+        elif char == "\n":
+            parts.append(_invisible_marker("&para;", "line break") + "\n")
+        elif char == "\r":
+            parts.append(_invisible_marker("CR", "carriage return"))
+        elif char == "\u00a0":
+            parts.append(_invisible_marker("&#9251;", "non-breaking space"))
+        elif char == "\u00ad":
+            parts.append(_invisible_marker("&not;", "soft hyphen"))
+        elif char in _ZERO_WIDTH_CHAR_LABELS:
+            parts.append(
+                _invisible_marker(
+                    _ZERO_WIDTH_CHAR_LABELS[char],
+                    "zero-width character",
+                )
+            )
+        else:
+            parts.append(escape(char))
+    return "".join(parts)
+
+
+def _invisible_marker(label: str, title: str) -> str:
+    return (
+        f'<span class="invisible-char" title="{escape(title)}" '
+        f'aria-label="{escape(title)}">{label}</span>'
+    )
 
 
 def _translation_source_block_label(row: dict[str, object]) -> str:
@@ -4773,6 +5041,42 @@ header {
   background: #1f2937;
   border-color: #1f2937;
 }
+.reader-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.reader-control-group,
+.reader-jump-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.reader-jump-form {
+  margin: 0;
+}
+.reader-jump-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.reader-jump-form input {
+  width: 96px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+  color: var(--ink);
+  background: #ffffff;
+}
 .reader-panel {
   padding: 0;
   overflow: hidden;
@@ -4833,6 +5137,15 @@ header {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.invisible-char {
+  color: #9a3412;
+  background: #fff7ed;
+  border-radius: 4px;
+  padding: 0 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  font-weight: 800;
 }
 .reader-empty {
   margin: 0;
