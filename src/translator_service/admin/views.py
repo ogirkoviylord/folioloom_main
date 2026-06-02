@@ -3449,6 +3449,7 @@ def translation_reader_body(
         qa_filter=qa_filter,
     )
     qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
+    outline = _translation_reader_outline(visible_rows)
     minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
         "reader",
@@ -3535,6 +3536,7 @@ def translation_reader_body(
     {qa_panel}
     {search_nav}
     {layout_panel}
+    {outline}
     {qa_issue_nav}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
@@ -4577,6 +4579,48 @@ def _translation_reader_minimap(rows: tuple[dict[str, object], ...]) -> str:
     <nav class="reader-minimap" aria-label="Reader QA minimap">
       {items}
     </nav>
+    """
+
+
+def _translation_reader_outline(rows: tuple[dict[str, object], ...]) -> str:
+    if not rows:
+        body = '<p class="reader-empty">No blocks in this reader window.</p>'
+    else:
+        body = "\n".join(_translation_reader_outline_item(row) for row in rows)
+    return f"""
+    <nav class="reader-outline" aria-label="Reader block outline">
+      <div class="reader-outline-heading">
+        <h4>Block outline</h4>
+        <span>Visible units: {len(rows)}</span>
+      </div>
+      <div class="reader-outline-list">
+        {body}
+      </div>
+    </nav>
+    """
+
+
+def _translation_reader_outline_item(row: dict[str, object]) -> str:
+    sequence = str(row.get("sequence") or 0)
+    safe_sequence = escape(sequence)
+    status = str(row.get("status") or "unknown")
+    block_label = _translation_source_block_label(row)
+    flags = _translation_row_issue_flags(row)
+    flag_class = " has-qa-warning" if flags else ""
+    flag_summary = "; ".join(flag["label"] for flag in flags) if flags else "No flags"
+    title = f"Sequence {sequence}: {status}; Blocks {block_label}; {flag_summary}"
+    return f"""
+    <a
+      class="reader-outline-link{flag_class}"
+      href="#reader-original-{safe_sequence}"
+      title="{escape(title)}"
+      aria-label="{escape(title)}"
+    >
+      <span class="reader-outline-sequence">#{safe_sequence}</span>
+      <span class="reader-outline-blocks">Blocks {escape(block_label)}</span>
+      <span class="reader-outline-status">Status {escape(status)}</span>
+      <span class="reader-outline-flags">{escape(flag_summary)}</span>
+    </a>
     """
 
 
@@ -6599,6 +6643,66 @@ header {
 }
 .reader-qa-issue-nav {
   margin: 12px 0;
+}
+.reader-outline {
+  margin: 12px 0;
+}
+.reader-outline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.reader-outline-heading h4 {
+  margin: 0;
+}
+.reader-outline-heading span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+.reader-outline-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.reader-outline-link {
+  min-width: min(100%, 190px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: #ffffff;
+  text-decoration: none;
+}
+.reader-outline-link:hover,
+.reader-outline-link:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-outline-link.has-qa-warning {
+  border-color: #fed7aa;
+  color: #7c2d12;
+  background: #fffbeb;
+}
+.reader-outline-sequence {
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+.reader-outline-blocks,
+.reader-outline-status,
+.reader-outline-flags {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.reader-outline-link.has-qa-warning .reader-outline-flags {
+  color: #7c2d12;
 }
 .reader-search-nav {
   display: flex;

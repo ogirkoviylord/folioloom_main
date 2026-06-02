@@ -2921,6 +2921,18 @@ class AdminRoutesTest(unittest.TestCase):
             '&amp;limit=100&amp;qa=indent"',
             reader.text,
         )
+        self.assertIn("reader-outline", reader.text)
+        self.assertIn("Reader block outline", reader.text)
+        self.assertIn("Block outline", reader.text)
+        self.assertIn("Visible units: 3", reader.text)
+        self.assertIn("reader-outline-link", reader.text)
+        self.assertIn("reader-outline-link has-qa-warning", reader.text)
+        self.assertIn("reader-outline-sequence", reader.text)
+        self.assertIn("reader-outline-blocks", reader.text)
+        self.assertIn("reader-outline-status", reader.text)
+        self.assertIn("reader-outline-flags", reader.text)
+        self.assertIn("Blocks block-1", reader.text)
+        self.assertIn("Status translated", reader.text)
         self.assertIn("reader-minimap", reader.text)
         self.assertIn(
             'title="Sequence 1: translated; Translation literal indent"',
@@ -3125,6 +3137,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Tiny", reader_paragraph_filter.text)
         self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
+        self.assertIn("reader-outline", reader_paragraph_filter.text)
+        self.assertIn("Visible units: 1", reader_paragraph_filter.text)
+        self.assertIn(
+            'title="Sequence 3: translated; Blocks block-3; '
+            'Translation much longer; Paragraph/line break mismatch"',
+            reader_paragraph_filter.text,
+        )
         self.assertIn("reader-qa-filter-metric is-active", reader_paragraph_filter.text)
         self.assertIn('aria-current="page"', reader_paragraph_filter.text)
         self.assertIn(
@@ -3181,6 +3200,9 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
         self.assertIn("No QA issues in this window.", reader_empty_filter.text)
+        self.assertIn("reader-outline", reader_empty_filter.text)
+        self.assertIn("Visible units: 0", reader_empty_filter.text)
+        self.assertIn("No blocks in this reader window.", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
