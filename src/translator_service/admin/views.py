@@ -3396,6 +3396,16 @@ def translation_reader_body(
         visible_rows,
         indent_preview=indent_preview,
     )
+    position_bar = _translation_reader_position_bar(
+        rows=visible_rows,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
     qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
     minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
@@ -3466,6 +3476,7 @@ def translation_reader_body(
         qa_filter=qa_filter,
     )}
     {controls}
+    {position_bar}
     {qa_panel}
     {layout_panel}
     {qa_issue_nav}
@@ -4148,6 +4159,44 @@ def _translation_reader_layout_panel(
       {_reader_qa_metric("Source literal indents", str(counts["source"]))}
       {_reader_qa_metric("Translation literal indents", str(counts["translation"]))}
       {_reader_qa_metric("Style metadata", "Unknown")}
+    </section>
+    """
+
+
+def _translation_reader_position_bar(
+    *,
+    rows: tuple[dict[str, object], ...],
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
+    search_query: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    search_label = f'Search "{search_query}"' if search_query else "Search off"
+    chips = (
+        ("QA", qa_filter if qa_filter != "all" else "all"),
+        ("Search", search_label),
+        ("Special chars", "shown" if show_invisibles else "hidden"),
+        ("Sync scroll", "on" if sync_scroll else "off"),
+        ("Indent preview", "on" if indent_preview else "off"),
+    )
+    chip_html = "".join(
+        (
+            f'<span class="reader-position-chip">'
+            f'<span>{escape(label)}</span>'
+            f'<strong>{escape(value)}</strong>'
+            f"</span>"
+        )
+        for label, value in chips
+    )
+    return f"""
+    <section class="reader-position-bar" aria-label="Reader current position">
+      <strong>{escape(_translation_page_status(start_sequence, limit, rows))}</strong>
+      <div class="reader-position-chips">
+        {chip_html}
+      </div>
     </section>
     """
 
@@ -5920,6 +5969,48 @@ header {
 }
 .reader-jump-form input {
   width: 96px;
+}
+.reader-position-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+.reader-position-bar > strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+.reader-position-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-position-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.reader-position-chip strong {
+  color: var(--ink);
+  font-size: inherit;
 }
 .reader-qa-panel,
 .reader-layout-panel {

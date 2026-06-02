@@ -2494,6 +2494,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Source blank lines", diagnostics.text)
         self.assertIn("Translation blank lines", diagnostics.text)
         self.assertIn("Paragraph/line break mismatch", diagnostics.text)
+        self.assertNotIn('<section class="reader-position-bar"', diagnostics.text)
         self.assertNotIn("data-reader-keyboard-navigation", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
@@ -2590,6 +2591,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Logical page 1", reader.text)
         self.assertIn("sequences 1-3", reader.text)
         self.assertIn("sequence=101&amp;limit=100", reader.text)
+        self.assertIn("reader-position-bar", reader.text)
+        self.assertIn("Reader current position", reader.text)
+        self.assertIn("QA</span><strong>all</strong>", reader.text)
+        self.assertIn("Search</span><strong>Search off</strong>", reader.text)
+        self.assertIn("Special chars</span><strong>hidden</strong>", reader.text)
+        self.assertIn("Sync scroll</span><strong>on</strong>", reader.text)
+        self.assertIn("Indent preview</span><strong>off</strong>", reader.text)
         self.assertIn("Reader QA summary", reader.text)
         self.assertIn("Reader layout diagnostics", reader.text)
         self.assertIn("Window units", reader.text)
@@ -2669,6 +2677,14 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("show_invisibles=1", reader_page.text)
         self.assertIn("sync=0", reader_page.text)
         self.assertIn("indent_preview=1", reader_page.text)
+        self.assertIn("reader-position-bar", reader_page.text)
+        self.assertIn("Logical page 3", reader_page.text)
+        self.assertIn("sequences 3-3", reader_page.text)
+        self.assertIn("QA</span><strong>all</strong>", reader_page.text)
+        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_page.text)
+        self.assertIn("Special chars</span><strong>shown</strong>", reader_page.text)
+        self.assertIn("Sync scroll</span><strong>off</strong>", reader_page.text)
+        self.assertIn("Indent preview</span><strong>on</strong>", reader_page.text)
         self.assertIn("data-reader-keyboard-navigation", reader_page.text)
         self.assertIn(
             f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
@@ -2708,6 +2724,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("show_invisibles=1", reader_paragraph_filter.text)
         self.assertIn("sync=0", reader_paragraph_filter.text)
         self.assertIn("indent_preview=1", reader_paragraph_filter.text)
+        self.assertIn("QA</span><strong>paragraph_mismatch</strong>", reader_paragraph_filter.text)
+        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_paragraph_filter.text)
         self.assertIn("Tiny", reader_paragraph_filter.text)
         self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
@@ -2767,6 +2785,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Source lines", archive_text)
         self.assertNotIn("Paragraph/line break mismatch", archive_text)
         self.assertNotIn("reader-qa-issue-nav", archive_text)
+        self.assertNotIn("reader-position-bar", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
