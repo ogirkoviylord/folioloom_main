@@ -591,8 +591,12 @@ Acceptance criteria:
   [#216](https://github.com/ogirkoviylord/folioloom_main/issues/216) begins the
   next current-window QA aids slice on branch
   `codex/issue-216-reader-qa-aids`: search with safe highlighting, reader QA
-  counts and a metadata-only minimap for loaded work units. These slices remain
-  owner-only and do not claim physical page fidelity.
+  counts and a metadata-only minimap for loaded work units. Issue
+  [#218](https://github.com/ogirkoviylord/folioloom_main/issues/218) begins the
+  first layout/indent diagnostics slice on branch
+  `codex/issue-218-reader-indent-diagnostics`: literal indentation evidence,
+  `Unknown` style metadata and opt-in editorial first-line indent preview.
+  These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:

@@ -684,6 +684,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         search_query = _query_text(request.query_params.get("q"), maximum=200)
+        indent_preview = _query_flag(request.query_params.get("indent_preview"))
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -704,6 +705,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 limit=limit,
                 show_invisibles=show_invisibles,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
         )
 
@@ -723,6 +725,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
         search_query = _query_text(request.query_params.get("q"), maximum=200)
+        indent_preview = _query_flag(request.query_params.get("indent_preview"))
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -744,6 +747,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 search_query=search_query,
+                indent_preview=indent_preview,
             ),
         )
 
