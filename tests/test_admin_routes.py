@@ -720,6 +720,18 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(runtime_var.status_code, 400)
         self.assertIn("runtime var/", runtime_var.text)
 
+    def test_internal_reader_preview_reports_missing_source_file(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get(
+            "/admin/internal-reader/preview",
+            params={"source": "test_samples/does-not-exist.epub"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Source file was not found.", response.text)
+        self.assertNotIn("Format:", response.text)
+
     def test_internal_reader_preview_reports_invalid_mapping_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:
             mapping_path = Path(temp_dir) / "translations.json"
