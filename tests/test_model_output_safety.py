@@ -47,6 +47,37 @@ class ModelOutputSafetyTest(unittest.TestCase):
             ModelOutputSafetyReason.TOOL_OR_EXECUTION_CLAIM,
         )
 
+    def test_rejects_file_access_with_tool_context(self):
+        samples = (
+            "I opened file /etc/passwd.",
+            "Я открыла файл /etc/passwd.",
+            "Я открыл файл /etc/passwd через shell.",
+        )
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                result = validate_model_output_safety(sample)
+
+                self.assertEqual(
+                    result.reason,
+                    ModelOutputSafetyReason.TOOL_OR_EXECUTION_CLAIM,
+                )
+
+    def test_rejects_url_access_with_tool_context(self):
+        samples = (
+            "I read https://example.com with a tool call.",
+            "Tool call completed: opened https://example.com and read the file.",
+        )
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                result = validate_model_output_safety(sample)
+
+                self.assertEqual(
+                    result.reason,
+                    ModelOutputSafetyReason.TOOL_OR_EXECUTION_CLAIM,
+                )
+
     def test_rejects_untrusted_boundary_marker_leak(self):
         result = validate_model_output_safety(
             "BEGIN_UNTRUSTED_DOCUMENT_CONTENT sha256=abc\nHello\n"
@@ -71,6 +102,20 @@ class ModelOutputSafetyTest(unittest.TestCase):
         )
 
         self.assertIsNone(result.reason)
+
+    def test_allows_narrative_file_opening_prose(self):
+        samples = (
+            "Я открыла файл на нашем компьютере, и он был заполнен фотографиями.",
+            'Карен сказала: "Я открыла файл мужа".',
+            "Он открыл файл и увидел фотографии.",
+            "She opened a file on his computer.",
+        )
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                result = validate_model_output_safety(sample)
+
+                self.assertIsNone(result.reason)
 
 
 if __name__ == "__main__":
