@@ -52,18 +52,44 @@ def build_reader_document(
     generated_at: datetime | None = None,
 ) -> ReaderDocument:
     translations = translated_by_block_id or {}
-    blocks: list[ReaderBlock] = []
+    sections: list[ReaderSection] = []
+    section_blocks: list[ReaderBlock] = []
+    current_source_file_name: str | None = None
+    current_section_title = "Document"
+    sequence = 0
+
+    def flush_section() -> None:
+        nonlocal section_blocks, current_source_file_name, current_section_title
+        if not section_blocks:
+            return
+        sections.append(
+            ReaderSection(
+                id=f"section-{len(sections) + 1}",
+                title=current_section_title,
+                source_file_name=current_source_file_name,
+                blocks=tuple(section_blocks),
+            )
+        )
+        section_blocks = []
+
     for unit in plan.units:
         for block in unit.blocks:
+            source_file_name = _metadata_value(block.metadata, "file_name")
+            section_title = source_file_name or "Document"
+            if section_blocks and source_file_name != current_source_file_name:
+                flush_section()
+            current_source_file_name = source_file_name
+            current_section_title = section_title
+            sequence += 1
             translated_text = translations.get(block.source_block_id)
             status = (
                 READER_STATUS_DONE
                 if translated_text is not None
                 else READER_STATUS_MISSING
             )
-            blocks.append(
+            section_blocks.append(
                 ReaderBlock(
-                    sequence=len(blocks) + 1,
+                    sequence=sequence,
                     source_block_id=block.source_block_id,
                     kind=block.kind.value,
                     group_id=block.group_id,
@@ -73,20 +99,23 @@ def build_reader_document(
                     status=status,
                 )
             )
+    flush_section()
+    if not sections:
+        sections.append(
+            ReaderSection(
+                id="section-1",
+                title="Document",
+                source_file_name=None,
+                blocks=(),
+            )
+        )
     timestamp = generated_at or datetime.now(UTC)
     return ReaderDocument(
         document_format=plan.document_format.value,
         adapter_version=plan.adapter_version,
         source_name=source_name,
         generated_at=timestamp.isoformat(),
-        sections=(
-            ReaderSection(
-                id="document",
-                title="Document",
-                source_file_name=None,
-                blocks=tuple(blocks),
-            ),
-        ),
+        sections=tuple(sections),
     )
 
 
@@ -301,6 +330,13 @@ def _render_block(block: ReaderBlock) -> str:
 
 def _escape(value: object) -> str:
     return html.escape(str(value), quote=True)
+
+
+def _metadata_value(metadata: tuple[tuple[str, str], ...], key: str) -> str | None:
+    for metadata_key, value in metadata:
+        if metadata_key == key and value:
+            return value
+    return None
 
 
 def reject_runtime_var_path(path: Path) -> None:

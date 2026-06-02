@@ -552,9 +552,11 @@ Acceptance criteria:
   Priority: Medium
   Risk: Medium
   Agent suitability: needs architect first slice, then focused implementer
-  Status: issue #181 first TXT local HTML report slice is locally verified on
-  branch `codex/issue-181-internal-reader-txt-report`; issues #182-#184 remain
-  open follow-ups.
+  Status: issue #181 first TXT local HTML report slice is ready for review in
+  PR #185 on branch `codex/issue-181-internal-reader-txt-report`; issue #182
+  generic semantic block mapping slice is locally verified on stacked branch
+  `codex/issue-182-generic-reader-block-model`; issues #183-#184 remain open
+  renderer/fidelity spikes.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:

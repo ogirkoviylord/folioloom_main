@@ -4,15 +4,23 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
+from translator_service.documents import DocumentFormat
+from translator_service.format_adapters.contracts import (
+    FormatAdapterPlan,
+    FormatTextBlock,
+    FormatTranslationUnit,
+)
 from translator_service.internal_reader import (
     READER_STATUS_DONE,
     READER_STATUS_MISSING,
+    build_reader_document,
     build_txt_reader_document,
     generate_txt_reader_html_from_path,
     load_translation_mapping,
     reject_runtime_var_path,
     render_reader_html,
 )
+from translator_service.structure_optimizer import PromptTier, TextBlockKind
 
 
 class InternalReaderTest(unittest.TestCase):
@@ -52,6 +60,188 @@ class InternalReaderTest(unittest.TestCase):
         self.assertEqual(blocks[0].status, READER_STATUS_DONE)
         self.assertIsNone(blocks[1].translated_text)
         self.assertEqual(blocks[1].status, READER_STATUS_MISSING)
+
+    def test_maps_docx_adapter_plan_to_file_section_and_preserves_metadata(self):
+        plan = FormatAdapterPlan(
+            document_format=DocumentFormat.DOCX,
+            adapter_version="docx-adapter-test",
+            character_count=27,
+            estimated_input_tokens=12,
+            units=(
+                FormatTranslationUnit(
+                    sequence=1,
+                    prompt_tier=PromptTier.STRICT,
+                    blocks=(
+                        FormatTextBlock(
+                            index=0,
+                            source_block_id="docx:word/document.xml:0",
+                            text="First paragraph",
+                            kind=TextBlockKind.PLAIN,
+                            metadata=(
+                                ("file_name", "word/document.xml"),
+                                ("block_index", "0"),
+                            ),
+                        ),
+                        FormatTextBlock(
+                            index=1,
+                            source_block_id="docx:word/document.xml:1",
+                            text="Table cell",
+                            kind=TextBlockKind.TABLE,
+                            group_id="word/document.xml:table:0",
+                            metadata=(
+                                ("file_name", "word/document.xml"),
+                                ("block_index", "1"),
+                                ("fixed_width_pseudo_table", "False"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        document = build_reader_document(
+            plan=plan,
+            translated_by_block_id={
+                "docx:word/document.xml:0": "Первый абзац",
+            },
+            source_name="sample.docx",
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+
+        self.assertEqual(document.document_format, "docx")
+        self.assertEqual(document.adapter_version, "docx-adapter-test")
+        self.assertEqual([section.source_file_name for section in document.sections], [
+            "word/document.xml",
+        ])
+        blocks = document.sections[0].blocks
+        self.assertEqual(
+            [block.source_block_id for block in blocks],
+            ["docx:word/document.xml:0", "docx:word/document.xml:1"],
+        )
+        self.assertEqual([block.sequence for block in blocks], [1, 2])
+        self.assertEqual([block.kind for block in blocks], ["plain", "table"])
+        self.assertEqual(blocks[1].group_id, "word/document.xml:table:0")
+        self.assertEqual(
+            dict(blocks[1].metadata)["fixed_width_pseudo_table"],
+            "False",
+        )
+        self.assertEqual([block.status for block in blocks], [
+            READER_STATUS_DONE,
+            READER_STATUS_MISSING,
+        ])
+
+    def test_maps_epub_adapter_plan_to_ordered_sections_with_roles(self):
+        plan = FormatAdapterPlan(
+            document_format=DocumentFormat.EPUB,
+            adapter_version="epub-adapter-test",
+            character_count=55,
+            estimated_input_tokens=20,
+            units=(
+                FormatTranslationUnit(
+                    sequence=1,
+                    prompt_tier=PromptTier.PLAIN,
+                    blocks=(
+                        FormatTextBlock(
+                            index=0,
+                            source_block_id="epub:OPS/chapter.xhtml:0",
+                            text="Chapter title",
+                            kind=TextBlockKind.HEADING,
+                            metadata=(
+                                ("file_name", "OPS/chapter.xhtml"),
+                                ("block_index", "0"),
+                                ("role", "body"),
+                            ),
+                        ),
+                        FormatTextBlock(
+                            index=1,
+                            source_block_id="epub:OPS/chapter.xhtml:1",
+                            text="First paragraph.",
+                            kind=TextBlockKind.PLAIN,
+                            metadata=(
+                                ("file_name", "OPS/chapter.xhtml"),
+                                ("block_index", "1"),
+                                ("role", "body"),
+                            ),
+                        ),
+                    ),
+                ),
+                FormatTranslationUnit(
+                    sequence=2,
+                    prompt_tier=PromptTier.STRICT,
+                    blocks=(
+                        FormatTextBlock(
+                            index=2,
+                            source_block_id="epub:OPS/notes.xhtml:0",
+                            text="Footnote body.",
+                            kind=TextBlockKind.FOOTNOTE,
+                            group_id="OPS/notes.xhtml:footnote:1",
+                            metadata=(
+                                ("file_name", "OPS/notes.xhtml"),
+                                ("block_index", "0"),
+                                ("role", "body"),
+                            ),
+                        ),
+                    ),
+                ),
+                FormatTranslationUnit(
+                    sequence=3,
+                    prompt_tier=PromptTier.PLAIN,
+                    blocks=(
+                        FormatTextBlock(
+                            index=3,
+                            source_block_id=(
+                                "epub:aux:opf:OPS/content.opf:title:0"
+                            ),
+                            text="Metadata title",
+                            kind=TextBlockKind.PLAIN,
+                            metadata=(
+                                ("role", "auxiliary"),
+                                ("file_name", "OPS/content.opf"),
+                                ("epub_aux_kind", "opf_title"),
+                                ("local_name", "title"),
+                                ("aux_index", "0"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        document = build_reader_document(
+            plan=plan,
+            translated_by_block_id={
+                "epub:aux:opf:OPS/content.opf:title:0": "Назва metadata",
+            },
+            source_name="sample.epub",
+            generated_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+
+        self.assertEqual(document.document_format, "epub")
+        self.assertEqual([section.source_file_name for section in document.sections], [
+            "OPS/chapter.xhtml",
+            "OPS/notes.xhtml",
+            "OPS/content.opf",
+        ])
+        blocks = [
+            block
+            for section in document.sections
+            for block in section.blocks
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in blocks],
+            [
+                "epub:OPS/chapter.xhtml:0",
+                "epub:OPS/chapter.xhtml:1",
+                "epub:OPS/notes.xhtml:0",
+                "epub:aux:opf:OPS/content.opf:title:0",
+            ],
+        )
+        self.assertEqual([block.sequence for block in blocks], [1, 2, 3, 4])
+        self.assertEqual(dict(blocks[0].metadata)["role"], "body")
+        self.assertEqual(blocks[2].group_id, "OPS/notes.xhtml:footnote:1")
+        self.assertEqual(dict(blocks[3].metadata)["role"], "auxiliary")
+        self.assertEqual(dict(blocks[3].metadata)["epub_aux_kind"], "opf_title")
+        self.assertEqual(blocks[3].status, READER_STATUS_DONE)
 
     def test_render_html_escapes_text_metadata_and_translation(self):
         document = build_txt_reader_document(

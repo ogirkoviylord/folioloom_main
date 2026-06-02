@@ -388,6 +388,19 @@ Owner decisions recorded during issue #71:
   directory. This does not implement DOCX/EPUB generic reader support, renderer
   spikes, admin/public UI, live translation streaming, production dependency,
   live runtime data access or release readiness.
+- 2026-06-01: Issue
+  [#182](https://github.com/ogirkoviylord/folioloom_main/issues/182)
+  implementation slice is locally verified on branch
+  `codex/issue-182-generic-reader-block-model`, stacked on the #181 branch. The
+  branch extends `build_reader_document()` so arbitrary `FormatAdapterPlan`
+  values can produce semantic reader sections, grouping contiguous blocks by
+  `file_name` metadata without reordering the adapter plan. Focused tests cover
+  synthetic DOCX and EPUB plans, including stable block ids, kind, group id,
+  metadata, EPUB file names, body/auxiliary role metadata and done/missing
+  status behavior. Local verification passed focused internal-reader tests,
+  format-adapter tests, compileall and targeted ruff. This does not implement
+  DOCX visual rendering, EPUB book-like rendering, admin/public UI, live
+  runtime data access, production dependency or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
