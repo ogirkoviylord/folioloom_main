@@ -77,6 +77,8 @@ Evidence:
 
 Consequences:
 - A focused owner-only admin route for approved local files is allowed.
+- Run-log reader access for a specific translation is governed by the
+  owner-only raw diagnostic decision below, not by this local-fixture UI scope.
 - Agents must not make this a public route, browse live runtime `var/` data,
   change auth/RBAC/security, add production dependencies, log raw document text
   or claim full DOCX/EPUB fidelity, release readiness or legal/privacy
@@ -1462,6 +1464,10 @@ Decision:
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model and must not be added to safe log archives, telemetry, JSON APIs,
   release artifacts, GitHub issues, PR descriptions or support notes.
+- A read-only run-log Translation Reader may sit beside Text diagnostics for a
+  specific translation run. It must resolve `run_id -> job_id`, reuse the same
+  work-unit/source-object path as Text diagnostics, render server-side
+  `no-store` HTML and avoid raw-text JSON/API/archive outputs.
 - Normal admin log details and downloadable diagnostics remain metadata-only and
   redacted by default.
 - Removing this raw-text diagnostic path, hiding it from the owner, replacing it
@@ -1475,6 +1481,10 @@ Evidence:
 - Local implementation adds a dedicated admin-only text diagnostics page and a
   regression test proving raw text stays out of the normal details page and
   safe archive download.
+- Branch `codex/internal-reader-v2` adds the run-log Translation Reader route
+  and regression coverage for auth, `no-store` HTML, escaping, reader
+  navigation, missing-store behavior and no raw text in details/API/archive
+  surfaces.
 - After PR #179 was merged and deployed, the owner explicitly stated on
   2026-06-01 that this first version is accepted as the direction and that the
   owner should have ongoing access to raw translation texts for diagnostics.

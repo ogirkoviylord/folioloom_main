@@ -2924,6 +2924,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
             f"/admin/logs/{run_id}/text-diagnostics",
             "view",
         )}
+        {_action_link("Reader", f"/admin/logs/{run_id}/reader", "view")}
         {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
     </section>
@@ -3217,6 +3218,7 @@ def translation_text_diagnostics_body(
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
+        {_action_link("Reader", f"/admin/logs/{run_id}/reader", "view")}
         {_action_link(
             "Previous",
             f"/admin/logs/{run_id}/text-diagnostics?sequence={previous_sequence}&limit={limit}",
@@ -3229,6 +3231,12 @@ def translation_text_diagnostics_body(
         )}
       </div>
     </section>
+    {_translation_raw_text_tabs(
+        run_id,
+        active="diagnostics",
+        start_sequence=start_sequence,
+        limit=limit,
+    )}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this diagnostic page only.</h3>
       <p>
@@ -3255,12 +3263,195 @@ def translation_text_diagnostics_body(
     """
 
 
+def translation_reader_body(
+    details: TranslationRunDetails,
+    rows: tuple[dict[str, object], ...],
+    *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+) -> str:
+    summary = details.summary
+    next_sequence = start_sequence + limit
+    previous_sequence = max(1, start_sequence - limit)
+    source_blocks = _translation_reader_blocks(rows, text_key="source_text")
+    translated_blocks = _translation_reader_blocks(rows, text_key="translated_text")
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translation Reader</h3>
+        <p>
+          {escape(summary.file_name)} · {escape(summary.source_language)}
+          -> {escape(summary.target_language)} · {escape(summary.job_id)}
+        </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
+        {_action_link(
+            "Text diagnostics",
+            f"/admin/logs/{run_id}/text-diagnostics",
+            "view",
+        )}
+        {_action_link(
+            "Previous",
+            f"/admin/logs/{run_id}/reader?sequence={previous_sequence}&limit={limit}",
+            "view",
+        )}
+        {_action_link(
+            "Next",
+            f"/admin/logs/{run_id}/reader?sequence={next_sequence}&limit={limit}",
+            "view",
+        )}
+      </div>
+    </section>
+    {_translation_raw_text_tabs(
+        run_id,
+        active="reader",
+        start_sequence=start_sequence,
+        limit=limit,
+    )}
+    <section class="panel warning-panel">
+      <h3>Raw text visibility is enabled for this reader page only.</h3>
+      <p>
+        This page may show user document text and translated output. Keep it
+        out of issues, PRs, safe log archives, screenshots and support notes
+        unless the owner explicitly approves that exact excerpt.
+      </p>
+    </section>
+    <section class="panel reader-panel" data-translation-reader>
+      <div class="reader-compare" data-reader-compare>
+        <article class="reader-pane" aria-labelledby="reader-original-title">
+          <div class="reader-pane-heading">
+            <h4 id="reader-original-title">Original</h4>
+          </div>
+          <div class="reader-scroll" data-reader-sync-pane>
+            {source_blocks}
+          </div>
+        </article>
+        <article class="reader-pane" aria-labelledby="reader-translation-title">
+          <div class="reader-pane-heading">
+            <h4 id="reader-translation-title">Translation</h4>
+          </div>
+          <div class="reader-scroll" data-reader-sync-pane>
+            {translated_blocks}
+          </div>
+        </article>
+      </div>
+    </section>
+    {_reader_sync_script()}
+    """
+
+
+def _translation_raw_text_tabs(
+    run_id: str,
+    *,
+    active: str,
+    start_sequence: int,
+    limit: int,
+) -> str:
+    diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
+    reader_current = 'aria-current="page"' if active == "reader" else ""
+    diagnostics_class = (
+        "reader-tab is-active"
+        if active == "diagnostics"
+        else "reader-tab"
+    )
+    reader_class = (
+        "reader-tab is-active"
+        if active == "reader"
+        else "reader-tab"
+    )
+    diagnostics_href = (
+        f"/admin/logs/{run_id}/text-diagnostics?sequence={start_sequence}&limit={limit}"
+    )
+    reader_href = f"/admin/logs/{run_id}/reader?sequence={start_sequence}&limit={limit}"
+    return f"""
+    <nav class="reader-tabs" aria-label="Raw text views">
+      <a
+        class="{diagnostics_class}"
+        href="{escape(diagnostics_href)}"
+        {diagnostics_current}
+      >
+        Diagnostics
+      </a>
+      <a
+        class="{reader_class}"
+        href="{escape(reader_href)}"
+        {reader_current}
+      >
+        Reader
+      </a>
+    </nav>
+    """
+
+
+def _translation_reader_blocks(
+    rows: tuple[dict[str, object], ...],
+    *,
+    text_key: str,
+) -> str:
+    if not rows:
+        return '<p class="reader-empty">No work units found.</p>'
+    return "\n".join(
+        _translation_reader_block(row, text_key=text_key)
+        for row in rows
+    )
+
+
+def _translation_reader_block(row: dict[str, object], *, text_key: str) -> str:
+    sequence = escape(str(row.get("sequence") or 0))
+    status = escape(str(row.get("status") or "unknown"))
+    block_label = escape(_translation_source_block_label(row))
+    text = str(row.get(text_key) or "")
+    if not text:
+        text = "[empty]"
+    return f"""
+    <article class="reader-block" data-reader-sequence="{sequence}">
+      <header>
+        <span>#{sequence}</span>
+        <span class="status">{status}</span>
+        <span>Blocks {block_label}</span>
+      </header>
+      <div class="reader-text">{escape(text)}</div>
+    </article>
+    """
+
+
+def _reader_sync_script() -> str:
+    return """
+    <script>
+      (() => {
+        const panes = Array.from(
+          document.querySelectorAll("[data-reader-sync-pane]")
+        );
+        if (panes.length < 2) return;
+        let syncing = false;
+        const scrollRatio = (pane) => {
+          const maxScroll = pane.scrollHeight - pane.clientHeight;
+          return maxScroll > 0 ? pane.scrollTop / maxScroll : 0;
+        };
+        panes.forEach((pane) => {
+          pane.addEventListener("scroll", () => {
+            if (syncing) return;
+            syncing = true;
+            const ratio = scrollRatio(pane);
+            panes.forEach((other) => {
+              if (other === pane) return;
+              const maxScroll = other.scrollHeight - other.clientHeight;
+              other.scrollTop = ratio * Math.max(0, maxScroll);
+            });
+            window.requestAnimationFrame(() => {
+              syncing = false;
+            });
+          }, { passive: true });
+        });
+      })();
+    </script>
+    """
+
+
 def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
-    blocks = row.get("source_block_ids")
-    if isinstance(blocks, (list, tuple)):
-        block_label = ", ".join(str(item) for item in blocks) or "n/a"
-    else:
-        block_label = str(blocks or "n/a")
+    block_label = _translation_source_block_label(row)
     notes = []
     last_error = row.get("last_error")
     if last_error:
@@ -3286,6 +3477,13 @@ def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
       <td><pre class="detail-json raw-text-cell">{translated_text}</pre></td>
     </tr>
     """
+
+
+def _translation_source_block_label(row: dict[str, object]) -> str:
+    blocks = row.get("source_block_ids")
+    if isinstance(blocks, (list, tuple)):
+        return ", ".join(str(item) for item in blocks) or "n/a"
+    return str(blocks or "n/a")
 
 
 def translation_trace_body(trace: TranslationTrace) -> str:
@@ -4093,6 +4291,12 @@ def _log_row(row: TranslationRunSummary) -> str:
         "view",
         compact=True,
     )
+    reader_link = _action_link(
+        "Reader",
+        f"/admin/logs/{run_id}/reader",
+        "view",
+        compact=True,
+    )
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -4109,6 +4313,7 @@ def _log_row(row: TranslationRunSummary) -> str:
       <td>
         {trace_link}
         {details_link}
+        {reader_link}
       </td>
     </tr>
     """
@@ -4532,6 +4737,91 @@ header {
 .raw-text-table td:nth-child(4),
 .raw-text-table td:nth-child(5) {
   min-width: 280px;
+}
+.reader-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader-tab {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text);
+  background: #ffffff;
+  font-weight: 800;
+  text-decoration: none;
+}
+.reader-tab.is-active {
+  color: #ffffff;
+  background: #1f2937;
+  border-color: #1f2937;
+}
+.reader-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.reader-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: min(72vh, 760px);
+}
+.reader-pane {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--line);
+}
+.reader-pane:last-child {
+  border-right: 0;
+}
+.reader-pane-heading {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+.reader-pane-heading h4 {
+  margin: 0;
+}
+.reader-scroll {
+  min-height: 0;
+  max-height: min(72vh, 760px);
+  overflow: auto;
+  padding: 16px;
+  scroll-behavior: auto;
+}
+.reader-block {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 18px;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.reader-block:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.reader-block header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.reader-text {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reader-empty {
+  margin: 0;
+  color: var(--muted);
 }
 .toolbar-panel {
   display: flex;
@@ -5196,6 +5486,20 @@ button.danger {
   }
   .trace-rail {
     position: static;
+  }
+  .reader-compare {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .reader-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .reader-pane:last-child {
+    border-bottom: 0;
+  }
+  .reader-scroll {
+    max-height: 56vh;
   }
   .incident-state-row {
     grid-template-columns: 1fr;
