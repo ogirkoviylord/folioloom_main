@@ -1331,6 +1331,21 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#254](https://github.com/ogirkoviylord/folioloom_main/issues/254)
+  adds a metadata-only current-window block outline to the owner-only
+  Translation Reader on branch `codex/issue-254-reader-block-outline`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #255 passed.
+- Follow-up: this slice does not add raw snippets to the outline,
+  public/user-facing reader access, editing, persisted review state, auth/RBAC
+  changes, runtime data access, dependencies, deployment or release-readiness
+  claims.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#252](https://github.com/ogirkoviylord/folioloom_main/issues/252)
   adds clickable owner-only Translation Reader QA/Layout metric filters on
   branch `codex/issue-252-reader-qa-metric-links`.
