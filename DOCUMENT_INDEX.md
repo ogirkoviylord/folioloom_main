@@ -65,7 +65,8 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 - `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md` -
   active owner-approved internal/dev design direction for a local before-after
   reader over TXT/DOCX/EPUB adapter blocks, with issue/PR status for the first
-  TXT/generic/DOCX/EPUB slices. First scope is local QA on
+  TXT/generic/DOCX/EPUB slices, including the DOCX structure preview in issue
+  #195. First scope is local QA on
   synthetic/test/public-domain/permissive or owner-approved files, not a
   user-facing reader, publisher workspace, admin route or production-readiness
   claim.

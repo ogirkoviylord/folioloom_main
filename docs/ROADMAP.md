@@ -558,7 +558,8 @@ Acceptance criteria:
   EPUB sandboxed XHTML preview slice is locally verified on branch
   `codex/issue-191-epub-xhtml-preview`; issue #193 EPUB preview resource
   inlining slice is locally verified on branch
-  `codex/issue-193-epub-preview-resources`.
+  `codex/issue-193-epub-preview-resources`; issue #195 DOCX structure preview
+  slice is locally verified on branch `codex/issue-195-docx-structure-preview`.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:
@@ -575,12 +576,14 @@ Acceptance criteria:
   [#191](https://github.com/ogirkoviylord/folioloom_main/issues/191) for the
   sandboxed EPUB XHTML chapter preview inside the local report,
   [#193](https://github.com/ogirkoviylord/folioloom_main/issues/193) for
-  local CSS and safe raster image inlining inside the preview panes.
+  local CSS and safe raster image inlining inside the preview panes,
+  [#195](https://github.com/ogirkoviylord/folioloom_main/issues/195) for the
+  explicit-input DOCX structure preview report.
   DOCX recommendation: keep semantic/block preview as the default for now, use
-  local LibreOffice only as reference/QA on approved fixtures, and require a
-  separate owner-approved prototype/implementation issue before adding
-  `docx-preview`, Mammoth or LibreOffice automation as a dependency/runtime
-  path.
+  the #195 explicit-input structure preview and block report, use local
+  LibreOffice only as reference/QA on approved fixtures, and require a separate
+  owner-approved prototype/implementation issue before adding `docx-preview`,
+  Mammoth or LibreOffice automation as a dependency/runtime path.
   EPUB recommendation: keep semantic/block preview as the default for now,
   use the #189/#191/#193 explicit-input local report, sandboxed XHTML preview
   and limited resource inlining before adding a book-like reader dependency,
