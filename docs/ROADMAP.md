@@ -538,6 +538,19 @@ Acceptance criteria:
   restart; cancel produces safe state and available partial result where
   expected.
 
+- Task: Let users download available fragments from crashed translations.
+  Phase: 1
+  Priority: High
+  Risk: High
+  Agent suitability: needs architect and review
+  Suggested acceptance criteria: when a persistent job fails or is interrupted
+  after translating some work units, Telegram/My Books can offer a clearly
+  labeled partial/crashed-result download only if safe assembly is possible;
+  the user-facing copy explains that the file is incomplete; beta-safety
+  accounting is not treated as paid billing; source/intermediate/final storage,
+  retry/resume state, duplicate-upload behavior and raw-text/admin redaction
+  boundaries remain unchanged unless separately approved and tested.
+
 - Task: Execute real-file TXT/DOCX/EPUB matrix.
   Phase: 3
   Priority: High
