@@ -1,7 +1,7 @@
 # Internal Before/After Reader Design
 
-Status: Approved internal/dev design direction; issues #181-#184, #189 and
-#191 are open as a stacked PR sequence.
+Status: Approved internal/dev design direction; issues #181-#184, #189, #191
+and #193 are open as a stacked PR sequence.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
 internal/dev-only slice.
 
@@ -59,6 +59,12 @@ source and adapter-assembled translated XHTML/HTML chapter files in side-by-side
 `iframe srcdoc` panes while keeping the semantic block report below. It still
 does not implement an EPUB reading system, external resource bundling or full
 book-like fidelity.
+
+Issue [#193](https://github.com/ogirkoviylord/folioloom_main/issues/193)
+adds limited local resource inlining for that sandboxed preview: linked CSS and
+safe raster images are embedded into the `srcdoc` output so approved fixtures
+look closer to their EPUB XHTML presentation. SVG, remote resources, fonts,
+media overlays, pagination and fixed-layout support remain out of scope.
 
 This status does not add an admin or public route, does not authorize live
 runtime `var/` reads, does not add a production dependency and does not claim
