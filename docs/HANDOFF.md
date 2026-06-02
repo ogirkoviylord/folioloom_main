@@ -626,6 +626,20 @@ Owner decisions recorded during issue #71:
   work-unit window and do not add semantic quality scoring, whole-book
   aggregation, saved metrics, annotations, public/user-facing access, live
   runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#226](https://github.com/ogirkoviylord/folioloom_main/issues/226) starts the
+  first paragraph-structure diagnostics slice on branch
+  `codex/issue-226-reader-paragraph-diagnostics`, stacked after #224. The slice
+  adds source/translation line counts, blank-line counts, a
+  `paragraph_mismatch` QA flag/filter and a Reader QA summary count for visible
+  work units whose source and translation are both non-empty but differ in
+  line/blank-line structure. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. The
+  metrics stay current-window-only and do not add DOCX style extraction, EPUB
+  CSS/layout reconstruction, semantic quality scoring, whole-book aggregation,
+  public/user-facing access, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

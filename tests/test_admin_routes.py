@@ -2328,7 +2328,11 @@ class AdminRoutesTest(unittest.TestCase):
                 assert claimed is not None
                 store.complete_work_unit(
                     claimed.id,
-                    translated_text=" ".join(["very long translated expansion"] * 10),
+                    translated_text=(
+                        " ".join(["very long translated expansion"] * 5)
+                        + "\n"
+                        + " ".join(["very long translated expansion"] * 5)
+                    ),
                     prompt_tokens=6,
                     completion_tokens=80,
                     cache_hit_tokens=0,
@@ -2417,6 +2421,15 @@ class AdminRoutesTest(unittest.TestCase):
                 "?qa=length_mismatch&q=Tiny&show_invisibles=1&sync=0"
                 "&indent_preview=1"
             )
+            reader_paragraph_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=paragraph_mismatch&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
+            diagnostics_paragraph_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?qa=paragraph_mismatch&q=Tiny&show_invisibles=1"
+            )
             reader_empty_filter = client.get(
                 f"/admin/logs/{logger.run_dir.name}/reader?qa=empty_source"
             )
@@ -2476,6 +2489,11 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Source chars", diagnostics.text)
         self.assertIn("Translation chars", diagnostics.text)
         self.assertIn("T/S ratio", diagnostics.text)
+        self.assertIn("Source lines", diagnostics.text)
+        self.assertIn("Translation lines", diagnostics.text)
+        self.assertIn("Source blank lines", diagnostics.text)
+        self.assertIn("Translation blank lines", diagnostics.text)
+        self.assertIn("Paragraph/line break mismatch", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2528,6 +2546,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Source chars", diagnostics_missing.text)
         self.assertIn("Translation chars 0", diagnostics_missing.text)
         self.assertIn("T/S ratio 0.00", diagnostics_missing.text)
+        self.assertIn("Translation lines 0", diagnostics_missing.text)
         self.assertNotIn("Private source paragraph", diagnostics_missing.text)
         self.assertNotIn("Tiny source", diagnostics_missing.text)
         self.assertEqual(diagnostics_indent_filter.status_code, 200)
@@ -2558,6 +2577,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Window units", reader.text)
         self.assertIn("Missing translation", reader.text)
         self.assertIn("Length mismatch", reader.text)
+        self.assertIn("Paragraph mismatch", reader.text)
         self.assertIn("Indent preview", reader.text)
         self.assertIn("Preview indents", reader.text)
         self.assertIn("Source literal indents", reader.text)
@@ -2568,12 +2588,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('title="Sequence 2: translated; Missing translation"', reader.text)
         self.assertIn("reader-qa-flag-missing_translation", reader.text)
         self.assertIn("reader-qa-flag-length_mismatch", reader.text)
+        self.assertIn("reader-qa-flag-paragraph_mismatch", reader.text)
         self.assertIn("reader-qa-flag-literal_source_indent", reader.text)
         self.assertIn("reader-qa-flag-literal_translation_indent", reader.text)
         self.assertIn("reader-block-metrics", reader.text)
         self.assertIn("Source chars", reader.text)
         self.assertIn("Translation chars", reader.text)
         self.assertIn("T/S ratio", reader.text)
+        self.assertIn("Source lines", reader.text)
+        self.assertIn("Translation lines", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)
@@ -2637,6 +2660,47 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("T/S ratio", reader_length_filter.text)
         self.assertNotIn("Private source paragraph", reader_length_filter.text)
         self.assertNotIn("Paragraph waiting for translation", reader_length_filter.text)
+        self.assertEqual(reader_paragraph_filter.status_code, 200)
+        self.assertIn(
+            '<option value="paragraph_mismatch" selected>Paragraph mismatch</option>',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn("qa=paragraph_mismatch", reader_paragraph_filter.text)
+        self.assertIn("q=Tiny", reader_paragraph_filter.text)
+        self.assertIn("show_invisibles=1", reader_paragraph_filter.text)
+        self.assertIn("sync=0", reader_paragraph_filter.text)
+        self.assertIn("indent_preview=1", reader_paragraph_filter.text)
+        self.assertIn("Tiny", reader_paragraph_filter.text)
+        self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
+        self.assertIn("Source lines 1", reader_paragraph_filter.text)
+        self.assertIn("Translation lines 2", reader_paragraph_filter.text)
+        self.assertIn("Source blank lines 0", reader_paragraph_filter.text)
+        self.assertIn("Translation blank lines 0", reader_paragraph_filter.text)
+        self.assertNotIn("Private source paragraph", reader_paragraph_filter.text)
+        self.assertNotIn(
+            "Paragraph waiting for translation",
+            reader_paragraph_filter.text,
+        )
+        self.assertEqual(diagnostics_paragraph_filter.status_code, 200)
+        self.assertIn(
+            '<option value="paragraph_mismatch" selected>Paragraph mismatch</option>',
+            diagnostics_paragraph_filter.text,
+        )
+        self.assertIn("qa=paragraph_mismatch", diagnostics_paragraph_filter.text)
+        self.assertIn("q=Tiny", diagnostics_paragraph_filter.text)
+        self.assertIn("show_invisibles=1", diagnostics_paragraph_filter.text)
+        self.assertIn("Tiny", diagnostics_paragraph_filter.text)
+        self.assertIn(
+            "Paragraph/line break mismatch",
+            diagnostics_paragraph_filter.text,
+        )
+        self.assertIn("Source lines 1", diagnostics_paragraph_filter.text)
+        self.assertIn("Translation lines 2", diagnostics_paragraph_filter.text)
+        self.assertNotIn("Private source paragraph", diagnostics_paragraph_filter.text)
+        self.assertNotIn(
+            "Paragraph waiting for translation",
+            diagnostics_paragraph_filter.text,
+        )
         self.assertEqual(reader_empty_filter.status_code, 200)
         self.assertIn(
             '<option value="empty_source" selected>Empty source</option>',
@@ -2658,6 +2722,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Paragraph waiting for translation", archive_text)
         self.assertNotIn("very long translated expansion", archive_text)
         self.assertNotIn("Source chars", archive_text)
+        self.assertNotIn("Source lines", archive_text)
+        self.assertNotIn("Paragraph/line break mismatch", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
