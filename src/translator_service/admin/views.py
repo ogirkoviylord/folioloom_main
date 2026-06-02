@@ -3551,7 +3551,6 @@ def translation_reader_body(
     {search_nav}
     {layout_panel}
     {review_panel}
-    {outline}
     {qa_issue_nav}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
@@ -3581,6 +3580,7 @@ def translation_reader_body(
         </article>
       </div>
     </section>
+    {outline}
     {minimap}
     {sync_script}
     {keyboard_script}
@@ -4726,15 +4726,15 @@ def _translation_reader_outline(rows: tuple[dict[str, object], ...]) -> str:
     else:
         body = "\n".join(_translation_reader_outline_item(row) for row in rows)
     return f"""
-    <nav class="reader-outline" aria-label="Reader block outline">
-      <div class="reader-outline-heading">
+    <details class="reader-outline" aria-label="Reader block outline">
+      <summary class="reader-outline-heading">
         <h4>Block outline</h4>
         <span>Visible units: {len(rows)}</span>
-      </div>
+      </summary>
       <div class="reader-outline-list">
         {body}
       </div>
-    </nav>
+    </details>
     """
 
 
@@ -7302,6 +7302,7 @@ header {
   gap: 8px;
   flex-wrap: wrap;
   margin: 0 0 8px;
+  cursor: pointer;
 }
 .reader-outline-heading h4 {
   margin: 0;
