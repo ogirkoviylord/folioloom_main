@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
 from translator_service.format_adapters.contracts import FormatAdapterPlan
+from translator_service.format_adapters.docx import plan_docx_translation
 from translator_service.format_adapters.epub import (
     assemble_epub_content_from_block_translations,
     plan_epub_translation,
@@ -189,6 +190,26 @@ def build_epub_reader_document(
     )
 
 
+def build_docx_reader_document(
+    *,
+    content: bytes,
+    translated_by_block_id: Mapping[str, str] | None = None,
+    source_name: str = "Document",
+    max_fragment_chars: int = 5_000,
+    generated_at: datetime | None = None,
+) -> ReaderDocument:
+    plan = plan_docx_translation(
+        content=content,
+        max_fragment_chars=max_fragment_chars,
+    )
+    return build_reader_document(
+        plan=plan,
+        translated_by_block_id=translated_by_block_id,
+        source_name=source_name,
+        generated_at=generated_at,
+    )
+
+
 def build_epub_chapter_previews(
     *,
     content: bytes,
@@ -287,6 +308,99 @@ def render_epub_reader_html(
     )
 
 
+def render_docx_reader_html(document: ReaderDocument) -> str:
+    structure_html = "\n".join(
+        _render_docx_structure_section(section) for section in document.sections
+    )
+    block_report_html = "\n".join(
+        _render_section(section) for section in document.sections
+    )
+    return _render_reader_page(
+        document=document,
+        body_html=f"""    <section class="docx-structure-preview">
+      <h2>DOCX structure preview</h2>
+{structure_html}
+    </section>
+    <section class="block-report">
+      <h2>Block report</h2>
+{block_report_html}
+    </section>""",
+        extra_css="""
+    .docx-structure-preview {
+      margin-bottom: 22px;
+    }
+    .docx-structure-section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 0 0 16px;
+      overflow: hidden;
+    }
+    .docx-section-head {
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      padding: 8px 10px;
+    }
+    .docx-structure-item + .docx-structure-item {
+      border-top: 1px solid var(--line);
+    }
+    .docx-structure-meta {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      font-size: 12px;
+      gap: 8px 12px;
+      padding: 8px 10px 0;
+    }
+    .docx-preview-pane {
+      padding: 10px;
+    }
+    .docx-preview-pane + .docx-preview-pane {
+      border-left: 1px solid var(--line);
+    }
+    .docx-paragraph {
+      margin: 0 0 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .docx-heading {
+      font-size: 18px;
+      font-weight: 650;
+    }
+    .docx-list-item {
+      padding-left: 18px;
+      position: relative;
+    }
+    .docx-list-item::before {
+      content: "*";
+      left: 4px;
+      position: absolute;
+    }
+    .docx-table-like {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .docx-table-row {
+      padding: 7px 8px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .docx-table-row + .docx-table-row {
+      border-top: 1px solid var(--line);
+    }
+    @media (max-width: 760px) {
+      .docx-preview-pane + .docx-preview-pane {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+""",
+    )
+
+
 def _render_reader_page(
     *,
     document: ReaderDocument,
@@ -309,6 +423,7 @@ def _render_reader_page(
       --line: #d8dedf;
       --done: #0f6b4f;
       --missing: #9a5b00;
+      --mixed: #5a5f69;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -354,6 +469,7 @@ def _render_reader_page(
     }}
     .status-done {{ color: var(--done); font-weight: 650; }}
     .status-missing {{ color: var(--missing); font-weight: 650; }}
+    .status-mixed {{ color: var(--mixed); font-weight: 650; }}
     .columns {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -469,6 +585,24 @@ def generate_epub_reader_html_from_path(
     )
 
 
+def generate_docx_reader_html_from_path(
+    *,
+    source_path: Path,
+    translated_by_block_id: Mapping[str, str] | None = None,
+    max_fragment_chars: int = 5_000,
+    generated_at: datetime | None = None,
+) -> str:
+    reject_runtime_var_path(source_path)
+    document = build_docx_reader_document(
+        content=source_path.read_bytes(),
+        translated_by_block_id=translated_by_block_id,
+        source_name=source_path.name,
+        max_fragment_chars=max_fragment_chars,
+        generated_at=generated_at,
+    )
+    return render_docx_reader_html(document)
+
+
 def _render_epub_chapter_preview(preview: EpubChapterPreview) -> str:
     file_name = _escape(preview.file_name)
     source_srcdoc = _escape(preview.source_xhtml)
@@ -496,6 +630,129 @@ def _render_epub_chapter_preview(preview: EpubChapterPreview) -> str:
           </div>
         </div>
       </article>"""
+
+
+def _render_docx_structure_section(section: ReaderSection) -> str:
+    items_html = "\n".join(
+        _render_docx_structure_item(blocks)
+        for blocks in _docx_structure_block_groups(section.blocks)
+    )
+    return f"""      <article class="docx-structure-section">
+        <div class="docx-section-head">{_escape(section.title)}</div>
+{items_html}
+      </article>"""
+
+
+def _docx_structure_block_groups(
+    blocks: tuple[ReaderBlock, ...],
+) -> tuple[tuple[ReaderBlock, ...], ...]:
+    groups: list[tuple[ReaderBlock, ...]] = []
+    index = 0
+    while index < len(blocks):
+        block = blocks[index]
+        if block.kind in {"list", "table"} and block.group_id:
+            end = index + 1
+            while (
+                end < len(blocks)
+                and blocks[end].kind == block.kind
+                and blocks[end].group_id == block.group_id
+            ):
+                end += 1
+            groups.append(tuple(blocks[index:end]))
+            index = end
+            continue
+        groups.append((block,))
+        index += 1
+    return tuple(groups)
+
+
+def _render_docx_structure_item(blocks: tuple[ReaderBlock, ...]) -> str:
+    first = blocks[0]
+    block_ids = ", ".join(block.source_block_id for block in blocks)
+    sequence_label = (
+        f"#{first.sequence}"
+        if len(blocks) == 1
+        else f"#{first.sequence}-#{blocks[-1].sequence}"
+    )
+    group_label = (
+        f"<span>group_id: {_escape(first.group_id)}</span>" if first.group_id else ""
+    )
+    status = _docx_structure_status(blocks)
+    escaped_block_ids = _escape(block_ids)
+    return f"""        <div class="docx-structure-item"
+          data-source-block-id="{escaped_block_ids}">
+          <div class="docx-structure-meta">
+            <span>{_escape(sequence_label)}</span>
+            <span>{_escape(first.kind)}</span>
+            {group_label}
+            <span class="status-{_escape(status)}">{_escape(status)}</span>
+          </div>
+          <div class="columns">
+            <div class="docx-preview-pane">
+              <div class="pane-title">Source</div>
+{_render_docx_structure_content(blocks=blocks, translated=False)}
+            </div>
+            <div class="docx-preview-pane">
+              <div class="pane-title">Translation</div>
+{_render_docx_structure_content(blocks=blocks, translated=True)}
+            </div>
+          </div>
+        </div>"""
+
+
+def _docx_structure_status(blocks: tuple[ReaderBlock, ...]) -> str:
+    statuses = {block.status for block in blocks}
+    if statuses == {READER_STATUS_DONE}:
+        return READER_STATUS_DONE
+    if statuses == {READER_STATUS_MISSING}:
+        return READER_STATUS_MISSING
+    return "mixed"
+
+
+def _render_docx_structure_content(
+    *,
+    blocks: tuple[ReaderBlock, ...],
+    translated: bool,
+) -> str:
+    kind = blocks[0].kind
+    if kind == "table":
+        rows = "\n".join(
+            "                "
+            f'<div class="docx-table-row">'
+            f"{_escape(_docx_preview_text(block, translated=translated))}</div>"
+            for block in blocks
+        )
+        return f"""              <div class="docx-table-like">
+{rows}
+              </div>"""
+
+    paragraphs = "\n".join(
+        _render_docx_paragraph_preview(block=block, translated=translated)
+        for block in blocks
+    )
+    return f"""              <div class="docx-flow">
+{paragraphs}
+              </div>"""
+
+
+def _render_docx_paragraph_preview(*, block: ReaderBlock, translated: bool) -> str:
+    classes = ["docx-paragraph"]
+    if block.kind == "heading":
+        classes.append("docx-heading")
+    if block.kind == "list":
+        classes.append("docx-list-item")
+    return (
+        f'                <div class="{" ".join(classes)}">'
+        f"{_escape(_docx_preview_text(block, translated=translated))}</div>"
+    )
+
+
+def _docx_preview_text(block: ReaderBlock, *, translated: bool) -> str:
+    if not translated:
+        return block.source_text
+    if block.translated_text is not None:
+        return block.translated_text
+    return "[missing translation]"
 
 
 def _render_section(section: ReaderSection) -> str:
