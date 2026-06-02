@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
-import re
-from typing import Pattern
+from re import Pattern
 
 
 class ModelOutputSafetyReason(StrEnum):
@@ -83,8 +83,15 @@ _TOOL_EXECUTION_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE | re.DOTALL)
     for pattern in (
         r"\b(?:i\s+)?(?:executed|ran|opened|accessed)\b.{0,120}"
-        r"\b(?:shell|command|url|link|file|terminal|browser)\b",
+        r"\b(?:shell|command|url|link|terminal|browser)\b",
+        r"\b(?:tool call|function call)\b.{0,120}"
+        r"\b(?:completed|executed|ran|opened|accessed|read)\b",
+        r"\b(?:i\s+)?(?:opened|accessed|read)\b.{0,80}https?://",
+        r"\b(?:i\s+)?(?:opened|accessed)\b.{0,80}"
+        r"\b(?:file|path)\b.{0,80}\b(?:/[\w./-]+|[a-z]:\\|file://)\b",
         r"(?:я\s+)?(?:выполнил|исполнил|запустил|открыл).{0,120}"
-        r"(?:команд|код|оболоч|shell|url|ссылк|файл|терминал|браузер)",
+        r"(?:команд|код|оболоч|shell|url|ссылк|терминал|браузер)",
+        r"(?:я\s+)?(?:открыл|открыла|открыло|открыли).{0,80}"
+        r"(?:файл|путь).{0,80}(?:/[\w./-]+|[a-z]:\\|file://)",
     )
 )
