@@ -2386,6 +2386,29 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Pane</span><strong>translation focus</strong>", reader.text)
         self.assertIn('name="qa" value="issues"', reader.text)
         self.assertIn("qa=issues", reader.text)
+        self.assertIn("reader-qa-filter-metric is-active", reader.text)
+        self.assertIn('aria-current="page"', reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=issues"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=missing_translation"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=indent"',
+            reader.text,
+        )
         self.assertIn("Needs", reader.text)
         self.assertIn("translation.", reader.text)
         self.assertIn("Indented", reader.text)
@@ -2825,9 +2848,36 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Reader QA summary", reader.text)
         self.assertIn("Reader layout diagnostics", reader.text)
         self.assertIn("Window units", reader.text)
+        self.assertIn("All issues", reader.text)
         self.assertIn("Missing translation", reader.text)
         self.assertIn("Length mismatch", reader.text)
         self.assertIn("Paragraph mismatch", reader.text)
+        self.assertIn("reader-qa-filter-metric", reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=issues"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=missing_translation"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=empty_source"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=length_mismatch"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=paragraph_mismatch"',
+            reader.text,
+        )
         self.assertIn("reader-qa-issue-nav", reader.text)
         self.assertIn("QA issues", reader.text)
         self.assertIn("data-reader-qa-step-controls", reader.text)
@@ -2866,6 +2916,11 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Translation literal indents", reader.text)
         self.assertIn("Style metadata", reader.text)
         self.assertIn("Unknown", reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=indent"',
+            reader.text,
+        )
         self.assertIn("reader-minimap", reader.text)
         self.assertIn(
             'title="Sequence 1: translated; Translation literal indent"',
@@ -3070,6 +3125,20 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Tiny", reader_paragraph_filter.text)
         self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
+        self.assertIn("reader-qa-filter-metric is-active", reader_paragraph_filter.text)
+        self.assertIn('aria-current="page"', reader_paragraph_filter.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            '&amp;q=Tiny&amp;indent_preview=1&amp;qa=paragraph_mismatch"',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            '&amp;q=Tiny&amp;indent_preview=1&amp;qa=missing_translation"',
+            reader_paragraph_filter.text,
+        )
         self.assertIn('href="#reader-original-3"', reader_paragraph_filter.text)
         self.assertNotIn('href="#reader-original-2"', reader_paragraph_filter.text)
         self.assertIn("data-reader-qa-step-controls", reader_paragraph_filter.text)
