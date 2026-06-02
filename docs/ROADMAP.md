@@ -683,6 +683,13 @@ Acceptance criteria:
   `codex/issue-250-reader-scroll-drift`: harden synced pane scrolling so
   programmatic scroll events do not feed back into the pane the owner is
   actively scrolling.
+  Issue
+  [#252](https://github.com/ogirkoviylord/folioloom_main/issues/252) begins the
+  Reader QA/Layout metric filter-link slice on branch
+  `codex/issue-252-reader-qa-metric-links`: make existing current-window
+  Reader QA/Layout metric cards navigate to the matching Reader filters while
+  preserving search, pane, special-character, sync, indent-preview and
+  pagination context.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
