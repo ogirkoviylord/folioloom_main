@@ -1331,6 +1331,31 @@ Potential issues to verify:
 
 - Date: 2026-06-02.
 - Change: Issue
+  [#268](https://github.com/ogirkoviylord/folioloom_main/issues/268)
+  persists owner-only Translation Reader review marks on branch
+  `codex/issue-268-reader-persisted-marks`. The browser submits only
+  `sequence` and mark state; the admin route resolves the selected work unit
+  server-side and stores the marked original/source text, translated text,
+  status and source block ids in run-scoped `reader_review_marks.json`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed. Visible
+  GitHub Python checks for PR
+  [#269](https://github.com/ogirkoviylord/folioloom_main/pull/269) passed.
+- Follow-up: `reader_review_marks.json` is an owner-only raw diagnostic sidecar
+  and is excluded from normal details/API/download archive surfaces by test.
+  This slice does not add notes/comments, export reports, cross-run review
+  state, database storage, public/user-facing reader access, publisher
+  workspace, auth/RBAC changes, dependencies, deploy, or release readiness.
+- Owner direction update: the earlier stop-after-#266 Reader ergonomics
+  direction remains the default for broad Reader feature creep, but the owner
+  explicitly resumed one narrow persistence slice for marked fragments and
+  clarified that both original/source and translated text must be saved for
+  marked items.
+
+- Date: 2026-06-02.
+- Change: Issue
   [#266](https://github.com/ogirkoviylord/folioloom_main/issues/266)
   adds current-page keyboard shortcuts for temporary Reader review marks on
   branch `codex/issue-266-reader-review-hotkeys`.

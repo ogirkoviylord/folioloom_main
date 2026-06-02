@@ -2670,6 +2670,39 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/reader?qa=unknown"
             )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+            save_mark = client.post(
+                f"/admin/logs/{logger.run_dir.name}/reader/review-mark",
+                data={
+                    "csrf_token": _csrf_token(reader.text),
+                    "sequence": "1",
+                    "mark": "needs_review",
+                },
+            )
+            review_marks_path = Path(logger.run_dir) / "reader_review_marks.json"
+            review_marks_document = json.loads(
+                review_marks_path.read_text(encoding="utf-8")
+            )
+            reader_with_saved_mark = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+            )
+            details_after_mark = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api_after_mark = client.get(
+                f"/admin/api/logs/{logger.run_dir.name}"
+            )
+            download_after_mark = client.get(
+                f"/admin/logs/{logger.run_dir.name}/download"
+            )
+            clear_mark = client.post(
+                f"/admin/logs/{logger.run_dir.name}/reader/review-mark",
+                data={
+                    "csrf_token": _csrf_token(reader_with_saved_mark.text),
+                    "sequence": "1",
+                    "mark": "clear",
+                },
+            )
+            review_marks_after_clear = json.loads(
+                review_marks_path.read_text(encoding="utf-8")
+            )
 
         self.assertEqual(logs.status_code, 200)
         self.assertIn("Reader", logs.text)
@@ -2954,6 +2987,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Review mark: none", reader.text)
         self.assertIn("data-reader-review-navigation", reader.text)
         self.assertIn("data-reader-review-panel", reader.text)
+        self.assertIn("data-reader-review-save-url", reader.text)
+        self.assertIn("data-reader-review-csrf", reader.text)
+        self.assertIn("data-reader-review-save-status", reader.text)
+        self.assertIn(
+            "Review marks save with marked original and translation text.",
+            reader.text,
+        )
         self.assertIn("Reader review marks", reader.text)
         self.assertIn("Review marks", reader.text)
         self.assertIn("data-reader-review-shortcuts", reader.text)
@@ -2987,6 +3027,18 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("setReviewMark", reader.text)
         self.assertIn("updateReviewCounts", reader.text)
         self.assertIn("applyReviewFilter", reader.text)
+        self.assertIn("savedReviewMarks", reader.text)
+        self.assertIn("persistReviewMark", reader.text)
+        self.assertIn("applyReviewMark", reader.text)
+        self.assertIn("URLSearchParams", reader.text)
+        self.assertIn("fetch(reviewSaveUrl", reader.text)
+        self.assertIn('body.set("sequence", sequence)', reader.text)
+        self.assertIn('body.set("mark", requestedMark)', reader.text)
+        self.assertIn(
+            "Review mark saved with original and translation text.",
+            reader.text,
+        )
+        self.assertIn("Review mark save failed.", reader.text)
         self.assertIn("reviewShortcutMarks", reader.text)
         self.assertIn('"1": "needs_review"', reader.text)
         self.assertIn('"2": "ok"', reader.text)
@@ -3300,6 +3352,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-review-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-review-step", reader_empty_filter.text)
         self.assertNotIn("data-reader-review-shortcuts", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-save-url", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
         self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
@@ -3337,6 +3390,54 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("data-reader-review-step-controls", archive_text)
         self.assertNotIn("data-reader-review-step", archive_text)
         self.assertNotIn("data-reader-review-shortcuts", archive_text)
+        self.assertEqual(save_mark.status_code, 200)
+        self.assertTrue(save_mark.json()["ok"])
+        self.assertEqual(save_mark.json()["marks"], {"1": "needs_review"})
+        self.assertTrue(review_marks_document["contains_raw_text"])
+        self.assertEqual(review_marks_document["version"], 1)
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["mark"],
+            "needs_review",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["source_text"],
+            "Private source paragraph\tA\nNext\xa0line \u200b<script>alert(1)</script>",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["translated_text"],
+            "  Приватний перекладений абзац\tA\n"
+            "Наступний\xa0рядок <img src=x onerror=alert(1)>",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["source_block_ids"],
+            ["block-1"],
+        )
+        self.assertIn(
+            'const savedReviewMarks = {"1": "needs_review"};',
+            reader_with_saved_mark.text,
+        )
+        self.assertEqual(details_after_mark.status_code, 200)
+        self.assertNotIn("reader_review_marks.json", details_after_mark.text)
+        self.assertEqual(details_api_after_mark.status_code, 200)
+        details_after_mark_text = json.dumps(
+            details_api_after_mark.json(),
+            ensure_ascii=False,
+        )
+        self.assertNotIn("reader_review_marks", details_after_mark_text)
+        self.assertNotIn("Private source paragraph", details_after_mark_text)
+        self.assertEqual(download_after_mark.status_code, 200)
+        with ZipFile(BytesIO(download_after_mark.content)) as archive:
+            marked_archive_names = archive.namelist()
+            marked_archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in marked_archive_names
+            )
+        self.assertNotIn("reader_review_marks.json", marked_archive_names)
+        self.assertNotIn("Private source paragraph", marked_archive_text)
+        self.assertNotIn("Приватний перекладений абзац", marked_archive_text)
+        self.assertEqual(clear_mark.status_code, 200)
+        self.assertEqual(clear_mark.json()["marks"], {})
+        self.assertEqual(review_marks_after_clear["marks"], {})
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
