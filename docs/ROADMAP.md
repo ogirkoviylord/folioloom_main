@@ -671,6 +671,12 @@ Acceptance criteria:
   `codex/issue-246-reader-all-issues-filter`: a shared owner-only `qa=issues`
   filter that keeps current-window rows with any existing QA flag or
   literal-indent layout flag in Reader and Text Diagnostics.
+  Issue
+  [#248](https://github.com/ogirkoviylord/folioloom_main/issues/248) begins the
+  first Reader layout issue navigation slice on branch
+  `codex/issue-248-reader-layout-issue-nav`: existing literal-indent layout
+  flags participate in current-window issue navigation, minimap warning state
+  and block warning styling.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
