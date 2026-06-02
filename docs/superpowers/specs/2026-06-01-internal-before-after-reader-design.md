@@ -1,9 +1,10 @@
 # Internal Before/After Reader Design
 
 Status: Approved internal/dev design direction; issues #181-#184, #189, #191,
-#193, #195 and #197 are open as a stacked PR sequence.
+#193, #195, #197 and #199 cover the current first implementation sequence.
 Owner approval: approved in owner conversation on 2026-06-01 for the first
-internal/dev-only slice.
+internal/dev-only slice; owner approved the narrow owner-only internal UI slice
+on 2026-06-02.
 
 ## Current Implementation Status
 
@@ -81,9 +82,14 @@ extension, while explicit `--format` values still override detection.
 Unknown extensions fail with a clear error asking for a supported explicit
 format.
 
-This status does not add an admin or public route, does not authorize live
-runtime `var/` reads, does not add a production dependency and does not claim
-release readiness.
+Issue [#199](https://github.com/ogirkoviylord/folioloom_main/issues/199)
+adds the approved narrow UI slice: an owner-only internal admin form and preview
+route over the existing renderer for approved local TXT/DOCX/EPUB files and
+optional JSON block translation mappings.
+
+This status does not add a public route, does not authorize live runtime `var/`
+reads, does not add a production dependency, does not change auth/RBAC/security
+and does not claim release readiness.
 
 ## Goal
 
@@ -93,8 +99,9 @@ and result files in several external applications.
 
 The first scope is a local QA tool for synthetic fixtures, repository test
 samples, public-domain/permissive authorized fixtures and explicitly
-owner-approved local files. It is not a user-facing reader, publisher/editor
-workspace, public web UI, production admin feature or legal/privacy policy.
+owner-approved local files. The issue #199 UI is owner-only/internal. It is not
+a user-facing reader, publisher/editor workspace, public web UI, production
+feature or legal/privacy policy.
 
 ## Current Repository Fit
 
@@ -121,7 +128,8 @@ Confirmed format foundations:
 ## Non-Goals
 
 - No live beta/runtime `var/` reads.
-- No admin route or public route in the first slice.
+- No public route.
+- No ordinary runtime `var/` browser.
 - No user-facing Telegram or web reader.
 - No publisher/editor workspace.
 - No payment, pricing, billing, auth/RBAC, deployment, Docker, database/schema,
