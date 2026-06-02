@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
+from tools.internal_reader_report import resolve_source_format
 from translator_service.documents import DocumentFormat
 from translator_service.format_adapters.contracts import (
     FormatAdapterPlan,
@@ -33,6 +34,19 @@ from translator_service.structure_optimizer import PromptTier, TextBlockKind
 
 
 class InternalReaderTest(unittest.TestCase):
+    def test_internal_reader_cli_auto_detects_supported_source_formats(self):
+        self.assertEqual(resolve_source_format(Path("sample.TXT"), "auto"), "txt")
+        self.assertEqual(resolve_source_format(Path("sample.docx"), "auto"), "docx")
+        self.assertEqual(resolve_source_format(Path("sample.EPUB"), "auto"), "epub")
+
+    def test_internal_reader_cli_explicit_format_overrides_extension(self):
+        self.assertEqual(resolve_source_format(Path("sample.bin"), "txt"), "txt")
+        self.assertEqual(resolve_source_format(Path("sample.txt"), "docx"), "docx")
+
+    def test_internal_reader_cli_auto_detection_requires_supported_extension(self):
+        with self.assertRaisesRegex(ValueError, "Cannot auto-detect"):
+            resolve_source_format(Path("sample.bin"), "auto")
+
     def test_builds_txt_reader_document_with_stable_blocks_and_missing_status(self):
         document = build_txt_reader_document(
             content=b"# Title\n\n- First item\nBody text.",
