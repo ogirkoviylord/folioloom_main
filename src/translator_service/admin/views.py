@@ -3449,6 +3449,7 @@ def translation_reader_body(
         qa_filter=qa_filter,
     )
     qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
+    review_panel = _translation_reader_review_panel(visible_rows)
     outline = _translation_reader_outline(visible_rows)
     minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
@@ -3538,6 +3539,7 @@ def translation_reader_body(
     {qa_panel}
     {search_nav}
     {layout_panel}
+    {review_panel}
     {outline}
     {qa_issue_nav}
     <section class="panel warning-panel">
@@ -4380,6 +4382,60 @@ def _translation_reader_review_controls(sequence: str) -> str:
     """
 
 
+def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str:
+    if not rows:
+        return ""
+    button_class = escape(_action_classes("view", True, "reader-review-filter-button"))
+    filter_buttons = "".join(
+        (
+            f'<button type="button" class="{button_class}" '
+            f'data-reader-review-filter="{escape(filter_name)}" '
+            f'aria-pressed="{"true" if filter_name == "all" else "false"}">'
+            f'{escape(label)}</button>'
+        )
+        for filter_name, label in (
+            ("all", "All"),
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+        )
+    )
+    count_chips = "".join(
+        (
+            f'<span class="reader-review-count" '
+            f'data-reader-review-count="{escape(mark)}">'
+            f'<span>{escape(label)}</span><strong>0</strong></span>'
+        )
+        for mark, label in (
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+        )
+    )
+    return f"""
+    <section
+      class="reader-review-panel"
+      aria-label="Reader review marks"
+      data-reader-review-panel
+    >
+      <div class="reader-review-heading">
+        <h4>Review marks</h4>
+        <span
+          class="reader-review-filter-status"
+          data-reader-review-filter-status
+          aria-live="polite"
+        >Review filter: all rows</span>
+      </div>
+      <div class="reader-review-counts">
+        {count_chips}
+      </div>
+      <div class="reader-review-filters" aria-label="Reader review mark filters">
+        {filter_buttons}
+      </div>
+    </section>
+    """
+
+
 def _translation_reader_qa_panel(
     rows: tuple[dict[str, object], ...],
     *,
@@ -4996,6 +5052,14 @@ def _reader_review_mark_script() -> str:
           document.querySelectorAll("[data-reader-review-mark]")
         );
         if (!reviewButtons.length) return;
+        const reviewPanel = document.querySelector("[data-reader-review-panel]");
+        const filterButtons = reviewPanel
+          ? Array.from(reviewPanel.querySelectorAll("[data-reader-review-filter]"))
+          : [];
+        const filterStatus = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-filter-status]")
+          : null;
+        let currentReviewFilter = "all";
         const markLabels = {
           needs_review: "needs review",
           ok: "OK",
@@ -5013,6 +5077,11 @@ def _reader_review_mark_script() -> str:
           if (mark === "ignore") return "is-review-ignore";
           return "";
         };
+        const reviewSequences = () => Array.from(new Set(
+          Array.from(document.querySelectorAll(".reader-block[data-reader-sequence]"))
+            .map((block) => block.getAttribute("data-reader-sequence"))
+            .filter(Boolean)
+        ));
         const matchingBlocks = (sequence) => Array.from(
           document.querySelectorAll(".reader-block")
         ).filter((block) => block.getAttribute("data-reader-sequence") === sequence);
@@ -5024,6 +5093,58 @@ def _reader_review_mark_script() -> str:
         ).filter(
           (control) => control.getAttribute("data-reader-review-sequence") === sequence
         );
+        const currentMarkForSequence = (sequence) => {
+          const markedBlock = matchingBlocks(sequence).find(
+            (block) => block.hasAttribute("data-reader-review-current")
+          );
+          return markedBlock
+            ? markedBlock.getAttribute("data-reader-review-current")
+            : "";
+        };
+        const updateReviewCounts = () => {
+          if (!reviewPanel) return;
+          const counts = {
+            needs_review: 0,
+            ok: 0,
+            ignore: 0,
+          };
+          reviewSequences().forEach((sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            if (Object.prototype.hasOwnProperty.call(counts, mark)) {
+              counts[mark] += 1;
+            }
+          });
+          Object.entries(counts).forEach(([mark, count]) => {
+            const target = reviewPanel.querySelector(
+              `[data-reader-review-count="${mark}"] strong`
+            );
+            if (target) target.textContent = String(count);
+          });
+        };
+        const setFilterHidden = (target, isHidden) => {
+          target.classList.toggle("is-review-filter-hidden", isHidden);
+        };
+        const applyReviewFilter = (filterName) => {
+          currentReviewFilter = filterName || "all";
+          filterButtons.forEach((button) => {
+            const isPressed =
+              button.getAttribute("data-reader-review-filter") === currentReviewFilter;
+            button.setAttribute("aria-pressed", isPressed ? "true" : "false");
+            button.classList.toggle("is-active", isPressed);
+          });
+          if (filterStatus) {
+            filterStatus.textContent = currentReviewFilter === "all"
+              ? "Review filter: all rows"
+              : `Review filter: ${markLabels[currentReviewFilter] || currentReviewFilter}`;
+          }
+          reviewSequences().forEach((sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            const isHidden =
+              currentReviewFilter !== "all" && mark !== currentReviewFilter;
+            matchingBlocks(sequence).forEach((block) => setFilterHidden(block, isHidden));
+            matchingOutlines(sequence).forEach((link) => setFilterHidden(link, isHidden));
+          });
+        };
         const setTargetClasses = (target, mark) => {
           markClasses.forEach((className) => target.classList.remove(className));
           if (!mark) {
@@ -5053,6 +5174,8 @@ def _reader_review_mark_script() -> str:
           matchingBlocks(sequence).forEach((block) => setTargetClasses(block, mark));
           matchingOutlines(sequence).forEach((link) => setTargetClasses(link, mark));
           matchingControls(sequence).forEach((control) => setControlState(control, mark));
+          updateReviewCounts();
+          applyReviewFilter(currentReviewFilter);
         };
         reviewButtons.forEach((button) => {
           button.addEventListener("click", (event) => {
@@ -5063,6 +5186,14 @@ def _reader_review_mark_script() -> str:
             );
           });
         });
+        filterButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            applyReviewFilter(button.getAttribute("data-reader-review-filter"));
+          });
+        });
+        updateReviewCounts();
+        applyReviewFilter("all");
       })();
     </script>
     """
@@ -6835,6 +6966,65 @@ header {
 }
 .reader-qa-issue-nav {
   margin: 12px 0;
+}
+.reader-review-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #ffffff;
+}
+.reader-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader-review-heading h4 {
+  margin: 0;
+}
+.reader-review-filter-status {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+.reader-review-counts,
+.reader-review-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-review-count {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+.reader-review-count strong {
+  color: var(--ink);
+  font-size: inherit;
+}
+.reader-review-filter-button {
+  white-space: nowrap;
+}
+.reader-review-filter-button.is-active,
+.reader-review-filter-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.is-review-filter-hidden {
+  display: none !important;
 }
 .reader-outline {
   margin: 12px 0;
