@@ -3404,11 +3404,37 @@ def translation_reader_body(
         if search_query
         else 0
     )
-    qa_panel = _translation_reader_qa_panel(visible_rows, search_query=search_query)
+    metric_rows = (
+        _translation_filter_rows_by_search(rows, search_query)
+        if search_hits_only and search_query
+        else rows
+    )
+    qa_panel = _translation_reader_qa_panel(
+        metric_rows,
+        run_id=run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
     search_nav = _translation_reader_search_nav(search_match_count)
     layout_panel = _translation_reader_layout_panel(
-        visible_rows,
+        metric_rows,
+        run_id=run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     position_bar = _translation_reader_position_bar(
         rows=visible_rows,
@@ -4319,24 +4345,50 @@ def _translation_reader_block(
 def _translation_reader_qa_panel(
     rows: tuple[dict[str, object], ...],
     *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
     search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
 ) -> str:
     counts = _translation_reader_qa_counts(rows)
+    issue_count = sum(1 for row in rows if _translation_row_issue_flags(row))
     search_matches = (
         _translation_search_match_count(rows, search_query=search_query)
         if search_query
         else 0
     )
+    def filter_href(next_filter: str) -> str:
+        return _translation_raw_text_href(
+            "reader",
+            run_id,
+            sequence=start_sequence,
+            limit=limit,
+            show_invisibles=show_invisibles,
+            sync_scroll=sync_scroll,
+            search_query=search_query,
+            search_hits_only=search_hits_only,
+            pane_mode=pane_mode,
+            indent_preview=indent_preview,
+            qa_filter=next_filter,
+        )
+
     search_metric = ""
     if search_query:
         search_metric = _reader_qa_metric("Search hits", str(search_matches))
     return f"""
     <section class="reader-qa-panel" aria-label="Reader QA summary">
       {_reader_qa_metric("Window units", str(len(rows)))}
-      {_reader_qa_metric("Missing translation", str(counts["missing_translation"]))}
-      {_reader_qa_metric("Empty source", str(counts["empty_source"]))}
-      {_reader_qa_metric("Length mismatch", str(counts["length_mismatch"]))}
-      {_reader_qa_metric("Paragraph mismatch", str(counts["paragraph_mismatch"]))}
+      {_reader_qa_filter_metric("All issues", str(issue_count), filter_href("issues"), is_active=qa_filter == "issues")}
+      {_reader_qa_filter_metric("Missing translation", str(counts["missing_translation"]), filter_href("missing_translation"), is_active=qa_filter == "missing_translation")}
+      {_reader_qa_filter_metric("Empty source", str(counts["empty_source"]), filter_href("empty_source"), is_active=qa_filter == "empty_source")}
+      {_reader_qa_filter_metric("Length mismatch", str(counts["length_mismatch"]), filter_href("length_mismatch"), is_active=qa_filter == "length_mismatch")}
+      {_reader_qa_filter_metric("Paragraph mismatch", str(counts["paragraph_mismatch"]), filter_href("paragraph_mismatch"), is_active=qa_filter == "paragraph_mismatch")}
       {search_metric}
     </section>
     """
@@ -4374,14 +4426,36 @@ def _translation_reader_search_nav(search_match_count: int) -> str:
 def _translation_reader_layout_panel(
     rows: tuple[dict[str, object], ...],
     *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
     indent_preview: bool,
+    qa_filter: str,
 ) -> str:
     counts = _translation_reader_indent_counts(rows)
+    indent_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter="indent",
+    )
     return f"""
     <section class="reader-layout-panel" aria-label="Reader layout diagnostics">
       {_reader_qa_metric("Indent preview", "On" if indent_preview else "Off")}
-      {_reader_qa_metric("Source literal indents", str(counts["source"]))}
-      {_reader_qa_metric("Translation literal indents", str(counts["translation"]))}
+      {_reader_qa_filter_metric("Source literal indents", str(counts["source"]), indent_href, is_active=qa_filter == "indent")}
+      {_reader_qa_filter_metric("Translation literal indents", str(counts["translation"]), indent_href, is_active=qa_filter == "indent")}
       {_reader_qa_metric("Style metadata", "Unknown")}
     </section>
     """
@@ -4455,6 +4529,27 @@ def _reader_qa_metric(label: str, value: str) -> str:
       <span>{escape(label)}</span>
       <strong>{escape(value)}</strong>
     </div>
+    """
+
+
+def _reader_qa_filter_metric(
+    label: str,
+    value: str,
+    href: str,
+    *,
+    is_active: bool,
+) -> str:
+    active_class = " is-active" if is_active else ""
+    aria_current = ' aria-current="page"' if is_active else ""
+    return f"""
+    <a
+      class="reader-qa-metric reader-qa-filter-metric{active_class}"
+      href="{escape(href)}"
+      {aria_current}
+    >
+      <span>{escape(label)}</span>
+      <strong>{escape(value)}</strong>
+    </a>
     """
 
 
@@ -6474,6 +6569,20 @@ header {
   border-radius: 6px;
   background: #ffffff;
   padding: 10px 12px;
+}
+.reader-qa-filter-metric {
+  color: inherit;
+  display: block;
+  text-decoration: none;
+}
+.reader-qa-filter-metric:hover,
+.reader-qa-filter-metric:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-qa-filter-metric.is-active {
+  border-color: var(--accent);
+  background: #eff6ff;
 }
 .reader-qa-metric span {
   display: block;
