@@ -607,6 +607,12 @@ Acceptance criteria:
   first per-work-unit metrics slice on branch
   `codex/issue-224-reader-block-metrics`: source/translation character counts
   and translation/source length ratio for visible work units.
+  Issue
+  [#226](https://github.com/ogirkoviylord/folioloom_main/issues/226) begins the
+  first paragraph-structure diagnostics slice on branch
+  `codex/issue-226-reader-paragraph-diagnostics`: source/translation line
+  counts, blank-line counts, `paragraph_mismatch` QA flag/filter and Reader QA
+  summary count for visible work units only.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
