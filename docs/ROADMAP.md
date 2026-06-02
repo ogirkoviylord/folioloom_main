@@ -591,6 +591,12 @@ Acceptance criteria:
   first layout/indent diagnostics slice on branch
   `codex/issue-218-reader-indent-diagnostics`: literal indentation evidence,
   `Unknown` style metadata and opt-in editorial first-line indent preview.
+  Issue
+  [#220](https://github.com/ogirkoviylord/folioloom_main/issues/220) begins the
+  first logical-page navigation slice on branch
+  `codex/issue-220-reader-logical-pages`: logical `page` query support, current
+  page/sequence-range status and page-size controls over bounded work-unit
+  windows.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
