@@ -3477,6 +3477,7 @@ def translation_reader_body(
         else ""
     )
     outline_script = _reader_outline_script() if visible_rows else ""
+    review_mark_script = _reader_review_mark_script() if visible_rows else ""
     search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
     compare_classes = ["reader-compare", f"reader-pane-mode-{pane_mode}"]
     if indent_preview:
@@ -3571,6 +3572,7 @@ def translation_reader_body(
     {sync_script}
     {keyboard_script}
     {outline_script}
+    {review_mark_script}
     {qa_step_script}
     {search_hit_script}
     """
@@ -4319,6 +4321,7 @@ def _translation_reader_block(
     issue_flags = _translation_row_issue_flags(row)
     qa_class = " has-qa-warning" if issue_flags else ""
     qa_html = _translation_row_qa_flag_html(issue_flags)
+    review_controls = _translation_reader_review_controls(sequence)
     text = str(row.get(text_key) or "")
     if not text:
         text = "[empty]"
@@ -4339,10 +4342,41 @@ def _translation_reader_block(
         <span class="status">{status}</span>
         <span>Blocks {block_label}</span>
         <span class="reader-block-metrics">{metrics}</span>
+        {review_controls}
         {qa_html}
       </header>
       <div class="reader-text">{text_html}</div>
     </article>
+    """
+
+
+def _translation_reader_review_controls(sequence: str) -> str:
+    buttons = "".join(
+        (
+            f'<button type="button" class="reader-review-button" '
+            f'data-reader-review-mark="{escape(mark)}" '
+            f'data-reader-review-sequence="{escape(sequence)}" '
+            f'aria-pressed="false">{escape(label)}</button>'
+        )
+        for mark, label in (
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+            ("clear", "Clear"),
+        )
+    )
+    return f"""
+    <span
+      class="reader-review-controls"
+      data-reader-review-controls
+      data-reader-review-sequence="{escape(sequence)}"
+      aria-label="Reader review mark controls"
+    >
+      <span class="reader-review-state" data-reader-review-state>
+        Review mark: none
+      </span>
+      {buttons}
+    </span>
     """
 
 
@@ -4618,6 +4652,7 @@ def _translation_reader_outline_item(row: dict[str, object]) -> str:
       title="{escape(title)}"
       aria-label="{escape(title)}"
       data-reader-outline-anchor
+      data-reader-outline-sequence="{safe_sequence}"
     >
       <span class="reader-outline-sequence">#{safe_sequence}</span>
       <span class="reader-outline-blocks">Blocks {escape(block_label)}</span>
@@ -4948,6 +4983,86 @@ def _reader_outline_script() -> str:
           setActiveOutline(event.detail && event.detail.href, false);
         });
         setActiveOutline(window.location.hash, false);
+      })();
+    </script>
+    """
+
+
+def _reader_review_mark_script() -> str:
+    return """
+    <script data-reader-review-navigation>
+      (() => {
+        const reviewButtons = Array.from(
+          document.querySelectorAll("[data-reader-review-mark]")
+        );
+        if (!reviewButtons.length) return;
+        const markLabels = {
+          needs_review: "needs review",
+          ok: "OK",
+          ignore: "ignored",
+        };
+        const markClasses = [
+          "has-review-mark",
+          "is-review-needs-review",
+          "is-review-ok",
+          "is-review-ignore",
+        ];
+        const classForMark = (mark) => {
+          if (mark === "needs_review") return "is-review-needs-review";
+          if (mark === "ok") return "is-review-ok";
+          if (mark === "ignore") return "is-review-ignore";
+          return "";
+        };
+        const matchingBlocks = (sequence) => Array.from(
+          document.querySelectorAll(".reader-block")
+        ).filter((block) => block.getAttribute("data-reader-sequence") === sequence);
+        const matchingOutlines = (sequence) => Array.from(
+          document.querySelectorAll("[data-reader-outline-sequence]")
+        ).filter((link) => link.getAttribute("data-reader-outline-sequence") === sequence);
+        const matchingControls = (sequence) => Array.from(
+          document.querySelectorAll("[data-reader-review-controls]")
+        ).filter(
+          (control) => control.getAttribute("data-reader-review-sequence") === sequence
+        );
+        const setTargetClasses = (target, mark) => {
+          markClasses.forEach((className) => target.classList.remove(className));
+          if (!mark) {
+            target.removeAttribute("data-reader-review-current");
+            return;
+          }
+          target.classList.add("has-review-mark", classForMark(mark));
+          target.setAttribute("data-reader-review-current", mark);
+        };
+        const setControlState = (control, mark) => {
+          const state = control.querySelector("[data-reader-review-state]");
+          if (state) {
+            state.textContent = `Review mark: ${markLabels[mark] || "none"}`;
+          }
+          control
+            .querySelectorAll("[data-reader-review-mark]")
+            .forEach((button) => {
+              const buttonMark = button.getAttribute("data-reader-review-mark");
+              const isPressed = Boolean(mark) && buttonMark === mark;
+              button.setAttribute("aria-pressed", isPressed ? "true" : "false");
+              button.classList.toggle("is-active", isPressed);
+            });
+        };
+        const setReviewMark = (sequence, requestedMark) => {
+          const mark = requestedMark === "clear" ? "" : requestedMark;
+          if (!sequence) return;
+          matchingBlocks(sequence).forEach((block) => setTargetClasses(block, mark));
+          matchingOutlines(sequence).forEach((link) => setTargetClasses(link, mark));
+          matchingControls(sequence).forEach((control) => setControlState(control, mark));
+        };
+        reviewButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            setReviewMark(
+              button.getAttribute("data-reader-review-sequence"),
+              button.getAttribute("data-reader-review-mark")
+            );
+          });
+        });
       })();
     </script>
     """
@@ -6791,6 +6906,21 @@ header {
 .reader-outline-link.has-qa-warning .reader-outline-flags {
   color: #7c2d12;
 }
+.reader-outline-link.has-review-mark {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-outline-link.is-review-needs-review {
+  border-color: #f97316;
+  background: #fff7ed;
+}
+.reader-outline-link.is-review-ok {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+.reader-outline-link.is-review-ignore {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
 .reader-search-nav {
   display: flex;
   align-items: center;
@@ -6940,6 +7070,22 @@ header {
   outline-offset: 3px;
   background: #fff7ed;
 }
+.reader-block.has-review-mark {
+  border-radius: 6px;
+  padding-left: 12px;
+}
+.reader-block.is-review-needs-review {
+  border-left: 3px solid #f97316;
+  background: #fff7ed;
+}
+.reader-block.is-review-ok {
+  border-left: 3px solid #16a34a;
+  background: #f0fdf4;
+}
+.reader-block.is-review-ignore {
+  border-left: 3px solid #94a3b8;
+  background: #f8fafc;
+}
 .reader-block:last-child {
   border-bottom: 0;
   margin-bottom: 0;
@@ -6956,6 +7102,43 @@ header {
 .reader-block-metrics {
   color: var(--muted);
   font-weight: 750;
+}
+.reader-review-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.reader-review-state {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+.reader-review-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+.reader-review-button:hover,
+.reader-review-button:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-review-button.is-active,
+.reader-review-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #1d4ed8;
+  background: #eff6ff;
 }
 .reader-text {
   color: var(--ink);
