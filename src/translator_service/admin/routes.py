@@ -683,6 +683,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
         limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
+        search_query = _query_text(request.query_params.get("q"), maximum=200)
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -702,6 +703,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 start_sequence=start_sequence,
                 limit=limit,
                 show_invisibles=show_invisibles,
+                search_query=search_query,
             ),
         )
 
@@ -720,6 +722,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
         )
         show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
+        search_query = _query_text(request.query_params.get("q"), maximum=200)
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -740,6 +743,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
+                search_query=search_query,
             ),
         )
 
@@ -3291,6 +3295,12 @@ def _query_flag(value: str | None, *, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _query_text(value: str | None, *, maximum: int) -> str:
+    if value is None:
+        return ""
+    return value.strip()[:maximum]
 
 
 def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
