@@ -646,6 +646,11 @@ Acceptance criteria:
   `codex/issue-236-reader-active-qa-highlight`: active issue-link state plus
   matching original/translation block highlight for the selected current-window
   QA issue.
+  Issue
+  [#238](https://github.com/ogirkoviylord/folioloom_main/issues/238) begins the
+  first Reader QA issue progress slice on branch
+  `codex/issue-238-reader-qa-progress`: a current-window QA progress chip that
+  shows the visible issue total and selected `Issue X of N` state.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
