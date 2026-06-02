@@ -2237,7 +2237,10 @@ class AdminRoutesTest(unittest.TestCase):
                 kind=StoredFileKind.INTERMEDIATE,
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
-                content=b"Private source paragraph <script>alert(1)</script>",
+                content=(
+                    "Private source paragraph\tA\n"
+                    "Next\u00a0line \u200b<script>alert(1)</script>"
+                ).encode("utf-8"),
             )
             store = SQLiteTranslationJobStore(job_db)
             try:
@@ -2272,7 +2275,8 @@ class AdminRoutesTest(unittest.TestCase):
                 store.complete_work_unit(
                     claimed.id,
                     translated_text=(
-                        "Приватний перекладений абзац "
+                        "Приватний перекладений абзац\tA\n"
+                        "Наступний\u00a0рядок "
                         "<img src=x onerror=alert(1)>"
                     ),
                     prompt_tokens=11,
@@ -2317,6 +2321,14 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
             )
             reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
+            diagnostics_invisibles = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?show_invisibles=1"
+            )
+            reader_unsynced = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?show_invisibles=1&sync=0"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
         self.assertEqual(logs.status_code, 200)
@@ -2353,6 +2365,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Приватний перекладений абзац", diagnostics.text)
         self.assertIn("Diagnostics", diagnostics.text)
         self.assertIn("Reader", diagnostics.text)
+        self.assertIn("Show special chars", diagnostics.text)
+        self.assertIn('name="sequence"', diagnostics.text)
+        self.assertIn("← Previous", diagnostics.text)
+        self.assertIn("Next →", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2360,11 +2376,24 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertNotIn("<script>alert(1)</script>", diagnostics.text)
         self.assertNotIn("<img src=x onerror=alert(1)>", diagnostics.text)
+        self.assertEqual(diagnostics_invisibles.status_code, 200)
+        self.assertIn("Hide special chars", diagnostics_invisibles.text)
+        self.assertIn("&middot;", diagnostics_invisibles.text)
+        self.assertIn("&rarr;", diagnostics_invisibles.text)
+        self.assertIn("&para;", diagnostics_invisibles.text)
+        self.assertIn("&#9251;", diagnostics_invisibles.text)
+        self.assertIn("ZWSP", diagnostics_invisibles.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics_invisibles.text)
+        self.assertNotIn("<script>alert(1)</script>", diagnostics_invisibles.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
         self.assertIn("data-reader-sync-pane", reader.text)
         self.assertIn("pendingProgrammaticScrolls", reader.text)
+        self.assertIn("Show special chars", reader.text)
+        self.assertIn("Unsync scroll", reader.text)
+        self.assertIn('name="sequence"', reader.text)
+        self.assertIn("sequence=101&amp;limit=100", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)
@@ -2374,6 +2403,19 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", reader.text)
         self.assertNotIn("<img src=x onerror=alert(1)>", reader.text)
         self.assertIn("Text diagnostics", reader.text)
+        self.assertEqual(reader_unsynced.status_code, 200)
+        self.assertIn("Hide special chars", reader_unsynced.text)
+        self.assertIn("Sync scroll", reader_unsynced.text)
+        self.assertIn("data-reader-pane", reader_unsynced.text)
+        self.assertNotIn("data-reader-sync-pane", reader_unsynced.text)
+        self.assertNotIn("pendingProgrammaticScrolls", reader_unsynced.text)
+        self.assertIn("&middot;", reader_unsynced.text)
+        self.assertIn("&rarr;", reader_unsynced.text)
+        self.assertIn("&para;", reader_unsynced.text)
+        self.assertIn("&#9251;", reader_unsynced.text)
+        self.assertIn("ZWSP", reader_unsynced.text)
+        self.assertIn("show_invisibles=1", reader_unsynced.text)
+        self.assertIn("sync=0", reader_unsynced.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(

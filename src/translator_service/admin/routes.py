@@ -682,6 +682,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
         limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
+        show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -700,6 +701,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 run_id=run_id,
                 start_sequence=start_sequence,
                 limit=limit,
+                show_invisibles=show_invisibles,
             ),
         )
 
@@ -716,6 +718,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
             default=100,
             maximum=500,
         )
+        show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
+        sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -734,6 +738,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 run_id=run_id,
                 start_sequence=start_sequence,
                 limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
             ),
         )
 
@@ -3279,6 +3285,12 @@ def _positive_int(value: str | None, *, default: int) -> int:
         return max(1, int(value))
     except ValueError:
         return default
+
+
+def _query_flag(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
