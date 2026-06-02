@@ -4114,6 +4114,7 @@ def _translation_reader_block(
       id="reader-{escape(pane_key)}-{sequence}"
       class="reader-block{qa_class}"
       data-reader-sequence="{sequence}"
+      tabindex="-1"
     >
       <header>
         <span>#{sequence}</span>
@@ -4503,13 +4504,51 @@ def _reader_qa_step_script() -> str:
       (() => {
         const controls = document.querySelector("[data-reader-qa-step-controls]");
         if (!controls) return;
-        const issueHrefs = Array.from(
+        const issueLinks = Array.from(
           document.querySelectorAll("[data-reader-qa-issue-anchor]")
-        )
+        );
+        const issueHrefs = issueLinks
           .map((link) => link.getAttribute("href"))
           .filter((href) => href && href.startsWith("#"));
         if (!issueHrefs.length) return;
         const targetForHref = (href) => document.getElementById(href.slice(1));
+        const sequenceForHref = (href) => href.replace(/^#reader-original-/, "");
+        const targetsForHref = (href) => {
+          const sequence = sequenceForHref(href);
+          return [
+            document.getElementById(`reader-original-${sequence}`),
+            document.getElementById(`reader-translation-${sequence}`),
+          ].filter(Boolean);
+        };
+        const clearActiveIssue = () => {
+          issueLinks.forEach((link) => {
+            link.classList.remove("is-active");
+            link.removeAttribute("aria-current");
+          });
+          document
+            .querySelectorAll(".reader-block.is-active-qa-issue")
+            .forEach((block) => block.classList.remove("is-active-qa-issue"));
+        };
+        const setActiveIssue = (href, shouldScroll) => {
+          if (!issueHrefs.includes(href)) {
+            clearActiveIssue();
+            return;
+          }
+          const targets = targetsForHref(href);
+          if (!targets.length) return;
+          clearActiveIssue();
+          issueLinks.forEach((link) => {
+            if (link.getAttribute("href") !== href) return;
+            link.classList.add("is-active");
+            link.setAttribute("aria-current", "true");
+          });
+          targets.forEach((target) => target.classList.add("is-active-qa-issue"));
+          if (shouldScroll) {
+            targets[0].scrollIntoView({ block: "start", behavior: "smooth" });
+          }
+          window.history.replaceState(null, "", href);
+          targets[0].focus({ preventScroll: true });
+        };
         const currentIssueIndex = () => {
           const hashIndex = issueHrefs.indexOf(window.location.hash);
           if (hashIndex >= 0) return hashIndex;
@@ -4531,13 +4570,16 @@ def _reader_qa_step_script() -> str:
           const nextIndex = direction === "next"
             ? Math.min(issueHrefs.length - 1, currentIndex + 1)
             : Math.max(0, currentIndex - 1);
-          const href = issueHrefs[nextIndex];
-          const target = targetForHref(href);
-          if (!target) return;
-          target.scrollIntoView({ block: "start", behavior: "smooth" });
-          window.history.replaceState(null, "", href);
-          target.focus({ preventScroll: true });
+          setActiveIssue(issueHrefs[nextIndex], true);
         };
+        issueLinks.forEach((link) => {
+          link.addEventListener("click", (event) => {
+            const href = link.getAttribute("href");
+            if (!href) return;
+            event.preventDefault();
+            setActiveIssue(href, true);
+          });
+        });
         controls.addEventListener("click", (event) => {
           if (!(event.target instanceof Element)) return;
           const button = event.target.closest("[data-reader-qa-step]");
@@ -4545,6 +4587,10 @@ def _reader_qa_step_script() -> str:
           event.preventDefault();
           goToIssue(button.getAttribute("data-reader-qa-step"));
         });
+        window.addEventListener("hashchange", () => {
+          setActiveIssue(window.location.hash, false);
+        });
+        setActiveIssue(window.location.hash, false);
       })();
     </script>
     """
@@ -6164,6 +6210,11 @@ header {
   border-color: #fb923c;
   background: #fff7ed;
 }
+.reader-qa-issue-link.is-active {
+  border-color: #c2410c;
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.18);
+  background: #fff7ed;
+}
 .reader-qa-issue-sequence {
   font-size: 0.82rem;
   font-weight: 950;
@@ -6221,6 +6272,13 @@ header {
 .reader-block.has-qa-warning {
   border-left: 3px solid #d98b4a;
   padding-left: 12px;
+}
+.reader-block:target,
+.reader-block.is-active-qa-issue {
+  border-radius: 6px;
+  outline: 2px solid rgba(194, 65, 12, 0.45);
+  outline-offset: 3px;
+  background: #fff7ed;
 }
 .reader-block:last-child {
   border-bottom: 0;
