@@ -778,6 +778,20 @@ Owner decisions recorded during issue #71:
   This does not add saved review state, annotations, exports, whole-book issue
   traversal, public/user-facing access, publisher workspace, live runtime data
   operations or release readiness.
+- 2026-06-02: Issue
+  [#248](https://github.com/ogirkoviylord/folioloom_main/issues/248) starts the
+  first Reader layout issue navigation slice on branch
+  `codex/issue-248-reader-layout-issue-nav`, stacked after #246. The slice
+  makes existing literal-indent layout flags participate in Reader issue
+  navigation, minimap warning state and block warning styling. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted
+  `ruff --select F,I` for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not add new QA heuristics, whole-book issue traversal, saved review state,
+  annotations, editing, public/user-facing access, publisher workspace, live
+  runtime data operations or release readiness. Browser smoke was not available
+  in the local app session because the browser agent was unavailable.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
