@@ -413,6 +413,16 @@ Owner decisions recorded during issue #71:
   not evidence that prompt bodies are already stored or rendered. Implementers
   should use a separate scoped issue for prompt diagnostics and keep normal
   trace/evidence/archive/telemetry/API surfaces metadata-only/redacted.
+- 2026-06-02: Owner approved the issue #165 Book/Manuscript MVP contract
+  direction: first MVP bar is structure preservation plus clean translation,
+  with format-specific TXT/DOCX/EPUB expectations, zero provider commentary,
+  target-language metadata updates where supported and no Gate B/release claims.
+  Terminology/name handling (#204), read-only glossary (#205), editable glossary
+  (#206), release-version analytics/consent policy (#207), future formats
+  (#208) and stricter literary/editorial quality rubric (#209) are separate
+  future issues. Owner also approved current/pre-release internal use of all
+  uploaded files for analytics and product improvement; release-version behavior
+  remains TBD.
 - 2026-06-01: During the follow-up live EPUB translation, backend/admin state
   showed the job still translating and progressing past the previously failed
   work unit, while the Telegram message could remain stuck on the queued copy.
@@ -921,6 +931,9 @@ core flow, release gates, operational visibility and documentation.
 - treat the first Beta Operations Console/admin redesign stack as implemented
   by PR #160 and issues #145-#152 as closed; handle prompt diagnostics,
   Alerts/Backups visibility and release evidence as separate follow-ups;
+- keep issue #165 as a docs-only Book/Manuscript MVP contract and keep
+  terminology/name handling, glossary, analytics release policy, new formats and
+  stricter quality criteria in separate future issues;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;

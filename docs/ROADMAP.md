@@ -264,6 +264,9 @@ Tasks:
   implemented by PR #160 and closed through #145-#152. Follow-up admin work
   should be scoped separately, including raw prompt diagnostics, Alerts/Backups
   visibility and any new release-evidence surfaces.
+- Treat issue #165 as a docs-only Book/Manuscript MVP contract: structure
+  preservation plus clean translation, with format-specific TXT/DOCX/EPUB
+  expectations and no release-readiness claims.
 - Описать support/debug workflow для owner: какие admin pages смотреть, какие
   scripts запускать, какие artifacts сохранять.
 - Preserve the issue #30 admin guardrail: bulk provider key probes should wait
@@ -288,6 +291,10 @@ Later:
   admin console rewrites. The first 2026-05-31 Beta Operations Console stack is
   implemented by PR #160, but Gate B evidence remains separate until
   implemented and verified.
+- Future book/manuscript work is split out of #165: terminology/name policy
+  (#204), read-only glossary viewer (#205), editable glossary workflow (#206),
+  release-version analytics file-use and consent policy (#207), future format
+  prioritization (#208) and stricter quality rubric (#209).
 
 ## 7. Phase 3 - Testing and reliability
 
@@ -388,6 +395,14 @@ Acceptance criteria:
 - New external providers or user-facing provider/model picker.
 - Complex automation beyond the current worker/scheduler needs.
 - Legal/privacy/AUP/refund text without owner/counsel decision.
+- Book/manuscript future scope without separate issues: terminology/name
+  controls, glossary viewer/editor, stricter literary/editorial quality rubric,
+  user analytics consent/release policy and new formats beyond TXT/DOCX/EPUB.
+- New format implementation beyond TXT/DOCX/EPUB. Future candidates are tracked
+  for discovery only: RTF (#4), FB2 (#23), PDF, HTML/HTM, ODT, legacy DOC,
+  MOBI, AZW3/KPF and image-heavy CBZ/CBR/DJVU. Issue #208 owns
+  prioritization; implementation requires separate approval and architecture
+  review.
 - Repo-wide ruff cleanup as a free closed-beta release blocker.
 
 ## 11. Backlog candidates
