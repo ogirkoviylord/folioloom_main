@@ -547,6 +547,33 @@ Acceptance criteria:
   commands, pass/fail results, DOCX openability notes and local/offline
   EPUBCheck validation.
 
+- Task: Build internal/dev before-after reader for approved fixtures.
+  Phase: 3
+  Priority: Medium
+  Risk: Medium
+  Agent suitability: needs architect first slice, then focused implementer
+  Status: issue #181 first TXT local HTML report slice is locally verified on
+  branch `codex/issue-181-internal-reader-txt-report`; issues #182-#184 remain
+  open follow-ups.
+  Design reference:
+  `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
+  Issue split:
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181) for the
+  TXT local HTML report,
+  [#182](https://github.com/ogirkoviylord/folioloom_main/issues/182) for the
+  generic DOCX/EPUB block model,
+  [#183](https://github.com/ogirkoviylord/folioloom_main/issues/183) for the
+  DOCX renderer spike and
+  [#184](https://github.com/ogirkoviylord/folioloom_main/issues/184) for the
+  EPUB renderer spike.
+  Suggested acceptance criteria: local tool generates a side-by-side
+  source/translation report from existing adapter blocks for explicit
+  synthetic/test/public-domain/permissive or owner-approved files, starts with
+  TXT, does not read live runtime `var/`, does not add an admin/public route,
+  does not add production dependencies without approval, HTML-escapes displayed
+  text and metadata, and does not claim DOCX full visual fidelity or release
+  readiness.
+
 - Task: Add metadata-only Alerts/Backups owner report.
   Phase: 2
   Priority: Medium

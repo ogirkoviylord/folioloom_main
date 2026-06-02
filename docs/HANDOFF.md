@@ -361,6 +361,33 @@ Owner decisions recorded during issue #71:
   This is a design/roadmap decision only; it does not implement the redesign,
   satisfy Gate B, change SSH-tunnel-only admin, authorize public admin,
   payment, deployment, auth/RBAC, database/state or user-data changes.
+- 2026-06-01: Owner approved the internal/dev before-after reader direction for
+  the first slice only. The accepted scope is a local QA reader/report over
+  existing TXT/DOCX/EPUB adapter blocks for synthetic fixtures, repository test
+  samples, public-domain/permissive authorized fixtures and explicitly
+  owner-approved local files. User-facing reader and publisher/editor workspace
+  are future work. The design is recorded in
+  `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
+  GitHub issues
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)-[#184](https://github.com/ogirkoviylord/folioloom_main/issues/184)
+  split the first implementation and renderer spikes.
+  This is a design/roadmap decision only; it does not implement the reader,
+  authorize live runtime `var/` reads, add admin/public routes, add production
+  dependencies, change legal/privacy policy or claim release readiness.
+- 2026-06-01: Issue
+  [#181](https://github.com/ogirkoviylord/folioloom_main/issues/181)
+  implementation slice is locally verified on branch
+  `codex/issue-181-internal-reader-txt-report`. The branch adds a reusable
+  internal reader model and HTML renderer, plus an explicit-input local CLI for
+  TXT reports. It refuses repo-local runtime `var/` source/mapping/output paths,
+  accepts optional JSON block translation mappings, preserves adapter block
+  order and metadata, marks missing/done statuses, and HTML-escapes rendered
+  source text, translations and metadata. Local verification passed focused
+  internal-reader tests, TXT/format-adapter tests, compileall, targeted ruff and
+  a CLI smoke on `test_samples/sample_book.en.txt` writing to a temporary
+  directory. This does not implement DOCX/EPUB generic reader support, renderer
+  spikes, admin/public UI, live translation streaming, production dependency,
+  live runtime data access or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
@@ -417,6 +444,9 @@ core flow, release gates, operational visibility and documentation.
 - выполнить owner-approved Beta Operations Console redesign in small scoped
   admin UX issues, starting with Translation Failure Trace and safe evidence
   packet for crashed translations;
+- prepare the owner-approved internal/dev before-after reader in scoped issues,
+  continuing after the locally verified #181 TXT report slice with #182 generic
+  DOCX/EPUB block model and #183/#184 renderer spikes;
 - держать payments, public production, public admin и новые форматы вне
   текущего scope.
 - GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)
