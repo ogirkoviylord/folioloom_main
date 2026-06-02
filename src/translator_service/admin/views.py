@@ -3955,6 +3955,7 @@ def _translation_qa_filter_options(current_filter: str) -> str:
         ("missing_translation", "Missing translation"),
         ("empty_source", "Empty source"),
         ("length_mismatch", "Length mismatch"),
+        ("paragraph_mismatch", "Paragraph mismatch"),
         ("indent", "Literal indent"),
     )
     return "\n".join(
@@ -3970,14 +3971,34 @@ def _translation_qa_filter_options(current_filter: str) -> str:
 def _translation_row_metric_summary(row: dict[str, object]) -> str:
     source_chars = len(str(row.get("source_text") or "").strip())
     translated_chars = len(str(row.get("translated_text") or "").strip())
+    source_structure = _translation_text_structure_counts(
+        str(row.get("source_text") or "")
+    )
+    translated_structure = _translation_text_structure_counts(
+        str(row.get("translated_text") or "")
+    )
     ratio = "n/a"
     if source_chars > 0:
         ratio = f"{translated_chars / source_chars:.2f}"
     return (
         f"Source chars {source_chars} · "
         f"Translation chars {translated_chars} · "
-        f"T/S ratio {ratio}"
+        f"T/S ratio {ratio} · "
+        f"Source lines {source_structure['lines']} · "
+        f"Translation lines {translated_structure['lines']} · "
+        f"Source blank lines {source_structure['blank_lines']} · "
+        f"Translation blank lines {translated_structure['blank_lines']}"
     )
+
+
+def _translation_text_structure_counts(text: str) -> dict[str, int]:
+    if not text.strip():
+        return {"lines": 0, "blank_lines": 0}
+    lines = text.splitlines() or [text]
+    return {
+        "lines": len(lines),
+        "blank_lines": sum(1 for line in lines if not line.strip()),
+    }
 
 
 def _translation_current_page(start_sequence: int, limit: int) -> int:
@@ -4100,6 +4121,7 @@ def _translation_reader_qa_panel(
       {_reader_qa_metric("Missing translation", str(counts["missing_translation"]))}
       {_reader_qa_metric("Empty source", str(counts["empty_source"]))}
       {_reader_qa_metric("Length mismatch", str(counts["length_mismatch"]))}
+      {_reader_qa_metric("Paragraph mismatch", str(counts["paragraph_mismatch"]))}
       {search_metric}
     </section>
     """
@@ -4149,6 +4171,7 @@ def _translation_reader_qa_counts(
         "missing_translation": 0,
         "empty_source": 0,
         "length_mismatch": 0,
+        "paragraph_mismatch": 0,
     }
     for row in rows:
         for flag in _translation_row_qa_flags(row):
@@ -4234,7 +4257,25 @@ def _translation_row_qa_flags(row: dict[str, object]) -> tuple[dict[str, str], .
                 else "Translation much shorter"
             )
             flags.append({"kind": "length_mismatch", "label": label})
+        if _has_paragraph_structure_mismatch(source, translated):
+            flags.append(
+                {
+                    "kind": "paragraph_mismatch",
+                    "label": "Paragraph/line break mismatch",
+                }
+            )
     return tuple(flags)
+
+
+def _has_paragraph_structure_mismatch(source: str, translated: str) -> bool:
+    if not source.strip() or not translated.strip():
+        return False
+    source_structure = _translation_text_structure_counts(source)
+    translated_structure = _translation_text_structure_counts(translated)
+    return (
+        source_structure["lines"] != translated_structure["lines"]
+        or source_structure["blank_lines"] != translated_structure["blank_lines"]
+    )
 
 
 def _has_literal_leading_indent(text: str) -> bool:
