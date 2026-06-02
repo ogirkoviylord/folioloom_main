@@ -582,7 +582,12 @@ Acceptance criteria:
   first run-log Reader/Text Diagnostics controls slice on branch
   `codex/issue-214-reader-controls`: opt-in invisible-character markers,
   logical sequence navigation, jump-by-sequence and reader sync-scroll toggle.
-  It remains owner-only and does not claim physical page fidelity.
+  Issue
+  [#216](https://github.com/ogirkoviylord/folioloom_main/issues/216) begins the
+  next current-window QA aids slice on branch
+  `codex/issue-216-reader-qa-aids`: search with safe highlighting, reader QA
+  counts and a metadata-only minimap for loaded work units. These slices remain
+  owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:

@@ -2242,6 +2242,18 @@ class AdminRoutesTest(unittest.TestCase):
                     "Next\u00a0line \u200b<script>alert(1)</script>"
                 ).encode("utf-8"),
             )
+            source_file_2 = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Paragraph waiting for translation.",
+            )
+            source_file_3 = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-3.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Tiny source.",
+            )
             store = SQLiteTranslationJobStore(job_db)
             try:
                 job = store.create_job(
@@ -2267,6 +2279,24 @@ class AdminRoutesTest(unittest.TestCase):
                             source_language="en",
                             target_language="uk",
                             source_object_key=source_file.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=2,
+                            source_block_ids=("block-2",),
+                            source_text_hash="hash-2",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file_2.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=3,
+                            source_block_ids=("block-3",),
+                            source_text_hash="hash-3",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file_3.object_key,
                         )
                     ],
                 )
@@ -2283,6 +2313,26 @@ class AdminRoutesTest(unittest.TestCase):
                     completion_tokens=7,
                     cache_hit_tokens=0,
                     cache_miss_tokens=11,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="",
+                    prompt_tokens=5,
+                    completion_tokens=0,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=5,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text=" ".join(["very long translated expansion"] * 10),
+                    prompt_tokens=6,
+                    completion_tokens=80,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=6,
                 )
                 logger = TranslationRunLogger.start(
                     root=run_root,
@@ -2329,6 +2379,14 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/reader"
                 "?show_invisibles=1&sync=0"
             )
+            diagnostics_search = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?q=%3Cscript%3E"
+            )
+            reader_search = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?q=%3Cscript%3E&show_invisibles=1&sync=0"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
 
         self.assertEqual(logs.status_code, 200)
@@ -2346,7 +2404,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Приватний перекладений абзац", details.text)
         self.assertEqual(details_api.status_code, 200)
         details_payload = details_api.json()["details"]
-        self.assertEqual(len(details_payload["fragments"]), 1)
+        self.assertEqual(len(details_payload["fragments"]), 3)
         self.assertEqual(details_payload["fragments"][0]["sequence"], 1)
         self.assertEqual(details_payload["fragments"][0]["status"], "translated")
         self.assertEqual(
@@ -2369,6 +2427,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('name="sequence"', diagnostics.text)
         self.assertIn("← Previous", diagnostics.text)
         self.assertIn("Next →", diagnostics.text)
+        self.assertIn("Missing translation", diagnostics.text)
+        self.assertIn("Translation much longer", diagnostics.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
         self.assertIn(
             "&lt;img src=x onerror=alert(1)&gt;",
@@ -2385,6 +2445,14 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("ZWSP", diagnostics_invisibles.text)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics_invisibles.text)
         self.assertNotIn("<script>alert(1)</script>", diagnostics_invisibles.text)
+        self.assertEqual(diagnostics_search.status_code, 200)
+        self.assertIn("Clear search", diagnostics_search.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            diagnostics_search.text,
+        )
+        self.assertIn("q=%3Cscript%3E", diagnostics_search.text)
+        self.assertNotIn("<script>alert(1)</script>", diagnostics_search.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
@@ -2394,6 +2462,14 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Unsync scroll", reader.text)
         self.assertIn('name="sequence"', reader.text)
         self.assertIn("sequence=101&amp;limit=100", reader.text)
+        self.assertIn("Reader QA summary", reader.text)
+        self.assertIn("Window units", reader.text)
+        self.assertIn("Missing translation", reader.text)
+        self.assertIn("Length mismatch", reader.text)
+        self.assertIn("reader-minimap", reader.text)
+        self.assertIn('title="Sequence 2: translated; Missing translation"', reader.text)
+        self.assertIn("reader-qa-flag-missing_translation", reader.text)
+        self.assertIn("reader-qa-flag-length_mismatch", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)
@@ -2416,6 +2492,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("ZWSP", reader_unsynced.text)
         self.assertIn("show_invisibles=1", reader_unsynced.text)
         self.assertIn("sync=0", reader_unsynced.text)
+        self.assertEqual(reader_search.status_code, 200)
+        self.assertIn("Clear search", reader_search.text)
+        self.assertIn("Search hits", reader_search.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            reader_search.text,
+        )
+        self.assertIn("q=%3Cscript%3E", reader_search.text)
+        self.assertNotIn("<script>alert(1)</script>", reader_search.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(
@@ -2424,6 +2509,8 @@ class AdminRoutesTest(unittest.TestCase):
             )
         self.assertNotIn("Private source paragraph", archive_text)
         self.assertNotIn("Приватний перекладений абзац", archive_text)
+        self.assertNotIn("Paragraph waiting for translation", archive_text)
+        self.assertNotIn("very long translated expansion", archive_text)
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:

@@ -3199,12 +3199,17 @@ def translation_text_diagnostics_body(
     start_sequence: int,
     limit: int,
     show_invisibles: bool = False,
+    search_query: str = "",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
     row_html = "\n".join(
-        _translation_text_diagnostic_row(row, show_invisibles=show_invisibles)
+        _translation_text_diagnostic_row(
+            row,
+            show_invisibles=show_invisibles,
+            search_query=search_query,
+        )
         for row in rows
     )
     if not row_html:
@@ -3219,6 +3224,7 @@ def translation_text_diagnostics_body(
         start_sequence=start_sequence,
         limit=limit,
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
     return f"""
     <section class="toolbar-panel">
@@ -3238,6 +3244,7 @@ def translation_text_diagnostics_body(
                 sequence=start_sequence,
                 limit=limit,
                 show_invisibles=show_invisibles,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3249,6 +3256,7 @@ def translation_text_diagnostics_body(
                 sequence=previous_sequence,
                 limit=limit,
                 show_invisibles=show_invisibles,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3260,6 +3268,7 @@ def translation_text_diagnostics_body(
                 sequence=next_sequence,
                 limit=limit,
                 show_invisibles=show_invisibles,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3271,6 +3280,7 @@ def translation_text_diagnostics_body(
         start_sequence=start_sequence,
         limit=limit,
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )}
     {controls}
     <section class="panel warning-panel">
@@ -3308,6 +3318,7 @@ def translation_reader_body(
     limit: int,
     show_invisibles: bool = False,
     sync_scroll: bool = True,
+    search_query: str = "",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
@@ -3315,13 +3326,19 @@ def translation_reader_body(
     source_blocks = _translation_reader_blocks(
         rows,
         text_key="source_text",
+        pane_key="original",
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
     translated_blocks = _translation_reader_blocks(
         rows,
         text_key="translated_text",
+        pane_key="translation",
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
+    qa_panel = _translation_reader_qa_panel(rows, search_query=search_query)
+    minimap = _translation_reader_minimap(rows)
     controls = _translation_text_controls(
         "reader",
         run_id,
@@ -3329,6 +3346,7 @@ def translation_reader_body(
         limit=limit,
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
+        search_query=search_query,
     )
     sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
     sync_script = _reader_sync_script() if sync_scroll else ""
@@ -3351,6 +3369,7 @@ def translation_reader_body(
                 sequence=start_sequence,
                 limit=limit,
                 show_invisibles=show_invisibles,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3363,6 +3382,7 @@ def translation_reader_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3375,6 +3395,7 @@ def translation_reader_body(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
+                search_query=search_query,
             ),
             "view",
         )}
@@ -3387,8 +3408,10 @@ def translation_reader_body(
         limit=limit,
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
+        search_query=search_query,
     )}
     {controls}
+    {qa_panel}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this reader page only.</h3>
       <p>
@@ -3417,6 +3440,7 @@ def translation_reader_body(
         </article>
       </div>
     </section>
+    {minimap}
     {sync_script}
     """
 
@@ -3429,6 +3453,7 @@ def _translation_raw_text_tabs(
     limit: int,
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
+    search_query: str = "",
 ) -> str:
     diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
     reader_current = 'aria-current="page"' if active == "reader" else ""
@@ -3448,6 +3473,7 @@ def _translation_raw_text_tabs(
         sequence=start_sequence,
         limit=limit,
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
     reader_href = _translation_raw_text_href(
         "reader",
@@ -3456,6 +3482,7 @@ def _translation_raw_text_tabs(
         limit=limit,
         show_invisibles=show_invisibles,
         sync_scroll=sync_scroll,
+        search_query=search_query,
     )
     return f"""
     <nav class="reader-tabs" aria-label="Raw text views">
@@ -3485,6 +3512,7 @@ def _translation_text_controls(
     limit: int,
     show_invisibles: bool,
     sync_scroll: bool | None = None,
+    search_query: str = "",
 ) -> str:
     invisible_label = (
         "Hide special chars" if show_invisibles else "Show special chars"
@@ -3500,6 +3528,7 @@ def _translation_text_controls(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=not sync_scroll,
+                search_query=search_query,
             ),
             "view",
         )
@@ -3515,11 +3544,21 @@ def _translation_text_controls(
                 limit=limit,
                 show_invisibles=not show_invisibles,
                 sync_scroll=sync_scroll,
+                search_query=search_query,
             ),
             "view",
         )}
         {sync_control}
       </div>
+      {_translation_search_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+      )}
       {_translation_jump_form(
           view_name,
           run_id,
@@ -3527,8 +3566,65 @@ def _translation_text_controls(
           limit=limit,
           show_invisibles=show_invisibles,
           sync_scroll=sync_scroll,
+          search_query=search_query,
       )}
     </section>
+    """
+
+
+def _translation_search_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=False,
+        search_query="",
+    )
+    clear_link = ""
+    if search_query:
+        clear_link = _action_link(
+            "Clear search",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+            ),
+            "view",
+            compact=True,
+        )
+    return f"""
+    <form
+      class="reader-search-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <input type="hidden" name="sequence" value="{start_sequence}">
+      <label>
+        Search
+        <input
+          type="search"
+          name="q"
+          value="{escape(search_query)}"
+          maxlength="200"
+          placeholder="Current window"
+        >
+      </label>
+      {_action_button("Find", "view", compact=True)}
+      {clear_link}
+    </form>
     """
 
 
@@ -3540,19 +3636,22 @@ def _translation_jump_form(
     limit: int,
     show_invisibles: bool,
     sync_scroll: bool | None = None,
+    search_query: str = "",
 ) -> str:
-    hidden_fields = [f'<input type="hidden" name="limit" value="{limit}">']
-    if show_invisibles:
-        hidden_fields.append('<input type="hidden" name="show_invisibles" value="1">')
-    if view_name == "reader" and sync_scroll is False:
-        hidden_fields.append('<input type="hidden" name="sync" value="0">')
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+    )
     return f"""
     <form
       class="reader-jump-form"
       method="get"
       action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
     >
-      {"".join(hidden_fields)}
+      {hidden_fields}
       <label>
         Sequence
         <input
@@ -3576,6 +3675,7 @@ def _translation_raw_text_href(
     limit: int,
     show_invisibles: bool = False,
     sync_scroll: bool | None = None,
+    search_query: str = "",
 ) -> str:
     query: dict[str, str] = {
         "sequence": str(max(1, sequence)),
@@ -3585,14 +3685,38 @@ def _translation_raw_text_href(
         query["show_invisibles"] = "1"
     if view_name == "reader" and sync_scroll is False:
         query["sync"] = "0"
+    if search_query:
+        query["q"] = search_query
     return f"/admin/logs/{run_id}/{view_name}?{urlencode(query)}"
+
+
+def _translation_control_hidden_fields(
+    *,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None,
+    include_search: bool,
+    search_query: str,
+) -> str:
+    fields = [f'<input type="hidden" name="limit" value="{limit}">']
+    if show_invisibles:
+        fields.append('<input type="hidden" name="show_invisibles" value="1">')
+    if sync_scroll is False:
+        fields.append('<input type="hidden" name="sync" value="0">')
+    if include_search and search_query:
+        fields.append(
+            f'<input type="hidden" name="q" value="{escape(search_query)}">'
+        )
+    return "".join(fields)
 
 
 def _translation_reader_blocks(
     rows: tuple[dict[str, object], ...],
     *,
     text_key: str,
+    pane_key: str,
     show_invisibles: bool = False,
+    search_query: str = "",
 ) -> str:
     if not rows:
         return '<p class="reader-empty">No work units found.</p>'
@@ -3600,7 +3724,9 @@ def _translation_reader_blocks(
         _translation_reader_block(
             row,
             text_key=text_key,
+            pane_key=pane_key,
             show_invisibles=show_invisibles,
+            search_query=search_query,
         )
         for row in rows
     )
@@ -3610,25 +3736,154 @@ def _translation_reader_block(
     row: dict[str, object],
     *,
     text_key: str,
+    pane_key: str,
     show_invisibles: bool = False,
+    search_query: str = "",
 ) -> str:
     sequence = escape(str(row.get("sequence") or 0))
     status = escape(str(row.get("status") or "unknown"))
     block_label = escape(_translation_source_block_label(row))
+    qa_flags = _translation_row_qa_flags(row)
+    qa_class = " has-qa-warning" if qa_flags else ""
+    qa_html = _translation_row_qa_flag_html(qa_flags)
     text = str(row.get(text_key) or "")
     if not text:
         text = "[empty]"
-    text_html = _diagnostic_text_html(text, show_invisibles=show_invisibles)
+    text_html = _diagnostic_text_html(
+        text,
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+    )
     return f"""
-    <article class="reader-block" data-reader-sequence="{sequence}">
+    <article
+      id="reader-{escape(pane_key)}-{sequence}"
+      class="reader-block{qa_class}"
+      data-reader-sequence="{sequence}"
+    >
       <header>
         <span>#{sequence}</span>
         <span class="status">{status}</span>
         <span>Blocks {block_label}</span>
+        {qa_html}
       </header>
       <div class="reader-text">{text_html}</div>
     </article>
     """
+
+
+def _translation_reader_qa_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    search_query: str,
+) -> str:
+    counts = _translation_reader_qa_counts(rows)
+    search_matches = (
+        _translation_search_match_count(rows, search_query=search_query)
+        if search_query
+        else 0
+    )
+    search_metric = ""
+    if search_query:
+        search_metric = _reader_qa_metric("Search hits", str(search_matches))
+    return f"""
+    <section class="reader-qa-panel" aria-label="Reader QA summary">
+      {_reader_qa_metric("Window units", str(len(rows)))}
+      {_reader_qa_metric("Missing translation", str(counts["missing_translation"]))}
+      {_reader_qa_metric("Empty source", str(counts["empty_source"]))}
+      {_reader_qa_metric("Length mismatch", str(counts["length_mismatch"]))}
+      {search_metric}
+    </section>
+    """
+
+
+def _reader_qa_metric(label: str, value: str) -> str:
+    return f"""
+    <div class="reader-qa-metric">
+      <span>{escape(label)}</span>
+      <strong>{escape(value)}</strong>
+    </div>
+    """
+
+
+def _translation_reader_qa_counts(
+    rows: tuple[dict[str, object], ...],
+) -> dict[str, int]:
+    counts = {
+        "missing_translation": 0,
+        "empty_source": 0,
+        "length_mismatch": 0,
+    }
+    for row in rows:
+        for flag in _translation_row_qa_flags(row):
+            if flag["kind"] in counts:
+                counts[flag["kind"]] += 1
+    return counts
+
+
+def _translation_reader_minimap(rows: tuple[dict[str, object], ...]) -> str:
+    if not rows:
+        return ""
+    items = "\n".join(_translation_reader_minimap_item(row) for row in rows)
+    return f"""
+    <nav class="reader-minimap" aria-label="Reader QA minimap">
+      {items}
+    </nav>
+    """
+
+
+def _translation_reader_minimap_item(row: dict[str, object]) -> str:
+    sequence = str(row.get("sequence") or 0)
+    safe_sequence = escape(sequence)
+    status = str(row.get("status") or "unknown")
+    flags = _translation_row_qa_flags(row)
+    flag_class = " has-qa-warning" if flags else ""
+    flag_summary = ", ".join(flag["label"] for flag in flags) if flags else "No QA flags"
+    title = f"Sequence {sequence}: {status}; {flag_summary}"
+    return f"""
+    <a
+      class="reader-minimap-item{flag_class}"
+      href="#reader-original-{safe_sequence}"
+      title="{escape(title)}"
+      aria-label="{escape(title)}"
+    >
+      {safe_sequence}
+    </a>
+    """
+
+
+def _translation_row_qa_flag_html(flags: tuple[dict[str, str], ...]) -> str:
+    if not flags:
+        return ""
+    return '<span class="reader-qa-flags">' + "".join(
+        (
+            f'<span class="reader-qa-flag reader-qa-flag-{escape(flag["kind"])}">'
+            f'{escape(flag["label"])}</span>'
+        )
+        for flag in flags
+    ) + "</span>"
+
+
+def _translation_row_qa_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
+    source = str(row.get("source_text") or "")
+    translated = str(row.get("translated_text") or "")
+    source_length = len(source.strip())
+    translated_length = len(translated.strip())
+    flags: list[dict[str, str]] = []
+    if source_length == 0:
+        flags.append({"kind": "empty_source", "label": "Empty source"})
+    if translated_length == 0:
+        flags.append({"kind": "missing_translation", "label": "Missing translation"})
+    elif source_length > 0:
+        larger = max(source_length, translated_length)
+        smaller = max(1, min(source_length, translated_length))
+        if larger >= smaller * 2.5 and larger - smaller >= 80:
+            label = (
+                "Translation much longer"
+                if translated_length > source_length
+                else "Translation much shorter"
+            )
+            flags.append({"kind": "length_mismatch", "label": label})
+    return tuple(flags)
 
 
 def _reader_sync_script() -> str:
@@ -3683,6 +3938,7 @@ def _translation_text_diagnostic_row(
     row: dict[str, object],
     *,
     show_invisibles: bool = False,
+    search_query: str = "",
 ) -> str:
     block_label = _translation_source_block_label(row)
     notes = []
@@ -3693,6 +3949,9 @@ def _translation_text_diagnostic_row(
     max_attempts = row.get("max_attempts")
     if attempt_count or max_attempts:
         notes.append(f"attempts: {attempt_count}/{max_attempts}")
+    qa_flags = _translation_row_qa_flags(row)
+    for flag in qa_flags:
+        notes.append(flag["label"])
     note_html = ""
     if notes:
         note_text = " · ".join(escape(str(note)) for note in notes)
@@ -3702,10 +3961,12 @@ def _translation_text_diagnostic_row(
     source_text = _diagnostic_text_html(
         str(row.get("source_text") or ""),
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
     translated_text = _diagnostic_text_html(
         str(row.get("translated_text") or ""),
         show_invisibles=show_invisibles,
+        search_query=search_query,
     )
     return f"""
     <tr>
@@ -3726,7 +3987,47 @@ _ZERO_WIDTH_CHAR_LABELS = {
 }
 
 
-def _diagnostic_text_html(text: str, *, show_invisibles: bool) -> str:
+def _diagnostic_text_html(
+    text: str,
+    *,
+    show_invisibles: bool,
+    search_query: str = "",
+) -> str:
+    if not search_query:
+        return _diagnostic_text_segment_html(text, show_invisibles=show_invisibles)
+    lowered_text = text.lower()
+    lowered_query = search_query.lower()
+    if not lowered_query:
+        return _diagnostic_text_segment_html(text, show_invisibles=show_invisibles)
+    parts: list[str] = []
+    cursor = 0
+    while True:
+        match_start = lowered_text.find(lowered_query, cursor)
+        if match_start < 0:
+            parts.append(
+                _diagnostic_text_segment_html(
+                    text[cursor:],
+                    show_invisibles=show_invisibles,
+                )
+            )
+            break
+        match_end = match_start + len(search_query)
+        parts.append(
+            _diagnostic_text_segment_html(
+                text[cursor:match_start],
+                show_invisibles=show_invisibles,
+            )
+        )
+        match_html = _diagnostic_text_segment_html(
+            text[match_start:match_end],
+            show_invisibles=show_invisibles,
+        )
+        parts.append(f'<mark class="reader-search-hit">{match_html}</mark>')
+        cursor = match_end
+    return "".join(parts)
+
+
+def _diagnostic_text_segment_html(text: str, *, show_invisibles: bool) -> str:
     if not show_invisibles:
         return escape(text)
     parts: list[str] = []
@@ -3753,6 +4054,28 @@ def _diagnostic_text_html(text: str, *, show_invisibles: bool) -> str:
         else:
             parts.append(escape(char))
     return "".join(parts)
+
+
+def _translation_search_match_count(
+    rows: tuple[dict[str, object], ...],
+    *,
+    search_query: str,
+) -> int:
+    if not search_query:
+        return 0
+    query = search_query.lower()
+    count = 0
+    for row in rows:
+        for key in ("source_text", "translated_text"):
+            text = str(row.get(key) or "").lower()
+            cursor = 0
+            while True:
+                index = text.find(query, cursor)
+                if index < 0:
+                    break
+                count += 1
+                cursor = index + len(query)
+    return count
 
 
 def _invisible_marker(label: str, title: str) -> str:
@@ -5050,15 +5373,18 @@ header {
   margin: 12px 0;
 }
 .reader-control-group,
+.reader-search-form,
 .reader-jump-form {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
+.reader-search-form,
 .reader-jump-form {
   margin: 0;
 }
+.reader-search-form label,
 .reader-jump-form label {
   display: flex;
   align-items: center;
@@ -5067,8 +5393,8 @@ header {
   font-size: 0.9rem;
   font-weight: 800;
 }
+.reader-search-form input,
 .reader-jump-form input {
-  width: 96px;
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -5076,6 +5402,37 @@ header {
   font: inherit;
   color: var(--ink);
   background: #ffffff;
+}
+.reader-search-form input {
+  width: min(260px, 100%);
+}
+.reader-jump-form input {
+  width: 96px;
+}
+.reader-qa-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.reader-qa-metric {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+.reader-qa-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.reader-qa-metric strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 1.2rem;
 }
 .reader-panel {
   padding: 0;
@@ -5117,6 +5474,10 @@ header {
   margin: 0 0 18px;
   border-bottom: 1px solid var(--line);
 }
+.reader-block.has-qa-warning {
+  border-left: 3px solid #d98b4a;
+  padding-left: 12px;
+}
 .reader-block:last-child {
   border-bottom: 0;
   margin-bottom: 0;
@@ -5137,6 +5498,53 @@ header {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.reader-search-hit {
+  color: #111827;
+  background: #fde68a;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.reader-qa-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-qa-flag {
+  color: #7c2d12;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+.reader-minimap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+.reader-minimap-item {
+  min-width: 32px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  background: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+.reader-minimap-item.has-qa-warning {
+  color: #7c2d12;
+  border-color: #fed7aa;
+  background: #ffedd5;
 }
 .invisible-char {
   color: #9a3412;
