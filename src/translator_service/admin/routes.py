@@ -79,6 +79,7 @@ from translator_service.admin.secrets import (
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
     TranslationRunDetails,
+    TranslationRunFragmentDetail,
     TranslationRunSummary,
     TranslationWorkUnitDiagnostic,
     build_translation_run_archive,
@@ -2535,6 +2536,13 @@ def _translation_run_details(
             error_message=_safe_work_unit_error_summary(details.summary.error_message),
         ),
     )
+    if not details.fragments:
+        fragments = _translation_work_unit_fragments(
+            settings,
+            job_id=details.summary.job_id,
+        )
+        if fragments:
+            details = replace(details, fragments=fragments)
     diagnostic = _translation_work_unit_diagnostic(
         settings,
         job_id=details.summary.job_id,
@@ -2542,6 +2550,67 @@ def _translation_run_details(
     if diagnostic is None:
         return details
     return replace(details, work_unit_diagnostic=diagnostic)
+
+
+def _translation_work_unit_fragments(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> tuple[TranslationRunFragmentDetail, ...]:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return ()
+    store = open_persistent_job_store(settings)
+    try:
+        units = sorted(
+            store.list_work_units(job_id),
+            key=lambda unit: getattr(unit, "sequence", 0),
+        )
+    finally:
+        store.close()
+    return tuple(_translation_work_unit_fragment(unit) for unit in units)
+
+
+def _translation_work_unit_fragment(unit: object) -> TranslationRunFragmentDetail:
+    translated_text = getattr(unit, "translated_text", None) or ""
+    prompt_tokens = max(0, int(getattr(unit, "prompt_tokens", 0) or 0))
+    completion_tokens = max(0, int(getattr(unit, "completion_tokens", 0) or 0))
+    return TranslationRunFragmentDetail(
+        sequence=max(0, int(getattr(unit, "sequence", 0) or 0)),
+        status=_status_value(getattr(unit, "status", "unknown")),
+        elapsed_seconds=_work_unit_elapsed_seconds(unit),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        prompt_cache_hit_tokens=max(
+            0,
+            int(getattr(unit, "cache_hit_tokens", 0) or 0),
+        ),
+        prompt_cache_miss_tokens=max(
+            0,
+            int(getattr(unit, "cache_miss_tokens", 0) or 0),
+        ),
+        retry_count=max(0, int(getattr(unit, "retry_count", 0) or 0)),
+        cache_hit=bool(getattr(unit, "cache_hit_tokens", 0) or 0),
+        prompt_tier=getattr(unit, "prompt_tier", None),
+        source_text_hash=getattr(unit, "source_text_hash", None),
+        translated_text_hash=None,
+        source_text_chars=0,
+        translated_text_chars=len(translated_text),
+        source_block_ids=tuple(getattr(unit, "source_block_ids", ()) or ()),
+        warnings=(),
+        error_message=_safe_work_unit_error_summary(getattr(unit, "last_error", None)),
+    )
+
+
+def _work_unit_elapsed_seconds(unit: object) -> float:
+    started_at = getattr(unit, "started_at", None)
+    completed_at = getattr(unit, "completed_at", None)
+    if started_at is None or completed_at is None:
+        return 0.0
+    try:
+        return max(0.0, round((completed_at - started_at).total_seconds(), 2))
+    except (AttributeError, TypeError):
+        return 0.0
 
 
 def _translation_text_diagnostics(

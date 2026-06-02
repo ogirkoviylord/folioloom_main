@@ -2299,6 +2299,7 @@ class AdminRoutesTest(unittest.TestCase):
             client.post("/admin/login", data={"password": "owner-pass"})
 
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             diagnostics = client.get(
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
             )
@@ -2306,8 +2307,26 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(details.status_code, 200)
         self.assertIn("Text diagnostics", details.text)
+        self.assertIn("block-1", details.text)
+        self.assertIn("translated", details.text)
+        self.assertIn("11 + 7 = 18", details.text)
+        self.assertNotIn("No run-log fragment records found", details.text)
         self.assertNotIn("Private source paragraph", details.text)
         self.assertNotIn("Приватний перекладений абзац", details.text)
+        self.assertEqual(details_api.status_code, 200)
+        details_payload = details_api.json()["details"]
+        self.assertEqual(len(details_payload["fragments"]), 1)
+        self.assertEqual(details_payload["fragments"][0]["sequence"], 1)
+        self.assertEqual(details_payload["fragments"][0]["status"], "translated")
+        self.assertEqual(
+            details_payload["fragments"][0]["source_block_ids"],
+            ["block-1"],
+        )
+        self.assertEqual(details_payload["fragments"][0]["prompt_tokens"], 11)
+        self.assertEqual(details_payload["fragments"][0]["completion_tokens"], 7)
+        details_api_text = json.dumps(details_payload, ensure_ascii=False)
+        self.assertNotIn("Private source paragraph", details_api_text)
+        self.assertNotIn("Приватний перекладений абзац", details_api_text)
         self.assertEqual(diagnostics.status_code, 200)
         self.assertIn("Raw text visibility is enabled", diagnostics.text)
         self.assertIn("Private source paragraph", diagnostics.text)
