@@ -3339,6 +3339,7 @@ def translation_reader_body(
     sync_scroll: bool = True,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3354,6 +3355,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3366,6 +3368,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3415,6 +3418,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3430,6 +3434,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3445,7 +3450,10 @@ def translation_reader_body(
         else ""
     )
     search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
-    compare_class = "reader-compare has-indent-preview" if indent_preview else "reader-compare"
+    compare_classes = ["reader-compare", f"reader-pane-mode-{pane_mode}"]
+    if indent_preview:
+        compare_classes.append("has-indent-preview")
+    compare_class = " ".join(compare_classes)
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3492,6 +3500,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )}
@@ -3547,6 +3556,7 @@ def _translation_raw_text_tabs(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3581,6 +3591,7 @@ def _translation_raw_text_tabs(
         sync_scroll=sync_scroll,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3615,6 +3626,7 @@ def _translation_text_controls(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3634,6 +3646,7 @@ def _translation_text_controls(
                 sync_scroll=not sync_scroll,
                 search_query=search_query,
                 search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3652,10 +3665,25 @@ def _translation_text_controls(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
                 indent_preview=not indent_preview,
                 qa_filter=qa_filter,
             ),
             "view",
+        )
+    pane_controls = ""
+    if view_name == "reader":
+        pane_controls = _translation_pane_mode_controls(
+            run_id,
+            start_sequence=start_sequence,
+            limit=limit,
+            show_invisibles=show_invisibles,
+            sync_scroll=sync_scroll,
+            search_query=search_query,
+            search_hits_only=search_hits_only,
+            pane_mode=pane_mode,
+            indent_preview=indent_preview,
+            qa_filter=qa_filter,
         )
     search_hits_control = ""
     if view_name == "reader" and search_query:
@@ -3674,6 +3702,7 @@ def _translation_text_controls(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 search_hits_only=not search_hits_only,
+                pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3696,6 +3725,7 @@ def _translation_text_controls(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3704,6 +3734,7 @@ def _translation_text_controls(
         {sync_control}
         {indent_control}
         {search_hits_control}
+        {pane_controls}
       </div>
       {_translation_page_form(
           view_name,
@@ -3714,6 +3745,7 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3726,6 +3758,7 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3738,6 +3771,7 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
@@ -3750,11 +3784,63 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
           indent_preview=indent_preview,
           qa_filter=qa_filter,
       )}
     </section>
     """
+
+
+def _translation_pane_mode_controls(
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    links = []
+    for mode, label in (
+        ("split", "Split panes"),
+        ("original", "Focus original"),
+        ("translation", "Focus translation"),
+    ):
+        links.append(
+            _action_link(
+                label,
+                _translation_raw_text_href(
+                    "reader",
+                    run_id,
+                    sequence=start_sequence,
+                    limit=limit,
+                    show_invisibles=show_invisibles,
+                    sync_scroll=sync_scroll,
+                    search_query=search_query,
+                    search_hits_only=search_hits_only,
+                    pane_mode=mode,
+                    indent_preview=indent_preview,
+                    qa_filter=qa_filter,
+                ),
+                "view",
+                compact=True,
+                extra_class=(
+                    "reader-pane-mode-action is-active"
+                    if pane_mode == mode
+                    else "reader-pane-mode-action"
+                ),
+            )
+        )
+    return (
+        '<span class="reader-pane-mode-controls" aria-label="Reader pane mode">'
+        + "".join(links)
+        + "</span>"
+    )
 
 
 def _translation_page_form(
@@ -3767,6 +3853,7 @@ def _translation_page_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3777,6 +3864,7 @@ def _translation_page_form(
         include_search=True,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
         indent_preview=indent_preview,
         qa_filter=qa_filter,
         include_limit=False,
@@ -3820,6 +3908,7 @@ def _translation_filter_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3830,6 +3919,7 @@ def _translation_filter_form(
         include_search=True,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
         indent_preview=indent_preview,
     )
     return f"""
@@ -3861,6 +3951,7 @@ def _translation_search_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3871,6 +3962,7 @@ def _translation_search_form(
         include_search=False,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3885,6 +3977,7 @@ def _translation_search_form(
                 limit=limit,
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
+                pane_mode=pane_mode,
                 indent_preview=indent_preview,
                 qa_filter=qa_filter,
             ),
@@ -3925,6 +4018,7 @@ def _translation_jump_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3935,6 +4029,7 @@ def _translation_jump_form(
         include_search=True,
         search_query=search_query,
         search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
         indent_preview=indent_preview,
         qa_filter=qa_filter,
     )
@@ -3970,6 +4065,7 @@ def _translation_raw_text_href(
     sync_scroll: bool | None = None,
     search_query: str = "",
     search_hits_only: bool = False,
+    pane_mode: str = "split",
     indent_preview: bool = False,
     qa_filter: str = "all",
 ) -> str:
@@ -3985,6 +4081,8 @@ def _translation_raw_text_href(
         query["q"] = search_query
     if view_name == "reader" and search_query and search_hits_only:
         query["search_hits"] = "1"
+    if view_name == "reader" and pane_mode != "split":
+        query["pane_mode"] = pane_mode
     if indent_preview:
         query["indent_preview"] = "1"
     if qa_filter != "all":
@@ -4000,6 +4098,7 @@ def _translation_control_hidden_fields(
     include_search: bool,
     search_query: str,
     search_hits_only: bool,
+    pane_mode: str,
     indent_preview: bool,
     qa_filter: str = "all",
     include_limit: bool = True,
@@ -4017,6 +4116,10 @@ def _translation_control_hidden_fields(
         )
     if search_query and search_hits_only:
         fields.append('<input type="hidden" name="search_hits" value="1">')
+    if pane_mode != "split":
+        fields.append(
+            f'<input type="hidden" name="pane_mode" value="{escape(pane_mode)}">'
+        )
     if indent_preview:
         fields.append('<input type="hidden" name="indent_preview" value="1">')
     if qa_filter != "all":
@@ -4289,13 +4392,19 @@ def _translation_reader_position_bar(
     sync_scroll: bool,
     search_query: str,
     search_hits_only: bool,
+    pane_mode: str,
     indent_preview: bool,
     qa_filter: str,
 ) -> str:
     search_label = f'Search "{search_query}"' if search_query else "Search off"
+    pane_label = {
+        "original": "original focus",
+        "translation": "translation focus",
+    }.get(pane_mode, "split")
     chips = [
         ("QA", qa_filter if qa_filter != "all" else "all"),
         ("Search", search_label),
+        ("Pane", pane_label),
         ("Special chars", "shown" if show_invisibles else "hidden"),
         ("Sync scroll", "on" if sync_scroll else "off"),
         ("Indent preview", "on" if indent_preview else "off"),
@@ -6239,6 +6348,17 @@ header {
   gap: 10px;
   flex-wrap: wrap;
 }
+.reader-pane-mode-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.reader-pane-mode-action.is-active {
+  border-color: #9fb7b4;
+  color: #ffffff;
+  background: #256f68;
+}
 .reader-page-form,
 .reader-filter-form,
 .reader-search-form,
@@ -6459,6 +6579,12 @@ header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-height: min(72vh, 760px);
+}
+.reader-compare.reader-pane-mode-original {
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.65fr);
+}
+.reader-compare.reader-pane-mode-translation {
+  grid-template-columns: minmax(260px, 0.65fr) minmax(0, 1.45fr);
 }
 .reader-pane {
   min-width: 0;
@@ -7262,6 +7388,10 @@ button.danger {
   .reader-compare {
     grid-template-columns: 1fr;
     min-height: 0;
+  }
+  .reader-compare.reader-pane-mode-original,
+  .reader-compare.reader-pane-mode-translation {
+    grid-template-columns: 1fr;
   }
   .reader-pane {
     border-right: 0;

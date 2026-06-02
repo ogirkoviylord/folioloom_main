@@ -751,6 +751,20 @@ Owner decisions recorded during issue #71:
   was unavailable. This does not add whole-book search indexing/traversal,
   saved searches, persistent annotations, public/user-facing access, publisher
   workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#244](https://github.com/ogirkoviylord/folioloom_main/issues/244) starts the
+  first Reader pane focus slice on branch
+  `codex/issue-244-reader-pane-focus-mode`, stacked after #242. The slice adds
+  Reader-only `pane_mode` controls for split, original-focus and
+  translation-focus layouts so the owner can keep the before/after comparison
+  visible while giving more horizontal space to one pane. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. Browser smoke was not available in the local app session
+  because the browser agent was unavailable. This does not add persisted
+  preferences, editing, annotations, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
