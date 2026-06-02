@@ -667,6 +667,20 @@ Owner decisions recorded during issue #71:
   shortcuts for annotations/comments/QA issues, persistent preferences,
   public/user-facing access, publisher workspace, live runtime data operations
   or release readiness.
+- 2026-06-02: Issue
+  [#232](https://github.com/ogirkoviylord/folioloom_main/issues/232) starts the
+  first Reader sticky position bar slice on branch
+  `codex/issue-232-reader-sticky-position`, stacked after #230. The slice adds
+  a compact sticky Reader-only current position/status bar showing the current
+  logical page, loaded sequence range, page size, active QA filter, search
+  state, special-character state, sync-scroll state and indent-preview state
+  from the already loaded window and query parameters. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not add saved views, persistent preferences, whole-book progress,
+  localStorage/sessionStorage, public/user-facing access, publisher workspace,
+  live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
