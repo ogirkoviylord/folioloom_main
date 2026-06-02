@@ -653,6 +653,20 @@ Owner decisions recorded during issue #71:
   does not add persistent annotations, whole-book aggregation, keyboard
   shortcuts, semantic quality scoring, public/user-facing access, publisher
   workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#230](https://github.com/ogirkoviylord/folioloom_main/issues/230) starts the
+  first Reader keyboard navigation slice on branch
+  `codex/issue-230-reader-keyboard-navigation`, stacked after #228. The slice
+  lets the run-log Reader navigate to the existing Previous/Next logical window
+  URLs with ArrowLeft/ArrowRight, while ignoring text fields, selects, buttons,
+  links and contenteditable targets so forms and normal vertical scrolling keep
+  their browser behavior. Local verification passed focused reader/diagnostics
+  regression coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not add keyboard
+  shortcuts for annotations/comments/QA issues, persistent preferences,
+  public/user-facing access, publisher workspace, live runtime data operations
+  or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

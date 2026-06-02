@@ -623,6 +623,12 @@ Acceptance criteria:
   first QA issue navigation slice on branch
   `codex/issue-228-reader-qa-navigation`: a Reader-only current-window issue
   rail linking existing QA flags to comparison block anchors.
+  Issue
+  [#230](https://github.com/ogirkoviylord/folioloom_main/issues/230) begins the
+  first Reader keyboard navigation slice on branch
+  `codex/issue-230-reader-keyboard-navigation`: ArrowLeft/ArrowRight navigation
+  to the existing Previous/Next logical window URLs, ignoring interactive form
+  controls.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
