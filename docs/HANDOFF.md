@@ -710,6 +710,19 @@ Owner decisions recorded during issue #71:
   `git diff --check`. This does not add whole-book issue traversal, persistent
   annotations, saved review state, public/user-facing access, publisher
   workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#238](https://github.com/ogirkoviylord/folioloom_main/issues/238) starts the
+  first Reader QA issue progress slice on branch
+  `codex/issue-238-reader-qa-progress`, stacked after #236. The slice adds a
+  compact Reader-only current-window QA progress chip that starts with the
+  visible QA issue total and updates to `Issue X of N` when the owner selects a
+  QA issue by issue link, Previous issue / Next issue or page hash. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This does not add whole-book issue counts/traversal,
+  persistent annotations, saved review state, public/user-facing access,
+  publisher workspace, live runtime data operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

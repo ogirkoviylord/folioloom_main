@@ -4285,8 +4285,14 @@ def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str
     else:
         body = "".join(issue_items)
         button_class = escape(_action_classes("view", True, "reader-qa-step-button"))
+        issue_count = len(issue_items)
         step_controls = f"""
         <div class="reader-qa-step-controls" data-reader-qa-step-controls>
+          <span
+            class="reader-qa-progress"
+            data-reader-qa-progress
+            aria-live="polite"
+          >Issues in window: {issue_count}</span>
           <button
             class="{button_class}"
             type="button"
@@ -4511,6 +4517,15 @@ def _reader_qa_step_script() -> str:
           .map((link) => link.getAttribute("href"))
           .filter((href) => href && href.startsWith("#"));
         if (!issueHrefs.length) return;
+        const progress = document.querySelector("[data-reader-qa-progress]");
+        const defaultProgressText = `Issues in window: ${issueHrefs.length}`;
+        const updateProgress = (href) => {
+          if (!progress) return;
+          const index = issueHrefs.indexOf(href);
+          progress.textContent = index >= 0
+            ? `Issue ${index + 1} of ${issueHrefs.length}`
+            : defaultProgressText;
+        };
         const targetForHref = (href) => document.getElementById(href.slice(1));
         const sequenceForHref = (href) => href.replace(/^#reader-original-/, "");
         const targetsForHref = (href) => {
@@ -4528,6 +4543,7 @@ def _reader_qa_step_script() -> str:
           document
             .querySelectorAll(".reader-block.is-active-qa-issue")
             .forEach((block) => block.classList.remove("is-active-qa-issue"));
+          updateProgress("");
         };
         const setActiveIssue = (href, shouldScroll) => {
           if (!issueHrefs.includes(href)) {
@@ -4537,6 +4553,7 @@ def _reader_qa_step_script() -> str:
           const targets = targetsForHref(href);
           if (!targets.length) return;
           clearActiveIssue();
+          updateProgress(href);
           issueLinks.forEach((link) => {
             if (link.getAttribute("href") !== href) return;
             link.classList.add("is-active");
@@ -6182,10 +6199,21 @@ header {
 }
 .reader-qa-step-controls {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
 .reader-qa-step-button {
+  white-space: nowrap;
+}
+.reader-qa-progress {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 850;
   white-space: nowrap;
 }
 .reader-qa-issue-list {
