@@ -2364,6 +2364,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(reader.headers["cache-control"], "no-store")
         self.assertIn("Translation Reader", reader.text)
         self.assertIn("data-reader-sync-pane", reader.text)
+        self.assertIn("pendingProgrammaticScrolls", reader.text)
         self.assertIn("Original", reader.text)
         self.assertIn("Translation", reader.text)
         self.assertIn("Private source paragraph", reader.text)

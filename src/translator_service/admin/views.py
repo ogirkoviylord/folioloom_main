@@ -3425,23 +3425,38 @@ def _reader_sync_script() -> str:
           document.querySelectorAll("[data-reader-sync-pane]")
         );
         if (panes.length < 2) return;
-        let syncing = false;
+        const pendingProgrammaticScrolls = new WeakMap();
+        const maxScroll = (pane) => Math.max(
+          0,
+          pane.scrollHeight - pane.clientHeight
+        );
         const scrollRatio = (pane) => {
-          const maxScroll = pane.scrollHeight - pane.clientHeight;
-          return maxScroll > 0 ? pane.scrollTop / maxScroll : 0;
+          const availableScroll = maxScroll(pane);
+          return availableScroll > 0 ? pane.scrollTop / availableScroll : 0;
+        };
+        const markProgrammaticScroll = (pane, scrollTop) => {
+          pendingProgrammaticScrolls.set(pane, scrollTop);
+          window.setTimeout(() => {
+            if (pendingProgrammaticScrolls.get(pane) === scrollTop) {
+              pendingProgrammaticScrolls.delete(pane);
+            }
+          }, 160);
+        };
+        const isProgrammaticScroll = (pane) => {
+          const expectedTop = pendingProgrammaticScrolls.get(pane);
+          if (expectedTop == null) return false;
+          pendingProgrammaticScrolls.delete(pane);
+          return Math.abs(pane.scrollTop - expectedTop) <= 2;
         };
         panes.forEach((pane) => {
           pane.addEventListener("scroll", () => {
-            if (syncing) return;
-            syncing = true;
+            if (isProgrammaticScroll(pane)) return;
             const ratio = scrollRatio(pane);
             panes.forEach((other) => {
               if (other === pane) return;
-              const maxScroll = other.scrollHeight - other.clientHeight;
-              other.scrollTop = ratio * Math.max(0, maxScroll);
-            });
-            window.requestAnimationFrame(() => {
-              syncing = false;
+              const nextScrollTop = ratio * maxScroll(other);
+              markProgrammaticScroll(other, nextScrollTop);
+              other.scrollTop = nextScrollTop;
             });
           }, { passive: true });
         });
