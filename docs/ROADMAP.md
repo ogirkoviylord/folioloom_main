@@ -657,6 +657,13 @@ Acceptance criteria:
   `codex/issue-240-reader-search-hit-navigation`: Reader-only Previous hit /
   Next hit controls and selected `Hit X of N` state for already rendered
   current-window search highlights.
+  Issue
+  [#242](https://github.com/ogirkoviylord/folioloom_main/issues/242) begins the
+  first Reader search-hit row filter slice on branch
+  `codex/issue-242-reader-search-hit-filter`: a Reader-only `search_hits=1`
+  mode that narrows the already loaded work-unit window to rows containing the
+  active source/translation search query while leaving Text Diagnostics
+  unchanged.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
