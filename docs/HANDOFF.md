@@ -723,6 +723,19 @@ Owner decisions recorded during issue #71:
   `git diff --check`. This does not add whole-book issue counts/traversal,
   persistent annotations, saved review state, public/user-facing access,
   publisher workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#240](https://github.com/ogirkoviylord/folioloom_main/issues/240) starts the
+  first Reader search-hit navigation slice on branch
+  `codex/issue-240-reader-search-hit-navigation`, stacked after #238. The slice
+  adds Reader-only Previous hit / Next hit controls and a `Hit X of N` progress
+  chip for already rendered search highlights in the currently loaded work-unit
+  window. Local verification passed focused reader/diagnostics regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted ruff for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not add whole-book search traversal, saved searches, persistent annotations,
+  public/user-facing access, publisher workspace, live runtime data operations
+  or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference

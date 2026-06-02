@@ -3391,7 +3391,13 @@ def translation_reader_body(
             else "No work units found."
         ),
     )
+    search_match_count = (
+        _translation_search_match_count(visible_rows, search_query=search_query)
+        if search_query
+        else 0
+    )
     qa_panel = _translation_reader_qa_panel(visible_rows, search_query=search_query)
+    search_nav = _translation_reader_search_nav(search_match_count)
     layout_panel = _translation_reader_layout_panel(
         visible_rows,
         indent_preview=indent_preview,
@@ -3431,6 +3437,7 @@ def translation_reader_body(
         if any(_translation_row_qa_flags(row) for row in visible_rows)
         else ""
     )
+    search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
     compare_class = "reader-compare has-indent-preview" if indent_preview else "reader-compare"
     return f"""
     <section class="toolbar-panel">
@@ -3483,6 +3490,7 @@ def translation_reader_body(
     {controls}
     {position_bar}
     {qa_panel}
+    {search_nav}
     {layout_panel}
     {qa_issue_nav}
     <section class="panel warning-panel">
@@ -3517,6 +3525,7 @@ def translation_reader_body(
     {sync_script}
     {keyboard_script}
     {qa_step_script}
+    {search_hit_script}
     """
 
 
@@ -4154,6 +4163,35 @@ def _translation_reader_qa_panel(
     """
 
 
+def _translation_reader_search_nav(search_match_count: int) -> str:
+    if search_match_count <= 0:
+        return ""
+    button_class = escape(_action_classes("view", True, "reader-search-hit-button"))
+    return f"""
+    <nav
+      class="reader-search-nav"
+      aria-label="Reader search hits"
+      data-reader-search-hit-controls
+    >
+      <span
+        class="reader-search-progress"
+        data-reader-search-hit-progress
+        aria-live="polite"
+      >Search hits in window: {search_match_count}</span>
+      <button
+        class="{button_class}"
+        type="button"
+        data-reader-search-hit-step="previous"
+      >Previous hit</button>
+      <button
+        class="{button_class}"
+        type="button"
+        data-reader-search-hit-step="next"
+      >Next hit</button>
+    </nav>
+    """
+
+
 def _translation_reader_layout_panel(
     rows: tuple[dict[str, object], ...],
     *,
@@ -4608,6 +4646,64 @@ def _reader_qa_step_script() -> str:
           setActiveIssue(window.location.hash, false);
         });
         setActiveIssue(window.location.hash, false);
+      })();
+    </script>
+    """
+
+
+def _reader_search_hit_script() -> str:
+    return """
+    <script data-reader-search-hit-navigation>
+      (() => {
+        const controls = document.querySelector("[data-reader-search-hit-controls]");
+        if (!controls) return;
+        const hits = Array.from(document.querySelectorAll(".reader-search-hit"));
+        if (!hits.length) return;
+        const progress = document.querySelector("[data-reader-search-hit-progress]");
+        const defaultProgressText = `Search hits in window: ${hits.length}`;
+        const updateProgress = (index) => {
+          if (!progress) return;
+          progress.textContent = index >= 0
+            ? `Hit ${index + 1} of ${hits.length}`
+            : defaultProgressText;
+        };
+        const clearActiveHit = () => {
+          hits.forEach((hit) => {
+            hit.classList.remove("is-active-search-hit");
+            hit.removeAttribute("aria-current");
+          });
+          updateProgress(-1);
+        };
+        const setActiveHit = (index, shouldScroll) => {
+          if (index < 0 || index >= hits.length) return;
+          clearActiveHit();
+          const hit = hits[index];
+          hit.classList.add("is-active-search-hit");
+          hit.setAttribute("aria-current", "true");
+          updateProgress(index);
+          if (shouldScroll) {
+            hit.scrollIntoView({ block: "center", behavior: "smooth" });
+          }
+        };
+        const activeHitIndex = () => hits.findIndex(
+          (hit) => hit.classList.contains("is-active-search-hit")
+        );
+        const goToHit = (direction) => {
+          const currentIndex = activeHitIndex();
+          const nextIndex = direction === "next"
+            ? Math.min(hits.length - 1, currentIndex + 1)
+            : currentIndex < 0
+              ? hits.length - 1
+              : Math.max(0, currentIndex - 1);
+          setActiveHit(nextIndex, true);
+        };
+        controls.addEventListener("click", (event) => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest("[data-reader-search-hit-step]");
+          if (!button) return;
+          event.preventDefault();
+          goToHit(button.getAttribute("data-reader-search-hit-step"));
+        });
       })();
     </script>
     """
@@ -6186,6 +6282,13 @@ header {
 .reader-qa-issue-nav {
   margin: 12px 0;
 }
+.reader-search-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
 .reader-qa-issue-heading {
   display: flex;
   align-items: center;
@@ -6214,6 +6317,19 @@ header {
   background: #ffffff;
   font-size: 0.76rem;
   font-weight: 850;
+  white-space: nowrap;
+}
+.reader-search-progress {
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #713f12;
+  background: #fffbeb;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.reader-search-hit-button {
   white-space: nowrap;
 }
 .reader-qa-issue-list {
@@ -6341,6 +6457,11 @@ header {
   background: #fde68a;
   border-radius: 3px;
   padding: 0 2px;
+}
+.reader-search-hit.is-active-search-hit {
+  outline: 2px solid rgba(202, 138, 4, 0.55);
+  outline-offset: 2px;
+  background: #facc15;
 }
 .reader-qa-flags {
   display: inline-flex;
