@@ -3201,22 +3201,29 @@ def translation_text_diagnostics_body(
     show_invisibles: bool = False,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
+    visible_rows = _translation_filter_rows(rows, qa_filter)
     row_html = "\n".join(
         _translation_text_diagnostic_row(
             row,
             show_invisibles=show_invisibles,
             search_query=search_query,
         )
-        for row in rows
+        for row in visible_rows
     )
     if not row_html:
-        row_html = """
+        empty_message = (
+            "No work units match this QA filter."
+            if qa_filter != "all" and rows
+            else "No work units found."
+        )
+        row_html = f"""
         <tr>
-          <td colspan="5" class="empty-cell">No work units found.</td>
+          <td colspan="5" class="empty-cell">{escape(empty_message)}</td>
         </tr>
         """
     controls = _translation_text_controls(
@@ -3228,6 +3235,7 @@ def translation_text_diagnostics_body(
         show_invisibles=show_invisibles,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     return f"""
     <section class="toolbar-panel">
@@ -3249,6 +3257,7 @@ def translation_text_diagnostics_body(
                 show_invisibles=show_invisibles,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3262,6 +3271,7 @@ def translation_text_diagnostics_body(
                 show_invisibles=show_invisibles,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3275,6 +3285,7 @@ def translation_text_diagnostics_body(
                 show_invisibles=show_invisibles,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3288,6 +3299,7 @@ def translation_text_diagnostics_body(
         show_invisibles=show_invisibles,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )}
     {controls}
     <section class="panel warning-panel">
@@ -3327,30 +3339,42 @@ def translation_reader_body(
     sync_scroll: bool = True,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
+    visible_rows = _translation_filter_rows(rows, qa_filter)
     source_blocks = _translation_reader_blocks(
-        rows,
+        visible_rows,
         text_key="source_text",
         pane_key="original",
         show_invisibles=show_invisibles,
         search_query=search_query,
+        empty_message=(
+            "No work units match this QA filter."
+            if qa_filter != "all" and rows
+            else "No work units found."
+        ),
     )
     translated_blocks = _translation_reader_blocks(
-        rows,
+        visible_rows,
         text_key="translated_text",
         pane_key="translation",
         show_invisibles=show_invisibles,
         search_query=search_query,
+        empty_message=(
+            "No work units match this QA filter."
+            if qa_filter != "all" and rows
+            else "No work units found."
+        ),
     )
-    qa_panel = _translation_reader_qa_panel(rows, search_query=search_query)
+    qa_panel = _translation_reader_qa_panel(visible_rows, search_query=search_query)
     layout_panel = _translation_reader_layout_panel(
-        rows,
+        visible_rows,
         indent_preview=indent_preview,
     )
-    minimap = _translation_reader_minimap(rows)
+    minimap = _translation_reader_minimap(visible_rows)
     controls = _translation_text_controls(
         "reader",
         run_id,
@@ -3361,6 +3385,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
     sync_script = _reader_sync_script() if sync_scroll else ""
@@ -3386,6 +3411,7 @@ def translation_reader_body(
                 show_invisibles=show_invisibles,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3400,6 +3426,7 @@ def translation_reader_body(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3414,6 +3441,7 @@ def translation_reader_body(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3428,6 +3456,7 @@ def translation_reader_body(
         sync_scroll=sync_scroll,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )}
     {controls}
     {qa_panel}
@@ -3475,6 +3504,7 @@ def _translation_raw_text_tabs(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
     reader_current = 'aria-current="page"' if active == "reader" else ""
@@ -3496,6 +3526,7 @@ def _translation_raw_text_tabs(
         show_invisibles=show_invisibles,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     reader_href = _translation_raw_text_href(
         "reader",
@@ -3506,6 +3537,7 @@ def _translation_raw_text_tabs(
         sync_scroll=sync_scroll,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     return f"""
     <nav class="reader-tabs" aria-label="Raw text views">
@@ -3538,6 +3570,7 @@ def _translation_text_controls(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     invisible_label = (
         "Hide special chars" if show_invisibles else "Show special chars"
@@ -3555,6 +3588,7 @@ def _translation_text_controls(
                 sync_scroll=not sync_scroll,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )
@@ -3571,6 +3605,7 @@ def _translation_text_controls(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 indent_preview=not indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )
@@ -3591,6 +3626,7 @@ def _translation_text_controls(
                 sync_scroll=sync_scroll,
                 search_query=search_query,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
         )}
@@ -3606,6 +3642,18 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           indent_preview=indent_preview,
+          qa_filter=qa_filter,
+      )}
+      {_translation_filter_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          indent_preview=indent_preview,
+          qa_filter=qa_filter,
       )}
       {_translation_search_form(
           view_name,
@@ -3616,6 +3664,7 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           indent_preview=indent_preview,
+          qa_filter=qa_filter,
       )}
       {_translation_jump_form(
           view_name,
@@ -3626,6 +3675,7 @@ def _translation_text_controls(
           sync_scroll=sync_scroll,
           search_query=search_query,
           indent_preview=indent_preview,
+          qa_filter=qa_filter,
       )}
     </section>
     """
@@ -3641,6 +3691,7 @@ def _translation_page_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     hidden_fields = _translation_control_hidden_fields(
         limit=limit,
@@ -3649,6 +3700,7 @@ def _translation_page_form(
         include_search=True,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
         include_limit=False,
     )
     current_page = _translation_current_page(start_sequence, limit)
@@ -3680,6 +3732,45 @@ def _translation_page_form(
     """
 
 
+def _translation_filter_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+        indent_preview=indent_preview,
+    )
+    return f"""
+    <form
+      class="reader-filter-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <input type="hidden" name="sequence" value="{start_sequence}">
+      <label>
+        QA
+        <select name="qa">
+          {_translation_qa_filter_options(qa_filter)}
+        </select>
+      </label>
+      {_action_button("Filter", "view", compact=True)}
+    </form>
+    """
+
+
 def _translation_search_form(
     view_name: str,
     run_id: str,
@@ -3690,6 +3781,7 @@ def _translation_search_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     hidden_fields = _translation_control_hidden_fields(
         limit=limit,
@@ -3698,6 +3790,7 @@ def _translation_search_form(
         include_search=False,
         search_query="",
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     clear_link = ""
     if search_query:
@@ -3711,6 +3804,7 @@ def _translation_search_form(
                 show_invisibles=show_invisibles,
                 sync_scroll=sync_scroll,
                 indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
             "view",
             compact=True,
@@ -3749,6 +3843,7 @@ def _translation_jump_form(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     hidden_fields = _translation_control_hidden_fields(
         limit=limit,
@@ -3757,6 +3852,7 @@ def _translation_jump_form(
         include_search=True,
         search_query=search_query,
         indent_preview=indent_preview,
+        qa_filter=qa_filter,
     )
     return f"""
     <form
@@ -3790,6 +3886,7 @@ def _translation_raw_text_href(
     sync_scroll: bool | None = None,
     search_query: str = "",
     indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     query: dict[str, str] = {
         "sequence": str(max(1, sequence)),
@@ -3803,6 +3900,8 @@ def _translation_raw_text_href(
         query["q"] = search_query
     if indent_preview:
         query["indent_preview"] = "1"
+    if qa_filter != "all":
+        query["qa"] = qa_filter
     return f"/admin/logs/{run_id}/{view_name}?{urlencode(query)}"
 
 
@@ -3814,6 +3913,7 @@ def _translation_control_hidden_fields(
     include_search: bool,
     search_query: str,
     indent_preview: bool,
+    qa_filter: str = "all",
     include_limit: bool = True,
 ) -> str:
     fields = []
@@ -3829,7 +3929,42 @@ def _translation_control_hidden_fields(
         )
     if indent_preview:
         fields.append('<input type="hidden" name="indent_preview" value="1">')
+    if qa_filter != "all":
+        fields.append(f'<input type="hidden" name="qa" value="{escape(qa_filter)}">')
     return "".join(fields)
+
+
+def _translation_filter_rows(
+    rows: tuple[dict[str, object], ...],
+    qa_filter: str,
+) -> tuple[dict[str, object], ...]:
+    if qa_filter == "all":
+        return rows
+    return tuple(row for row in rows if _translation_row_matches_filter(row, qa_filter))
+
+
+def _translation_row_matches_filter(row: dict[str, object], qa_filter: str) -> bool:
+    if qa_filter == "indent":
+        return bool(_translation_row_layout_flags(row))
+    return any(flag["kind"] == qa_filter for flag in _translation_row_qa_flags(row))
+
+
+def _translation_qa_filter_options(current_filter: str) -> str:
+    options = (
+        ("all", "All"),
+        ("missing_translation", "Missing translation"),
+        ("empty_source", "Empty source"),
+        ("length_mismatch", "Length mismatch"),
+        ("indent", "Literal indent"),
+    )
+    return "\n".join(
+        (
+            f'<option value="{escape(value)}"'
+            f'{" selected" if value == current_filter else ""}>'
+            f'{escape(label)}</option>'
+        )
+        for value, label in options
+    )
 
 
 def _translation_current_page(start_sequence: int, limit: int) -> int:
@@ -3874,9 +4009,10 @@ def _translation_reader_blocks(
     pane_key: str,
     show_invisibles: bool = False,
     search_query: str = "",
+    empty_message: str = "No work units found.",
 ) -> str:
     if not rows:
-        return '<p class="reader-empty">No work units found.</p>'
+        return f'<p class="reader-empty">{escape(empty_message)}</p>'
     return "\n".join(
         _translation_reader_block(
             row,
@@ -5586,6 +5722,7 @@ header {
 }
 .reader-control-group,
 .reader-page-form,
+.reader-filter-form,
 .reader-search-form,
 .reader-jump-form {
   display: flex;
@@ -5594,11 +5731,13 @@ header {
   flex-wrap: wrap;
 }
 .reader-page-form,
+.reader-filter-form,
 .reader-search-form,
 .reader-jump-form {
   margin: 0;
 }
 .reader-page-form label,
+.reader-filter-form label,
 .reader-search-form label,
 .reader-jump-form label {
   display: flex;
@@ -5610,6 +5749,7 @@ header {
 }
 .reader-page-form input,
 .reader-page-form select,
+.reader-filter-form select,
 .reader-search-form input,
 .reader-jump-form input {
   min-height: 38px;
@@ -5630,6 +5770,9 @@ header {
 }
 .reader-page-form select {
   width: 92px;
+}
+.reader-filter-form select {
+  width: 190px;
 }
 .reader-search-form input {
   width: min(260px, 100%);
