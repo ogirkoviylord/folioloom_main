@@ -2399,6 +2399,22 @@ class AdminRoutesTest(unittest.TestCase):
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
                 "?q=%3Cscript%3E&search_hits=1"
             )
+            reader_pane_focus = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?pane_mode=original&q=Tiny&show_invisibles=1&sync=0"
+                "&search_hits=1&indent_preview=1"
+            )
+            reader_translation_focus = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?pane_mode=translation"
+            )
+            reader_invalid_pane = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?pane_mode=unknown"
+            )
+            diagnostics_pane_param = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?pane_mode=translation&q=Tiny"
+            )
             diagnostics_indent = client.get(
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
                 "?indent_preview=1"
@@ -2607,9 +2623,15 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Reader current position", reader.text)
         self.assertIn("QA</span><strong>all</strong>", reader.text)
         self.assertIn("Search</span><strong>Search off</strong>", reader.text)
+        self.assertIn("Pane</span><strong>split</strong>", reader.text)
         self.assertIn("Special chars</span><strong>hidden</strong>", reader.text)
         self.assertIn("Sync scroll</span><strong>on</strong>", reader.text)
         self.assertIn("Indent preview</span><strong>off</strong>", reader.text)
+        self.assertIn("reader-pane-mode-split", reader.text)
+        self.assertIn("Split panes", reader.text)
+        self.assertIn("Focus original", reader.text)
+        self.assertIn("Focus translation", reader.text)
+        self.assertNotIn("pane_mode=split", reader.text)
         self.assertIn("Reader QA summary", reader.text)
         self.assertIn("Reader layout diagnostics", reader.text)
         self.assertIn("Window units", reader.text)
@@ -2733,6 +2755,49 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("search_hits=1", diagnostics_search_hits_param.text)
         self.assertIn("Paragraph waiting for translation", diagnostics_search_hits_param.text)
         self.assertIn("Tiny source", diagnostics_search_hits_param.text)
+        self.assertEqual(reader_pane_focus.status_code, 200)
+        self.assertIn("reader-pane-mode-original", reader_pane_focus.text)
+        self.assertIn("reader-pane-mode-action is-active", reader_pane_focus.text)
+        self.assertIn(
+            "Pane</span><strong>original focus</strong>",
+            reader_pane_focus.text,
+        )
+        self.assertIn("pane_mode=original", reader_pane_focus.text)
+        self.assertIn('name="pane_mode" value="original"', reader_pane_focus.text)
+        self.assertIn("search_hits=1", reader_pane_focus.text)
+        self.assertIn("indent_preview=1", reader_pane_focus.text)
+        self.assertIn("sync=0", reader_pane_focus.text)
+        self.assertIn("show_invisibles=1", reader_pane_focus.text)
+        self.assertIn("q=Tiny", reader_pane_focus.text)
+        self.assertIn("Tiny", reader_pane_focus.text)
+        self.assertNotIn("Private source paragraph", reader_pane_focus.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_pane_focus.text)
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=1&limit=100&show_invisibles=1&sync=0&q=Tiny'
+            '&search_hits=1&pane_mode=original&indent_preview=1";',
+            reader_pane_focus.text,
+        )
+        self.assertEqual(reader_translation_focus.status_code, 200)
+        self.assertIn("reader-pane-mode-translation", reader_translation_focus.text)
+        self.assertIn(
+            "Pane</span><strong>translation focus</strong>",
+            reader_translation_focus.text,
+        )
+        self.assertIn("pane_mode=translation", reader_translation_focus.text)
+        self.assertEqual(reader_invalid_pane.status_code, 200)
+        self.assertIn("reader-pane-mode-split", reader_invalid_pane.text)
+        self.assertIn("Pane</span><strong>split</strong>", reader_invalid_pane.text)
+        self.assertNotIn("pane_mode=unknown", reader_invalid_pane.text)
+        self.assertEqual(diagnostics_pane_param.status_code, 200)
+        self.assertIn("Translation Text Diagnostics", diagnostics_pane_param.text)
+        self.assertNotIn("Focus original", diagnostics_pane_param.text)
+        self.assertNotIn("Focus translation", diagnostics_pane_param.text)
+        self.assertNotIn("pane_mode=translation", diagnostics_pane_param.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">Tiny</mark> source.',
+            diagnostics_pane_param.text,
+        )
         self.assertEqual(reader_indent.status_code, 200)
         self.assertIn("Plain indent", reader_indent.text)
         self.assertIn("has-indent-preview", reader_indent.text)
