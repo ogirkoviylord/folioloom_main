@@ -1468,6 +1468,12 @@ Decision:
   specific translation run. It must resolve `run_id -> job_id`, reuse the same
   work-unit/source-object path as Text diagnostics, render server-side
   `no-store` HTML and avoid raw-text JSON/API/archive outputs.
+- On 2026-06-02, the owner approved saving marked Reader review fragments so
+  later diagnostics can inspect exactly what the owner flagged. The persisted
+  record may include both original/source text and translated text for the
+  marked work-unit sequence, plus mark/status/source-block metadata, but must
+  remain a run-scoped owner-only raw diagnostic sidecar rather than a normal
+  admin detail, API, archive, telemetry or support artifact.
 - Normal admin log details and downloadable diagnostics remain metadata-only and
   redacted by default.
 - Removing this raw-text diagnostic path, hiding it from the owner, replacing it
@@ -1485,6 +1491,10 @@ Evidence:
   and regression coverage for auth, `no-store` HTML, escaping, reader
   navigation, missing-store behavior and no raw text in details/API/archive
   surfaces.
+- In the 2026-06-02 Reader-marking thread, the owner explicitly stated that
+  marked fragments need to be saved for later log review and clarified that both
+  files/text sides, original/source and translation, must be saved for marked
+  items.
 - After PR #179 was merged and deployed, the owner explicitly stated on
   2026-06-01 that this first version is accepted as the direction and that the
   owner should have ongoing access to raw translation texts for diagnostics.
@@ -1509,6 +1519,10 @@ Consequences:
 - Agents must still treat raw document text, translated output and prompt
   bodies as sensitive data and avoid copying excerpts into logs, docs, issues
   or chat unless the owner approves that exact excerpt.
+- Persisted Reader review marks are sensitive raw diagnostic artifacts. They
+  must stay out of safe archives, normal admin details, JSON APIs, telemetry,
+  PRs/issues and docs unless a separate owner approval covers the exact excerpt
+  or workflow.
 - Implementing prompt viewing may require a separate scoped issue because full
   prompt bodies are not confirmed to be persisted in current run metadata.
   If implementation changes provider request logging, storage/runtime data,
