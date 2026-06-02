@@ -693,6 +693,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             request.query_params.get("qa"),
             choices={
                 "all",
+                "issues",
                 "empty_source",
                 "missing_translation",
                 "length_mismatch",
@@ -759,6 +760,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             request.query_params.get("qa"),
             choices={
                 "all",
+                "issues",
                 "empty_source",
                 "missing_translation",
                 "length_mismatch",

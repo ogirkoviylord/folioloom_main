@@ -670,6 +670,12 @@ Acceptance criteria:
   `codex/issue-244-reader-pane-focus-mode`: Reader-only split,
   original-focus and translation-focus layout modes for the current before/after
   view.
+  Issue
+  [#246](https://github.com/ogirkoviylord/folioloom_main/issues/246) begins the
+  first all-issues QA filter slice on branch
+  `codex/issue-246-reader-all-issues-filter`: a shared owner-only `qa=issues`
+  filter that keeps current-window rows with any existing QA flag or
+  literal-indent layout flag in Reader and Text Diagnostics.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
