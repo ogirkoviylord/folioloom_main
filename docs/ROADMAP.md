@@ -634,6 +634,12 @@ Acceptance criteria:
   first Reader sticky position bar slice on branch
   `codex/issue-232-reader-sticky-position`: a Reader-only sticky status bar for
   current logical page, sequence range and active query/toggle states.
+  Issue
+  [#234](https://github.com/ogirkoviylord/folioloom_main/issues/234) begins the
+  first Reader QA issue step-controls slice on branch
+  `codex/issue-234-reader-qa-step-controls`: Reader-only Previous issue /
+  Next issue controls that navigate through existing QA issue anchors in the
+  currently loaded work-unit window.
   These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.

@@ -681,6 +681,21 @@ Owner decisions recorded during issue #71:
   does not add saved views, persistent preferences, whole-book progress,
   localStorage/sessionStorage, public/user-facing access, publisher workspace,
   live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#234](https://github.com/ogirkoviylord/folioloom_main/issues/234) starts the
+  first Reader QA issue step-controls slice on branch
+  `codex/issue-234-reader-qa-step-controls`, stacked after #232. The slice adds
+  Reader-only Previous issue / Next issue controls that move through existing
+  QA issue anchors in the currently loaded work-unit window and update only the
+  page hash/scroll position. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. The in-app browser connection was unavailable in this
+  Codex session, so no manual browser smoke evidence was collected. This does
+  not add whole-book issue traversal, persistent annotations, saved review
+  state, public/user-facing access, publisher workspace, live runtime data
+  operations or release readiness.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
