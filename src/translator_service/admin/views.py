@@ -4432,6 +4432,23 @@ def _translation_reader_review_panel(rows: tuple[dict[str, object], ...]) -> str
       <div class="reader-review-filters" aria-label="Reader review mark filters">
         {filter_buttons}
       </div>
+      <div class="reader-review-step-controls" data-reader-review-step-controls>
+        <span
+          class="reader-review-step-progress"
+          data-reader-review-step-progress
+          aria-live="polite"
+        >Marked blocks: 0</span>
+        <button
+          type="button"
+          class="{button_class}"
+          data-reader-review-step="previous"
+        >Previous mark</button>
+        <button
+          type="button"
+          class="{button_class}"
+          data-reader-review-step="next"
+        >Next mark</button>
+      </div>
     </section>
     """
 
@@ -5059,7 +5076,17 @@ def _reader_review_mark_script() -> str:
         const filterStatus = reviewPanel
           ? reviewPanel.querySelector("[data-reader-review-filter-status]")
           : null;
+        const stepControls = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-step-controls]")
+          : null;
+        const stepButtons = stepControls
+          ? Array.from(stepControls.querySelectorAll("[data-reader-review-step]"))
+          : [];
+        const stepProgress = stepControls
+          ? stepControls.querySelector("[data-reader-review-step-progress]")
+          : null;
         let currentReviewFilter = "all";
+        let currentReviewStepSequence = "";
         const markLabels = {
           needs_review: "needs review",
           ok: "OK",
@@ -5100,6 +5127,32 @@ def _reader_review_mark_script() -> str:
           return markedBlock
             ? markedBlock.getAttribute("data-reader-review-current")
             : "";
+        };
+        const markedSequencesForCurrentFilter = () => reviewSequences().filter(
+          (sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            return Boolean(mark) && (
+              currentReviewFilter === "all" || mark === currentReviewFilter
+            );
+          }
+        );
+        const updateReviewStepProgress = (sequence) => {
+          if (!stepProgress) return;
+          const markedSequences = markedSequencesForCurrentFilter();
+          currentReviewStepSequence = markedSequences.includes(sequence)
+            ? sequence
+            : "";
+          if (!markedSequences.length) {
+            stepProgress.textContent = "Marked blocks: 0";
+            return;
+          }
+          if (!currentReviewStepSequence) {
+            stepProgress.textContent = `Marked blocks: ${markedSequences.length}`;
+            return;
+          }
+          const index = markedSequences.indexOf(currentReviewStepSequence);
+          stepProgress.textContent =
+            `Marked block ${index + 1} of ${markedSequences.length}`;
         };
         const updateReviewCounts = () => {
           if (!reviewPanel) return;
@@ -5144,6 +5197,34 @@ def _reader_review_mark_script() -> str:
             matchingBlocks(sequence).forEach((block) => setFilterHidden(block, isHidden));
             matchingOutlines(sequence).forEach((link) => setFilterHidden(link, isHidden));
           });
+          updateReviewStepProgress(currentReviewStepSequence);
+        };
+        const goToReviewMark = (direction) => {
+          const markedSequences = markedSequencesForCurrentFilter();
+          if (!markedSequences.length) {
+            updateReviewStepProgress("");
+            return;
+          }
+          const currentIndex = markedSequences.indexOf(currentReviewStepSequence);
+          let nextIndex = 0;
+          if (currentIndex >= 0) {
+            nextIndex = direction === "previous"
+              ? Math.max(0, currentIndex - 1)
+              : Math.min(markedSequences.length - 1, currentIndex + 1);
+          } else if (direction === "previous") {
+            nextIndex = markedSequences.length - 1;
+          }
+          const sequence = markedSequences[nextIndex];
+          const href = `#reader-original-${sequence}`;
+          const target = document.getElementById(`reader-original-${sequence}`);
+          if (!target) return;
+          window.history.replaceState(null, "", href);
+          window.dispatchEvent(
+            new CustomEvent("reader:block-selected", { detail: { href } })
+          );
+          target.scrollIntoView({ block: "start", behavior: "smooth" });
+          target.focus({ preventScroll: true });
+          updateReviewStepProgress(sequence);
         };
         const setTargetClasses = (target, mark) => {
           markClasses.forEach((className) => target.classList.remove(className));
@@ -5190,6 +5271,12 @@ def _reader_review_mark_script() -> str:
           button.addEventListener("click", (event) => {
             event.preventDefault();
             applyReviewFilter(button.getAttribute("data-reader-review-filter"));
+          });
+        });
+        stepButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            goToReviewMark(button.getAttribute("data-reader-review-step"));
           });
         });
         updateReviewCounts();
@@ -6992,7 +7079,8 @@ header {
   font-weight: 850;
 }
 .reader-review-counts,
-.reader-review-filters {
+.reader-review-filters,
+.reader-review-step-controls {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -7015,6 +7103,16 @@ header {
   font-size: inherit;
 }
 .reader-review-filter-button {
+  white-space: nowrap;
+}
+.reader-review-step-progress {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 850;
   white-space: nowrap;
 }
 .reader-review-filter-button.is-active,
