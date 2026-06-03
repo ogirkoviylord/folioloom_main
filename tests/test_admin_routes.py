@@ -43,6 +43,7 @@ from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
+from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -1942,6 +1943,202 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("processing-bearer-token", archive_text)
             self.assertNotIn("sk-processing-secret-value", archive_text)
             self.assertNotIn("deepseek.api_keys.processing-key", archive_text)
+
+    def test_translation_log_download_uses_effective_scheduler_snapshot(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            run_root = root / "runs"
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-stale-export",
+                    user_id="telegram:42",
+                    file_id="file-stale-export",
+                    file_name="pg55-images-3.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                    adapter_version="epub-adapter-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=sequence,
+                            source_block_ids=(f"block-{sequence}",),
+                            source_text_hash=f"hash-{sequence}",
+                            prompt_tier="plain",
+                            source_language="auto",
+                            target_language="ru",
+                        )
+                        for sequence in range(1, 187)
+                    ],
+                )
+                limits = SchedulerLimits(max_active_units_global=1)
+                for _ in range(9):
+                    claim = store.claim_next_scheduled_work_unit(
+                        worker_id="worker-a",
+                        lease_seconds=300,
+                        limits=limits,
+                    )
+                    assert claim is not None
+                    store.complete_claimed_work_unit(
+                        work_unit_id=claim.work_unit_id,
+                        claim_token=claim.claim_token,
+                        translated_text="Translated text hidden from archive",
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                        cache_hit_tokens=2,
+                        cache_miss_tokens=8,
+                    )
+                for _ in range(3):
+                    claim = store.claim_next_scheduled_work_unit(
+                        worker_id="worker-a",
+                        lease_seconds=300,
+                        limits=limits,
+                    )
+                    assert claim is not None
+                    store.fail_claimed_work_unit(
+                        work_unit_id=claim.work_unit_id,
+                        claim_token=claim.claim_token,
+                        failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+                        error_message=(
+                            "provider failed on Private source paragraph "
+                            "with Bearer provider-secret and "
+                            "api_key=sk-provider-secret"
+                        ),
+                        retry_base_delay_seconds=0,
+                        retry_max_delay_seconds=0,
+                    )
+            finally:
+                store.close()
+
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="pg55-images-3.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                    total_fragment_count=186,
+                ),
+            )
+            logger.record_event("job_queued", {"job_id": job.id, "fragment_count": 186})
+            logger.finish(
+                status="failed",
+                error_message="Translation failed in the background worker.",
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            names = set(archive.namelist())
+            self.assertIn("run.json", names)
+            self.assertIn("effective_run.json", names)
+            self.assertIn("work_units.json", names)
+            self.assertIn("README.md", names)
+            raw_run = json.loads(archive.read("run.json"))
+            effective = json.loads(archive.read("effective_run.json"))
+            work_units = json.loads(archive.read("work_units.json"))
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in names
+            )
+
+        self.assertEqual(raw_run["fragment_count"], 0)
+        self.assertEqual(effective["summary"]["fragment_count"], 9)
+        self.assertEqual(effective["summary"]["total_fragment_count"], 186)
+        self.assertEqual(effective["summary"]["status"], "interrupted")
+        self.assertEqual(effective["totals"]["prompt_tokens"], 90)
+        self.assertEqual(effective["totals"]["completion_tokens"], 45)
+        self.assertEqual(work_units["counts_by_status"]["translated"], 9)
+        self.assertEqual(work_units["counts_by_status"]["failed_terminal"], 1)
+        self.assertEqual(work_units["counts_by_status"]["pending"], 176)
+        self.assertEqual(work_units["attention_unit"]["sequence"], 10)
+        self.assertEqual(work_units["attention_unit"]["attempt_count"], 3)
+        self.assertNotIn("Private source paragraph", archive_text)
+        self.assertNotIn("Translated text hidden from archive", archive_text)
+        self.assertNotIn("provider-secret", archive_text)
+        self.assertNotIn("sk-provider-secret", archive_text)
+
+    def test_translation_log_download_counts_ready_raw_fragments_completed(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_root = root / "runs"
+            job_db = root / "missing" / "jobs.sqlite3"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-ready-raw-export",
+                    order_id="order-ready-raw-export",
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="Private source paragraph",
+                    translated_text="Private translated paragraph",
+                    status="ready",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    total_tokens=18,
+                )
+            )
+            logger.finish(status="ready", result_file_name="book.uk.txt")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            work_units = json.loads(archive.read("work_units.json"))
+            effective = json.loads(archive.read("effective_run.json"))
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+            )
+
+        self.assertEqual(effective["summary"]["fragment_count"], 1)
+        self.assertEqual(effective["summary"]["total_fragment_count"], 1)
+        self.assertEqual(work_units["counts_by_status"]["ready"], 1)
+        self.assertEqual(work_units["completed_units"], 1)
+        self.assertNotIn("Private source paragraph", archive_text)
+        self.assertNotIn("Private translated paragraph", archive_text)
 
     def test_translation_logs_page_passes_safe_limit_filter(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
