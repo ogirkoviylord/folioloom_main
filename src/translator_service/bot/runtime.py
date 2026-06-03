@@ -167,6 +167,7 @@ _BOOK_RECOVERABLE_STATUS_INDICATOR_STATUSES = {
     "partial",
     "paused",
 }
+TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB = 20
 
 
 @dataclass(frozen=True)
@@ -2038,9 +2039,16 @@ def create_router(
                 "mime_type": getattr(document, "mime_type", None),
             },
         )
-        if _document_exceeds_upload_limit(document, max_upload_mb=config.max_upload_mb):
+        effective_upload_limit_mb = min(
+            config.max_upload_mb,
+            TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB,
+        )
+        if _document_exceeds_upload_limit(
+            document,
+            max_upload_mb=effective_upload_limit_mb,
+        ):
             error = FileTooLargeError(
-                f"File exceeds the upload limit of {config.max_upload_mb} MB"
+                f"File exceeds the upload limit of {effective_upload_limit_mb} MB"
             )
             await message.answer(build_upload_error_message(error, interface_language))
             return
