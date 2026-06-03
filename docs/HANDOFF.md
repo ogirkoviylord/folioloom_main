@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 ## 1. Текущее состояние проекта
 
@@ -63,6 +63,24 @@ key identifiers and traceback markers. Local verification for #78 passed
 focused redaction/admin/security tests, full unittest, compileall, targeted
 ruff and `scripts/predeploy_check.sh`. This does not prove real-file matrix,
 beta-server smoke, backup/restore or full Gate B readiness.
+
+Translation export state update on 2026-06-03: admin translation-log downloads
+now include metadata-only `effective_run.json` and `work_units.json` snapshots
+built through the same persistent scheduler/work-unit overlay used by the
+admin details UI/API. Raw `run.json` remains a sanitized lifecycle log and can
+lag durable progress after worker interruption; Postgres-backed work units are
+the effective progress source of truth when available. The regression fixture
+models a stale run log with `0` raw fragments but `9/186` translated work units
+and one terminal failed unit; coverage also includes a raw-only `ready`
+fragment fallback so generated completed-unit counts stay aligned with raw run
+summaries when no persistent store is available. Local verification on branch
+`codex/fix-effective-translation-export`: focused admin/archive tests passed,
+full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1226 tests with
+`OK (skipped=13)`, `PYTHONPATH=src python3 -m compileall src` passed, targeted
+ruff on changed Python files passed, and `git diff --check` passed. CI status
+remains Unknown until a PR/checks page is inspected. This does not mutate
+runtime data, change schema/state, deploy code, read secrets/env files, or
+claim broader Gate B/release readiness.
 
 Owner decisions recorded during issue #71:
 

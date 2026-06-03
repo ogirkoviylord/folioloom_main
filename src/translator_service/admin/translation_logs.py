@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +9,22 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
+_COMPLETED_FRAGMENT_STATUSES = {
+    "cached",
+    "complete",
+    "completed",
+    "ready",
+    "success",
+    "succeeded",
+    "translated",
+}
+_FAILED_FRAGMENT_STATUSES = {
+    "error",
+    "failed",
+    "failed_retryable",
+    "failed_terminal",
+    "interrupted",
+}
 READER_REVIEW_MARKS_FILE = "reader_review_marks.json"
 _READER_REVIEW_MARKS_VERSION = 1
 _READER_REVIEW_ALLOWED_MARKS = frozenset({"needs_review", "ok", "ignore"})
@@ -192,6 +208,59 @@ def build_translation_run_archive(
     return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
 
 
+def build_effective_translation_run_archive(
+    root: str | Path,
+    run_id: str,
+    *,
+    details: TranslationRunDetails,
+) -> TranslationRunArchive | None:
+    run_dir = _resolve_run_dir(root, run_id)
+    if run_dir is None:
+        return None
+    archive_name = f"{run_dir.name}.zip"
+    effective = _effective_run_payload(details)
+    work_units = _work_units_payload(details)
+    buffer = BytesIO()
+    with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+        for path in sorted(run_dir.rglob("*")):
+            if path.is_file() and path.name not in {
+                "summary.md",
+                READER_REVIEW_MARKS_FILE,
+            }:
+                archive.write(path, path.relative_to(run_dir).as_posix())
+        archive.writestr(
+            "effective_run.json",
+            _json_dumps(effective),
+        )
+        archive.writestr(
+            "work_units.json",
+            _json_dumps(work_units),
+        )
+        archive.writestr(
+            "summary.md",
+            _render_effective_summary(details, work_units=work_units),
+        )
+        archive.writestr(
+            "README.md",
+            "\n".join(
+                [
+                    "# Translation Export",
+                    "",
+                    "`run.json` is the sanitized lifecycle log captured during the run.",
+                    "`effective_run.json` is the authoritative export snapshot built",
+                    "from the lifecycle log plus persistent scheduler/work-unit state.",
+                    "`work_units.json` contains metadata-only work-unit status counts",
+                    "and the work unit needing attention when one is available.",
+                    "",
+                    "This archive intentionally excludes raw source text, translated",
+                    "text, provider prompts, API keys, and provider internals.",
+                    "",
+                ]
+            ),
+        )
+    return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
+
+
 def load_reader_review_marks(
     root: str | Path,
     run_id: str,
@@ -288,6 +357,105 @@ def _resolve_run_dir(root: str | Path, run_id: str) -> Path | None:
     if not candidate.is_dir() or not (candidate / "run.json").is_file():
         return None
     return candidate
+
+
+def _effective_run_payload(details: TranslationRunDetails) -> dict[str, Any]:
+    return {
+        "schema_version": "translation-effective-run-v1",
+        "summary": _json_safe(details.summary),
+        "metadata": _json_safe(details.metadata),
+        "totals": _json_safe(details.totals),
+        "security": _json_safe(details.security),
+        "translation_stack": _json_safe(details.translation_stack),
+        "work_unit_diagnostic": _json_safe(details.work_unit_diagnostic),
+    }
+
+
+def _work_units_payload(details: TranslationRunDetails) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for fragment in details.fragments:
+        counts[fragment.status] = counts.get(fragment.status, 0) + 1
+    return {
+        "schema_version": "translation-work-units-v1",
+        "counts_by_status": counts,
+        "total_units": len(details.fragments),
+        "completed_units": sum(
+            count
+            for status, count in counts.items()
+            if status in _COMPLETED_FRAGMENT_STATUSES
+        ),
+        "failed_units": sum(
+            count
+            for status, count in counts.items()
+            if status in _FAILED_FRAGMENT_STATUSES
+        ),
+        "attention_unit": _json_safe(details.work_unit_diagnostic),
+        "units": tuple(_json_safe(fragment) for fragment in details.fragments),
+    }
+
+
+def _render_effective_summary(
+    details: TranslationRunDetails,
+    *,
+    work_units: dict[str, Any],
+) -> str:
+    summary = details.summary
+    diagnostic = details.work_unit_diagnostic
+    lines = [
+        "# Translation Run",
+        "",
+        f"- Job: `{summary.job_id}`",
+        f"- File: `{summary.file_name}`",
+        f"- Format: `{summary.document_kind}`",
+        f"- Direction: `{summary.source_language}` -> `{summary.target_language}`",
+        f"- Status: `{summary.status}`",
+        f"- Progress: `{summary.fragment_count}/{summary.total_fragment_count}`",
+        f"- Tokens: `{summary.total_tokens}`",
+        "",
+        "## Effective Scheduler Snapshot",
+        "",
+        f"- total_units: `{work_units['total_units']}`",
+        f"- completed_units: `{work_units['completed_units']}`",
+        f"- failed_units: `{work_units['failed_units']}`",
+        f"- counts_by_status: `{json.dumps(work_units['counts_by_status'], sort_keys=True)}`",
+    ]
+    if diagnostic is not None:
+        lines.extend(
+            [
+                "",
+                "## Work Unit Needing Attention",
+                "",
+                f"- sequence: `{diagnostic.sequence}`",
+                f"- status: `{diagnostic.status}`",
+                f"- attempts: `{diagnostic.attempt_count}/{diagnostic.max_attempts}`",
+                f"- last_error: `{diagnostic.last_error or 'n/a'}`",
+            ]
+        )
+    if summary.error_message:
+        lines.extend(["", "## Error", "", summary.error_message])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _json_dumps(payload: Any) -> str:
+    return json.dumps(
+        _json_safe(payload),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+
+
+def _json_safe(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_safe(asdict(value))
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _read_reader_review_marks_document(path: Path) -> dict[str, Any]:
