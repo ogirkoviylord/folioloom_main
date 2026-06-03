@@ -1,8 +1,8 @@
-from dataclasses import dataclass
 import html
+import re
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
-import re
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
@@ -31,10 +31,10 @@ from translator_service.structure_optimizer import (
 )
 from translator_service.translation_jobs import FragmentTranslation
 
-
 EPUB_ADAPTER_VERSION = "epub-adapter-v1"
 _XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
 _EPUB_NAMESPACE = "http://www.idpf.org/2007/ops"
+_XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 
 ElementTree.register_namespace("", _XHTML_NAMESPACE)
 ElementTree.register_namespace("epub", _EPUB_NAMESPACE)
@@ -765,7 +765,8 @@ def _replace_epub_auxiliary_content(
                 else:
                     data = normalize_epub_xml_part_for_xml(data)
             elif _is_epub_text_item(item.filename) and (
-                _has_auxiliary_translation_for_file(
+                target_language
+                or _has_auxiliary_translation_for_file(
                     translated_by_block_id,
                     kind="xhtml-title",
                     file_name=item.filename,
@@ -780,6 +781,7 @@ def _replace_epub_auxiliary_content(
                     data,
                     file_name=item.filename,
                     translated_by_block_id=translated_by_block_id,
+                    target_language=target_language,
                 )
             target_epub.writestr(item, data)
 
@@ -884,8 +886,11 @@ def _replace_epub_xhtml_auxiliary_text(
     *,
     file_name: str,
     translated_by_block_id: dict[str, str],
+    target_language: str | None,
 ) -> bytes:
     document = _read_epub_xhtml(content)
+    if target_language:
+        _set_epub_xhtml_language_attrs(document, target_language)
     parent_by_child_id = _parent_map(document)
     is_navigation_document = _is_epub_navigation_document(
         file_name=file_name,
@@ -934,6 +939,16 @@ def _replace_epub_xhtml_auxiliary_text(
         if translated_text:
             _replace_text_node_sequence(_epub_text_slots(element), translated_text)
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
+
+
+def _set_epub_xhtml_language_attrs(
+    document: ElementTree.Element,
+    target_language: str,
+) -> None:
+    if _local_name(document.tag) != "html":
+        return
+    document.attrib["lang"] = target_language
+    document.attrib[f"{{{_XML_NAMESPACE}}}lang"] = target_language
 
 
 def _translated_auxiliary_text(
