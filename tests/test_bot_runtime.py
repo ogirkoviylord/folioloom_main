@@ -2658,6 +2658,45 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_document_exceeds_upload_limit(Document(), max_upload_mb=5))
         self.assertFalse(_document_exceeds_upload_limit(Document(), max_upload_mb=6))
 
+    async def test_document_upload_rejects_files_above_telegram_download_limit(self):
+        class DownloadBlockedBot:
+            def __init__(self) -> None:
+                self.get_file_called = False
+
+            async def get_file(self, file_id: str):
+                self.get_file_called = True
+                raise AssertionError("oversized Telegram files must not be downloaded")
+
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        bot = DownloadBlockedBot()
+        message = RecordingMessage()
+        message.bot = bot
+        message.document = SimpleNamespace(
+            file_id="telegram-file-id",
+            file_name="large.epub",
+            file_size=21 * 1024 * 1024,
+            mime_type="application/epub+zip",
+        )
+        router = create_router(
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            config=BotRuntimeConfig(max_upload_mb=50),
+        )
+
+        handler = self._router_message_handler(router, "document_upload")
+        await handler(message)
+
+        self.assertFalse(bot.get_file_called)
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("current limit of 20 MB", message.answers[0][0])
+        self.assertIsNone(service.get_pending_upload(42))
+
     def test_translation_progress_log_excludes_last_translated_fragment_preview(self):
         output = io.StringIO()
 
