@@ -797,6 +797,125 @@ class EpubFormatAdapterTest(unittest.TestCase):
             ["Real Title"],
         )
 
+    def test_assembles_epub_metadata_navigation_headings_and_language_attrs(self):
+        from io import BytesIO
+        from xml.etree import ElementTree
+        from zipfile import ZipFile
+
+        source_content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+                  <head><title>Chapter Metadata Title</title></head>
+                  <body>
+                    <h1>Chapter One</h1>
+                    <p>First paragraph.</p>
+                  </body>
+                </html>
+                """,
+                "OPS/nav.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml"
+                      xmlns:epub="http://www.idpf.org/2007/ops"
+                      lang="en"
+                      xml:lang="en">
+                  <head><title>Contents</title></head>
+                  <body>
+                    <nav epub:type="toc">
+                      <h1>Contents</h1>
+                      <ol>
+                        <li><a href="chapter.xhtml">Chapter One</a></li>
+                      </ol>
+                    </nav>
+                  </body>
+                </html>
+                """,
+            },
+            opf_content="""
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Book Metadata Title</dc:title>
+                <dc:description>Book description.</dc:description>
+                <dc:language>en</dc:language>
+              </metadata>
+            </package>
+            """,
+            ncx_content="""
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>NCX Book Title</text></docTitle>
+              <navMap>
+                <navPoint><navLabel><text>NCX Chapter One</text></navLabel></navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+
+        plan = plan_epub_translation(content=source_content, max_fragment_chars=100)
+        source_block_ids = {
+            block.source_block_id
+            for unit in plan.units
+            for block in unit.blocks
+        }
+        expected_aux_ids = {
+            "epub:aux:opf:OPS/content.opf:title:0",
+            "epub:aux:opf:OPS/content.opf:description:0",
+            "epub:aux:ncx:OPS/toc.ncx:text:0",
+            "epub:aux:ncx:OPS/toc.ncx:text:1",
+            "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0",
+            "epub:aux:xhtml-title:OPS/nav.xhtml:title:0",
+            "epub:aux:xhtml-navigation:OPS/nav.xhtml:h1:0",
+            "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0",
+        }
+        self.assertTrue(expected_aux_ids.issubset(source_block_ids))
+
+        content = assemble_epub_content_from_block_translations(
+            source_content=source_content,
+            target_language="ru",
+            translated_by_block_id={
+                "epub:OPS/chapter.xhtml:0": "Глава первая",
+                "epub:OPS/chapter.xhtml:1": "Первый абзац.",
+                "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                "epub:aux:opf:OPS/content.opf:description:0": "Описание книги.",
+                "epub:aux:ncx:OPS/toc.ncx:text:0": "Название NCX",
+                "epub:aux:ncx:OPS/toc.ncx:text:1": "Глава NCX первая",
+                "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": "Название главы",
+                "epub:aux:xhtml-title:OPS/nav.xhtml:title:0": "Содержание",
+                "epub:aux:xhtml-navigation:OPS/nav.xhtml:h1:0": "Содержание",
+                "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "Глава первая",
+            },
+        )
+
+        with ZipFile(BytesIO(content)) as epub:
+            opf = epub.read("OPS/content.opf")
+            toc = epub.read("OPS/toc.ncx")
+            chapter = epub.read("OPS/chapter.xhtml")
+            nav = epub.read("OPS/nav.xhtml")
+
+        self.assertIn("<dc:title>Название книги</dc:title>".encode("utf-8"), opf)
+        self.assertIn(
+            "<dc:description>Описание книги.</dc:description>".encode("utf-8"),
+            opf,
+        )
+        self.assertIn(b"<dc:language>ru</dc:language>", opf)
+        self.assertNotIn(b"<dc:language>en</dc:language>", opf)
+        self.assertIn("Название NCX".encode("utf-8"), toc)
+        self.assertIn("Глава NCX первая".encode("utf-8"), toc)
+        chapter_root = ElementTree.fromstring(chapter)
+        nav_root = ElementTree.fromstring(nav)
+        self.assertEqual(chapter_root.attrib["lang"], "ru")
+        self.assertEqual(nav_root.attrib["lang"], "ru")
+        self.assertEqual(
+            chapter_root.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        self.assertEqual(
+            nav_root.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        self.assertIn("Название главы".encode("utf-8"), chapter)
+        self.assertIn("Глава первая".encode("utf-8"), chapter)
+        self.assertIn("Содержание".encode("utf-8"), nav)
+        self.assertIn(b'href="chapter.xhtml"', nav)
+
     def test_rejects_epub_with_malformed_container_xml(self):
         with self.assertRaisesRegex(
             TextExtractionError,
