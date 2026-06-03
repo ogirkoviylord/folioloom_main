@@ -82,7 +82,7 @@ from translator_service.admin.translation_logs import (
     TranslationRunFragmentDetail,
     TranslationRunSummary,
     TranslationWorkUnitDiagnostic,
-    build_translation_run_archive,
+    build_effective_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
 )
@@ -736,9 +736,13 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def download_log(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        archive = build_translation_run_archive(
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        archive = build_effective_translation_run_archive(
             settings.translation_run_log_root,
             run_id,
+            details=details,
         )
         if archive is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
