@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from translator_service.admin.action_center import ActionCenter, ActionItem
 from translator_service.admin.ai_provider_keys import AIProviderKeySummary
@@ -2924,6 +2925,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
             f"/admin/logs/{run_id}/text-diagnostics",
             "view",
         )}
+        {_action_link("Reader", f"/admin/logs/{run_id}/reader", "view")}
         {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
     </section>
@@ -3196,17 +3198,45 @@ def translation_text_diagnostics_body(
     run_id: str,
     start_sequence: int,
     limit: int,
+    show_invisibles: bool = False,
+    search_query: str = "",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
 ) -> str:
     summary = details.summary
     next_sequence = start_sequence + limit
     previous_sequence = max(1, start_sequence - limit)
-    row_html = "\n".join(_translation_text_diagnostic_row(row) for row in rows)
+    visible_rows = _translation_filter_rows(rows, qa_filter)
+    row_html = "\n".join(
+        _translation_text_diagnostic_row(
+            row,
+            show_invisibles=show_invisibles,
+            search_query=search_query,
+        )
+        for row in visible_rows
+    )
     if not row_html:
-        row_html = """
+        empty_message = (
+            "No work units match this QA filter."
+            if qa_filter != "all" and rows
+            else "No work units found."
+        )
+        row_html = f"""
         <tr>
-          <td colspan="5" class="empty-cell">No work units found.</td>
+          <td colspan="5" class="empty-cell">{escape(empty_message)}</td>
         </tr>
         """
+    controls = _translation_text_controls(
+        "text-diagnostics",
+        run_id,
+        rows=rows,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3218,17 +3248,60 @@ def translation_text_diagnostics_body(
       <div class="toolbar-actions">
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
         {_action_link(
-            "Previous",
-            f"/admin/logs/{run_id}/text-diagnostics?sequence={previous_sequence}&limit={limit}",
+            "Reader",
+            _translation_raw_text_href(
+                "reader",
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                search_query=search_query,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
             "view",
         )}
         {_action_link(
-            "Next",
-            f"/admin/logs/{run_id}/text-diagnostics?sequence={next_sequence}&limit={limit}",
+            "← Previous",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=previous_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                search_query=search_query,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )}
+        {_action_link(
+            "Next →",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=next_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                search_query=search_query,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
             "view",
         )}
       </div>
     </section>
+    {_translation_raw_text_tabs(
+        run_id,
+        active="diagnostics",
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )}
+    {controls}
     <section class="panel warning-panel">
       <h3>Raw text visibility is enabled for this diagnostic page only.</h3>
       <p>
@@ -3255,12 +3328,2309 @@ def translation_text_diagnostics_body(
     """
 
 
-def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
-    blocks = row.get("source_block_ids")
-    if isinstance(blocks, (list, tuple)):
-        block_label = ", ".join(str(item) for item in blocks) or "n/a"
+def translation_reader_body(
+    details: TranslationRunDetails,
+    rows: tuple[dict[str, object], ...],
+    *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool = True,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+    review_marks: dict[str, str] | None = None,
+    review_save_url: str = "",
+    csrf_token: str = "",
+) -> str:
+    summary = details.summary
+    next_sequence = start_sequence + limit
+    previous_sequence = max(1, start_sequence - limit)
+    previous_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=previous_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    next_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=next_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    qa_rows = _translation_filter_rows(rows, qa_filter)
+    visible_rows = (
+        _translation_filter_rows_by_search(qa_rows, search_query)
+        if search_hits_only and search_query
+        else qa_rows
+    )
+    empty_message = "No work units found."
+    if qa_filter != "all" and not qa_rows and rows:
+        empty_message = "No work units match this QA filter."
+    elif search_hits_only and search_query and not visible_rows and qa_rows:
+        empty_message = "No work units match this search in the current window."
+    source_blocks = _translation_reader_blocks(
+        visible_rows,
+        text_key="source_text",
+        pane_key="original",
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+        empty_message=empty_message,
+    )
+    translated_blocks = _translation_reader_blocks(
+        visible_rows,
+        text_key="translated_text",
+        pane_key="translation",
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+        empty_message=empty_message,
+    )
+    search_match_count = (
+        _translation_search_match_count(visible_rows, search_query=search_query)
+        if search_query
+        else 0
+    )
+    metric_rows = (
+        _translation_filter_rows_by_search(rows, search_query)
+        if search_hits_only and search_query
+        else rows
+    )
+    qa_panel = _translation_reader_qa_panel(
+        metric_rows,
+        run_id=run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    search_nav = _translation_reader_search_nav(search_match_count)
+    layout_panel = _translation_reader_layout_panel(
+        metric_rows,
+        run_id=run_id,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    position_bar = _translation_reader_position_bar(
+        rows=visible_rows,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    qa_issue_nav = _translation_reader_qa_issue_nav(visible_rows)
+    review_panel = _translation_reader_review_panel(
+        visible_rows,
+        review_save_url=review_save_url,
+        csrf_token=csrf_token,
+    )
+    outline = _translation_reader_outline(visible_rows)
+    minimap = _translation_reader_minimap(visible_rows)
+    controls = _translation_text_controls(
+        "reader",
+        run_id,
+        rows=rows,
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    sync_attr = "data-reader-sync-pane" if sync_scroll else "data-reader-pane"
+    sync_script = _reader_sync_script() if sync_scroll else ""
+    keyboard_script = _reader_keyboard_navigation_script(
+        previous_href,
+        next_href,
+    )
+    qa_step_script = (
+        _reader_qa_step_script()
+        if any(_translation_row_qa_flags(row) for row in visible_rows)
+        else ""
+    )
+    outline_script = _reader_outline_script() if visible_rows else ""
+    review_mark_script = (
+        _reader_review_mark_script(review_marks or {})
+        if visible_rows
+        else ""
+    )
+    search_hit_script = _reader_search_hit_script() if search_match_count > 0 else ""
+    compare_classes = ["reader-compare", f"reader-pane-mode-{pane_mode}"]
+    if indent_preview:
+        compare_classes.append("has-indent-preview")
+    compare_class = " ".join(compare_classes)
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translation Reader</h3>
+        <p>
+          {escape(summary.file_name)} · {escape(summary.source_language)}
+          -> {escape(summary.target_language)} · {escape(summary.job_id)}
+        </p>
+      </div>
+      <div class="toolbar-actions">
+        {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
+        {_action_link(
+            "Text diagnostics",
+            _translation_raw_text_href(
+                "text-diagnostics",
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                search_query=search_query,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )}
+        {_action_link(
+            "← Previous",
+            previous_href,
+            "view",
+        )}
+        {_action_link(
+            "Next →",
+            next_href,
+            "view",
+        )}
+      </div>
+    </section>
+    {_translation_raw_text_tabs(
+        run_id,
+        active="reader",
+        start_sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )}
+    {controls}
+    {position_bar}
+    {qa_panel}
+    {search_nav}
+    {layout_panel}
+    {review_panel}
+    {qa_issue_nav}
+    <section class="panel warning-panel">
+      <h3>Raw text visibility is enabled for this reader page only.</h3>
+      <p>
+        This page may show user document text and translated output. Keep it
+        out of issues, PRs, safe log archives, screenshots and support notes
+        unless the owner explicitly approves that exact excerpt.
+      </p>
+    </section>
+    <section class="panel reader-panel" data-translation-reader>
+      <div class="{compare_class}" data-reader-compare>
+        <article class="reader-pane" aria-labelledby="reader-original-title">
+          <div class="reader-pane-heading">
+            <h4 id="reader-original-title">Original</h4>
+          </div>
+          <div class="reader-scroll" {sync_attr}>
+            {source_blocks}
+          </div>
+        </article>
+        <article class="reader-pane" aria-labelledby="reader-translation-title">
+          <div class="reader-pane-heading">
+            <h4 id="reader-translation-title">Translation</h4>
+          </div>
+          <div class="reader-scroll" {sync_attr}>
+            {translated_blocks}
+          </div>
+        </article>
+      </div>
+    </section>
+    {outline}
+    {minimap}
+    {sync_script}
+    {keyboard_script}
+    {outline_script}
+    {review_mark_script}
+    {qa_step_script}
+    {search_hit_script}
+    """
+
+
+def _translation_raw_text_tabs(
+    run_id: str,
+    *,
+    active: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    diagnostics_current = 'aria-current="page"' if active == "diagnostics" else ""
+    reader_current = 'aria-current="page"' if active == "reader" else ""
+    diagnostics_class = (
+        "reader-tab is-active"
+        if active == "diagnostics"
+        else "reader-tab"
+    )
+    reader_class = (
+        "reader-tab is-active"
+        if active == "reader"
+        else "reader-tab"
+    )
+    diagnostics_href = _translation_raw_text_href(
+        "text-diagnostics",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    reader_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    return f"""
+    <nav class="reader-tabs" aria-label="Raw text views">
+      <a
+        class="{diagnostics_class}"
+        href="{escape(diagnostics_href)}"
+        {diagnostics_current}
+      >
+        Diagnostics
+      </a>
+      <a
+        class="{reader_class}"
+        href="{escape(reader_href)}"
+        {reader_current}
+      >
+        Reader
+      </a>
+    </nav>
+    """
+
+
+def _translation_text_controls(
+    view_name: str,
+    run_id: str,
+    *,
+    rows: tuple[dict[str, object], ...],
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    invisible_label = (
+        "Hide special chars" if show_invisibles else "Show special chars"
+    )
+    sync_control = ""
+    if view_name == "reader" and sync_scroll is not None:
+        sync_control = _action_link(
+            "Unsync scroll" if sync_scroll else "Sync scroll",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=not sync_scroll,
+                search_query=search_query,
+                search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )
+    indent_control = ""
+    if view_name == "reader":
+        indent_control = _action_link(
+            "Plain indent" if indent_preview else "Preview indents",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
+                indent_preview=not indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )
+    pane_controls = ""
+    if view_name == "reader":
+        pane_controls = _translation_pane_mode_controls(
+            run_id,
+            start_sequence=start_sequence,
+            limit=limit,
+            show_invisibles=show_invisibles,
+            sync_scroll=sync_scroll,
+            search_query=search_query,
+            search_hits_only=search_hits_only,
+            pane_mode=pane_mode,
+            indent_preview=indent_preview,
+            qa_filter=qa_filter,
+        )
+    search_hits_control = ""
+    if view_name == "reader" and search_query:
+        search_hits_control = _action_link(
+            (
+                "Show all search context"
+                if search_hits_only
+                else "Show search hits only"
+            ),
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                search_hits_only=not search_hits_only,
+                pane_mode=pane_mode,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )
+    return f"""
+    <section class="reader-controls" aria-label="Reader controls">
+      <div class="reader-control-group">
+        <span class="reader-page-status">
+          {_translation_page_status(start_sequence, limit, rows)}
+        </span>
+        {_action_link(
+            invisible_label,
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=not show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+        )}
+        {sync_control}
+        {indent_control}
+        {search_hits_control}
+        {pane_controls}
+      </div>
+      {_translation_page_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
+          indent_preview=indent_preview,
+          qa_filter=qa_filter,
+      )}
+      {_translation_filter_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
+          indent_preview=indent_preview,
+          qa_filter=qa_filter,
+      )}
+      {_translation_search_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
+          indent_preview=indent_preview,
+          qa_filter=qa_filter,
+      )}
+      {_translation_jump_form(
+          view_name,
+          run_id,
+          start_sequence=start_sequence,
+          limit=limit,
+          show_invisibles=show_invisibles,
+          sync_scroll=sync_scroll,
+          search_query=search_query,
+          search_hits_only=search_hits_only,
+          pane_mode=pane_mode,
+          indent_preview=indent_preview,
+          qa_filter=qa_filter,
+      )}
+    </section>
+    """
+
+
+def _translation_pane_mode_controls(
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    links = []
+    for mode, label in (
+        ("split", "Split panes"),
+        ("original", "Focus original"),
+        ("translation", "Focus translation"),
+    ):
+        links.append(
+            _action_link(
+                label,
+                _translation_raw_text_href(
+                    "reader",
+                    run_id,
+                    sequence=start_sequence,
+                    limit=limit,
+                    show_invisibles=show_invisibles,
+                    sync_scroll=sync_scroll,
+                    search_query=search_query,
+                    search_hits_only=search_hits_only,
+                    pane_mode=mode,
+                    indent_preview=indent_preview,
+                    qa_filter=qa_filter,
+                ),
+                "view",
+                compact=True,
+                extra_class=(
+                    "reader-pane-mode-action is-active"
+                    if pane_mode == mode
+                    else "reader-pane-mode-action"
+                ),
+            )
+        )
+    return (
+        '<span class="reader-pane-mode-controls" aria-label="Reader pane mode">'
+        + "".join(links)
+        + "</span>"
+    )
+
+
+def _translation_page_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+        include_limit=False,
+    )
+    current_page = _translation_current_page(start_sequence, limit)
+    return f"""
+    <form
+      class="reader-page-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <label>
+        Page
+        <input
+          type="number"
+          name="page"
+          min="1"
+          value="{current_page}"
+          inputmode="numeric"
+        >
+      </label>
+      <label>
+        Size
+        <select name="limit">
+          {_translation_limit_options(limit, maximum=500 if view_name == "reader" else 100)}
+        </select>
+      </label>
+      {_action_button("Open", "view", compact=True)}
+    </form>
+    """
+
+
+def _translation_filter_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
+        indent_preview=indent_preview,
+    )
+    return f"""
+    <form
+      class="reader-filter-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <input type="hidden" name="sequence" value="{start_sequence}">
+      <label>
+        QA
+        <select name="qa">
+          {_translation_qa_filter_options(qa_filter)}
+        </select>
+      </label>
+      {_action_button("Filter", "view", compact=True)}
+    </form>
+    """
+
+
+def _translation_search_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=False,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    clear_link = ""
+    if search_query:
+        clear_link = _action_link(
+            "Clear search",
+            _translation_raw_text_href(
+                view_name,
+                run_id,
+                sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                pane_mode=pane_mode,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+            ),
+            "view",
+            compact=True,
+        )
+    return f"""
+    <form
+      class="reader-search-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <input type="hidden" name="sequence" value="{start_sequence}">
+      <label>
+        Search
+        <input
+          type="search"
+          name="q"
+          value="{escape(search_query)}"
+          maxlength="200"
+          placeholder="Current window"
+        >
+      </label>
+      {_action_button("Find", "view", compact=True)}
+      {clear_link}
+    </form>
+    """
+
+
+def _translation_jump_form(
+    view_name: str,
+    run_id: str,
+    *,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    hidden_fields = _translation_control_hidden_fields(
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll if view_name == "reader" else None,
+        include_search=True,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode if view_name == "reader" else "split",
+        indent_preview=indent_preview,
+        qa_filter=qa_filter,
+    )
+    return f"""
+    <form
+      class="reader-jump-form"
+      method="get"
+      action="/admin/logs/{escape(run_id)}/{escape(view_name)}"
+    >
+      {hidden_fields}
+      <label>
+        Sequence
+        <input
+          type="number"
+          name="sequence"
+          min="1"
+          value="{start_sequence}"
+          inputmode="numeric"
+        >
+      </label>
+      {_action_button("Go", "view", compact=True)}
+    </form>
+    """
+
+
+def _translation_raw_text_href(
+    view_name: str,
+    run_id: str,
+    *,
+    sequence: int,
+    limit: int,
+    show_invisibles: bool = False,
+    sync_scroll: bool | None = None,
+    search_query: str = "",
+    search_hits_only: bool = False,
+    pane_mode: str = "split",
+    indent_preview: bool = False,
+    qa_filter: str = "all",
+) -> str:
+    query: dict[str, str] = {
+        "sequence": str(max(1, sequence)),
+        "limit": str(max(1, limit)),
+    }
+    if show_invisibles:
+        query["show_invisibles"] = "1"
+    if view_name == "reader" and sync_scroll is False:
+        query["sync"] = "0"
+    if search_query:
+        query["q"] = search_query
+    if view_name == "reader" and search_query and search_hits_only:
+        query["search_hits"] = "1"
+    if view_name == "reader" and pane_mode != "split":
+        query["pane_mode"] = pane_mode
+    if indent_preview:
+        query["indent_preview"] = "1"
+    if qa_filter != "all":
+        query["qa"] = qa_filter
+    return f"/admin/logs/{run_id}/{view_name}?{urlencode(query)}"
+
+
+def _translation_control_hidden_fields(
+    *,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool | None,
+    include_search: bool,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str = "all",
+    include_limit: bool = True,
+) -> str:
+    fields = []
+    if include_limit:
+        fields.append(f'<input type="hidden" name="limit" value="{limit}">')
+    if show_invisibles:
+        fields.append('<input type="hidden" name="show_invisibles" value="1">')
+    if sync_scroll is False:
+        fields.append('<input type="hidden" name="sync" value="0">')
+    if include_search and search_query:
+        fields.append(
+            f'<input type="hidden" name="q" value="{escape(search_query)}">'
+        )
+    if search_query and search_hits_only:
+        fields.append('<input type="hidden" name="search_hits" value="1">')
+    if pane_mode != "split":
+        fields.append(
+            f'<input type="hidden" name="pane_mode" value="{escape(pane_mode)}">'
+        )
+    if indent_preview:
+        fields.append('<input type="hidden" name="indent_preview" value="1">')
+    if qa_filter != "all":
+        fields.append(f'<input type="hidden" name="qa" value="{escape(qa_filter)}">')
+    return "".join(fields)
+
+
+def _translation_filter_rows(
+    rows: tuple[dict[str, object], ...],
+    qa_filter: str,
+) -> tuple[dict[str, object], ...]:
+    if qa_filter == "all":
+        return rows
+    return tuple(row for row in rows if _translation_row_matches_filter(row, qa_filter))
+
+
+def _translation_filter_rows_by_search(
+    rows: tuple[dict[str, object], ...],
+    search_query: str,
+) -> tuple[dict[str, object], ...]:
+    query = search_query.lower()
+    if not query:
+        return rows
+    return tuple(row for row in rows if _translation_row_matches_search(row, query))
+
+
+def _translation_row_matches_search(row: dict[str, object], lowered_query: str) -> bool:
+    return any(
+        lowered_query in str(row.get(key) or "").lower()
+        for key in ("source_text", "translated_text")
+    )
+
+
+def _translation_row_matches_filter(row: dict[str, object], qa_filter: str) -> bool:
+    if qa_filter == "issues":
+        return bool(
+            _translation_row_qa_flags(row) or _translation_row_layout_flags(row)
+        )
+    if qa_filter == "indent":
+        return bool(_translation_row_layout_flags(row))
+    return any(flag["kind"] == qa_filter for flag in _translation_row_qa_flags(row))
+
+
+def _translation_qa_filter_options(current_filter: str) -> str:
+    options = (
+        ("all", "All"),
+        ("issues", "All issues"),
+        ("missing_translation", "Missing translation"),
+        ("empty_source", "Empty source"),
+        ("length_mismatch", "Length mismatch"),
+        ("paragraph_mismatch", "Paragraph mismatch"),
+        ("indent", "Literal indent"),
+    )
+    return "\n".join(
+        (
+            f'<option value="{escape(value)}"'
+            f'{" selected" if value == current_filter else ""}>'
+            f'{escape(label)}</option>'
+        )
+        for value, label in options
+    )
+
+
+def _translation_row_metric_summary(row: dict[str, object]) -> str:
+    source_chars = len(str(row.get("source_text") or "").strip())
+    translated_chars = len(str(row.get("translated_text") or "").strip())
+    source_structure = _translation_text_structure_counts(
+        str(row.get("source_text") or "")
+    )
+    translated_structure = _translation_text_structure_counts(
+        str(row.get("translated_text") or "")
+    )
+    ratio = "n/a"
+    if source_chars > 0:
+        ratio = f"{translated_chars / source_chars:.2f}"
+    return (
+        f"Source chars {source_chars} · "
+        f"Translation chars {translated_chars} · "
+        f"T/S ratio {ratio} · "
+        f"Source lines {source_structure['lines']} · "
+        f"Translation lines {translated_structure['lines']} · "
+        f"Source blank lines {source_structure['blank_lines']} · "
+        f"Translation blank lines {translated_structure['blank_lines']}"
+    )
+
+
+def _translation_text_structure_counts(text: str) -> dict[str, int]:
+    if not text.strip():
+        return {"lines": 0, "blank_lines": 0}
+    lines = text.splitlines() or [text]
+    return {
+        "lines": len(lines),
+        "blank_lines": sum(1 for line in lines if not line.strip()),
+    }
+
+
+def _translation_current_page(start_sequence: int, limit: int) -> int:
+    return ((max(1, start_sequence) - 1) // max(1, limit)) + 1
+
+
+def _translation_page_status(
+    start_sequence: int,
+    limit: int,
+    rows: tuple[dict[str, object], ...],
+) -> str:
+    current_page = _translation_current_page(start_sequence, limit)
+    end_sequence = (start_sequence + len(rows) - 1) if rows else start_sequence
+    return (
+        f"Logical page {current_page} · sequences "
+        f"{start_sequence}-{end_sequence} · size {limit}"
+    )
+
+
+def _translation_limit_options(current_limit: int, *, maximum: int) -> str:
+    options = [25, 50, 100]
+    if maximum >= 250:
+        options.append(250)
+    if maximum >= 500:
+        options.append(500)
+    if current_limit not in options:
+        options.append(current_limit)
+    return "\n".join(
+        (
+            f'<option value="{limit}"{" selected" if limit == current_limit else ""}>'
+            f'{limit}</option>'
+        )
+        for limit in sorted(set(options))
+        if limit <= maximum
+    )
+
+
+def _translation_reader_blocks(
+    rows: tuple[dict[str, object], ...],
+    *,
+    text_key: str,
+    pane_key: str,
+    show_invisibles: bool = False,
+    search_query: str = "",
+    empty_message: str = "No work units found.",
+) -> str:
+    if not rows:
+        return f'<p class="reader-empty">{escape(empty_message)}</p>'
+    return "\n".join(
+        _translation_reader_block(
+            row,
+            text_key=text_key,
+            pane_key=pane_key,
+            show_invisibles=show_invisibles,
+            search_query=search_query,
+        )
+        for row in rows
+    )
+
+
+def _translation_reader_block(
+    row: dict[str, object],
+    *,
+    text_key: str,
+    pane_key: str,
+    show_invisibles: bool = False,
+    search_query: str = "",
+) -> str:
+    sequence = escape(str(row.get("sequence") or 0))
+    status = escape(str(row.get("status") or "unknown"))
+    block_label = escape(_translation_source_block_label(row))
+    metrics = escape(_translation_row_metric_summary(row))
+    issue_flags = _translation_row_issue_flags(row)
+    qa_class = " has-qa-warning" if issue_flags else ""
+    qa_html = _translation_row_qa_flag_html(issue_flags)
+    review_controls = _translation_reader_review_controls(sequence)
+    text = str(row.get(text_key) or "")
+    if not text:
+        text = "[empty]"
+    text_html = _diagnostic_text_html(
+        text,
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+    )
+    return f"""
+    <article
+      id="reader-{escape(pane_key)}-{sequence}"
+      class="reader-block{qa_class}"
+      data-reader-sequence="{sequence}"
+      tabindex="-1"
+    >
+      <header>
+        <span>#{sequence}</span>
+        <span class="status">{status}</span>
+        <span>Blocks {block_label}</span>
+        <span class="reader-block-metrics">{metrics}</span>
+        {review_controls}
+        {qa_html}
+      </header>
+      <div class="reader-text">{text_html}</div>
+    </article>
+    """
+
+
+def _translation_reader_review_controls(sequence: str) -> str:
+    buttons = "".join(
+        (
+            f'<button type="button" class="reader-review-button" '
+            f'data-reader-review-mark="{escape(mark)}" '
+            f'data-reader-review-sequence="{escape(sequence)}" '
+            f'aria-pressed="false">{escape(label)}</button>'
+        )
+        for mark, label in (
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+            ("clear", "Clear"),
+        )
+    )
+    return f"""
+    <span
+      class="reader-review-controls"
+      data-reader-review-controls
+      data-reader-review-sequence="{escape(sequence)}"
+      aria-label="Reader review mark controls"
+    >
+      <span class="reader-review-state" data-reader-review-state>
+        Review mark: none
+      </span>
+      {buttons}
+    </span>
+    """
+
+
+def _translation_reader_review_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    review_save_url: str,
+    csrf_token: str,
+) -> str:
+    if not rows:
+        return ""
+    button_class = escape(_action_classes("view", True, "reader-review-filter-button"))
+    filter_buttons = "".join(
+        (
+            f'<button type="button" class="{button_class}" '
+            f'data-reader-review-filter="{escape(filter_name)}" '
+            f'aria-pressed="{"true" if filter_name == "all" else "false"}">'
+            f'{escape(label)}</button>'
+        )
+        for filter_name, label in (
+            ("all", "All"),
+            ("unmarked", "Unmarked"),
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+        )
+    )
+    count_chips = "".join(
+        (
+            f'<span class="reader-review-count" '
+            f'data-reader-review-count="{escape(mark)}">'
+            f'<span>{escape(label)}</span><strong>0</strong></span>'
+        )
+        for mark, label in (
+            ("marked", "Marked"),
+            ("unmarked", "Unmarked"),
+            ("needs_review", "Needs review"),
+            ("ok", "OK"),
+            ("ignore", "Ignore"),
+        )
+    )
+    return f"""
+    <section
+      class="reader-review-panel"
+      aria-label="Reader review marks"
+      data-reader-review-panel
+      data-reader-review-save-url="{escape(review_save_url)}"
+      data-reader-review-csrf="{escape(csrf_token)}"
+    >
+      <div class="reader-review-heading">
+        <h4>Review marks</h4>
+        <span
+          class="reader-review-filter-status"
+          data-reader-review-filter-status
+          aria-live="polite"
+        >Review filter: all rows</span>
+      </div>
+      <p class="sr-only" data-reader-review-shortcuts>
+        Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.
+      </p>
+      <p
+        class="reader-review-save-status"
+        data-reader-review-save-status
+        aria-live="polite"
+      >Review marks save with marked original and translation text.</p>
+      <div class="reader-review-counts">
+        {count_chips}
+      </div>
+      <div class="reader-review-filters" aria-label="Reader review mark filters">
+        {filter_buttons}
+      </div>
+      <div class="reader-review-step-controls" data-reader-review-step-controls>
+        <span
+          class="reader-review-step-progress"
+          data-reader-review-step-progress
+          aria-live="polite"
+        >Marked blocks: 0</span>
+        <button
+          type="button"
+          class="{button_class}"
+          data-reader-review-step="previous"
+        >Previous mark</button>
+        <button
+          type="button"
+          class="{button_class}"
+          data-reader-review-step="next"
+        >Next mark</button>
+      </div>
+    </section>
+    """
+
+
+def _translation_reader_qa_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    counts = _translation_reader_qa_counts(rows)
+    issue_count = sum(1 for row in rows if _translation_row_issue_flags(row))
+    search_matches = (
+        _translation_search_match_count(rows, search_query=search_query)
+        if search_query
+        else 0
+    )
+    def filter_href(next_filter: str) -> str:
+        return _translation_raw_text_href(
+            "reader",
+            run_id,
+            sequence=start_sequence,
+            limit=limit,
+            show_invisibles=show_invisibles,
+            sync_scroll=sync_scroll,
+            search_query=search_query,
+            search_hits_only=search_hits_only,
+            pane_mode=pane_mode,
+            indent_preview=indent_preview,
+            qa_filter=next_filter,
+        )
+
+    search_metric = ""
+    if search_query:
+        search_metric = _reader_qa_metric("Search hits", str(search_matches))
+    return f"""
+    <section class="reader-qa-panel" aria-label="Reader QA summary">
+      {_reader_qa_metric("Window units", str(len(rows)))}
+      {_reader_qa_filter_metric("All issues", str(issue_count), filter_href("issues"), is_active=qa_filter == "issues")}
+      {_reader_qa_filter_metric("Missing translation", str(counts["missing_translation"]), filter_href("missing_translation"), is_active=qa_filter == "missing_translation")}
+      {_reader_qa_filter_metric("Empty source", str(counts["empty_source"]), filter_href("empty_source"), is_active=qa_filter == "empty_source")}
+      {_reader_qa_filter_metric("Length mismatch", str(counts["length_mismatch"]), filter_href("length_mismatch"), is_active=qa_filter == "length_mismatch")}
+      {_reader_qa_filter_metric("Paragraph mismatch", str(counts["paragraph_mismatch"]), filter_href("paragraph_mismatch"), is_active=qa_filter == "paragraph_mismatch")}
+      {search_metric}
+    </section>
+    """
+
+
+def _translation_reader_search_nav(search_match_count: int) -> str:
+    if search_match_count <= 0:
+        return ""
+    button_class = escape(_action_classes("view", True, "reader-search-hit-button"))
+    return f"""
+    <nav
+      class="reader-search-nav"
+      aria-label="Reader search hits"
+      data-reader-search-hit-controls
+    >
+      <span
+        class="reader-search-progress"
+        data-reader-search-hit-progress
+        aria-live="polite"
+      >Search hits in window: {search_match_count}</span>
+      <button
+        class="{button_class}"
+        type="button"
+        data-reader-search-hit-step="previous"
+      >Previous hit</button>
+      <button
+        class="{button_class}"
+        type="button"
+        data-reader-search-hit-step="next"
+      >Next hit</button>
+    </nav>
+    """
+
+
+def _translation_reader_layout_panel(
+    rows: tuple[dict[str, object], ...],
+    *,
+    run_id: str,
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    counts = _translation_reader_indent_counts(rows)
+    indent_href = _translation_raw_text_href(
+        "reader",
+        run_id,
+        sequence=start_sequence,
+        limit=limit,
+        show_invisibles=show_invisibles,
+        sync_scroll=sync_scroll,
+        search_query=search_query,
+        search_hits_only=search_hits_only,
+        pane_mode=pane_mode,
+        indent_preview=indent_preview,
+        qa_filter="indent",
+    )
+    return f"""
+    <section class="reader-layout-panel" aria-label="Reader layout diagnostics">
+      {_reader_qa_metric("Indent preview", "On" if indent_preview else "Off")}
+      {_reader_qa_filter_metric("Source literal indents", str(counts["source"]), indent_href, is_active=qa_filter == "indent")}
+      {_reader_qa_filter_metric("Translation literal indents", str(counts["translation"]), indent_href, is_active=qa_filter == "indent")}
+      {_reader_qa_metric("Style metadata", "Unknown")}
+    </section>
+    """
+
+
+def _translation_reader_position_bar(
+    *,
+    rows: tuple[dict[str, object], ...],
+    start_sequence: int,
+    limit: int,
+    show_invisibles: bool,
+    sync_scroll: bool,
+    search_query: str,
+    search_hits_only: bool,
+    pane_mode: str,
+    indent_preview: bool,
+    qa_filter: str,
+) -> str:
+    search_label = f'Search "{search_query}"' if search_query else "Search off"
+    pane_label = {
+        "original": "original focus",
+        "translation": "translation focus",
+    }.get(pane_mode, "split")
+    chips = [
+        ("QA", qa_filter if qa_filter != "all" else "all"),
+        ("Search", search_label),
+        ("Pane", pane_label),
+        ("Special chars", "shown" if show_invisibles else "hidden"),
+        ("Sync scroll", "on" if sync_scroll else "off"),
+        ("Indent preview", "on" if indent_preview else "off"),
+    ]
+    if search_query:
+        chips.insert(
+            2,
+            ("Search rows", "matches only" if search_hits_only else "all rows"),
+        )
+    chip_html = "".join(
+        (
+            f'<span class="reader-position-chip">'
+            f'<span>{escape(label)}</span>'
+            f'<strong>{escape(value)}</strong>'
+            f"</span>"
+        )
+        for label, value in chips
+    )
+    return f"""
+    <section class="reader-position-bar" aria-label="Reader current position">
+      <strong>{escape(_translation_page_status(start_sequence, limit, rows))}</strong>
+      <div class="reader-position-chips">
+        {chip_html}
+      </div>
+    </section>
+    """
+
+
+def _translation_reader_indent_counts(
+    rows: tuple[dict[str, object], ...],
+) -> dict[str, int]:
+    counts = {"source": 0, "translation": 0}
+    for row in rows:
+        if _has_literal_leading_indent(str(row.get("source_text") or "")):
+            counts["source"] += 1
+        if _has_literal_leading_indent(str(row.get("translated_text") or "")):
+            counts["translation"] += 1
+    return counts
+
+
+def _reader_qa_metric(label: str, value: str) -> str:
+    return f"""
+    <div class="reader-qa-metric">
+      <span>{escape(label)}</span>
+      <strong>{escape(value)}</strong>
+    </div>
+    """
+
+
+def _reader_qa_filter_metric(
+    label: str,
+    value: str,
+    href: str,
+    *,
+    is_active: bool,
+) -> str:
+    active_class = " is-active" if is_active else ""
+    aria_current = ' aria-current="page"' if is_active else ""
+    return f"""
+    <a
+      class="reader-qa-metric reader-qa-filter-metric{active_class}"
+      href="{escape(href)}"
+      {aria_current}
+    >
+      <span>{escape(label)}</span>
+      <strong>{escape(value)}</strong>
+    </a>
+    """
+
+
+def _translation_reader_qa_counts(
+    rows: tuple[dict[str, object], ...],
+) -> dict[str, int]:
+    counts = {
+        "missing_translation": 0,
+        "empty_source": 0,
+        "length_mismatch": 0,
+        "paragraph_mismatch": 0,
+    }
+    for row in rows:
+        for flag in _translation_row_qa_flags(row):
+            if flag["kind"] in counts:
+                counts[flag["kind"]] += 1
+    return counts
+
+
+def _translation_reader_minimap(rows: tuple[dict[str, object], ...]) -> str:
+    if not rows:
+        return ""
+    items = "\n".join(_translation_reader_minimap_item(row) for row in rows)
+    return f"""
+    <nav class="reader-minimap" aria-label="Reader QA minimap">
+      {items}
+    </nav>
+    """
+
+
+def _translation_reader_outline(rows: tuple[dict[str, object], ...]) -> str:
+    if not rows:
+        body = '<p class="reader-empty">No blocks in this reader window.</p>'
     else:
-        block_label = str(blocks or "n/a")
+        body = "\n".join(_translation_reader_outline_item(row) for row in rows)
+    return f"""
+    <details class="reader-outline" aria-label="Reader block outline">
+      <summary class="reader-outline-heading">
+        <h4>Block outline</h4>
+        <span>Visible units: {len(rows)}</span>
+      </summary>
+      <div class="reader-outline-list">
+        {body}
+      </div>
+    </details>
+    """
+
+
+def _translation_reader_outline_item(row: dict[str, object]) -> str:
+    sequence = str(row.get("sequence") or 0)
+    safe_sequence = escape(sequence)
+    status = str(row.get("status") or "unknown")
+    block_label = _translation_source_block_label(row)
+    flags = _translation_row_issue_flags(row)
+    flag_class = " has-qa-warning" if flags else ""
+    flag_summary = "; ".join(flag["label"] for flag in flags) if flags else "No flags"
+    title = f"Sequence {sequence}: {status}; Blocks {block_label}; {flag_summary}"
+    return f"""
+    <a
+      class="reader-outline-link{flag_class}"
+      href="#reader-original-{safe_sequence}"
+      title="{escape(title)}"
+      aria-label="{escape(title)}"
+      data-reader-outline-anchor
+      data-reader-outline-sequence="{safe_sequence}"
+    >
+      <span class="reader-outline-sequence">#{safe_sequence}</span>
+      <span class="reader-outline-blocks">Blocks {escape(block_label)}</span>
+      <span class="reader-outline-status">Status {escape(status)}</span>
+      <span class="reader-outline-flags">{escape(flag_summary)}</span>
+    </a>
+    """
+
+
+def _translation_reader_qa_issue_nav(rows: tuple[dict[str, object], ...]) -> str:
+    issue_items = []
+    for row in rows:
+        flags = _translation_row_issue_flags(row)
+        if not flags:
+            continue
+        sequence = str(row.get("sequence") or 0)
+        safe_sequence = escape(sequence)
+        block_label = escape(_translation_source_block_label(row))
+        flag_summary = escape("; ".join(flag["label"] for flag in flags))
+        issue_items.append(
+            f"""
+            <a
+              class="reader-qa-issue-link"
+              href="#reader-original-{safe_sequence}"
+              data-reader-qa-issue-anchor
+            >
+              <span class="reader-qa-issue-sequence">#{safe_sequence}</span>
+              <span class="reader-qa-issue-labels">{flag_summary}</span>
+              <span class="reader-qa-issue-blocks">Blocks {block_label}</span>
+            </a>
+            """
+        )
+    if not issue_items:
+        body = '<p class="reader-empty">No QA issues in this window.</p>'
+        step_controls = ""
+    else:
+        body = "".join(issue_items)
+        button_class = escape(_action_classes("view", True, "reader-qa-step-button"))
+        issue_count = len(issue_items)
+        step_controls = f"""
+        <div class="reader-qa-step-controls" data-reader-qa-step-controls>
+          <span
+            class="reader-qa-progress"
+            data-reader-qa-progress
+            aria-live="polite"
+          >Issues in window: {issue_count}</span>
+          <button
+            class="{button_class}"
+            type="button"
+            data-reader-qa-step="previous"
+          >Previous issue</button>
+          <button
+            class="{button_class}"
+            type="button"
+            data-reader-qa-step="next"
+          >Next issue</button>
+        </div>
+        """
+    return f"""
+    <nav class="reader-qa-issue-nav" aria-label="Reader QA issues">
+      <div class="reader-qa-issue-heading">
+        <h4>QA issues</h4>
+        {step_controls}
+      </div>
+      <div class="reader-qa-issue-list">
+        {body}
+      </div>
+    </nav>
+    """
+
+
+def _translation_reader_minimap_item(row: dict[str, object]) -> str:
+    sequence = str(row.get("sequence") or 0)
+    safe_sequence = escape(sequence)
+    status = str(row.get("status") or "unknown")
+    flags = _translation_row_issue_flags(row)
+    flag_class = " has-qa-warning" if flags else ""
+    flag_summary = ", ".join(flag["label"] for flag in flags) if flags else "No QA flags"
+    title = f"Sequence {sequence}: {status}; {flag_summary}"
+    return f"""
+    <a
+      class="reader-minimap-item{flag_class}"
+      href="#reader-original-{safe_sequence}"
+      title="{escape(title)}"
+      aria-label="{escape(title)}"
+    >
+      {safe_sequence}
+    </a>
+    """
+
+
+def _translation_row_qa_flag_html(flags: tuple[dict[str, str], ...]) -> str:
+    if not flags:
+        return ""
+    return '<span class="reader-qa-flags">' + "".join(
+        (
+            f'<span class="reader-qa-flag reader-qa-flag-{escape(flag["kind"])}">'
+            f'{escape(flag["label"])}</span>'
+        )
+        for flag in flags
+    ) + "</span>"
+
+
+def _translation_row_issue_flags(
+    row: dict[str, object],
+) -> tuple[dict[str, str], ...]:
+    return _translation_row_qa_flags(row) + _translation_row_layout_flags(row)
+
+
+def _translation_row_layout_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
+    flags: list[dict[str, str]] = []
+    if _has_literal_leading_indent(str(row.get("source_text") or "")):
+        flags.append({"kind": "literal_source_indent", "label": "Source literal indent"})
+    if _has_literal_leading_indent(str(row.get("translated_text") or "")):
+        flags.append(
+            {
+                "kind": "literal_translation_indent",
+                "label": "Translation literal indent",
+            }
+        )
+    return tuple(flags)
+
+
+def _translation_row_qa_flags(row: dict[str, object]) -> tuple[dict[str, str], ...]:
+    source = str(row.get("source_text") or "")
+    translated = str(row.get("translated_text") or "")
+    source_length = len(source.strip())
+    translated_length = len(translated.strip())
+    flags: list[dict[str, str]] = []
+    if source_length == 0:
+        flags.append({"kind": "empty_source", "label": "Empty source"})
+    if translated_length == 0:
+        flags.append({"kind": "missing_translation", "label": "Missing translation"})
+    elif source_length > 0:
+        larger = max(source_length, translated_length)
+        smaller = max(1, min(source_length, translated_length))
+        if larger >= smaller * 2.5 and larger - smaller >= 80:
+            label = (
+                "Translation much longer"
+                if translated_length > source_length
+                else "Translation much shorter"
+            )
+            flags.append({"kind": "length_mismatch", "label": label})
+        if _has_paragraph_structure_mismatch(source, translated):
+            flags.append(
+                {
+                    "kind": "paragraph_mismatch",
+                    "label": "Paragraph/line break mismatch",
+                }
+            )
+    return tuple(flags)
+
+
+def _has_paragraph_structure_mismatch(source: str, translated: str) -> bool:
+    if not source.strip() or not translated.strip():
+        return False
+    source_structure = _translation_text_structure_counts(source)
+    translated_structure = _translation_text_structure_counts(translated)
+    return (
+        source_structure["lines"] != translated_structure["lines"]
+        or source_structure["blank_lines"] != translated_structure["blank_lines"]
+    )
+
+
+def _has_literal_leading_indent(text: str) -> bool:
+    for line in text.splitlines() or [text]:
+        if not line.strip():
+            continue
+        if line[0] in {" ", "\t", "\u00a0"}:
+            return True
+    return False
+
+
+def _reader_sync_script() -> str:
+    return """
+    <script>
+      (() => {
+        const panes = Array.from(
+          document.querySelectorAll("[data-reader-sync-pane]")
+        );
+        if (panes.length < 2) return;
+        const programmaticScrollLocks = new WeakMap();
+        const lockDurationMs = 180;
+        const maxScroll = (pane) => Math.max(
+          0,
+          pane.scrollHeight - pane.clientHeight
+        );
+        const scrollRatio = (pane) => {
+          const availableScroll = maxScroll(pane);
+          return availableScroll > 0 ? pane.scrollTop / availableScroll : 0;
+        };
+        const lockProgrammaticScroll = (pane) => {
+          const existingUnlock = programmaticScrollLocks.get(pane);
+          if (existingUnlock) {
+            window.clearTimeout(existingUnlock);
+          }
+          const unlock = window.setTimeout(() => {
+            programmaticScrollLocks.delete(pane);
+          }, lockDurationMs);
+          programmaticScrollLocks.set(pane, unlock);
+        };
+        const isLockedProgrammaticScroll = (pane) => {
+          return programmaticScrollLocks.has(pane);
+        };
+        panes.forEach((pane) => {
+          pane.addEventListener("scroll", () => {
+            if (isLockedProgrammaticScroll(pane)) return;
+            const ratio = scrollRatio(pane);
+            panes.forEach((other) => {
+              if (other === pane) return;
+              const nextScrollTop = ratio * maxScroll(other);
+              if (Math.abs(other.scrollTop - nextScrollTop) <= 1) return;
+              lockProgrammaticScroll(other);
+              other.scrollTop = nextScrollTop;
+            });
+          }, { passive: true });
+        });
+      })();
+    </script>
+    """
+
+
+def _reader_keyboard_navigation_script(previous_href: str, next_href: str) -> str:
+    previous_json = json.dumps(previous_href)
+    next_json = json.dumps(next_href)
+    return f"""
+    <script data-reader-keyboard-navigation>
+      (() => {{
+        const previousHref = {previous_json};
+        const nextHref = {next_json};
+        const isInteractiveTarget = (target) => {{
+          if (!target || !(target instanceof Element)) return false;
+          return Boolean(
+            target.closest(
+              "input, textarea, select, button, a, [contenteditable='true']"
+            )
+          );
+        }};
+        document.addEventListener("keydown", (event) => {{
+          if (
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            isInteractiveTarget(event.target)
+          ) {{
+            return;
+          }}
+          if (event.key === "ArrowLeft") {{
+            event.preventDefault();
+            window.location.assign(previousHref);
+            return;
+          }}
+          if (event.key === "ArrowRight") {{
+            event.preventDefault();
+            window.location.assign(nextHref);
+          }}
+        }});
+      }})();
+    </script>
+    """
+
+
+def _reader_outline_script() -> str:
+    return """
+    <script data-reader-outline-navigation>
+      (() => {
+        const outlineLinks = Array.from(
+          document.querySelectorAll("[data-reader-outline-anchor]")
+        );
+        if (!outlineLinks.length) return;
+        const outlineHrefs = outlineLinks
+          .map((link) => link.getAttribute("href"))
+          .filter((href) => href && href.startsWith("#reader-original-"));
+        const sequenceForHref = (href) => href.replace(/^#reader-original-/, "");
+        const blocksForHref = (href) => {
+          const sequence = sequenceForHref(href);
+          return [
+            document.getElementById(`reader-original-${sequence}`),
+            document.getElementById(`reader-translation-${sequence}`),
+          ].filter(Boolean);
+        };
+        const clearActiveOutline = () => {
+          outlineLinks.forEach((link) => {
+            link.classList.remove("is-active");
+            link.removeAttribute("aria-current");
+          });
+          document
+            .querySelectorAll(".reader-block.is-active-outline-block")
+            .forEach((block) => block.classList.remove("is-active-outline-block"));
+        };
+        const setActiveOutline = (href, shouldScroll) => {
+          if (!outlineHrefs.includes(href)) {
+            clearActiveOutline();
+            return;
+          }
+          const blocks = blocksForHref(href);
+          if (!blocks.length) return;
+          clearActiveOutline();
+          outlineLinks.forEach((link) => {
+            if (link.getAttribute("href") !== href) return;
+            link.classList.add("is-active");
+            link.setAttribute("aria-current", "page");
+          });
+          blocks.forEach((block) => block.classList.add("is-active-outline-block"));
+          if (shouldScroll) {
+            blocks[0].scrollIntoView({ block: "start", behavior: "smooth" });
+          }
+          window.history.replaceState(null, "", href);
+          blocks[0].focus({ preventScroll: true });
+        };
+        outlineLinks.forEach((link) => {
+          link.addEventListener("click", (event) => {
+            const href = link.getAttribute("href");
+            if (!href) return;
+            event.preventDefault();
+            setActiveOutline(href, true);
+            window.dispatchEvent(
+              new CustomEvent("reader:block-selected", { detail: { href } })
+            );
+          });
+        });
+        window.addEventListener("hashchange", () => {
+          setActiveOutline(window.location.hash, false);
+        });
+        window.addEventListener("reader:block-selected", (event) => {
+          setActiveOutline(event.detail && event.detail.href, false);
+        });
+        setActiveOutline(window.location.hash, false);
+      })();
+    </script>
+    """
+
+
+def _reader_review_mark_script(review_marks: dict[str, str]) -> str:
+    review_marks_json = json.dumps(review_marks, ensure_ascii=False, sort_keys=True)
+    script = """
+    <script data-reader-review-navigation>
+      (() => {
+        const savedReviewMarks = __READER_REVIEW_MARKS__;
+        const reviewButtons = Array.from(
+          document.querySelectorAll("[data-reader-review-mark]")
+        );
+        if (!reviewButtons.length) return;
+        const reviewPanel = document.querySelector("[data-reader-review-panel]");
+        const filterButtons = reviewPanel
+          ? Array.from(reviewPanel.querySelectorAll("[data-reader-review-filter]"))
+          : [];
+        const filterStatus = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-filter-status]")
+          : null;
+        const stepControls = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-step-controls]")
+          : null;
+        const stepButtons = stepControls
+          ? Array.from(stepControls.querySelectorAll("[data-reader-review-step]"))
+          : [];
+        const stepProgress = stepControls
+          ? stepControls.querySelector("[data-reader-review-step-progress]")
+          : null;
+        const saveStatus = reviewPanel
+          ? reviewPanel.querySelector("[data-reader-review-save-status]")
+          : null;
+        const reviewSaveUrl = reviewPanel
+          ? reviewPanel.getAttribute("data-reader-review-save-url")
+          : "";
+        const reviewCsrfToken = reviewPanel
+          ? reviewPanel.getAttribute("data-reader-review-csrf")
+          : "";
+        let currentReviewFilter = "all";
+        let currentReviewStepSequence = "";
+        let selectedReviewSequence = "";
+        const reviewShortcutMarks = {
+          "1": "needs_review",
+          "2": "ok",
+          "3": "ignore",
+          "0": "clear",
+        };
+        const markLabels = {
+          unmarked: "unmarked",
+          needs_review: "needs review",
+          ok: "OK",
+          ignore: "ignored",
+        };
+        const markClasses = [
+          "has-review-mark",
+          "is-review-needs-review",
+          "is-review-ok",
+          "is-review-ignore",
+        ];
+        const classForMark = (mark) => {
+          if (mark === "needs_review") return "is-review-needs-review";
+          if (mark === "ok") return "is-review-ok";
+          if (mark === "ignore") return "is-review-ignore";
+          return "";
+        };
+        const reviewSequences = () => Array.from(new Set(
+          Array.from(document.querySelectorAll(".reader-block[data-reader-sequence]"))
+            .map((block) => block.getAttribute("data-reader-sequence"))
+            .filter(Boolean)
+        ));
+        const matchingBlocks = (sequence) => Array.from(
+          document.querySelectorAll(".reader-block")
+        ).filter((block) => block.getAttribute("data-reader-sequence") === sequence);
+        const matchingOutlines = (sequence) => Array.from(
+          document.querySelectorAll("[data-reader-outline-sequence]")
+        ).filter((link) => link.getAttribute("data-reader-outline-sequence") === sequence);
+        const matchingControls = (sequence) => Array.from(
+          document.querySelectorAll("[data-reader-review-controls]")
+        ).filter(
+          (control) => control.getAttribute("data-reader-review-sequence") === sequence
+        );
+        const isInteractiveTarget = (target) => {
+          if (!target || !(target instanceof Element)) return false;
+          return Boolean(
+            target.closest(
+              "input, textarea, select, button, a, [contenteditable='true']"
+            )
+          );
+        };
+        const sequenceFromHref = (href) => (
+          href && href.startsWith("#reader-original-")
+            ? href.replace(/^#reader-original-/, "")
+            : ""
+        );
+        const visibleReviewSequence = () => {
+          const visibleControl = Array.from(
+            document.querySelectorAll("[data-reader-review-controls]")
+          ).find((control) => {
+            const block = control.closest(".reader-block");
+            return block && !block.classList.contains("is-review-filter-hidden");
+          });
+          return visibleControl
+            ? visibleControl.getAttribute("data-reader-review-sequence") || ""
+            : reviewSequences()[0] || "";
+        };
+        const activeOutlineSequence = () => {
+          const activeBlock = document.querySelector(
+            ".reader-block.is-active-outline-block[data-reader-sequence]"
+          );
+          return activeBlock ? activeBlock.getAttribute("data-reader-sequence") || "" : "";
+        };
+        const activeReviewSequence = () => (
+          currentReviewStepSequence ||
+          selectedReviewSequence ||
+          activeOutlineSequence() ||
+          sequenceFromHref(window.location.hash) ||
+          visibleReviewSequence()
+        );
+        const setReviewSaveStatus = (message, isError) => {
+          if (!saveStatus) return;
+          saveStatus.textContent = message;
+          saveStatus.classList.toggle("is-error", Boolean(isError));
+        };
+        const currentMarkForSequence = (sequence) => {
+          const markedBlock = matchingBlocks(sequence).find(
+            (block) => block.hasAttribute("data-reader-review-current")
+          );
+          return markedBlock
+            ? markedBlock.getAttribute("data-reader-review-current")
+            : "";
+        };
+        const isValidReviewMark = (mark) => (
+          mark === "needs_review" || mark === "ok" || mark === "ignore"
+        );
+        const markedSequencesForCurrentFilter = () => reviewSequences().filter(
+          (sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            return Boolean(mark) && (
+              currentReviewFilter === "all" || mark === currentReviewFilter
+            );
+          }
+        );
+        const updateReviewStepProgress = (sequence) => {
+          if (!stepProgress) return;
+          const markedSequences = markedSequencesForCurrentFilter();
+          currentReviewStepSequence = markedSequences.includes(sequence)
+            ? sequence
+            : "";
+          if (!markedSequences.length) {
+            stepProgress.textContent = "Marked blocks: 0";
+            return;
+          }
+          if (!currentReviewStepSequence) {
+            stepProgress.textContent = `Marked blocks: ${markedSequences.length}`;
+            return;
+          }
+          const index = markedSequences.indexOf(currentReviewStepSequence);
+          stepProgress.textContent =
+            `Marked block ${index + 1} of ${markedSequences.length}`;
+        };
+        const updateReviewCounts = () => {
+          if (!reviewPanel) return;
+          const counts = {
+            marked: 0,
+            unmarked: 0,
+            needs_review: 0,
+            ok: 0,
+            ignore: 0,
+          };
+          reviewSequences().forEach((sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            if (mark) {
+              counts.marked += 1;
+            } else {
+              counts.unmarked += 1;
+            }
+            if (Object.prototype.hasOwnProperty.call(counts, mark)) {
+              counts[mark] += 1;
+            }
+          });
+          Object.entries(counts).forEach(([mark, count]) => {
+            const target = reviewPanel.querySelector(
+              `[data-reader-review-count="${mark}"] strong`
+            );
+            if (target) target.textContent = String(count);
+          });
+        };
+        const setFilterHidden = (target, isHidden) => {
+          target.classList.toggle("is-review-filter-hidden", isHidden);
+        };
+        const applyReviewFilter = (filterName) => {
+          currentReviewFilter = filterName || "all";
+          filterButtons.forEach((button) => {
+            const isPressed =
+              button.getAttribute("data-reader-review-filter") === currentReviewFilter;
+            button.setAttribute("aria-pressed", isPressed ? "true" : "false");
+            button.classList.toggle("is-active", isPressed);
+          });
+          if (filterStatus) {
+            filterStatus.textContent = currentReviewFilter === "all"
+              ? "Review filter: all rows"
+              : `Review filter: ${markLabels[currentReviewFilter] || currentReviewFilter}`;
+          }
+          reviewSequences().forEach((sequence) => {
+            const mark = currentMarkForSequence(sequence);
+            const isHidden = (
+              currentReviewFilter === "unmarked"
+                ? Boolean(mark)
+                : currentReviewFilter !== "all" && mark !== currentReviewFilter
+            );
+            matchingBlocks(sequence).forEach((block) => setFilterHidden(block, isHidden));
+            matchingOutlines(sequence).forEach((link) => setFilterHidden(link, isHidden));
+          });
+          updateReviewStepProgress(currentReviewStepSequence);
+        };
+        const goToReviewMark = (direction) => {
+          const markedSequences = markedSequencesForCurrentFilter();
+          if (!markedSequences.length) {
+            updateReviewStepProgress("");
+            return;
+          }
+          const currentIndex = markedSequences.indexOf(currentReviewStepSequence);
+          let nextIndex = 0;
+          if (currentIndex >= 0) {
+            nextIndex = direction === "previous"
+              ? Math.max(0, currentIndex - 1)
+              : Math.min(markedSequences.length - 1, currentIndex + 1);
+          } else if (direction === "previous") {
+            nextIndex = markedSequences.length - 1;
+          }
+          const sequence = markedSequences[nextIndex];
+          const href = `#reader-original-${sequence}`;
+          const target = document.getElementById(`reader-original-${sequence}`);
+          if (!target) return;
+          selectedReviewSequence = sequence;
+          window.history.replaceState(null, "", href);
+          window.dispatchEvent(
+            new CustomEvent("reader:block-selected", { detail: { href } })
+          );
+          target.scrollIntoView({ block: "start", behavior: "smooth" });
+          target.focus({ preventScroll: true });
+          updateReviewStepProgress(sequence);
+        };
+        const setTargetClasses = (target, mark) => {
+          markClasses.forEach((className) => target.classList.remove(className));
+          if (!mark) {
+            target.removeAttribute("data-reader-review-current");
+            return;
+          }
+          target.classList.add("has-review-mark", classForMark(mark));
+          target.setAttribute("data-reader-review-current", mark);
+        };
+        const setControlState = (control, mark) => {
+          const state = control.querySelector("[data-reader-review-state]");
+          if (state) {
+            state.textContent = `Review mark: ${markLabels[mark] || "none"}`;
+          }
+          control
+            .querySelectorAll("[data-reader-review-mark]")
+            .forEach((button) => {
+              const buttonMark = button.getAttribute("data-reader-review-mark");
+              const isPressed = Boolean(mark) && buttonMark === mark;
+              button.setAttribute("aria-pressed", isPressed ? "true" : "false");
+              button.classList.toggle("is-active", isPressed);
+            });
+        };
+        const applyReviewMark = (sequence, requestedMark) => {
+          const mark = requestedMark === "clear" ? "" : requestedMark;
+          if (!sequence) return;
+          selectedReviewSequence = sequence;
+          matchingBlocks(sequence).forEach((block) => setTargetClasses(block, mark));
+          matchingOutlines(sequence).forEach((link) => setTargetClasses(link, mark));
+          matchingControls(sequence).forEach((control) => setControlState(control, mark));
+          updateReviewCounts();
+          applyReviewFilter(currentReviewFilter);
+        };
+        const persistReviewMark = async (sequence, requestedMark) => {
+          if (!reviewSaveUrl || !reviewCsrfToken) return;
+          const body = new URLSearchParams();
+          body.set("csrf_token", reviewCsrfToken);
+          body.set("sequence", sequence);
+          body.set("mark", requestedMark);
+          try {
+            const response = await fetch(reviewSaveUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+              },
+              body,
+              credentials: "same-origin",
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) {
+              throw new Error(payload.error || "save_failed");
+            }
+            setReviewSaveStatus(
+              "Review mark saved with original and translation text.",
+              false
+            );
+          } catch (_error) {
+            setReviewSaveStatus("Review mark save failed.", true);
+          }
+        };
+        const setReviewMark = (sequence, requestedMark) => {
+          applyReviewMark(sequence, requestedMark);
+          persistReviewMark(sequence, requestedMark);
+        };
+        reviewButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            setReviewMark(
+              button.getAttribute("data-reader-review-sequence"),
+              button.getAttribute("data-reader-review-mark")
+            );
+          });
+        });
+        filterButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            applyReviewFilter(button.getAttribute("data-reader-review-filter"));
+          });
+        });
+        stepButtons.forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            goToReviewMark(button.getAttribute("data-reader-review-step"));
+          });
+        });
+        window.addEventListener("reader:block-selected", (event) => {
+          selectedReviewSequence = sequenceFromHref(
+            event.detail && event.detail.href
+          );
+        });
+        window.addEventListener("hashchange", () => {
+          selectedReviewSequence = sequenceFromHref(window.location.hash);
+        });
+        document.addEventListener("keydown", (event) => {
+          if (
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            isInteractiveTarget(event.target)
+          ) {
+            return;
+          }
+          const requestedMark = reviewShortcutMarks[event.key];
+          if (!requestedMark) return;
+          const sequence = activeReviewSequence();
+          if (!sequence) return;
+          event.preventDefault();
+          setReviewMark(sequence, requestedMark);
+        });
+        Object.entries(savedReviewMarks).forEach(([sequence, mark]) => {
+          if (isValidReviewMark(mark)) {
+            applyReviewMark(sequence, mark);
+          }
+        });
+        updateReviewCounts();
+        applyReviewFilter("all");
+      })();
+    </script>
+    """
+    return script.replace("__READER_REVIEW_MARKS__", review_marks_json)
+
+
+def _reader_qa_step_script() -> str:
+    return """
+    <script data-reader-qa-step-navigation>
+      (() => {
+        const controls = document.querySelector("[data-reader-qa-step-controls]");
+        if (!controls) return;
+        const issueLinks = Array.from(
+          document.querySelectorAll("[data-reader-qa-issue-anchor]")
+        );
+        const issueHrefs = issueLinks
+          .map((link) => link.getAttribute("href"))
+          .filter((href) => href && href.startsWith("#"));
+        if (!issueHrefs.length) return;
+        const progress = document.querySelector("[data-reader-qa-progress]");
+        const defaultProgressText = `Issues in window: ${issueHrefs.length}`;
+        const updateProgress = (href) => {
+          if (!progress) return;
+          const index = issueHrefs.indexOf(href);
+          progress.textContent = index >= 0
+            ? `Issue ${index + 1} of ${issueHrefs.length}`
+            : defaultProgressText;
+        };
+        const targetForHref = (href) => document.getElementById(href.slice(1));
+        const sequenceForHref = (href) => href.replace(/^#reader-original-/, "");
+        const targetsForHref = (href) => {
+          const sequence = sequenceForHref(href);
+          return [
+            document.getElementById(`reader-original-${sequence}`),
+            document.getElementById(`reader-translation-${sequence}`),
+          ].filter(Boolean);
+        };
+        const clearActiveIssue = () => {
+          issueLinks.forEach((link) => {
+            link.classList.remove("is-active");
+            link.removeAttribute("aria-current");
+          });
+          document
+            .querySelectorAll(".reader-block.is-active-qa-issue")
+            .forEach((block) => block.classList.remove("is-active-qa-issue"));
+          updateProgress("");
+        };
+        const setActiveIssue = (href, shouldScroll) => {
+          if (!issueHrefs.includes(href)) {
+            clearActiveIssue();
+            return;
+          }
+          const targets = targetsForHref(href);
+          if (!targets.length) return;
+          clearActiveIssue();
+          updateProgress(href);
+          issueLinks.forEach((link) => {
+            if (link.getAttribute("href") !== href) return;
+            link.classList.add("is-active");
+            link.setAttribute("aria-current", "true");
+          });
+          targets.forEach((target) => target.classList.add("is-active-qa-issue"));
+          if (shouldScroll) {
+            targets[0].scrollIntoView({ block: "start", behavior: "smooth" });
+          }
+          window.history.replaceState(null, "", href);
+          window.dispatchEvent(
+            new CustomEvent("reader:block-selected", { detail: { href } })
+          );
+          targets[0].focus({ preventScroll: true });
+        };
+        const currentIssueIndex = () => {
+          const hashIndex = issueHrefs.indexOf(window.location.hash);
+          if (hashIndex >= 0) return hashIndex;
+          let nearestIndex = 0;
+          let nearestDistance = Number.POSITIVE_INFINITY;
+          issueHrefs.forEach((href, index) => {
+            const target = targetForHref(href);
+            if (!target) return;
+            const distance = Math.abs(target.getBoundingClientRect().top - 96);
+            if (distance < nearestDistance) {
+              nearestIndex = index;
+              nearestDistance = distance;
+            }
+          });
+          return nearestIndex;
+        };
+        const goToIssue = (direction) => {
+          const currentIndex = currentIssueIndex();
+          const nextIndex = direction === "next"
+            ? Math.min(issueHrefs.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+          setActiveIssue(issueHrefs[nextIndex], true);
+        };
+        issueLinks.forEach((link) => {
+          link.addEventListener("click", (event) => {
+            const href = link.getAttribute("href");
+            if (!href) return;
+            event.preventDefault();
+            setActiveIssue(href, true);
+          });
+        });
+        controls.addEventListener("click", (event) => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest("[data-reader-qa-step]");
+          if (!button) return;
+          event.preventDefault();
+          goToIssue(button.getAttribute("data-reader-qa-step"));
+        });
+        window.addEventListener("hashchange", () => {
+          setActiveIssue(window.location.hash, false);
+        });
+        setActiveIssue(window.location.hash, false);
+      })();
+    </script>
+    """
+
+
+def _reader_search_hit_script() -> str:
+    return """
+    <script data-reader-search-hit-navigation>
+      (() => {
+        const controls = document.querySelector("[data-reader-search-hit-controls]");
+        if (!controls) return;
+        const hits = Array.from(document.querySelectorAll(".reader-search-hit"));
+        if (!hits.length) return;
+        const progress = document.querySelector("[data-reader-search-hit-progress]");
+        const defaultProgressText = `Search hits in window: ${hits.length}`;
+        const updateProgress = (index) => {
+          if (!progress) return;
+          progress.textContent = index >= 0
+            ? `Hit ${index + 1} of ${hits.length}`
+            : defaultProgressText;
+        };
+        const clearActiveHit = () => {
+          hits.forEach((hit) => {
+            hit.classList.remove("is-active-search-hit");
+            hit.removeAttribute("aria-current");
+          });
+          updateProgress(-1);
+        };
+        const setActiveHit = (index, shouldScroll) => {
+          if (index < 0 || index >= hits.length) return;
+          clearActiveHit();
+          const hit = hits[index];
+          hit.classList.add("is-active-search-hit");
+          hit.setAttribute("aria-current", "true");
+          updateProgress(index);
+          if (shouldScroll) {
+            hit.scrollIntoView({ block: "center", behavior: "smooth" });
+          }
+        };
+        const activeHitIndex = () => hits.findIndex(
+          (hit) => hit.classList.contains("is-active-search-hit")
+        );
+        const goToHit = (direction) => {
+          const currentIndex = activeHitIndex();
+          const nextIndex = direction === "next"
+            ? Math.min(hits.length - 1, currentIndex + 1)
+            : currentIndex < 0
+              ? hits.length - 1
+              : Math.max(0, currentIndex - 1);
+          setActiveHit(nextIndex, true);
+        };
+        controls.addEventListener("click", (event) => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest("[data-reader-search-hit-step]");
+          if (!button) return;
+          event.preventDefault();
+          goToHit(button.getAttribute("data-reader-search-hit-step"));
+        });
+      })();
+    </script>
+    """
+
+
+def _translation_text_diagnostic_row(
+    row: dict[str, object],
+    *,
+    show_invisibles: bool = False,
+    search_query: str = "",
+) -> str:
+    block_label = _translation_source_block_label(row)
     notes = []
     last_error = row.get("last_error")
     if last_error:
@@ -3269,14 +5639,29 @@ def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
     max_attempts = row.get("max_attempts")
     if attempt_count or max_attempts:
         notes.append(f"attempts: {attempt_count}/{max_attempts}")
+    notes.append(_translation_row_metric_summary(row))
+    qa_flags = _translation_row_qa_flags(row)
+    for flag in qa_flags:
+        notes.append(flag["label"])
+    layout_flags = _translation_row_layout_flags(row)
+    for flag in layout_flags:
+        notes.append(flag["label"])
     note_html = ""
     if notes:
         note_text = " · ".join(escape(str(note)) for note in notes)
         note_html = f'<p class="muted">{note_text}</p>'
     sequence = escape(str(row.get("sequence") or 0))
     status = escape(str(row.get("status") or "unknown"))
-    source_text = escape(str(row.get("source_text") or ""))
-    translated_text = escape(str(row.get("translated_text") or ""))
+    source_text = _diagnostic_text_html(
+        str(row.get("source_text") or ""),
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+    )
+    translated_text = _diagnostic_text_html(
+        str(row.get("translated_text") or ""),
+        show_invisibles=show_invisibles,
+        search_query=search_query,
+    )
     return f"""
     <tr>
       <td>{sequence}</td>
@@ -3286,6 +5671,119 @@ def _translation_text_diagnostic_row(row: dict[str, object]) -> str:
       <td><pre class="detail-json raw-text-cell">{translated_text}</pre></td>
     </tr>
     """
+
+
+_ZERO_WIDTH_CHAR_LABELS = {
+    "\u200b": "ZWSP",
+    "\u200c": "ZWNJ",
+    "\u200d": "ZWJ",
+    "\ufeff": "BOM",
+}
+
+
+def _diagnostic_text_html(
+    text: str,
+    *,
+    show_invisibles: bool,
+    search_query: str = "",
+) -> str:
+    if not search_query:
+        return _diagnostic_text_segment_html(text, show_invisibles=show_invisibles)
+    lowered_text = text.lower()
+    lowered_query = search_query.lower()
+    if not lowered_query:
+        return _diagnostic_text_segment_html(text, show_invisibles=show_invisibles)
+    parts: list[str] = []
+    cursor = 0
+    while True:
+        match_start = lowered_text.find(lowered_query, cursor)
+        if match_start < 0:
+            parts.append(
+                _diagnostic_text_segment_html(
+                    text[cursor:],
+                    show_invisibles=show_invisibles,
+                )
+            )
+            break
+        match_end = match_start + len(search_query)
+        parts.append(
+            _diagnostic_text_segment_html(
+                text[cursor:match_start],
+                show_invisibles=show_invisibles,
+            )
+        )
+        match_html = _diagnostic_text_segment_html(
+            text[match_start:match_end],
+            show_invisibles=show_invisibles,
+        )
+        parts.append(f'<mark class="reader-search-hit">{match_html}</mark>')
+        cursor = match_end
+    return "".join(parts)
+
+
+def _diagnostic_text_segment_html(text: str, *, show_invisibles: bool) -> str:
+    if not show_invisibles:
+        return escape(text)
+    parts: list[str] = []
+    for char in text:
+        if char == " ":
+            parts.append(_invisible_marker("&middot;", "space"))
+        elif char == "\t":
+            parts.append(_invisible_marker("&rarr;", "tab"))
+        elif char == "\n":
+            parts.append(_invisible_marker("&para;", "line break") + "\n")
+        elif char == "\r":
+            parts.append(_invisible_marker("CR", "carriage return"))
+        elif char == "\u00a0":
+            parts.append(_invisible_marker("&#9251;", "non-breaking space"))
+        elif char == "\u00ad":
+            parts.append(_invisible_marker("&not;", "soft hyphen"))
+        elif char in _ZERO_WIDTH_CHAR_LABELS:
+            parts.append(
+                _invisible_marker(
+                    _ZERO_WIDTH_CHAR_LABELS[char],
+                    "zero-width character",
+                )
+            )
+        else:
+            parts.append(escape(char))
+    return "".join(parts)
+
+
+def _translation_search_match_count(
+    rows: tuple[dict[str, object], ...],
+    *,
+    search_query: str,
+) -> int:
+    if not search_query:
+        return 0
+    query = search_query.lower()
+    count = 0
+    for row in rows:
+        for key in ("source_text", "translated_text"):
+            text = str(row.get(key) or "").lower()
+            cursor = 0
+            while True:
+                index = text.find(query, cursor)
+                if index < 0:
+                    break
+                count += 1
+                cursor = index + len(query)
+    return count
+
+
+def _invisible_marker(label: str, title: str) -> str:
+    return (
+        f'<span class="invisible-char" title="{escape(title)}" '
+        f'aria-label="{escape(title)}">{label}</span>'
+    )
+
+
+def _translation_source_block_label(row: dict[str, object]) -> str:
+    blocks = row.get("source_block_ids")
+    if isinstance(blocks, (list, tuple)):
+        return ", ".join(str(item) for item in blocks) or "n/a"
+    return str(blocks or "n/a")
 
 
 def translation_trace_body(trace: TranslationTrace) -> str:
@@ -4093,6 +6591,12 @@ def _log_row(row: TranslationRunSummary) -> str:
         "view",
         compact=True,
     )
+    reader_link = _action_link(
+        "Reader",
+        f"/admin/logs/{run_id}/reader",
+        "view",
+        compact=True,
+    )
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -4109,6 +6613,7 @@ def _log_row(row: TranslationRunSummary) -> str:
       <td>
         {trace_link}
         {details_link}
+        {reader_link}
       </td>
     </tr>
     """
@@ -4532,6 +7037,641 @@ header {
 .raw-text-table td:nth-child(4),
 .raw-text-table td:nth-child(5) {
   min-width: 280px;
+}
+.reader-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader-tab {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text);
+  background: #ffffff;
+  font-weight: 800;
+  text-decoration: none;
+}
+.reader-tab.is-active {
+  color: #ffffff;
+  background: #1f2937;
+  border-color: #1f2937;
+}
+.reader-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.reader-control-group,
+.reader-page-form,
+.reader-filter-form,
+.reader-search-form,
+.reader-jump-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.reader-pane-mode-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.reader-pane-mode-action.is-active {
+  border-color: #9fb7b4;
+  color: #ffffff;
+  background: #256f68;
+}
+.reader-page-form,
+.reader-filter-form,
+.reader-search-form,
+.reader-jump-form {
+  margin: 0;
+}
+.reader-page-form label,
+.reader-filter-form label,
+.reader-search-form label,
+.reader-jump-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.reader-page-form input,
+.reader-page-form select,
+.reader-filter-form select,
+.reader-search-form input,
+.reader-jump-form input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+  color: var(--ink);
+  background: #ffffff;
+}
+.reader-page-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+.reader-page-form input {
+  width: 82px;
+}
+.reader-page-form select {
+  width: 92px;
+}
+.reader-filter-form select {
+  width: 190px;
+}
+.reader-search-form input {
+  width: min(260px, 100%);
+}
+.reader-jump-form input {
+  width: 96px;
+}
+.reader-position-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+.reader-position-bar > strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+.reader-position-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-position-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.reader-position-chip strong {
+  color: var(--ink);
+  font-size: inherit;
+}
+.reader-qa-panel,
+.reader-layout-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.reader-qa-metric {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+.reader-qa-filter-metric {
+  color: inherit;
+  display: block;
+  text-decoration: none;
+}
+.reader-qa-filter-metric:hover,
+.reader-qa-filter-metric:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-qa-filter-metric.is-active {
+  border-color: var(--accent);
+  background: #eff6ff;
+}
+.reader-qa-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.reader-qa-metric strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 1.2rem;
+}
+.reader-qa-issue-nav {
+  margin: 12px 0;
+}
+.reader-review-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #ffffff;
+}
+.reader-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader-review-heading h4 {
+  margin: 0;
+}
+.reader-review-filter-status {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+.reader-review-counts,
+.reader-review-filters,
+.reader-review-step-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-review-count {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+.reader-review-count strong {
+  color: var(--ink);
+  font-size: inherit;
+}
+.reader-review-filter-button {
+  white-space: nowrap;
+}
+.reader-review-step-progress {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.reader-review-filter-button.is-active,
+.reader-review-filter-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.is-review-filter-hidden {
+  display: none !important;
+}
+.reader-outline {
+  margin: 12px 0;
+}
+.reader-outline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  cursor: pointer;
+}
+.reader-outline-heading h4 {
+  margin: 0;
+}
+.reader-outline-heading span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+.reader-outline-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.reader-outline-link {
+  min-width: min(100%, 190px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: #ffffff;
+  text-decoration: none;
+}
+.reader-outline-link:hover,
+.reader-outline-link:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-outline-link.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+  background: #eff6ff;
+}
+.reader-outline-link.has-qa-warning {
+  border-color: #fed7aa;
+  color: #7c2d12;
+  background: #fffbeb;
+}
+.reader-outline-link.has-qa-warning.is-active {
+  border-color: #c2410c;
+  background: #fff7ed;
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.18);
+}
+.reader-outline-sequence {
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+.reader-outline-blocks,
+.reader-outline-status,
+.reader-outline-flags {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.reader-outline-link.has-qa-warning .reader-outline-flags {
+  color: #7c2d12;
+}
+.reader-outline-link.has-review-mark {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-outline-link.is-review-needs-review {
+  border-color: #f97316;
+  background: #fff7ed;
+}
+.reader-outline-link.is-review-ok {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+.reader-outline-link.is-review-ignore {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+.reader-search-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.reader-qa-issue-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.reader-qa-issue-heading h4 {
+  margin: 0;
+}
+.reader-qa-step-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-qa-step-button {
+  white-space: nowrap;
+}
+.reader-qa-progress {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.reader-search-progress {
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #713f12;
+  background: #fffbeb;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.reader-search-hit-button {
+  white-space: nowrap;
+}
+.reader-qa-issue-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.reader-qa-issue-link {
+  min-width: min(100%, 240px);
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  color: #7c2d12;
+  background: #fffbeb;
+  text-decoration: none;
+}
+.reader-qa-issue-link:hover,
+.reader-qa-issue-link:focus {
+  border-color: #fb923c;
+  background: #fff7ed;
+}
+.reader-qa-issue-link.is-active {
+  border-color: #c2410c;
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.18);
+  background: #fff7ed;
+}
+.reader-qa-issue-sequence {
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+.reader-qa-issue-labels {
+  color: #7c2d12;
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+.reader-qa-issue-blocks {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.reader-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.reader-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: min(72vh, 760px);
+}
+.reader-compare.reader-pane-mode-original {
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.65fr);
+}
+.reader-compare.reader-pane-mode-translation {
+  grid-template-columns: minmax(260px, 0.65fr) minmax(0, 1.45fr);
+}
+.reader-pane {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--line);
+}
+.reader-pane:last-child {
+  border-right: 0;
+}
+.reader-pane-heading {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+.reader-pane-heading h4 {
+  margin: 0;
+}
+.reader-scroll {
+  min-height: 0;
+  max-height: min(72vh, 760px);
+  overflow: auto;
+  padding: 16px;
+  scroll-behavior: auto;
+}
+.reader-block {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 18px;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.reader-block.has-qa-warning {
+  border-left: 3px solid #d98b4a;
+  padding-left: 12px;
+}
+.reader-block:target,
+.reader-block.is-active-qa-issue,
+.reader-block.is-active-outline-block {
+  border-radius: 6px;
+  outline: 2px solid rgba(194, 65, 12, 0.45);
+  outline-offset: 3px;
+  background: #fff7ed;
+}
+.reader-block.has-review-mark {
+  border-radius: 6px;
+  padding-left: 12px;
+}
+.reader-block.is-review-needs-review {
+  border-left: 3px solid #f97316;
+  background: #fff7ed;
+}
+.reader-block.is-review-ok {
+  border-left: 3px solid #16a34a;
+  background: #f0fdf4;
+}
+.reader-block.is-review-ignore {
+  border-left: 3px solid #94a3b8;
+  background: #f8fafc;
+}
+.reader-block:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.reader-block header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.reader-block-metrics {
+  color: var(--muted);
+  font-weight: 750;
+}
+.reader-review-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.reader-review-state {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+.reader-review-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+.reader-review-button:hover,
+.reader-review-button:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+.reader-review-button.is-active,
+.reader-review-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.reader-text {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reader-compare.has-indent-preview .reader-text {
+  text-indent: 1.6em;
+}
+.reader-search-hit {
+  color: #111827;
+  background: #fde68a;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.reader-search-hit.is-active-search-hit {
+  outline: 2px solid rgba(202, 138, 4, 0.55);
+  outline-offset: 2px;
+  background: #facc15;
+}
+.reader-qa-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.reader-qa-flag {
+  color: #7c2d12;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+.reader-minimap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+.reader-minimap-item {
+  min-width: 32px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  background: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+.reader-minimap-item.has-qa-warning {
+  color: #7c2d12;
+  border-color: #fed7aa;
+  background: #ffedd5;
+}
+.invisible-char {
+  color: #9a3412;
+  background: #fff7ed;
+  border-radius: 4px;
+  padding: 0 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  font-weight: 800;
+}
+.reader-empty {
+  margin: 0;
+  color: var(--muted);
 }
 .toolbar-panel {
   display: flex;
@@ -5196,6 +8336,24 @@ button.danger {
   }
   .trace-rail {
     position: static;
+  }
+  .reader-compare {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .reader-compare.reader-pane-mode-original,
+  .reader-compare.reader-pane-mode-translation {
+    grid-template-columns: 1fr;
+  }
+  .reader-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .reader-pane:last-child {
+    border-bottom: 0;
+  }
+  .reader-scroll {
+    max-height: 56vh;
   }
   .incident-state-row {
     grid-template-columns: 1fr;

@@ -85,6 +85,8 @@ from translator_service.admin.translation_logs import (
     build_effective_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
+    reader_review_mark_map,
+    save_reader_review_mark,
 )
 from translator_service.admin.translation_progress import (
     overlay_translation_run_details,
@@ -115,6 +117,7 @@ from translator_service.admin.views import (
     section_body,
     security_events_body,
     settings_body,
+    translation_reader_body,
     translation_text_diagnostics_body,
     translation_trace_body,
     upload_safety_body,
@@ -679,8 +682,28 @@ def create_admin_router(settings: Settings) -> APIRouter:
         details = _translation_run_details(settings, run_id)
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
-        start_sequence = _positive_int(request.query_params.get("sequence"), default=1)
         limit = _bounded_int(request.query_params.get("limit"), default=25, maximum=100)
+        start_sequence = _sequence_from_page_or_query(
+            page_value=request.query_params.get("page"),
+            sequence_value=request.query_params.get("sequence"),
+            limit=limit,
+        )
+        show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
+        search_query = _query_text(request.query_params.get("q"), maximum=200)
+        indent_preview = _query_flag(request.query_params.get("indent_preview"))
+        qa_filter = _query_choice(
+            request.query_params.get("qa"),
+            choices={
+                "all",
+                "issues",
+                "empty_source",
+                "missing_translation",
+                "length_mismatch",
+                "paragraph_mismatch",
+                "indent",
+            },
+            default="all",
+        )
         rows = _translation_text_diagnostics(
             settings,
             job_id=details.summary.job_id,
@@ -699,7 +722,147 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 run_id=run_id,
                 start_sequence=start_sequence,
                 limit=limit,
+                show_invisibles=show_invisibles,
+                search_query=search_query,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
             ),
+        )
+
+    @router.get("/logs/{run_id}/reader", response_class=HTMLResponse)
+    async def log_reader(run_id: str, request: Request) -> Response:
+        if _session_or_none(request, session_manager) is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
+        limit = _bounded_int(
+            request.query_params.get("limit"),
+            default=100,
+            maximum=500,
+        )
+        start_sequence = _sequence_from_page_or_query(
+            page_value=request.query_params.get("page"),
+            sequence_value=request.query_params.get("sequence"),
+            limit=limit,
+        )
+        show_invisibles = _query_flag(request.query_params.get("show_invisibles"))
+        sync_scroll = _query_flag(request.query_params.get("sync"), default=True)
+        search_query = _query_text(request.query_params.get("q"), maximum=200)
+        search_hits_only = bool(search_query) and _query_flag(
+            request.query_params.get("search_hits")
+        )
+        pane_mode = _query_choice(
+            request.query_params.get("pane_mode"),
+            choices={"split", "original", "translation"},
+            default="split",
+        )
+        indent_preview = _query_flag(request.query_params.get("indent_preview"))
+        qa_filter = _query_choice(
+            request.query_params.get("qa"),
+            choices={
+                "all",
+                "issues",
+                "empty_source",
+                "missing_translation",
+                "length_mismatch",
+                "paragraph_mismatch",
+                "indent",
+            },
+            default="all",
+        )
+        rows = _translation_text_diagnostics(
+            settings,
+            job_id=details.summary.job_id,
+            start_sequence=start_sequence,
+            limit=limit,
+        )
+        return _protected_page(
+            request,
+            session_manager=session_manager,
+            environment=settings.environment,
+            title="Translation Reader",
+            active="logs",
+            body=lambda session: translation_reader_body(
+                details,
+                rows,
+                run_id=run_id,
+                start_sequence=start_sequence,
+                limit=limit,
+                show_invisibles=show_invisibles,
+                sync_scroll=sync_scroll,
+                search_query=search_query,
+                search_hits_only=search_hits_only,
+                pane_mode=pane_mode,
+                indent_preview=indent_preview,
+                qa_filter=qa_filter,
+                review_marks=reader_review_mark_map(
+                    settings.translation_run_log_root,
+                    run_id,
+                ),
+                review_save_url=f"/admin/logs/{run_id}/reader/review-mark",
+                csrf_token=session.csrf_token,
+            ),
+        )
+
+    @router.post("/logs/{run_id}/reader/review-mark")
+    async def save_log_reader_review_mark(
+        run_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _json({"error": "forbidden"}, status_code=HTTPStatus.FORBIDDEN)
+        details = _translation_run_details(settings, run_id)
+        if details is None:
+            return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
+        sequence = _strict_positive_int(form.get("sequence"), maximum=1_000_000)
+        mark = (form.get("mark") or "").strip().lower()
+        if sequence is None or mark not in {"needs_review", "ok", "ignore", "clear"}:
+            return _json({"error": "invalid_mark"}, status_code=HTTPStatus.BAD_REQUEST)
+        row = _reader_review_mark_row(
+            settings,
+            job_id=details.summary.job_id,
+            sequence=sequence,
+        )
+        if row is None and mark != "clear":
+            return _json(
+                {"error": "sequence_not_found"},
+                status_code=HTTPStatus.NOT_FOUND,
+            )
+        try:
+            saved = save_reader_review_mark(
+                settings.translation_run_log_root,
+                run_id,
+                sequence=sequence,
+                mark=mark,
+                source_text=str((row or {}).get("source_text") or ""),
+                translated_text=str((row or {}).get("translated_text") or ""),
+                status=str((row or {}).get("status") or "unknown"),
+                source_block_ids=tuple(
+                    str(block_id)
+                    for block_id in ((row or {}).get("source_block_ids") or ())
+                    if str(block_id)
+                ),
+            )
+        except OSError:
+            return _json(
+                {"error": "save_failed"},
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+        if saved is None:
+            return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
+        return _json(
+            {
+                "ok": True,
+                "marks": reader_review_mark_map(
+                    settings.translation_run_log_root,
+                    run_id,
+                ),
+            }
         )
 
     @router.get("/translations/{run_id}/trace", response_class=HTMLResponse)
@@ -2658,6 +2821,23 @@ def _translation_text_diagnostics(
         store.close()
 
 
+def _reader_review_mark_row(
+    settings: Settings,
+    *,
+    job_id: str,
+    sequence: int,
+) -> dict[str, object] | None:
+    rows = _translation_text_diagnostics(
+        settings,
+        job_id=job_id,
+        start_sequence=sequence,
+        limit=1,
+    )
+    if not rows or rows[0].get("sequence") != sequence:
+        return None
+    return rows[0]
+
+
 def _translation_work_unit_diagnostic(
     settings: Settings,
     *,
@@ -3250,6 +3430,53 @@ def _positive_int(value: str | None, *, default: int) -> int:
         return default
 
 
+def _optional_positive_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return None
+
+
+def _sequence_from_page_or_query(
+    *,
+    page_value: str | None,
+    sequence_value: str | None,
+    limit: int,
+) -> int:
+    page = _optional_positive_int(page_value)
+    if page is not None:
+        return ((page - 1) * max(1, limit)) + 1
+    return _positive_int(sequence_value, default=1)
+
+
+def _query_flag(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _query_text(value: str | None, *, maximum: int) -> str:
+    if value is None:
+        return ""
+    return value.strip()[:maximum]
+
+
+def _query_choice(
+    value: str | None,
+    *,
+    choices: set[str],
+    default: str,
+) -> str:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in choices:
+        return normalized
+    return default
+
+
 def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
     if value is None:
         return default
@@ -3257,3 +3484,15 @@ def _bounded_int(value: str | None, *, default: int, maximum: int) -> int:
         return max(1, min(int(value), maximum))
     except ValueError:
         return default
+
+
+def _strict_positive_int(value: str | None, *, maximum: int) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    if parsed <= 0 or parsed > maximum:
+        return None
+    return parsed

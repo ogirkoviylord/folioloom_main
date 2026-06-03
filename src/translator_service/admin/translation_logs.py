@@ -25,6 +25,9 @@ _FAILED_FRAGMENT_STATUSES = {
     "failed_terminal",
     "interrupted",
 }
+READER_REVIEW_MARKS_FILE = "reader_review_marks.json"
+_READER_REVIEW_MARKS_VERSION = 1
+_READER_REVIEW_ALLOWED_MARKS = frozenset({"needs_review", "ok", "ignore"})
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,17 @@ class TranslationRunSummary:
 class TranslationRunArchive:
     file_name: str
     content: bytes
+
+
+@dataclass(frozen=True)
+class ReaderReviewMark:
+    sequence: int
+    mark: str
+    source_text: str
+    translated_text: str
+    status: str
+    source_block_ids: tuple[str, ...]
+    updated_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -189,7 +203,7 @@ def build_translation_run_archive(
     buffer = BytesIO()
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(run_dir.rglob("*")):
-            if path.is_file():
+            if path.is_file() and path.name != READER_REVIEW_MARKS_FILE:
                 archive.write(path, path.relative_to(run_dir).as_posix())
     return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
 
@@ -209,7 +223,10 @@ def build_effective_translation_run_archive(
     buffer = BytesIO()
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(run_dir.rglob("*")):
-            if path.is_file() and path.name != "summary.md":
+            if path.is_file() and path.name not in {
+                "summary.md",
+                READER_REVIEW_MARKS_FILE,
+            }:
                 archive.write(path, path.relative_to(run_dir).as_posix())
         archive.writestr(
             "effective_run.json",
@@ -242,6 +259,90 @@ def build_effective_translation_run_archive(
             ),
         )
     return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
+
+
+def load_reader_review_marks(
+    root: str | Path,
+    run_id: str,
+) -> tuple[ReaderReviewMark, ...]:
+    run_dir = _resolve_run_dir(root, run_id)
+    if run_dir is None:
+        return ()
+    document = _read_reader_review_marks_document(
+        run_dir / READER_REVIEW_MARKS_FILE
+    )
+    review_marks = []
+    for sequence_key, record in sorted(
+        document.get("marks", {}).items(),
+        key=lambda item: _int(item[0]),
+    ):
+        review_mark = _reader_review_mark_from_record(sequence_key, record)
+        if review_mark is not None:
+            review_marks.append(review_mark)
+    return tuple(review_marks)
+
+
+def reader_review_mark_map(
+    root: str | Path,
+    run_id: str,
+) -> dict[str, str]:
+    return {
+        str(mark.sequence): mark.mark
+        for mark in load_reader_review_marks(root, run_id)
+    }
+
+
+def save_reader_review_mark(
+    root: str | Path,
+    run_id: str,
+    *,
+    sequence: int,
+    mark: str,
+    source_text: str,
+    translated_text: str,
+    status: str,
+    source_block_ids: tuple[str, ...],
+    now: datetime | None = None,
+) -> tuple[ReaderReviewMark, ...] | None:
+    run_dir = _resolve_run_dir(root, run_id)
+    if run_dir is None:
+        return None
+    sequence = _int(sequence)
+    if sequence <= 0:
+        return None
+    marks_path = run_dir / READER_REVIEW_MARKS_FILE
+    document = _read_reader_review_marks_document(marks_path)
+    marks = document.setdefault("marks", {})
+    if not isinstance(marks, dict):
+        marks = {}
+        document["marks"] = marks
+    sequence_key = str(sequence)
+    if mark == "clear":
+        marks.pop(sequence_key, None)
+    elif mark in _READER_REVIEW_ALLOWED_MARKS:
+        updated_at = _aware_utc(now or datetime.now(UTC)).isoformat()
+        marks[sequence_key] = {
+            "mark": mark,
+            "source_text": source_text,
+            "translated_text": translated_text,
+            "status": _string(status, fallback="unknown"),
+            "source_block_ids": [
+                _string(block_id, fallback="")
+                for block_id in source_block_ids
+                if _string(block_id, fallback="")
+            ],
+            "updated_at": updated_at,
+        }
+    else:
+        return None
+    document = {
+        "version": _READER_REVIEW_MARKS_VERSION,
+        "contains_raw_text": True,
+        "updated_at": _aware_utc(now or datetime.now(UTC)).isoformat(),
+        "marks": marks,
+    }
+    _write_json_atomic(marks_path, document)
+    return load_reader_review_marks(root, run_id)
 
 
 def _resolve_run_dir(root: str | Path, run_id: str) -> Path | None:
@@ -355,6 +456,56 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _read_reader_review_marks_document(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"version": _READER_REVIEW_MARKS_VERSION, "marks": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"version": _READER_REVIEW_MARKS_VERSION, "marks": {}}
+    if not isinstance(data, dict):
+        return {"version": _READER_REVIEW_MARKS_VERSION, "marks": {}}
+    marks = data.get("marks")
+    if not isinstance(marks, dict):
+        data["marks"] = {}
+    return data
+
+
+def _reader_review_mark_from_record(
+    sequence_key: str,
+    record: object,
+) -> ReaderReviewMark | None:
+    sequence = _int(sequence_key)
+    if sequence <= 0 or not isinstance(record, dict):
+        return None
+    mark = _string(record.get("mark"), fallback="")
+    if mark not in _READER_REVIEW_ALLOWED_MARKS:
+        return None
+    return ReaderReviewMark(
+        sequence=sequence,
+        mark=mark,
+        source_text=_string(record.get("source_text"), fallback=""),
+        translated_text=_string(record.get("translated_text"), fallback=""),
+        status=_string(record.get("status"), fallback="unknown"),
+        source_block_ids=tuple(
+            _string(block_id, fallback="")
+            for block_id in _safe_list(record.get("source_block_ids"))
+            if _string(block_id, fallback="")
+        ),
+        updated_at=_parse_datetime(record.get("updated_at")),
+    )
+
+
+def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def _read_run_summary(
@@ -638,6 +789,10 @@ def _safe_dict(value: Any) -> dict[str, Any]:
         key_text = str(key)
         safe[key_text] = _safe_value(item, key=key_text)
     return safe
+
+
+def _safe_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _safe_value(value: Any, *, key: str = "") -> Any:

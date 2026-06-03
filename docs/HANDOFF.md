@@ -75,7 +75,7 @@ and one terminal failed unit; coverage also includes a raw-only `ready`
 fragment fallback so generated completed-unit counts stay aligned with raw run
 summaries when no persistent store is available. Local verification on branch
 `codex/fix-effective-translation-export`: focused admin/archive tests passed,
-full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1225 tests with
+full `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1226 tests with
 `OK (skipped=13)`, `PYTHONPATH=src python3 -m compileall src` passed, targeted
 ruff on changed Python files passed, and `git diff --check` passed. CI status
 remains Unknown until a PR/checks page is inspected. This does not mutate
@@ -551,6 +551,281 @@ Owner decisions recorded during issue #71:
   reader, publisher/editor workspace, live runtime `var/` browsing, auth/RBAC
   changes, production dependencies, legal/privacy copy changes, full
   DOCX/EPUB fidelity claims or release readiness.
+- 2026-06-02: Branch `codex/internal-reader-v2` adds a run-log Translation
+  Reader at `/admin/logs/{run_id}/reader`. It is linked from logs, translation
+  details and Text diagnostics, uses the same `run_id -> job_id` work-unit path
+  as Text diagnostics, renders owner-only `no-store` HTML with synchronized
+  Original/Translation panes, and keeps details/API/download archives
+  metadata-only/redacted. Local verification passed `tests.test_admin_routes`,
+  focused reader/diagnostics tests, targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not add public routes,
+  raw-text JSON APIs, archive raw text, arbitrary server-path browsing, runtime
+  `var/` browsing, auth/RBAC changes, dependencies, publisher workspace or
+  release readiness.
+- 2026-06-02: Issue
+  [#214](https://github.com/ogirkoviylord/folioloom_main/issues/214) starts the
+  first focused controls slice for the run-log Reader/Text Diagnostics UX on
+  branch `codex/issue-214-reader-controls`, stacked after the scroll-fix PR.
+  The slice adds opt-in invisible/special-character markers, logical
+  sequence-window Previous/Next navigation, jump-by-sequence controls and a
+  reader sync-scroll toggle while keeping raw text confined to the same
+  owner-only `no-store` surfaces. Local verification passed
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, focused
+  regression coverage for the new controls, targeted ruff for touched Python
+  files and `PYTHONPATH=src python3 -m compileall src`. Physical book pages,
+  format-aware chapter navigation, search, anomaly filters, minimap,
+  publisher/editor workspace, live runtime data access and full DOCX/EPUB
+  fidelity remain out of scope.
+- 2026-06-02: Issue
+  [#216](https://github.com/ogirkoviylord/folioloom_main/issues/216) starts the
+  second focused Reader/Text Diagnostics UX slice on branch
+  `codex/issue-216-reader-qa-aids`, stacked after #214. The slice adds
+  current-window search with safe highlighting, reader QA counts for empty
+  source, missing translation and large source/translation length mismatch, and
+  a metadata-only minimap over the loaded work-unit window. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not search outside the loaded window, add public/user-facing access,
+  expose raw text through JSON/API/archive surfaces, add dependencies, access
+  live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+- 2026-06-02: Issue
+  [#218](https://github.com/ogirkoviylord/folioloom_main/issues/218) starts the
+  first focused layout/indent diagnostics slice on branch
+  `codex/issue-218-reader-indent-diagnostics`, stacked after #216. The slice
+  adds current-window literal indentation evidence for source and translated
+  work-unit text, a metadata panel that explicitly marks source-format style
+  metadata as `Unknown`, and an opt-in editorial first-line indent preview for
+  Reader only. Local verification passed focused reader/diagnostics regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not extract EPUB CSS or
+  DOCX paragraph style metadata, change stored text, add dependencies, access
+  live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+- 2026-06-02: Issue
+  [#220](https://github.com/ogirkoviylord/folioloom_main/issues/220) starts the
+  first logical-page navigation slice on branch
+  `codex/issue-220-reader-logical-pages`, stacked after #218. The slice lets
+  run-log Reader/Text Diagnostics open a bounded work-unit window via a
+  logical `page` query parameter, shows the current logical page plus loaded
+  sequence range, and adds page jump/page-size controls that preserve search,
+  invisible-character, sync-scroll and indent-preview flags. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  keeps sequence-based links backwards-compatible and does not implement
+  physical book pages, EPUB spine navigation, DOCX heading/chapter navigation,
+  full-window search, public/user-facing access, live runtime data operations
+  or release readiness.
+- 2026-06-02: Issue
+  [#222](https://github.com/ogirkoviylord/folioloom_main/issues/222) starts the
+  first current-window QA filter slice on branch
+  `codex/issue-222-reader-qa-filters`, stacked after #220. The slice adds a
+  bounded `qa` query parameter and visible filter control for already-computed
+  `all`, `empty_source`, `missing_translation`, `length_mismatch` and literal
+  indent signals in run-log Reader/Text Diagnostics. Local verification passed
+  focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This filters only the currently loaded work-unit window
+  and does not add quality scoring, cross-window scanning, saved filters,
+  annotations, public/user-facing access, live runtime data operations or
+  release readiness.
+- 2026-06-02: Issue
+  [#224](https://github.com/ogirkoviylord/folioloom_main/issues/224) starts the
+  first per-work-unit metrics slice on branch
+  `codex/issue-224-reader-block-metrics`, stacked after #222. The slice shows
+  source character count, translated character count and translation/source
+  length ratio in run-log Reader blocks and Text Diagnostics row notes. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. The metrics are computed only from the currently loaded
+  work-unit window and do not add semantic quality scoring, whole-book
+  aggregation, saved metrics, annotations, public/user-facing access, live
+  runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#226](https://github.com/ogirkoviylord/folioloom_main/issues/226) starts the
+  first paragraph-structure diagnostics slice on branch
+  `codex/issue-226-reader-paragraph-diagnostics`, stacked after #224. The slice
+  adds source/translation line counts, blank-line counts, a
+  `paragraph_mismatch` QA flag/filter and a Reader QA summary count for visible
+  work units whose source and translation are both non-empty but differ in
+  line/blank-line structure. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. The
+  metrics stay current-window-only and do not add DOCX style extraction, EPUB
+  CSS/layout reconstruction, semantic quality scoring, whole-book aggregation,
+  public/user-facing access, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#228](https://github.com/ogirkoviylord/folioloom_main/issues/228) starts the
+  first QA issue navigation slice on branch
+  `codex/issue-228-reader-qa-navigation`, stacked after #226. The slice adds a
+  compact Reader-only QA issue rail for the currently visible work-unit window,
+  listing existing QA flag labels by sequence and linking each item to the
+  corresponding comparison block anchor. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not add persistent annotations, whole-book aggregation, keyboard
+  shortcuts, semantic quality scoring, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#230](https://github.com/ogirkoviylord/folioloom_main/issues/230) starts the
+  first Reader keyboard navigation slice on branch
+  `codex/issue-230-reader-keyboard-navigation`, stacked after #228. The slice
+  lets the run-log Reader navigate to the existing Previous/Next logical window
+  URLs with ArrowLeft/ArrowRight, while ignoring text fields, selects, buttons,
+  links and contenteditable targets so forms and normal vertical scrolling keep
+  their browser behavior. Local verification passed focused reader/diagnostics
+  regression coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted ruff for touched Python files and
+  `PYTHONPATH=src python3 -m compileall src`. This does not add keyboard
+  shortcuts for annotations/comments/QA issues, persistent preferences,
+  public/user-facing access, publisher workspace, live runtime data operations
+  or release readiness.
+- 2026-06-02: Issue
+  [#232](https://github.com/ogirkoviylord/folioloom_main/issues/232) starts the
+  first Reader sticky position bar slice on branch
+  `codex/issue-232-reader-sticky-position`, stacked after #230. The slice adds
+  a compact sticky Reader-only current position/status bar showing the current
+  logical page, loaded sequence range, page size, active QA filter, search
+  state, special-character state, sync-scroll state and indent-preview state
+  from the already loaded window and query parameters. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
+  does not add saved views, persistent preferences, whole-book progress,
+  localStorage/sessionStorage, public/user-facing access, publisher workspace,
+  live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#234](https://github.com/ogirkoviylord/folioloom_main/issues/234) starts the
+  first Reader QA issue step-controls slice on branch
+  `codex/issue-234-reader-qa-step-controls`, stacked after #232. The slice adds
+  Reader-only Previous issue / Next issue controls that move through existing
+  QA issue anchors in the currently loaded work-unit window and update only the
+  page hash/scroll position. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. The in-app browser connection was unavailable in this
+  Codex session, so no manual browser smoke evidence was collected. This does
+  not add whole-book issue traversal, persistent annotations, saved review
+  state, public/user-facing access, publisher workspace, live runtime data
+  operations or release readiness.
+- 2026-06-02: Issue
+  [#236](https://github.com/ogirkoviylord/folioloom_main/issues/236) starts the
+  first Reader active QA highlight slice on branch
+  `codex/issue-236-reader-active-qa-highlight`, stacked after #234. The slice
+  makes Reader QA navigation visually stateful: selecting a QA issue by issue
+  link, Previous issue / Next issue or page hash marks the active issue link
+  and highlights the matching original/translation blocks in the currently
+  loaded work-unit window. Local verification passed focused
+  reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This does not add whole-book issue traversal, persistent
+  annotations, saved review state, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#238](https://github.com/ogirkoviylord/folioloom_main/issues/238) starts the
+  first Reader QA issue progress slice on branch
+  `codex/issue-238-reader-qa-progress`, stacked after #236. The slice adds a
+  compact Reader-only current-window QA progress chip that starts with the
+  visible QA issue total and updates to `Issue X of N` when the owner selects a
+  QA issue by issue link, Previous issue / Next issue or page hash. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. This does not add whole-book issue counts/traversal,
+  persistent annotations, saved review state, public/user-facing access,
+  publisher workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#240](https://github.com/ogirkoviylord/folioloom_main/issues/240) starts the
+  first Reader search-hit navigation slice on branch
+  `codex/issue-240-reader-search-hit-navigation`, stacked after #238. The slice
+  adds Reader-only Previous hit / Next hit controls and a `Hit X of N` progress
+  chip for already rendered search highlights in the currently loaded work-unit
+  window. Local verification passed focused reader/diagnostics regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted ruff for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not add whole-book search traversal, saved searches, persistent annotations,
+  public/user-facing access, publisher workspace, live runtime data operations
+  or release readiness.
+- 2026-06-02: Issue
+  [#242](https://github.com/ogirkoviylord/folioloom_main/issues/242) starts the
+  first Reader search-hit row filter slice on branch
+  `codex/issue-242-reader-search-hit-filter`, stacked after #240. The slice
+  adds a Reader-only `search_hits=1` mode that narrows the already loaded
+  work-unit window to source/translation rows containing the active search
+  query, preserves existing Reader query controls and leaves Text Diagnostics
+  behavior unchanged. Local verification passed focused reader/diagnostics
+  regression coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted ruff for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. Browser
+  smoke was not available in the local app session because the browser agent
+  was unavailable. This does not add whole-book search indexing/traversal,
+  saved searches, persistent annotations, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#244](https://github.com/ogirkoviylord/folioloom_main/issues/244) starts the
+  first Reader pane focus slice on branch
+  `codex/issue-244-reader-pane-focus-mode`, stacked after #242. The slice adds
+  Reader-only `pane_mode` controls for split, original-focus and
+  translation-focus layouts so the owner can keep the before/after comparison
+  visible while giving more horizontal space to one pane. Local verification
+  passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
+  for touched Python files, `PYTHONPATH=src python3 -m compileall src` and
+  `git diff --check`. Browser smoke was not available in the local app session
+  because the browser agent was unavailable. This does not add persisted
+  preferences, editing, annotations, public/user-facing access, publisher
+  workspace, live runtime data operations or release readiness.
+- 2026-06-02: Issue
+  [#246](https://github.com/ogirkoviylord/folioloom_main/issues/246) starts the
+  first all-issues QA filter slice on branch
+  `codex/issue-246-reader-all-issues-filter`, stacked after #244. The slice
+  adds a shared owner-only `qa=issues` filter for Reader and Text Diagnostics
+  so the current work-unit window can show any row with existing QA flags or
+  literal-indent layout flags. Local verification passed focused all-issues
+  filter coverage, `PYTHONPATH=src python3 -m unittest
+  tests.test_admin_routes`, targeted `ruff --select F,I` for touched Python
+  files, `PYTHONPATH=src python3 -m compileall src` and `git diff --check`.
+  This does not add saved review state, annotations, exports, whole-book issue
+  traversal, public/user-facing access, publisher workspace, live runtime data
+  operations or release readiness.
+- 2026-06-02: Issue
+  [#248](https://github.com/ogirkoviylord/folioloom_main/issues/248) starts the
+  first Reader layout issue navigation slice on branch
+  `codex/issue-248-reader-layout-issue-nav`, stacked after #246. The slice
+  makes existing literal-indent layout flags participate in Reader issue
+  navigation, minimap warning state and block warning styling. Local
+  verification passed focused reader/diagnostics regression coverage,
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted
+  `ruff --select F,I` for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not add new QA heuristics, whole-book issue traversal, saved review state,
+  annotations, editing, public/user-facing access, publisher workspace, live
+  runtime data operations or release readiness. Browser smoke was not available
+  in the local app session because the browser agent was unavailable.
+- 2026-06-02: Issue
+  [#250](https://github.com/ogirkoviylord/folioloom_main/issues/250) starts the
+  Reader sync-scroll drift bugfix on branch
+  `codex/issue-250-reader-scroll-drift`, stacked after #248. Root-cause
+  evidence: the previous sync script suppressed only one expected programmatic
+  scroll value, so rounded/follow-up scroll events from the synced pane could
+  be treated as user input and sync the active pane back. The slice replaces
+  that with a short programmatic-scroll lock and tolerance before writing
+  `scrollTop`. Local verification passed focused reader sync regression
+  coverage, `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`,
+  targeted `ruff --select F,I` for touched Python files,
+  `PYTHONPATH=src python3 -m compileall src` and `git diff --check`. This does
+  not change layout controls, persisted settings, public/user-facing access,
+  publisher workspace, live runtime data operations or release readiness.
+  Browser smoke was not available in the local app session because browser
+  runtime discovery did not expose a usable JS execution tool.
 
 AI-agent workflow update on 2026-05-23: `AGENTS.md` now defines a compact Skill
 Dispatch Contract, and `docs/AGENT_SKILL_ROUTING.md` is the detailed reference
@@ -1071,6 +1346,162 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#268](https://github.com/ogirkoviylord/folioloom_main/issues/268)
+  persists owner-only Translation Reader review marks on branch
+  `codex/issue-268-reader-persisted-marks`. The browser submits only
+  `sequence` and mark state; the admin route resolves the selected work unit
+  server-side and stores the marked original/source text, translated text,
+  status and source block ids in run-scoped `reader_review_marks.json`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed. Visible
+  GitHub Python checks for PR
+  [#269](https://github.com/ogirkoviylord/folioloom_main/pull/269) passed.
+- Follow-up: `reader_review_marks.json` is an owner-only raw diagnostic sidecar
+  and is excluded from normal details/API/download archive surfaces by test.
+  This slice does not add notes/comments, export reports, cross-run review
+  state, database storage, public/user-facing reader access, publisher
+  workspace, auth/RBAC changes, dependencies, deploy, or release readiness.
+- Owner direction update: the earlier stop-after-#266 Reader ergonomics
+  direction remains the default for broad Reader feature creep, but the owner
+  explicitly resumed one narrow persistence slice for marked fragments and
+  clarified that both original/source and translated text must be saved for
+  marked items.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#266](https://github.com/ogirkoviylord/folioloom_main/issues/266)
+  adds current-page keyboard shortcuts for temporary Reader review marks on
+  branch `codex/issue-266-reader-review-hotkeys`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+  Visible GitHub Python checks for PR
+  [#267](https://github.com/ogirkoviylord/folioloom_main/pull/267) passed.
+- Follow-up: keyboard-applied review marks are current-page DOM state only.
+  This slice does not persist review marks, add cross-page review state, edit
+  text, export review reports, add raw snippets to docs/issues or archives, add
+  public/user-facing reader access, change auth/RBAC, access runtime data, add
+  dependencies, deploy, or claim release readiness.
+- Owner direction: stop the current Reader ergonomics push after this slice.
+  Unfinished/deferred Reader ideas are persistent review state, cross-page
+  completion, block notes/comments, review report export, stronger chapter/page
+  outline and visual intra-block diff. Publisher/editor workspaces are not
+  planned for immediate implementation; treat them as future TBD scope only.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#264](https://github.com/ogirkoviylord/folioloom_main/issues/264)
+  adds client-side unmarked review filtering and completion counts to the
+  owner-only Translation Reader on branch
+  `codex/issue-264-reader-unmarked-review-filter`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+  Visible GitHub Python checks for PR
+  [#265](https://github.com/ogirkoviylord/folioloom_main/pull/265) passed.
+- Follow-up: unmarked filtering and completion counts are current-page DOM state
+  only. This slice does not persist review completion, add cross-page review
+  state, edit text, export review reports, add raw snippets to docs/issues or
+  archives, add public/user-facing reader access, change auth/RBAC, access
+  runtime data, add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#262](https://github.com/ogirkoviylord/folioloom_main/issues/262)
+  adds client-side Previous/Next navigation for temporary review marks in the
+  owner-only Translation Reader on branch
+  `codex/issue-262-reader-review-mark-navigation`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #263 passed.
+- Follow-up: review mark navigation is current-page DOM state only. This slice
+  does not persist marks, filters or current step, add cross-page navigation,
+  edit text, export review reports, add raw snippets to docs/issues or archives,
+  add public/user-facing reader access, change auth/RBAC, access runtime data,
+  add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#260](https://github.com/ogirkoviylord/folioloom_main/issues/260)
+  adds client-side review mark counts and filters to the owner-only Translation
+  Reader on branch `codex/issue-260-reader-review-mark-filters`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #261 passed.
+- Follow-up: review mark filters are current-page DOM state only. This slice
+  does not persist marks or filters, change URL/server row selection, edit text,
+  export review reports, add raw snippets to docs/issues or archives, add
+  public/user-facing reader access, change auth/RBAC, access runtime data, add
+  dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#258](https://github.com/ogirkoviylord/folioloom_main/issues/258)
+  adds client-only review marks to the owner-only Translation Reader on branch
+  `codex/issue-258-reader-review-marks`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #259 passed.
+- Follow-up: review marks are current-page DOM state only. This slice does not
+  persist marks, edit text, export review notes, add raw snippets to docs/issues
+  or archives, add public/user-facing reader access, change auth/RBAC, access
+  runtime data, add dependencies, deploy, or claim release readiness.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#256](https://github.com/ogirkoviylord/folioloom_main/issues/256)
+  adds active current-window outline navigation to the owner-only Translation
+  Reader on branch `codex/issue-256-reader-active-outline`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #257 passed.
+- Follow-up: this slice does not add raw snippets, editing, persisted review
+  state, public/user-facing reader access, auth/RBAC changes, runtime data
+  access, dependencies, deployment or release-readiness claims.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#254](https://github.com/ogirkoviylord/folioloom_main/issues/254)
+  adds a metadata-only current-window block outline to the owner-only
+  Translation Reader on branch `codex/issue-254-reader-block-outline`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, `git diff --check` passed, and visible
+  GitHub `Python checks` for PR #255 passed.
+- Follow-up: this slice does not add raw snippets to the outline,
+  public/user-facing reader access, editing, persisted review state, auth/RBAC
+  changes, runtime data access, dependencies, deployment or release-readiness
+  claims.
+
+- Date: 2026-06-02.
+- Change: Issue
+  [#252](https://github.com/ogirkoviylord/folioloom_main/issues/252)
+  adds clickable owner-only Translation Reader QA/Layout metric filters on
+  branch `codex/issue-252-reader-qa-metric-links`.
+- Evidence: local verification passed:
+  `PYTHONPATH=src python3 -m unittest tests.test_admin_routes` ran 99 tests
+  with `OK`, `PYTHONPATH=src python3 -m compileall src` passed,
+  targeted `ruff --select F,I` passed, and `git diff --check` passed.
+- Follow-up: keep future publisher/editor workspace work as separate
+  owner-approved issues. This slice does not add public/user-facing reader
+  access, new raw-text surfaces, auth/RBAC changes, runtime data access,
+  dependencies, deployment or release-readiness claims.
 
 - Date: 2026-05-23.
 - Change: Recorded dedicated local Gate B common verification baseline for issue
