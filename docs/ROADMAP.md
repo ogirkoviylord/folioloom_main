@@ -574,7 +574,175 @@ Acceptance criteria:
   slice is locally verified on branch `codex/issue-195-docx-structure-preview`;
   issue #197 format auto-detection CLI slice is locally verified on branch
   `codex/issue-197-reader-format-auto`; issue #199 owner-only internal admin UI
-  slice is in progress on branch `codex/issue-internal-reader-ui`.
+  slice is in progress on branch `codex/issue-internal-reader-ui`; run-log
+  Translation Reader v2 is locally verified on branch
+  `codex/internal-reader-v2` as an owner-only diagnostic surface linked from
+  logs/details/Text diagnostics, with no raw-text API/archive expansion. Issue
+  [#214](https://github.com/ogirkoviylord/folioloom_main/issues/214) begins the
+  first run-log Reader/Text Diagnostics controls slice on branch
+  `codex/issue-214-reader-controls`: opt-in invisible-character markers,
+  logical sequence navigation, jump-by-sequence and reader sync-scroll toggle.
+  Issue
+  [#216](https://github.com/ogirkoviylord/folioloom_main/issues/216) begins the
+  next current-window QA aids slice on branch
+  `codex/issue-216-reader-qa-aids`: search with safe highlighting, reader QA
+  counts and a metadata-only minimap for loaded work units. Issue
+  [#218](https://github.com/ogirkoviylord/folioloom_main/issues/218) begins the
+  first layout/indent diagnostics slice on branch
+  `codex/issue-218-reader-indent-diagnostics`: literal indentation evidence,
+  `Unknown` style metadata and opt-in editorial first-line indent preview.
+  Issue
+  [#220](https://github.com/ogirkoviylord/folioloom_main/issues/220) begins the
+  first logical-page navigation slice on branch
+  `codex/issue-220-reader-logical-pages`: logical `page` query support, current
+  page/sequence-range status and page-size controls over bounded work-unit
+  windows.
+  Issue
+  [#222](https://github.com/ogirkoviylord/folioloom_main/issues/222) begins the
+  first current-window QA filter slice on branch
+  `codex/issue-222-reader-qa-filters`: filter controls for already-computed
+  empty source, missing translation, length mismatch and literal indent signals.
+  Issue
+  [#224](https://github.com/ogirkoviylord/folioloom_main/issues/224) begins the
+  first per-work-unit metrics slice on branch
+  `codex/issue-224-reader-block-metrics`: source/translation character counts
+  and translation/source length ratio for visible work units.
+  Issue
+  [#226](https://github.com/ogirkoviylord/folioloom_main/issues/226) begins the
+  first paragraph-structure diagnostics slice on branch
+  `codex/issue-226-reader-paragraph-diagnostics`: source/translation line
+  counts, blank-line counts, `paragraph_mismatch` QA flag/filter and Reader QA
+  summary count for visible work units only.
+  Issue
+  [#228](https://github.com/ogirkoviylord/folioloom_main/issues/228) begins the
+  first QA issue navigation slice on branch
+  `codex/issue-228-reader-qa-navigation`: a Reader-only current-window issue
+  rail linking existing QA flags to comparison block anchors.
+  Issue
+  [#230](https://github.com/ogirkoviylord/folioloom_main/issues/230) begins the
+  first Reader keyboard navigation slice on branch
+  `codex/issue-230-reader-keyboard-navigation`: ArrowLeft/ArrowRight navigation
+  to the existing Previous/Next logical window URLs, ignoring interactive form
+  controls.
+  Issue
+  [#232](https://github.com/ogirkoviylord/folioloom_main/issues/232) begins the
+  first Reader sticky position bar slice on branch
+  `codex/issue-232-reader-sticky-position`: a Reader-only sticky status bar for
+  current logical page, sequence range and active query/toggle states.
+  Issue
+  [#234](https://github.com/ogirkoviylord/folioloom_main/issues/234) begins the
+  first Reader QA issue step-controls slice on branch
+  `codex/issue-234-reader-qa-step-controls`: Reader-only Previous issue /
+  Next issue controls that navigate through existing QA issue anchors in the
+  currently loaded work-unit window.
+  Issue
+  [#236](https://github.com/ogirkoviylord/folioloom_main/issues/236) begins the
+  first Reader active QA highlight slice on branch
+  `codex/issue-236-reader-active-qa-highlight`: active issue-link state plus
+  matching original/translation block highlight for the selected current-window
+  QA issue.
+  Issue
+  [#238](https://github.com/ogirkoviylord/folioloom_main/issues/238) begins the
+  first Reader QA issue progress slice on branch
+  `codex/issue-238-reader-qa-progress`: a current-window QA progress chip that
+  shows the visible issue total and selected `Issue X of N` state.
+  Issue
+  [#240](https://github.com/ogirkoviylord/folioloom_main/issues/240) begins the
+  first Reader search-hit navigation slice on branch
+  `codex/issue-240-reader-search-hit-navigation`: Reader-only Previous hit /
+  Next hit controls and selected `Hit X of N` state for already rendered
+  current-window search highlights.
+  Issue
+  [#242](https://github.com/ogirkoviylord/folioloom_main/issues/242) begins the
+  first Reader search-hit row filter slice on branch
+  `codex/issue-242-reader-search-hit-filter`: a Reader-only `search_hits=1`
+  mode that narrows the already loaded work-unit window to rows containing the
+  active source/translation search query while leaving Text Diagnostics
+  unchanged.
+  Issue
+  [#244](https://github.com/ogirkoviylord/folioloom_main/issues/244) begins the
+  first Reader pane focus slice on branch
+  `codex/issue-244-reader-pane-focus-mode`: Reader-only split,
+  original-focus and translation-focus layout modes for the current before/after
+  view.
+  Issue
+  [#246](https://github.com/ogirkoviylord/folioloom_main/issues/246) begins the
+  first all-issues QA filter slice on branch
+  `codex/issue-246-reader-all-issues-filter`: a shared owner-only `qa=issues`
+  filter that keeps current-window rows with any existing QA flag or
+  literal-indent layout flag in Reader and Text Diagnostics.
+  Issue
+  [#248](https://github.com/ogirkoviylord/folioloom_main/issues/248) begins the
+  first Reader layout issue navigation slice on branch
+  `codex/issue-248-reader-layout-issue-nav`: existing literal-indent layout
+  flags participate in current-window issue navigation, minimap warning state
+  and block warning styling.
+  Issue
+  [#250](https://github.com/ogirkoviylord/folioloom_main/issues/250) begins the
+  Reader sync-scroll drift bugfix on branch
+  `codex/issue-250-reader-scroll-drift`: harden synced pane scrolling so
+  programmatic scroll events do not feed back into the pane the owner is
+  actively scrolling.
+  Issue
+  [#252](https://github.com/ogirkoviylord/folioloom_main/issues/252) begins the
+  Reader QA/Layout metric filter-link slice on branch
+  `codex/issue-252-reader-qa-metric-links`: make existing current-window
+  Reader QA/Layout metric cards navigate to the matching Reader filters while
+  preserving search, pane, special-character, sync, indent-preview and
+  pagination context.
+  Issue
+  [#254](https://github.com/ogirkoviylord/folioloom_main/issues/254) begins the
+  Reader block outline slice on branch
+  `codex/issue-254-reader-block-outline`: add a metadata-only current-window
+  outline for all visible work units so the owner can navigate every loaded
+  block, not only QA issue rows.
+  Issue
+  [#256](https://github.com/ogirkoviylord/folioloom_main/issues/256) begins the
+  active Reader outline navigation slice on branch
+  `codex/issue-256-reader-active-outline`: make outline clicks and QA issue
+  navigation keep the selected outline entry and matching original/translation
+  blocks visibly active.
+  Issue
+  [#258](https://github.com/ogirkoviylord/folioloom_main/issues/258) begins the
+  client-only Reader review marks slice on branch
+  `codex/issue-258-reader-review-marks`: add current-page DOM-only mark controls
+  for visible original/translation work-unit pairs so the owner can temporarily
+  tag blocks as needs-review, OK or ignored during side-by-side review.
+  Issue
+  [#260](https://github.com/ogirkoviylord/folioloom_main/issues/260) begins the
+  client-side Reader review mark filter slice on branch
+  `codex/issue-260-reader-review-mark-filters`: add current-page counts and
+  DOM-only filters for temporary needs-review, OK and ignored marks.
+  Issue
+  [#262](https://github.com/ogirkoviylord/folioloom_main/issues/262) begins the
+  client-side Reader review mark navigation slice on branch
+  `codex/issue-262-reader-review-mark-navigation`: add current-page Previous
+  mark / Next mark stepping for temporary review marks.
+  Issue
+  [#264](https://github.com/ogirkoviylord/folioloom_main/issues/264) begins the
+  client-side Reader unmarked review filter slice on branch
+  `codex/issue-264-reader-unmarked-review-filter`: add current-page marked and
+  unmarked completion counts plus an Unmarked DOM-only filter.
+  Issue
+  [#266](https://github.com/ogirkoviylord/folioloom_main/issues/266) begins the
+  client-side Reader review mark keyboard shortcut slice on branch
+  `codex/issue-266-reader-review-hotkeys`: add current-page numeric shortcuts
+  for temporary review marks without changing existing ArrowLeft/ArrowRight
+  logical page navigation.
+  Issue
+  [#268](https://github.com/ogirkoviylord/folioloom_main/issues/268) resumes one
+  narrow owner-approved persistence slice on branch
+  `codex/issue-268-reader-persisted-marks`: save marked Reader work-unit
+  excerpts, including both original/source and translated text, in a run-scoped
+  owner-only raw diagnostic sidecar while keeping normal details, APIs and safe
+  archives redacted.
+  Owner direction on 2026-06-02: stop this Reader ergonomics push after #266.
+  Owner later approved only the #268 marked-fragment persistence slice.
+  Deferred/unfinished ideas remain cross-page completion, block notes/comments,
+  review report export, stronger chapter/page outline and visual intra-block
+  diff. Publisher/editor workspaces are future TBD scope and are not planned
+  for immediate implementation.
+  These slices remain owner-only and do not claim physical page fidelity.
   Design reference:
   `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md`.
   Issue split:

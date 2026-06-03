@@ -2406,13 +2406,231 @@ class AdminRoutesTest(unittest.TestCase):
                     )
                 )
             )
+            unauthenticated = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader",
+                follow_redirects=False,
+            )
             client.post("/admin/login", data={"password": "owner-pass"})
 
             response = client.get(f"/admin/logs/{logger.run_dir.name}/text-diagnostics")
+            reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
 
+        self.assertEqual(unauthenticated.status_code, 303)
+        self.assertEqual(unauthenticated.headers["location"], "/admin/login")
         self.assertEqual(response.status_code, 200)
         self.assertIn("No work units found.", response.text)
+        self.assertEqual(reader.status_code, 200)
+        self.assertIn("No work units found.", reader.text)
         self.assertFalse(job_db.exists())
+
+    def test_translation_text_diagnostics_all_issues_filter(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            clean_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="clean.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Clean source.",
+            )
+            missing_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="missing.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Needs translation.",
+            )
+            indented_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="indented.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"  Indented source.",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-issues",
+                    user_id="telegram:42",
+                    file_id="file-issues",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="txt-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("clean",),
+                            source_text_hash="hash-clean",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=clean_source.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=2,
+                            source_block_ids=("missing",),
+                            source_text_hash="hash-missing",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=missing_source.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=3,
+                            source_block_ids=("indented",),
+                            source_text_hash="hash-indented",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=indented_source.object_key,
+                        ),
+                    ],
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="Clean translation.",
+                    prompt_tokens=3,
+                    completion_tokens=3,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="",
+                    prompt_tokens=3,
+                    completion_tokens=0,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="  Indented translation.",
+                    prompt_tokens=3,
+                    completion_tokens=3,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=3,
+                )
+                logger = TranslationRunLogger.start(
+                    root=run_root,
+                    metadata=TranslationRunMetadata(
+                        job_id=job.id,
+                        order_id="order-issues",
+                        user_id="telegram:42",
+                        file_name="book.txt",
+                        document_kind="txt",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=3,
+                    ),
+                )
+                logger.record_event("job_queued", {"fragment_count": 3})
+            finally:
+                store.close()
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            diagnostics = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics?qa=issues"
+            )
+            reader = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=issues&q=Indented&show_invisibles=1&sync=0"
+                "&pane_mode=translation&indent_preview=1"
+            )
+
+        self.assertEqual(diagnostics.status_code, 200)
+        self.assertIn(
+            '<option value="issues" selected>All issues</option>',
+            diagnostics.text,
+        )
+        self.assertIn("Needs translation.", diagnostics.text)
+        self.assertIn("Indented source.", diagnostics.text)
+        self.assertIn("Source literal indent", diagnostics.text)
+        self.assertNotIn("Clean source.", diagnostics.text)
+        self.assertIn("qa=issues", diagnostics.text)
+
+        self.assertEqual(reader.status_code, 200)
+        self.assertIn(
+            '<option value="issues" selected>All issues</option>',
+            reader.text,
+        )
+        self.assertIn("QA</span><strong>issues</strong>", reader.text)
+        self.assertIn("Pane</span><strong>translation focus</strong>", reader.text)
+        self.assertIn('name="qa" value="issues"', reader.text)
+        self.assertIn("qa=issues", reader.text)
+        self.assertIn("reader-qa-filter-metric is-active", reader.text)
+        self.assertIn('aria-current="page"', reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=issues"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=missing_translation"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            "&amp;q=Indented&amp;pane_mode=translation"
+            '&amp;indent_preview=1&amp;qa=indent"',
+            reader.text,
+        )
+        self.assertIn("Needs", reader.text)
+        self.assertIn("translation.", reader.text)
+        self.assertIn("Indented", reader.text)
+        self.assertIn("source.", reader.text)
+        self.assertIn("Missing translation", reader.text)
+        self.assertIn("Source literal indent", reader.text)
+        self.assertIn("Translation literal indent", reader.text)
+        self.assertIn("Issues in window: 2", reader.text)
+        self.assertIn('href="#reader-original-2"', reader.text)
+        self.assertIn('href="#reader-original-3"', reader.text)
+        self.assertIn(
+            '<span class="reader-qa-issue-sequence">#3</span>',
+            reader.text,
+        )
+        self.assertIn(
+            '<span class="reader-qa-issue-labels">Source literal indent; '
+            "Translation literal indent</span>",
+            reader.text,
+        )
+        self.assertIn(
+            'title="Sequence 3: translated; Source literal indent, '
+            'Translation literal indent"',
+            reader.text,
+        )
+        self.assertNotIn("Clean source.", reader.text)
 
     def test_translation_text_diagnostics_is_dedicated_raw_text_view(self):
         with TemporaryDirectory() as temp_dir:
@@ -2425,7 +2643,22 @@ class AdminRoutesTest(unittest.TestCase):
                 kind=StoredFileKind.INTERMEDIATE,
                 file_name="unit-1.txt",
                 content_type="text/plain; charset=utf-8",
-                content=b"Private source paragraph",
+                content=(
+                    "Private source paragraph\tA\n"
+                    "Next\u00a0line \u200b<script>alert(1)</script>"
+                ).encode("utf-8"),
+            )
+            source_file_2 = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"  Paragraph waiting for translation.",
+            )
+            source_file_3 = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-3.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Tiny source.",
             )
             store = SQLiteTranslationJobStore(job_db)
             try:
@@ -2452,6 +2685,24 @@ class AdminRoutesTest(unittest.TestCase):
                             source_language="en",
                             target_language="uk",
                             source_object_key=source_file.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=2,
+                            source_block_ids=("block-2",),
+                            source_text_hash="hash-2",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file_2.object_key,
+                        ),
+                        WorkUnitPlan(
+                            sequence=3,
+                            source_block_ids=("block-3",),
+                            source_text_hash="hash-3",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file_3.object_key,
                         )
                     ],
                 )
@@ -2459,11 +2710,39 @@ class AdminRoutesTest(unittest.TestCase):
                 assert claimed is not None
                 store.complete_work_unit(
                     claimed.id,
-                    translated_text="Приватний перекладений абзац",
+                    translated_text=(
+                        "  Приватний перекладений абзац\tA\n"
+                        "Наступний\u00a0рядок "
+                        "<img src=x onerror=alert(1)>"
+                    ),
                     prompt_tokens=11,
                     completion_tokens=7,
                     cache_hit_tokens=0,
                     cache_miss_tokens=11,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text="",
+                    prompt_tokens=5,
+                    completion_tokens=0,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=5,
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text=(
+                        " ".join(["very long translated expansion"] * 5)
+                        + "\n"
+                        + " ".join(["very long translated expansion"] * 5)
+                    ),
+                    prompt_tokens=6,
+                    completion_tokens=80,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=6,
                 )
                 logger = TranslationRunLogger.start(
                     root=run_root,
@@ -2495,15 +2774,140 @@ class AdminRoutesTest(unittest.TestCase):
             )
             client.post("/admin/login", data={"password": "owner-pass"})
 
+            logs = client.get("/admin/logs")
             details = client.get(f"/admin/logs/{logger.run_dir.name}")
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
             diagnostics = client.get(
                 f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
             )
+            reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
+            diagnostics_invisibles = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?show_invisibles=1"
+            )
+            reader_unsynced = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?show_invisibles=1&sync=0"
+            )
+            diagnostics_search = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?q=%3Cscript%3E"
+            )
+            reader_search = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?q=%3Cscript%3E&show_invisibles=1&sync=0"
+            )
+            reader_search_hits = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?q=%3Cscript%3E&show_invisibles=1&sync=0&search_hits=1"
+            )
+            diagnostics_search_hits_param = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?q=%3Cscript%3E&search_hits=1"
+            )
+            reader_pane_focus = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?pane_mode=original&q=Tiny&show_invisibles=1&sync=0"
+                "&search_hits=1&indent_preview=1"
+            )
+            reader_translation_focus = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?pane_mode=translation"
+            )
+            reader_invalid_pane = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?pane_mode=unknown"
+            )
+            diagnostics_pane_param = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?pane_mode=translation&q=Tiny"
+            )
+            diagnostics_indent = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?indent_preview=1"
+            )
+            reader_indent = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?indent_preview=1&q=%3Cscript%3E&show_invisibles=1&sync=0"
+            )
+            diagnostics_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?page=2&limit=1&q=Paragraph&indent_preview=1"
+            )
+            reader_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?page=3&limit=1&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
+            diagnostics_missing = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?qa=missing_translation&q=Paragraph&show_invisibles=1"
+                "&indent_preview=1"
+            )
+            diagnostics_indent_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics?qa=indent"
+            )
+            reader_length_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=length_mismatch&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
+            reader_paragraph_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+                "?qa=paragraph_mismatch&q=Tiny&show_invisibles=1&sync=0"
+                "&indent_preview=1"
+            )
+            diagnostics_paragraph_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+                "?qa=paragraph_mismatch&q=Tiny&show_invisibles=1"
+            )
+            reader_empty_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?qa=empty_source"
+            )
+            reader_invalid_filter = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader?qa=unknown"
+            )
             download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+            save_mark = client.post(
+                f"/admin/logs/{logger.run_dir.name}/reader/review-mark",
+                data={
+                    "csrf_token": _csrf_token(reader.text),
+                    "sequence": "1",
+                    "mark": "needs_review",
+                },
+            )
+            review_marks_path = Path(logger.run_dir) / "reader_review_marks.json"
+            review_marks_document = json.loads(
+                review_marks_path.read_text(encoding="utf-8")
+            )
+            reader_with_saved_mark = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+            )
+            details_after_mark = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api_after_mark = client.get(
+                f"/admin/api/logs/{logger.run_dir.name}"
+            )
+            download_after_mark = client.get(
+                f"/admin/logs/{logger.run_dir.name}/download"
+            )
+            clear_mark = client.post(
+                f"/admin/logs/{logger.run_dir.name}/reader/review-mark",
+                data={
+                    "csrf_token": _csrf_token(reader_with_saved_mark.text),
+                    "sequence": "1",
+                    "mark": "clear",
+                },
+            )
+            review_marks_after_clear = json.loads(
+                review_marks_path.read_text(encoding="utf-8")
+            )
 
+        self.assertEqual(logs.status_code, 200)
+        self.assertIn("Reader", logs.text)
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}/reader", logs.text)
         self.assertEqual(details.status_code, 200)
         self.assertIn("Text diagnostics", details.text)
+        self.assertIn("Reader", details.text)
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}/reader", details.text)
         self.assertIn("block-1", details.text)
         self.assertIn("translated", details.text)
         self.assertIn("11 + 7 = 18", details.text)
@@ -2512,7 +2916,7 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Приватний перекладений абзац", details.text)
         self.assertEqual(details_api.status_code, 200)
         details_payload = details_api.json()["details"]
-        self.assertEqual(len(details_payload["fragments"]), 1)
+        self.assertEqual(len(details_payload["fragments"]), 3)
         self.assertEqual(details_payload["fragments"][0]["sequence"], 1)
         self.assertEqual(details_payload["fragments"][0]["status"], "translated")
         self.assertEqual(
@@ -2525,9 +2929,641 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Private source paragraph", details_api_text)
         self.assertNotIn("Приватний перекладений абзац", details_api_text)
         self.assertEqual(diagnostics.status_code, 200)
+        self.assertEqual(diagnostics.headers["cache-control"], "no-store")
         self.assertIn("Raw text visibility is enabled", diagnostics.text)
         self.assertIn("Private source paragraph", diagnostics.text)
         self.assertIn("Приватний перекладений абзац", diagnostics.text)
+        self.assertIn("Diagnostics", diagnostics.text)
+        self.assertIn("Reader", diagnostics.text)
+        self.assertIn("Show special chars", diagnostics.text)
+        self.assertIn('name="sequence"', diagnostics.text)
+        self.assertIn('name="page"', diagnostics.text)
+        self.assertIn('name="limit"', diagnostics.text)
+        self.assertIn('name="qa"', diagnostics.text)
+        self.assertIn('<option value="all" selected>All</option>', diagnostics.text)
+        self.assertIn("Logical page 1", diagnostics.text)
+        self.assertIn("sequences 1-3", diagnostics.text)
+        self.assertIn("← Previous", diagnostics.text)
+        self.assertIn("Next →", diagnostics.text)
+        self.assertIn("Missing translation", diagnostics.text)
+        self.assertIn("Translation much longer", diagnostics.text)
+        self.assertIn("Source literal indent", diagnostics.text)
+        self.assertIn("Translation literal indent", diagnostics.text)
+        self.assertIn("Source chars", diagnostics.text)
+        self.assertIn("Translation chars", diagnostics.text)
+        self.assertIn("T/S ratio", diagnostics.text)
+        self.assertIn("Source lines", diagnostics.text)
+        self.assertIn("Translation lines", diagnostics.text)
+        self.assertIn("Source blank lines", diagnostics.text)
+        self.assertIn("Translation blank lines", diagnostics.text)
+        self.assertIn("Paragraph/line break mismatch", diagnostics.text)
+        self.assertNotIn('<section class="reader-position-bar"', diagnostics.text)
+        self.assertNotIn("data-reader-keyboard-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-qa-step-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-qa-step-controls", diagnostics.text)
+        self.assertNotIn("data-reader-review-controls", diagnostics.text)
+        self.assertNotIn("data-reader-review-navigation", diagnostics.text)
+        self.assertNotIn("data-reader-review-mark", diagnostics.text)
+        self.assertNotIn("data-reader-review-panel", diagnostics.text)
+        self.assertNotIn("data-reader-review-filter", diagnostics.text)
+        self.assertNotIn("data-reader-review-step-controls", diagnostics.text)
+        self.assertNotIn("data-reader-review-step", diagnostics.text)
+        self.assertNotIn("data-reader-review-shortcuts", diagnostics.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics.text)
+        self.assertIn(
+            "&lt;img src=x onerror=alert(1)&gt;",
+            diagnostics.text,
+        )
+        self.assertNotIn("<script>alert(1)</script>", diagnostics.text)
+        self.assertNotIn("<img src=x onerror=alert(1)>", diagnostics.text)
+        self.assertEqual(diagnostics_invisibles.status_code, 200)
+        self.assertIn("Hide special chars", diagnostics_invisibles.text)
+        self.assertIn("&middot;", diagnostics_invisibles.text)
+        self.assertIn("&rarr;", diagnostics_invisibles.text)
+        self.assertIn("&para;", diagnostics_invisibles.text)
+        self.assertIn("&#9251;", diagnostics_invisibles.text)
+        self.assertIn("ZWSP", diagnostics_invisibles.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics_invisibles.text)
+        self.assertNotIn("<script>alert(1)</script>", diagnostics_invisibles.text)
+        self.assertEqual(diagnostics_search.status_code, 200)
+        self.assertIn("Clear search", diagnostics_search.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            diagnostics_search.text,
+        )
+        self.assertIn("q=%3Cscript%3E", diagnostics_search.text)
+        self.assertNotIn("data-reader-search-hit-controls", diagnostics_search.text)
+        self.assertNotIn("data-reader-search-hit-navigation", diagnostics_search.text)
+        self.assertNotIn("<script>alert(1)</script>", diagnostics_search.text)
+        self.assertEqual(diagnostics_indent.status_code, 200)
+        self.assertIn("indent_preview=1", diagnostics_indent.text)
+        self.assertIn("Source literal indent", diagnostics_indent.text)
+        self.assertEqual(diagnostics_page.status_code, 200)
+        self.assertIn("Logical page 2", diagnostics_page.text)
+        self.assertIn("sequences 2-2", diagnostics_page.text)
+        self.assertIn('value="2"', diagnostics_page.text)
+        self.assertIn('<option value="1" selected>1</option>', diagnostics_page.text)
+        self.assertIn("reader-search-hit", diagnostics_page.text)
+        self.assertIn("waiting for translation", diagnostics_page.text)
+        self.assertIn("q=Paragraph", diagnostics_page.text)
+        self.assertIn("indent_preview=1", diagnostics_page.text)
+        self.assertNotIn("Private source paragraph", diagnostics_page.text)
+        self.assertEqual(diagnostics_missing.status_code, 200)
+        self.assertIn(
+            '<option value="missing_translation" selected>Missing translation</option>',
+            diagnostics_missing.text,
+        )
+        self.assertIn("qa=missing_translation", diagnostics_missing.text)
+        self.assertIn("show_invisibles=1", diagnostics_missing.text)
+        self.assertIn("q=Paragraph", diagnostics_missing.text)
+        self.assertIn("indent_preview=1", diagnostics_missing.text)
+        self.assertIn("reader-search-hit", diagnostics_missing.text)
+        self.assertIn("waiting", diagnostics_missing.text)
+        self.assertIn("translation.", diagnostics_missing.text)
+        self.assertIn("Source chars", diagnostics_missing.text)
+        self.assertIn("Translation chars 0", diagnostics_missing.text)
+        self.assertIn("T/S ratio 0.00", diagnostics_missing.text)
+        self.assertIn("Translation lines 0", diagnostics_missing.text)
+        self.assertNotIn("Private source paragraph", diagnostics_missing.text)
+        self.assertNotIn("Tiny source", diagnostics_missing.text)
+        self.assertEqual(diagnostics_indent_filter.status_code, 200)
+        self.assertIn(
+            '<option value="indent" selected>Literal indent</option>',
+            diagnostics_indent_filter.text,
+        )
+        self.assertIn("qa=indent", diagnostics_indent_filter.text)
+        self.assertIn("Private source paragraph", diagnostics_indent_filter.text)
+        self.assertIn("Paragraph waiting for translation", diagnostics_indent_filter.text)
+        self.assertNotIn("Tiny source", diagnostics_indent_filter.text)
+        self.assertEqual(reader.status_code, 200)
+        self.assertEqual(reader.headers["cache-control"], "no-store")
+        self.assertIn("Translation Reader", reader.text)
+        self.assertIn("data-reader-sync-pane", reader.text)
+        self.assertIn("programmaticScrollLocks", reader.text)
+        self.assertIn("lockProgrammaticScroll", reader.text)
+        self.assertIn("isLockedProgrammaticScroll", reader.text)
+        self.assertIn("Math.abs(other.scrollTop - nextScrollTop) <= 1", reader.text)
+        self.assertNotIn("pendingProgrammaticScrolls", reader.text)
+        self.assertIn("data-reader-keyboard-navigation", reader.text)
+        self.assertIn('event.key === "ArrowLeft"', reader.text)
+        self.assertIn('event.key === "ArrowRight"', reader.text)
+        self.assertIn(
+            "input, textarea, select, button, a, [contenteditable='true']",
+            reader.text,
+        )
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=1&limit=100";',
+            reader.text,
+        )
+        self.assertIn(
+            f'const nextHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=101&limit=100";',
+            reader.text,
+        )
+        self.assertIn("Show special chars", reader.text)
+        self.assertIn("Unsync scroll", reader.text)
+        self.assertIn('name="sequence"', reader.text)
+        self.assertIn('name="page"', reader.text)
+        self.assertIn('name="limit"', reader.text)
+        self.assertIn('name="qa"', reader.text)
+        self.assertIn("Logical page 1", reader.text)
+        self.assertIn("sequences 1-3", reader.text)
+        self.assertIn("sequence=101&amp;limit=100", reader.text)
+        self.assertIn("reader-position-bar", reader.text)
+        self.assertIn("Reader current position", reader.text)
+        self.assertIn("QA</span><strong>all</strong>", reader.text)
+        self.assertIn("Search</span><strong>Search off</strong>", reader.text)
+        self.assertIn("Pane</span><strong>split</strong>", reader.text)
+        self.assertIn("Special chars</span><strong>hidden</strong>", reader.text)
+        self.assertIn("Sync scroll</span><strong>on</strong>", reader.text)
+        self.assertIn("Indent preview</span><strong>off</strong>", reader.text)
+        self.assertIn("reader-pane-mode-split", reader.text)
+        self.assertIn("Split panes", reader.text)
+        self.assertIn("Focus original", reader.text)
+        self.assertIn("Focus translation", reader.text)
+        self.assertNotIn("pane_mode=split", reader.text)
+        self.assertIn("Reader QA summary", reader.text)
+        self.assertIn("Reader layout diagnostics", reader.text)
+        self.assertIn("Window units", reader.text)
+        self.assertIn("All issues", reader.text)
+        self.assertIn("Missing translation", reader.text)
+        self.assertIn("Length mismatch", reader.text)
+        self.assertIn("Paragraph mismatch", reader.text)
+        self.assertIn("reader-qa-filter-metric", reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=issues"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=missing_translation"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=empty_source"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=length_mismatch"',
+            reader.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=paragraph_mismatch"',
+            reader.text,
+        )
+        self.assertIn("reader-qa-issue-nav", reader.text)
+        self.assertIn("QA issues", reader.text)
+        self.assertIn("data-reader-qa-step-controls", reader.text)
+        self.assertIn("data-reader-qa-step-navigation", reader.text)
+        self.assertIn("data-reader-qa-progress", reader.text)
+        self.assertIn("Issues in window: 3", reader.text)
+        self.assertIn("Issue ${index + 1} of ${issueHrefs.length}", reader.text)
+        self.assertIn('data-reader-qa-step="previous"', reader.text)
+        self.assertIn('data-reader-qa-step="next"', reader.text)
+        self.assertIn("Previous issue", reader.text)
+        self.assertIn("Next issue", reader.text)
+        self.assertIn("data-reader-qa-issue-anchor", reader.text)
+        self.assertIn('tabindex="-1"', reader.text)
+        self.assertIn("setActiveIssue", reader.text)
+        self.assertIn("is-active-qa-issue", reader.text)
+        self.assertIn('aria-current", "true"', reader.text)
+        self.assertIn("hashchange", reader.text)
+        self.assertIn(".reader-block:target", reader.text)
+        self.assertIn("scrollIntoView", reader.text)
+        self.assertIn("window.history.replaceState", reader.text)
+        self.assertNotIn("data-reader-search-hit-controls", reader.text)
+        self.assertNotIn("data-reader-search-hit-navigation", reader.text)
+        self.assertIn('href="#reader-original-1"', reader.text)
+        self.assertIn('href="#reader-original-2"', reader.text)
+        self.assertIn('href="#reader-original-3"', reader.text)
+        self.assertIn(
+            '<span class="reader-qa-issue-sequence">#1</span>',
+            reader.text,
+        )
+        self.assertIn('<span class="reader-qa-issue-sequence">#2</span>', reader.text)
+        self.assertIn('<span class="reader-qa-issue-sequence">#3</span>', reader.text)
+        self.assertIn("Blocks block-3", reader.text)
+        self.assertIn("Indent preview", reader.text)
+        self.assertIn("Preview indents", reader.text)
+        self.assertIn("Source literal indents", reader.text)
+        self.assertIn("Translation literal indents", reader.text)
+        self.assertIn("Style metadata", reader.text)
+        self.assertIn("Unknown", reader.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            '&amp;limit=100&amp;qa=indent"',
+            reader.text,
+        )
+        self.assertIn("reader-outline", reader.text)
+        self.assertIn('<details class="reader-outline"', reader.text)
+        self.assertIn("Reader block outline", reader.text)
+        self.assertIn("Block outline", reader.text)
+        self.assertIn("Visible units: 3", reader.text)
+        self.assertLess(
+            reader.text.index("data-translation-reader"),
+            reader.text.index('<details class="reader-outline"'),
+        )
+        self.assertIn("reader-outline-link", reader.text)
+        self.assertIn("reader-outline-link has-qa-warning", reader.text)
+        self.assertIn("data-reader-outline-anchor", reader.text)
+        self.assertIn("data-reader-outline-navigation", reader.text)
+        self.assertIn("is-active-outline-block", reader.text)
+        self.assertIn("setActiveOutline", reader.text)
+        self.assertIn('link.setAttribute("aria-current", "page")', reader.text)
+        self.assertIn("reader:block-selected", reader.text)
+        self.assertIn('new CustomEvent("reader:block-selected"', reader.text)
+        self.assertIn("reader-outline-sequence", reader.text)
+        self.assertIn("reader-outline-blocks", reader.text)
+        self.assertIn("reader-outline-status", reader.text)
+        self.assertIn("reader-outline-flags", reader.text)
+        self.assertIn("data-reader-outline-sequence", reader.text)
+        self.assertIn("Blocks block-1", reader.text)
+        self.assertIn("Status translated", reader.text)
+        self.assertIn("data-reader-review-controls", reader.text)
+        self.assertIn("data-reader-review-state", reader.text)
+        self.assertIn("Review mark: none", reader.text)
+        self.assertIn("data-reader-review-navigation", reader.text)
+        self.assertIn("data-reader-review-panel", reader.text)
+        self.assertIn("data-reader-review-save-url", reader.text)
+        self.assertIn("data-reader-review-csrf", reader.text)
+        self.assertIn("data-reader-review-save-status", reader.text)
+        self.assertIn(
+            "Review marks save with marked original and translation text.",
+            reader.text,
+        )
+        self.assertIn("Reader review marks", reader.text)
+        self.assertIn("Review marks", reader.text)
+        self.assertIn("data-reader-review-shortcuts", reader.text)
+        self.assertIn("Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.", reader.text)
+        self.assertIn("Review filter: all rows", reader.text)
+        self.assertIn("data-reader-review-filter-status", reader.text)
+        self.assertIn("data-reader-review-count", reader.text)
+        self.assertIn('data-reader-review-count="marked"', reader.text)
+        self.assertIn('data-reader-review-count="unmarked"', reader.text)
+        self.assertIn('data-reader-review-count="needs_review"', reader.text)
+        self.assertIn('data-reader-review-count="ok"', reader.text)
+        self.assertIn('data-reader-review-count="ignore"', reader.text)
+        self.assertIn('data-reader-review-filter="all"', reader.text)
+        self.assertIn('data-reader-review-filter="unmarked"', reader.text)
+        self.assertIn('data-reader-review-filter="needs_review"', reader.text)
+        self.assertIn('data-reader-review-filter="ok"', reader.text)
+        self.assertIn('data-reader-review-filter="ignore"', reader.text)
+        self.assertIn("Unmarked", reader.text)
+        self.assertIn("data-reader-review-step-controls", reader.text)
+        self.assertIn("data-reader-review-step-progress", reader.text)
+        self.assertIn("Marked blocks: 0", reader.text)
+        self.assertIn('data-reader-review-step="previous"', reader.text)
+        self.assertIn('data-reader-review-step="next"', reader.text)
+        self.assertIn("Previous mark", reader.text)
+        self.assertIn("Next mark", reader.text)
+        self.assertIn('data-reader-review-mark="needs_review"', reader.text)
+        self.assertIn('data-reader-review-mark="ok"', reader.text)
+        self.assertIn('data-reader-review-mark="ignore"', reader.text)
+        self.assertIn('data-reader-review-mark="clear"', reader.text)
+        self.assertIn("Needs review", reader.text)
+        self.assertIn("setReviewMark", reader.text)
+        self.assertIn("updateReviewCounts", reader.text)
+        self.assertIn("applyReviewFilter", reader.text)
+        self.assertIn("savedReviewMarks", reader.text)
+        self.assertIn("persistReviewMark", reader.text)
+        self.assertIn("applyReviewMark", reader.text)
+        self.assertIn("URLSearchParams", reader.text)
+        self.assertIn("fetch(reviewSaveUrl", reader.text)
+        self.assertIn('body.set("sequence", sequence)', reader.text)
+        self.assertIn('body.set("mark", requestedMark)', reader.text)
+        self.assertIn(
+            "Review mark saved with original and translation text.",
+            reader.text,
+        )
+        self.assertIn("Review mark save failed.", reader.text)
+        self.assertIn("reviewShortcutMarks", reader.text)
+        self.assertIn('"1": "needs_review"', reader.text)
+        self.assertIn('"2": "ok"', reader.text)
+        self.assertIn('"3": "ignore"', reader.text)
+        self.assertIn('"0": "clear"', reader.text)
+        self.assertIn("activeReviewSequence", reader.text)
+        self.assertIn("visibleReviewSequence", reader.text)
+        self.assertIn("selectedReviewSequence", reader.text)
+        self.assertIn("isInteractiveTarget(event.target)", reader.text)
+        self.assertIn('unmarked: "unmarked"', reader.text)
+        self.assertIn("counts.marked += 1", reader.text)
+        self.assertIn("counts.unmarked += 1", reader.text)
+        self.assertIn('currentReviewFilter === "unmarked"', reader.text)
+        self.assertIn("reviewSequences", reader.text)
+        self.assertIn("currentMarkForSequence", reader.text)
+        self.assertIn("markedSequencesForCurrentFilter", reader.text)
+        self.assertIn("updateReviewStepProgress", reader.text)
+        self.assertIn("goToReviewMark", reader.text)
+        self.assertIn("currentReviewStepSequence", reader.text)
+        self.assertIn("Marked block ${index + 1} of ${markedSequences.length}", reader.text)
+        self.assertIn("matchingBlocks", reader.text)
+        self.assertIn("matchingOutlines", reader.text)
+        self.assertIn("data-reader-review-current", reader.text)
+        self.assertIn("is-review-filter-hidden", reader.text)
+        self.assertIn("currentReviewFilter", reader.text)
+        self.assertIn("aria-pressed", reader.text)
+        self.assertIn("is-review-needs-review", reader.text)
+        self.assertIn("is-review-ok", reader.text)
+        self.assertIn("is-review-ignore", reader.text)
+        self.assertNotIn("localStorage", reader.text)
+        self.assertNotIn("sessionStorage", reader.text)
+        self.assertIn("reader-minimap", reader.text)
+        self.assertIn(
+            'title="Sequence 1: translated; Translation literal indent"',
+            reader.text,
+        )
+        self.assertIn(
+            'title="Sequence 2: translated; Missing translation, '
+            'Source literal indent"',
+            reader.text,
+        )
+        self.assertIn("reader-qa-flag-missing_translation", reader.text)
+        self.assertIn("reader-qa-flag-length_mismatch", reader.text)
+        self.assertIn("reader-qa-flag-paragraph_mismatch", reader.text)
+        self.assertIn("reader-qa-flag-literal_source_indent", reader.text)
+        self.assertIn("reader-qa-flag-literal_translation_indent", reader.text)
+        self.assertIn("reader-block-metrics", reader.text)
+        self.assertIn("Source chars", reader.text)
+        self.assertIn("Translation chars", reader.text)
+        self.assertIn("T/S ratio", reader.text)
+        self.assertIn("Source lines", reader.text)
+        self.assertIn("Translation lines", reader.text)
+        self.assertIn("Original", reader.text)
+        self.assertIn("Translation", reader.text)
+        self.assertIn("Private source paragraph", reader.text)
+        self.assertIn("Приватний перекладений абзац", reader.text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", reader.text)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", reader.text)
+        self.assertNotIn("<script>alert(1)</script>", reader.text)
+        self.assertNotIn("<img src=x onerror=alert(1)>", reader.text)
+        self.assertIn("Text diagnostics", reader.text)
+        self.assertEqual(reader_unsynced.status_code, 200)
+        self.assertIn("Hide special chars", reader_unsynced.text)
+        self.assertIn("Sync scroll", reader_unsynced.text)
+        self.assertIn("data-reader-pane", reader_unsynced.text)
+        self.assertNotIn("data-reader-sync-pane", reader_unsynced.text)
+        self.assertNotIn("programmaticScrollLocks", reader_unsynced.text)
+        self.assertNotIn("pendingProgrammaticScrolls", reader_unsynced.text)
+        self.assertIn("&middot;", reader_unsynced.text)
+        self.assertIn("&rarr;", reader_unsynced.text)
+        self.assertIn("&para;", reader_unsynced.text)
+        self.assertIn("&#9251;", reader_unsynced.text)
+        self.assertIn("ZWSP", reader_unsynced.text)
+        self.assertIn("show_invisibles=1", reader_unsynced.text)
+        self.assertIn("sync=0", reader_unsynced.text)
+        self.assertEqual(reader_search.status_code, 200)
+        self.assertIn("Clear search", reader_search.text)
+        self.assertIn("Show search hits only", reader_search.text)
+        self.assertIn("Search hits", reader_search.text)
+        self.assertIn("data-reader-search-hit-controls", reader_search.text)
+        self.assertIn("data-reader-search-hit-navigation", reader_search.text)
+        self.assertIn("data-reader-search-hit-progress", reader_search.text)
+        self.assertIn("Search hits in window: 1", reader_search.text)
+        self.assertIn("Search rows</span><strong>all rows</strong>", reader_search.text)
+        self.assertIn('data-reader-search-hit-step="previous"', reader_search.text)
+        self.assertIn('data-reader-search-hit-step="next"', reader_search.text)
+        self.assertIn("Previous hit", reader_search.text)
+        self.assertIn("Next hit", reader_search.text)
+        self.assertIn("is-active-search-hit", reader_search.text)
+        self.assertIn("Hit ${index + 1} of ${hits.length}", reader_search.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            reader_search.text,
+        )
+        self.assertIn("q=%3Cscript%3E", reader_search.text)
+        self.assertIn("search_hits=1", reader_search.text)
+        self.assertNotIn("<script>alert(1)</script>", reader_search.text)
+        self.assertEqual(reader_search_hits.status_code, 200)
+        self.assertIn("Show all search context", reader_search_hits.text)
+        self.assertIn(
+            "Search rows</span><strong>matches only</strong>",
+            reader_search_hits.text,
+        )
+        self.assertIn("search_hits=1", reader_search_hits.text)
+        self.assertIn("reader-original-1", reader_search_hits.text)
+        self.assertIn("Private", reader_search_hits.text)
+        self.assertIn("source", reader_search_hits.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">&lt;script&gt;</mark>',
+            reader_search_hits.text,
+        )
+        self.assertIn("Search hits in window: 1", reader_search_hits.text)
+        self.assertIn("Window units", reader_search_hits.text)
+        self.assertIn("<strong>1</strong>", reader_search_hits.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_search_hits.text)
+        self.assertNotIn("Tiny source", reader_search_hits.text)
+        self.assertNotIn("<script>alert(1)</script>", reader_search_hits.text)
+        self.assertEqual(diagnostics_search_hits_param.status_code, 200)
+        self.assertIn("Translation Text Diagnostics", diagnostics_search_hits_param.text)
+        self.assertNotIn("Show all search context", diagnostics_search_hits_param.text)
+        self.assertNotIn("Show search hits only", diagnostics_search_hits_param.text)
+        self.assertNotIn("search_hits=1", diagnostics_search_hits_param.text)
+        self.assertIn("Paragraph waiting for translation", diagnostics_search_hits_param.text)
+        self.assertIn("Tiny source", diagnostics_search_hits_param.text)
+        self.assertEqual(reader_pane_focus.status_code, 200)
+        self.assertIn("reader-pane-mode-original", reader_pane_focus.text)
+        self.assertIn("reader-pane-mode-action is-active", reader_pane_focus.text)
+        self.assertIn(
+            "Pane</span><strong>original focus</strong>",
+            reader_pane_focus.text,
+        )
+        self.assertIn("pane_mode=original", reader_pane_focus.text)
+        self.assertIn('name="pane_mode" value="original"', reader_pane_focus.text)
+        self.assertIn("search_hits=1", reader_pane_focus.text)
+        self.assertIn("indent_preview=1", reader_pane_focus.text)
+        self.assertIn("sync=0", reader_pane_focus.text)
+        self.assertIn("show_invisibles=1", reader_pane_focus.text)
+        self.assertIn("q=Tiny", reader_pane_focus.text)
+        self.assertIn("Tiny", reader_pane_focus.text)
+        self.assertNotIn("Private source paragraph", reader_pane_focus.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_pane_focus.text)
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=1&limit=100&show_invisibles=1&sync=0&q=Tiny'
+            '&search_hits=1&pane_mode=original&indent_preview=1";',
+            reader_pane_focus.text,
+        )
+        self.assertEqual(reader_translation_focus.status_code, 200)
+        self.assertIn("reader-pane-mode-translation", reader_translation_focus.text)
+        self.assertIn(
+            "Pane</span><strong>translation focus</strong>",
+            reader_translation_focus.text,
+        )
+        self.assertIn("pane_mode=translation", reader_translation_focus.text)
+        self.assertEqual(reader_invalid_pane.status_code, 200)
+        self.assertIn("reader-pane-mode-split", reader_invalid_pane.text)
+        self.assertIn("Pane</span><strong>split</strong>", reader_invalid_pane.text)
+        self.assertNotIn("pane_mode=unknown", reader_invalid_pane.text)
+        self.assertEqual(diagnostics_pane_param.status_code, 200)
+        self.assertIn("Translation Text Diagnostics", diagnostics_pane_param.text)
+        self.assertNotIn("Focus original", diagnostics_pane_param.text)
+        self.assertNotIn("Focus translation", diagnostics_pane_param.text)
+        self.assertNotIn("pane_mode=translation", diagnostics_pane_param.text)
+        self.assertIn(
+            '<mark class="reader-search-hit">Tiny</mark> source.',
+            diagnostics_pane_param.text,
+        )
+        self.assertEqual(reader_indent.status_code, 200)
+        self.assertIn("Plain indent", reader_indent.text)
+        self.assertIn("has-indent-preview", reader_indent.text)
+        self.assertIn("indent_preview=1", reader_indent.text)
+        self.assertIn("q=%3Cscript%3E", reader_indent.text)
+        self.assertIn("show_invisibles=1", reader_indent.text)
+        self.assertIn("sync=0", reader_indent.text)
+        self.assertEqual(reader_page.status_code, 200)
+        self.assertIn("Logical page 3", reader_page.text)
+        self.assertIn("sequences 3-3", reader_page.text)
+        self.assertIn('<option value="1" selected>1</option>', reader_page.text)
+        self.assertIn("Tiny", reader_page.text)
+        self.assertIn("q=Tiny", reader_page.text)
+        self.assertIn("show_invisibles=1", reader_page.text)
+        self.assertIn("sync=0", reader_page.text)
+        self.assertIn("indent_preview=1", reader_page.text)
+        self.assertIn("reader-position-bar", reader_page.text)
+        self.assertIn("Logical page 3", reader_page.text)
+        self.assertIn("sequences 3-3", reader_page.text)
+        self.assertIn("QA</span><strong>all</strong>", reader_page.text)
+        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_page.text)
+        self.assertIn("Special chars</span><strong>shown</strong>", reader_page.text)
+        self.assertIn("Sync scroll</span><strong>off</strong>", reader_page.text)
+        self.assertIn("Indent preview</span><strong>on</strong>", reader_page.text)
+        self.assertIn("data-reader-keyboard-navigation", reader_page.text)
+        self.assertIn(
+            f'const previousHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=2&limit=1&show_invisibles=1&sync=0&q=Tiny'
+            '&indent_preview=1";',
+            reader_page.text,
+        )
+        self.assertIn(
+            f'const nextHref = "/admin/logs/{logger.run_dir.name}/reader'
+            '?sequence=4&limit=1&show_invisibles=1&sync=0&q=Tiny'
+            '&indent_preview=1";',
+            reader_page.text,
+        )
+        self.assertNotIn("Private source paragraph", reader_page.text)
+        self.assertEqual(reader_length_filter.status_code, 200)
+        self.assertIn(
+            '<option value="length_mismatch" selected>Length mismatch</option>',
+            reader_length_filter.text,
+        )
+        self.assertIn("qa=length_mismatch", reader_length_filter.text)
+        self.assertIn("q=Tiny", reader_length_filter.text)
+        self.assertIn("show_invisibles=1", reader_length_filter.text)
+        self.assertIn("sync=0", reader_length_filter.text)
+        self.assertIn("indent_preview=1", reader_length_filter.text)
+        self.assertIn("Tiny", reader_length_filter.text)
+        self.assertIn("Source chars 12", reader_length_filter.text)
+        self.assertIn("T/S ratio", reader_length_filter.text)
+        self.assertNotIn("Private source paragraph", reader_length_filter.text)
+        self.assertNotIn("Paragraph waiting for translation", reader_length_filter.text)
+        self.assertEqual(reader_paragraph_filter.status_code, 200)
+        self.assertIn(
+            '<option value="paragraph_mismatch" selected>Paragraph mismatch</option>',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn("qa=paragraph_mismatch", reader_paragraph_filter.text)
+        self.assertIn("q=Tiny", reader_paragraph_filter.text)
+        self.assertIn("show_invisibles=1", reader_paragraph_filter.text)
+        self.assertIn("sync=0", reader_paragraph_filter.text)
+        self.assertIn("indent_preview=1", reader_paragraph_filter.text)
+        self.assertIn("QA</span><strong>paragraph_mismatch</strong>", reader_paragraph_filter.text)
+        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_paragraph_filter.text)
+        self.assertIn("Tiny", reader_paragraph_filter.text)
+        self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
+        self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
+        self.assertIn("reader-outline", reader_paragraph_filter.text)
+        self.assertIn("Visible units: 1", reader_paragraph_filter.text)
+        self.assertIn("data-reader-outline-navigation", reader_paragraph_filter.text)
+        self.assertIn("data-reader-outline-anchor", reader_paragraph_filter.text)
+        self.assertIn(
+            'title="Sequence 3: translated; Blocks block-3; '
+            'Translation much longer; Paragraph/line break mismatch"',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn("reader-qa-filter-metric is-active", reader_paragraph_filter.text)
+        self.assertIn('aria-current="page"', reader_paragraph_filter.text)
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            '&amp;q=Tiny&amp;indent_preview=1&amp;qa=paragraph_mismatch"',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn(
+            f'href="/admin/logs/{logger.run_dir.name}/reader?sequence=1'
+            "&amp;limit=100&amp;show_invisibles=1&amp;sync=0"
+            '&amp;q=Tiny&amp;indent_preview=1&amp;qa=missing_translation"',
+            reader_paragraph_filter.text,
+        )
+        self.assertIn('href="#reader-original-3"', reader_paragraph_filter.text)
+        self.assertNotIn('href="#reader-original-2"', reader_paragraph_filter.text)
+        self.assertIn("data-reader-qa-step-controls", reader_paragraph_filter.text)
+        self.assertIn("data-reader-qa-step-navigation", reader_paragraph_filter.text)
+        self.assertIn("data-reader-qa-progress", reader_paragraph_filter.text)
+        self.assertIn("Issues in window: 1", reader_paragraph_filter.text)
+        self.assertIn("Source lines 1", reader_paragraph_filter.text)
+        self.assertIn("Translation lines 2", reader_paragraph_filter.text)
+        self.assertIn("Source blank lines 0", reader_paragraph_filter.text)
+        self.assertIn("Translation blank lines 0", reader_paragraph_filter.text)
+        self.assertNotIn("Private source paragraph", reader_paragraph_filter.text)
+        self.assertNotIn(
+            "Paragraph waiting for translation",
+            reader_paragraph_filter.text,
+        )
+        self.assertEqual(diagnostics_paragraph_filter.status_code, 200)
+        self.assertIn(
+            '<option value="paragraph_mismatch" selected>Paragraph mismatch</option>',
+            diagnostics_paragraph_filter.text,
+        )
+        self.assertIn("qa=paragraph_mismatch", diagnostics_paragraph_filter.text)
+        self.assertIn("q=Tiny", diagnostics_paragraph_filter.text)
+        self.assertIn("show_invisibles=1", diagnostics_paragraph_filter.text)
+        self.assertIn("Tiny", diagnostics_paragraph_filter.text)
+        self.assertIn(
+            "Paragraph/line break mismatch",
+            diagnostics_paragraph_filter.text,
+        )
+        self.assertIn("Source lines 1", diagnostics_paragraph_filter.text)
+        self.assertIn("Translation lines 2", diagnostics_paragraph_filter.text)
+        self.assertNotIn("Private source paragraph", diagnostics_paragraph_filter.text)
+        self.assertNotIn(
+            "Paragraph waiting for translation",
+            diagnostics_paragraph_filter.text,
+        )
+        self.assertEqual(reader_empty_filter.status_code, 200)
+        self.assertIn(
+            '<option value="empty_source" selected>Empty source</option>',
+            reader_empty_filter.text,
+        )
+        self.assertIn("No work units match this QA filter.", reader_empty_filter.text)
+        self.assertIn("No QA issues in this window.", reader_empty_filter.text)
+        self.assertIn("reader-outline", reader_empty_filter.text)
+        self.assertIn('<details class="reader-outline"', reader_empty_filter.text)
+        self.assertIn("Visible units: 0", reader_empty_filter.text)
+        self.assertIn("No blocks in this reader window.", reader_empty_filter.text)
+        self.assertNotIn("data-reader-outline-navigation", reader_empty_filter.text)
+        self.assertNotIn("data-reader-outline-anchor", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-controls", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-navigation", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-mark", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-panel", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-filter", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-step-controls", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-step", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-shortcuts", reader_empty_filter.text)
+        self.assertNotIn("data-reader-review-save-url", reader_empty_filter.text)
+        self.assertNotIn("data-reader-qa-step-controls", reader_empty_filter.text)
+        self.assertNotIn("data-reader-qa-step-navigation", reader_empty_filter.text)
+        self.assertNotIn("data-reader-qa-progress", reader_empty_filter.text)
+        self.assertNotIn("setActiveIssue", reader_empty_filter.text)
+        self.assertNotIn("Private source paragraph", reader_empty_filter.text)
+        self.assertEqual(reader_invalid_filter.status_code, 200)
+        self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
+        self.assertNotIn("qa=unknown", reader_invalid_filter.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
             archive_text = "\n".join(
@@ -2536,6 +3572,75 @@ class AdminRoutesTest(unittest.TestCase):
             )
         self.assertNotIn("Private source paragraph", archive_text)
         self.assertNotIn("Приватний перекладений абзац", archive_text)
+        self.assertNotIn("Paragraph waiting for translation", archive_text)
+        self.assertNotIn("very long translated expansion", archive_text)
+        self.assertNotIn("Source chars", archive_text)
+        self.assertNotIn("Source lines", archive_text)
+        self.assertNotIn("Paragraph/line break mismatch", archive_text)
+        self.assertNotIn("reader-qa-issue-nav", archive_text)
+        self.assertNotIn("reader-position-bar", archive_text)
+        self.assertNotIn("data-reader-qa-step-controls", archive_text)
+        self.assertNotIn("data-reader-qa-step-navigation", archive_text)
+        self.assertNotIn("data-reader-qa-progress", archive_text)
+        self.assertNotIn("is-active-qa-issue", archive_text)
+        self.assertNotIn("data-reader-search-hit-controls", archive_text)
+        self.assertNotIn("data-reader-search-hit-navigation", archive_text)
+        self.assertNotIn("is-active-search-hit", archive_text)
+        self.assertNotIn("data-reader-review-controls", archive_text)
+        self.assertNotIn("data-reader-review-navigation", archive_text)
+        self.assertNotIn("data-reader-review-panel", archive_text)
+        self.assertNotIn("data-reader-review-filter", archive_text)
+        self.assertNotIn("data-reader-review-step-controls", archive_text)
+        self.assertNotIn("data-reader-review-step", archive_text)
+        self.assertNotIn("data-reader-review-shortcuts", archive_text)
+        self.assertEqual(save_mark.status_code, 200)
+        self.assertTrue(save_mark.json()["ok"])
+        self.assertEqual(save_mark.json()["marks"], {"1": "needs_review"})
+        self.assertTrue(review_marks_document["contains_raw_text"])
+        self.assertEqual(review_marks_document["version"], 1)
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["mark"],
+            "needs_review",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["source_text"],
+            "Private source paragraph\tA\nNext\xa0line \u200b<script>alert(1)</script>",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["translated_text"],
+            "  Приватний перекладений абзац\tA\n"
+            "Наступний\xa0рядок <img src=x onerror=alert(1)>",
+        )
+        self.assertEqual(
+            review_marks_document["marks"]["1"]["source_block_ids"],
+            ["block-1"],
+        )
+        self.assertIn(
+            'const savedReviewMarks = {"1": "needs_review"};',
+            reader_with_saved_mark.text,
+        )
+        self.assertEqual(details_after_mark.status_code, 200)
+        self.assertNotIn("reader_review_marks.json", details_after_mark.text)
+        self.assertEqual(details_api_after_mark.status_code, 200)
+        details_after_mark_text = json.dumps(
+            details_api_after_mark.json(),
+            ensure_ascii=False,
+        )
+        self.assertNotIn("reader_review_marks", details_after_mark_text)
+        self.assertNotIn("Private source paragraph", details_after_mark_text)
+        self.assertEqual(download_after_mark.status_code, 200)
+        with ZipFile(BytesIO(download_after_mark.content)) as archive:
+            marked_archive_names = archive.namelist()
+            marked_archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in marked_archive_names
+            )
+        self.assertNotIn("reader_review_marks.json", marked_archive_names)
+        self.assertNotIn("Private source paragraph", marked_archive_text)
+        self.assertNotIn("Приватний перекладений абзац", marked_archive_text)
+        self.assertEqual(clear_mark.status_code, 200)
+        self.assertEqual(clear_mark.json()["marks"], {})
+        self.assertEqual(review_marks_after_clear["marks"], {})
 
     def test_activity_users_and_security_pages_show_user_events(self):
         with TemporaryDirectory() as temp_dir:
