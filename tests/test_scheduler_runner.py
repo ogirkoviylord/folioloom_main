@@ -1315,13 +1315,18 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(failed_unit.status.value, "failed_retryable")
             self.assertEqual(
                 failed_unit.last_error,
-                "retryable provider failure",
+                "provider failure: timeout",
             )
             self.assertEqual(len(attempts), 1)
             self.assertEqual(
                 attempts[0].error_message,
-                "retryable provider failure",
+                "provider failure: timeout",
             )
+            self.assertEqual(
+                attempts[0].error_code,
+                "timeout",
+            )
+            self.assertIn('"failure_category": "timeout"', scheduler_events)
             self.assertEqual(
                 store.get_job(failed_job.id).status,
                 PersistentTranslationJobStatus.TRANSLATING,

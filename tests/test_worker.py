@@ -703,6 +703,69 @@ class WorkerTest(unittest.TestCase):
             self.assertNotIn("ValueError", log_output)
             self.assertNotIn("Traceback", log_output)
 
+    def test_scheduled_worker_records_specific_provider_failure_diagnostic(self):
+        from translator_service.deepseek_client import DeepSeekApiError
+        from translator_service.deepseek_key_pool import (
+            DeepSeekChannelConfig,
+            DeepSeekKeyPoolTranslator,
+        )
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Private source paragraph",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+            translator = DeepSeekKeyPoolTranslator(
+                channels=[
+                    DeepSeekChannelConfig(
+                        api_key="sk-private-provider-key",
+                        label="primary",
+                    )
+                ],
+                client_factory=_DeepSeekErrorClientFactory(
+                    DeepSeekApiError(
+                        "DeepSeek API returned HTTP 503: unavailable "
+                        "for sk-private-provider-key"
+                    )
+                ),
+                cooldown_seconds=30,
+                clock=lambda: 100.0,
+            )
+
+            failed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                retry_base_delay_seconds=60,
+                retry_max_delay_seconds=60,
+            )
+
+            attempts = store.list_work_unit_attempts(failed.id)
+            events = [json.loads(event.payload_json) for event in store.list_scheduler_events(job.id)]
+            events_text = json.dumps(events, sort_keys=True)
+
+            self.assertEqual(attempts[0].error_code, "unavailable_5xx")
+            self.assertEqual(attempts[0].error_message, "provider failure: unavailable_5xx")
+            self.assertEqual(
+                events[-1]["provider_failure"]["failure_category"],
+                "unavailable_5xx",
+            )
+            self.assertEqual(events[-1]["provider_failure"]["http_status_bucket"], "5xx")
+            self.assertEqual(events[-1]["provider_failure"]["provider_id"], "deepseek")
+            self.assertIn("channel_fingerprint", events[-1]["provider_failure"]["channel"])
+            self.assertNotIn("Private source paragraph", failed.last_error or "")
+            self.assertNotIn("Private source paragraph", events_text)
+            self.assertNotIn("sk-private-provider-key", events_text)
+
     def test_assembles_translated_text_result_into_object_storage(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1622,6 +1685,24 @@ class ProviderValidationErrorTranslator:
         target_language: str,
     ) -> str:
         raise ValueError("provider validation failed")
+
+
+class _DeepSeekErrorClientFactory:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def __call__(self, *, api_key: str, **kwargs):
+        return _DeepSeekErrorClient(self._error)
+
+
+class _DeepSeekErrorClient:
+    last_usage = None
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+        raise self._error
 
 
 class BlockingParallelTranslator:

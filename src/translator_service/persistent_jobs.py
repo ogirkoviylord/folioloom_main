@@ -1,11 +1,12 @@
+import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-import json
 from pathlib import Path
-import sqlite3
 from uuid import uuid4
 
+from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
     SchedulerClaim,
     SchedulerLimits,
@@ -820,6 +821,7 @@ class SQLiteTranslationJobStore:
         error_message: str,
         retry_base_delay_seconds: int,
         retry_max_delay_seconds: int,
+        provider_failure_diagnostic: ProviderFailureDiagnostic | None = None,
     ) -> PersistentWorkUnit:
         work_unit = self._require_work_unit(work_unit_id)
         now = _now()
@@ -835,6 +837,20 @@ class SQLiteTranslationJobStore:
             0,
             int((decision.available_at - now).total_seconds()),
         )
+        safe_error_message = _attempt_error_message(
+            error_message,
+            provider_failure_diagnostic=provider_failure_diagnostic,
+        )
+        attempt_error_code = _attempt_error_code(
+            failure_kind,
+            provider_failure_diagnostic=provider_failure_diagnostic,
+        )
+        terminal_reason = _terminal_reason(
+            failure_kind=failure_kind,
+            retryable=decision.retryable,
+            attempt_count=work_unit.attempt_count,
+            max_attempts=work_unit.max_attempts,
+        )
         with self._connection:
             updated = self._connection.execute(
                 """
@@ -848,7 +864,7 @@ class SQLiteTranslationJobStore:
                 """,
                 (
                     decision.next_status.value,
-                    error_message,
+                    safe_error_message,
                     _to_db_time(decision.available_at),
                     _to_db_time(now),
                     work_unit_id,
@@ -861,8 +877,8 @@ class SQLiteTranslationJobStore:
             self._insert_attempt(
                 work_unit=work_unit,
                 status=decision.next_status.value,
-                error_code=failure_kind.value,
-                error_message=error_message,
+                error_code=attempt_error_code,
+                error_message=safe_error_message,
                 retry_after_seconds=retry_after_seconds,
                 finished_at=now,
             )
@@ -878,6 +894,13 @@ class SQLiteTranslationJobStore:
                 payload={
                     "failure_kind": failure_kind.value,
                     "retry_after_seconds": retry_after_seconds,
+                    "terminal_reason": terminal_reason,
+                    **_provider_failure_event_payload(
+                        provider_failure_diagnostic,
+                        retry_after_seconds=retry_after_seconds,
+                        terminal_reason=terminal_reason,
+                        attempt_number=work_unit.attempt_count,
+                    ),
                 },
                 now=now,
             )
@@ -1413,6 +1436,64 @@ class SQLiteTranslationJobStore:
                 _to_db_time(now),
             ),
         )
+
+
+def _attempt_error_code(
+    failure_kind: WorkUnitFailureKind,
+    *,
+    provider_failure_diagnostic: ProviderFailureDiagnostic | None,
+) -> str:
+    if provider_failure_diagnostic is not None:
+        return provider_failure_diagnostic.failure_category.value
+    return failure_kind.value
+
+
+def _attempt_error_message(
+    error_message: str,
+    *,
+    provider_failure_diagnostic: ProviderFailureDiagnostic | None,
+) -> str:
+    if provider_failure_diagnostic is not None:
+        return (
+            "provider failure: "
+            f"{provider_failure_diagnostic.failure_category.value}"
+        )
+    return error_message
+
+
+def _terminal_reason(
+    *,
+    failure_kind: WorkUnitFailureKind,
+    retryable: bool,
+    attempt_count: int,
+    max_attempts: int,
+) -> str | None:
+    if retryable:
+        return None
+    if (
+        failure_kind is WorkUnitFailureKind.RETRYABLE_PROVIDER
+        and attempt_count >= max_attempts
+    ):
+        return "max_attempts_reached"
+    return failure_kind.value
+
+
+def _provider_failure_event_payload(
+    provider_failure_diagnostic: ProviderFailureDiagnostic | None,
+    *,
+    retry_after_seconds: int,
+    terminal_reason: str | None,
+    attempt_number: int,
+) -> dict[str, object]:
+    if provider_failure_diagnostic is None:
+        return {}
+    return {
+        "provider_failure": provider_failure_diagnostic.to_safe_payload(
+            retry_after_seconds=retry_after_seconds,
+            terminal_reason=terminal_reason,
+            attempt_number=attempt_number,
+        )
+    }
 
 
 def _job_from_mapping(row) -> PersistentTranslationJob:

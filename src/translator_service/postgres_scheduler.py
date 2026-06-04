@@ -11,28 +11,32 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without optiona
 
 from translator_service.persistent_jobs import (
     JobUsageSummary,
+    PersistentSchedulerEvent,
     PersistentTranslationJob,
     PersistentTranslationJobStatus,
-    PersistentSchedulerEvent,
+    PersistentWorkerHeartbeat,
     PersistentWorkUnit,
     PersistentWorkUnitAttempt,
     PersistentWorkUnitStatus,
-    PersistentWorkerHeartbeat,
     WorkUnitPlan,
+    _attempt_error_code,
+    _attempt_error_message,
     _job_from_mapping,
+    _provider_failure_event_payload,
     _scheduler_event_from_row,
+    _terminal_reason,
     _to_db_time,
-    _worker_heartbeat_from_row,
     _work_unit_attempt_from_row,
     _work_unit_from_mapping,
+    _worker_heartbeat_from_row,
 )
+from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
     calculate_retry_decision,
 )
-
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS translation_jobs (
@@ -549,6 +553,7 @@ class PostgresSchedulerStore:
         error_message: str,
         retry_base_delay_seconds: int,
         retry_max_delay_seconds: int,
+        provider_failure_diagnostic: ProviderFailureDiagnostic | None = None,
     ) -> PersistentWorkUnit:
         now = _now()
         with self.connection.transaction():
@@ -579,6 +584,20 @@ class PostgresSchedulerStore:
                 0,
                 int((decision.available_at - now).total_seconds()),
             )
+            safe_error_message = _attempt_error_message(
+                error_message,
+                provider_failure_diagnostic=provider_failure_diagnostic,
+            )
+            attempt_error_code = _attempt_error_code(
+                failure_kind,
+                provider_failure_diagnostic=provider_failure_diagnostic,
+            )
+            terminal_reason = _terminal_reason(
+                failure_kind=failure_kind,
+                retryable=decision.retryable,
+                attempt_count=work_unit.attempt_count,
+                max_attempts=work_unit.max_attempts,
+            )
             updated_row = self.connection.execute(
                 """
                 UPDATE work_units
@@ -596,7 +615,7 @@ class PostgresSchedulerStore:
                 """,
                 {
                     "status": decision.next_status.value,
-                    "error_message": error_message,
+                    "error_message": safe_error_message,
                     "available_at": decision.available_at,
                     "now": now,
                     "work_unit_id": work_unit_id,
@@ -609,8 +628,8 @@ class PostgresSchedulerStore:
             self._insert_attempt(
                 work_unit=work_unit,
                 status=decision.next_status.value,
-                error_code=failure_kind.value,
-                error_message=error_message,
+                error_code=attempt_error_code,
+                error_message=safe_error_message,
                 retry_after_seconds=retry_after_seconds,
                 finished_at=now,
             )
@@ -625,6 +644,13 @@ class PostgresSchedulerStore:
                 payload={
                     "failure_kind": failure_kind.value,
                     "retry_after_seconds": retry_after_seconds,
+                    "terminal_reason": terminal_reason,
+                    **_provider_failure_event_payload(
+                        provider_failure_diagnostic,
+                        retry_after_seconds=retry_after_seconds,
+                        terminal_reason=terminal_reason,
+                        attempt_number=work_unit.attempt_count,
+                    ),
                 },
                 now=now,
             )
