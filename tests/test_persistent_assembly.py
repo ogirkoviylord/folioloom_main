@@ -1,11 +1,11 @@
+import unittest
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from zipfile import ZipFile
 
-from translator_service.documents import DocumentFormat
 from translator_service.document_sandbox import SandboxTranslationUnit
+from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     MAX_XML_DEPTH,
     TextExtractionError,
@@ -80,7 +80,7 @@ class PersistentAssemblyTest(unittest.TestCase):
                 "Вступний абзац.\n\nSource\n\nTarget\n\nOutro paragraph.",
             )
 
-    def test_assembles_partial_epub_and_preserves_navigation_and_untranslated_body(self):
+    def test_assembles_partial_epub_preserving_nav_and_untranslated_body(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
             store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
@@ -189,7 +189,7 @@ class PersistentAssemblyTest(unittest.TestCase):
                 ["[uk] Part I", "[uk] Chapter 1"],
             )
 
-    def test_assembles_partial_epub_without_translating_metadata_toc_or_navigation(self):
+    def test_assembles_partial_epub_without_metadata_toc_or_nav_translation(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
             store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
@@ -217,7 +217,10 @@ class PersistentAssemblyTest(unittest.TestCase):
                 )
 
             self.assertEqual(_first_text(opf, "title"), "Original Book Title")
-            self.assertEqual(_first_text(opf, "description"), "Original book description.")
+            self.assertEqual(
+                _first_text(opf, "description"),
+                "Original book description.",
+            )
             self.assertEqual(_first_text(opf, "language"), "en")
             self.assertEqual(
                 [
@@ -276,8 +279,12 @@ class PersistentAssemblyTest(unittest.TestCase):
                 store,
                 plan.job.id,
                 "<translation_batch>"
-                '<translation_block id="1" source_language="en">Джерело</translation_block>'
-                '<translation_block id="2" source_language="en">Ціль</translation_block>'
+                '<translation_block id="1" source_language="en">'
+                "Джерело"
+                "</translation_block>"
+                '<translation_block id="2" source_language="en">'
+                "Ціль"
+                "</translation_block>"
                 "</translation_batch>",
             )
             _complete_next(store, plan.job.id, "Фінальний абзац.")
@@ -293,6 +300,42 @@ class PersistentAssemblyTest(unittest.TestCase):
             self.assertEqual(
                 extract_text_from_docx(storage.get_bytes(stored.object_key)),
                 "Вступний абзац.\n\nДжерело\n\nЦіль\n\nФінальний абзац.",
+            )
+
+    def test_assembles_docx_table_cells_by_translation_block_id_when_reordered(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            # Rights basis: synthetic minimal fixture authored for this test.
+            plan = _docx_table_alignment_plan(store=store, storage=storage)
+
+            _complete_next(store, plan.job.id, "Вступний абзац.")
+            _complete_next(
+                store,
+                plan.job.id,
+                "<translation_batch>"
+                '<translation_block id="1" source_language="en">'
+                "Опис A"
+                "</translation_block>"
+                '<translation_block id="0" source_language="en">'
+                "Варіант A"
+                "</translation_block>"
+                "</translation_batch>",
+            )
+            _complete_next(store, plan.job.id, "Фінальний абзац.")
+
+            stored = assemble_persistent_docx_result(
+                store=store,
+                storage=storage,
+                job_id=plan.job.id,
+                file_name="options.uk.docx",
+                partial=False,
+            )
+
+            self.assertEqual(
+                extract_text_from_docx(storage.get_bytes(stored.object_key)),
+                "Вступний абзац.\n\nВаріант A\n\nОпис A\n\nФінальний абзац.",
             )
 
     def test_assembles_docx_with_original_blocks_when_unit_parts_do_not_match(self):
@@ -409,8 +452,11 @@ class PersistentAssemblyTest(unittest.TestCase):
             sandbox = RecordingAssemblySandbox(
                 output=_make_docx(
                     """
-                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                      <w:body><w:p><w:r><w:t>Sandboxed result.</w:t></w:r></w:p></w:body>
+                    <w:document
+                      xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Sandboxed result.</w:t></w:r></w:p>
+                      </w:body>
                     </w:document>
                     """
                 )
@@ -426,11 +472,17 @@ class PersistentAssemblyTest(unittest.TestCase):
                 document_sandbox=sandbox,
             )
 
-            self.assertEqual(extract_text_from_docx(storage.get_bytes(stored.object_key)), "Sandboxed result.")
+            self.assertEqual(
+                extract_text_from_docx(storage.get_bytes(stored.object_key)),
+                "Sandboxed result.",
+            )
             self.assertEqual(len(sandbox.calls), 1)
             document_format, source_content, translated_units = sandbox.calls[0]
             self.assertEqual(document_format, DocumentFormat.DOCX)
-            self.assertEqual(source_content, storage.get_bytes(plan.job.source_object_key))
+            self.assertEqual(
+                source_content,
+                storage.get_bytes(plan.job.source_object_key),
+            )
             self.assertEqual(
                 translated_units,
                 [
@@ -476,7 +528,10 @@ class PersistentAssemblyTest(unittest.TestCase):
             self.assertEqual(len(sandbox.calls), 1)
             document_format, source_content, translated_units = sandbox.calls[0]
             self.assertEqual(document_format, DocumentFormat.EPUB)
-            self.assertEqual(source_content, storage.get_bytes(plan.job.source_object_key))
+            self.assertEqual(
+                source_content,
+                storage.get_bytes(plan.job.source_object_key),
+            )
             self.assertEqual(
                 translated_units,
                 [
@@ -559,6 +614,47 @@ def _docx_plan(*, store: SQLiteTranslationJobStore, storage: LocalObjectStorage)
         user_id="user-42",
         source_object_key=original.object_key,
         file_name="book.docx",
+        source_language="en",
+        target_language="uk",
+        max_fragment_chars=1_000,
+    )
+
+
+def _docx_table_alignment_plan(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+):
+    original = storage.put_bytes(
+        kind=StoredFileKind.ORIGINAL,
+        file_name="options.docx",
+        content_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        content=_make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Intro paragraph.</w:t></w:r></w:p>
+                <w:tbl>
+                  <w:tr>
+                    <w:tc><w:p><w:r><w:t>Option A</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:p><w:r><w:t>Description A</w:t></w:r></w:p></w:tc>
+                  </w:tr>
+                </w:tbl>
+                <w:p><w:r><w:t>Outro paragraph.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        ),
+    )
+    return create_persistent_docx_job_plan(
+        store=store,
+        storage=storage,
+        order_id="order-docx-table-alignment",
+        user_id="user-42",
+        source_object_key=original.object_key,
+        file_name="options.docx",
         source_language="en",
         target_language="uk",
         max_fragment_chars=1_000,
@@ -755,7 +851,9 @@ def _make_epub_with_metadata_and_toc(*, include_nested_nav: bool = False) -> byt
             """
             <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
               <rootfiles>
-                <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+                <rootfile
+                  full-path="OPS/content.opf"
+                  media-type="application/oebps-package+xml" />
               </rootfiles>
             </container>
             """,
@@ -773,7 +871,10 @@ def _make_epub_with_metadata_and_toc(*, include_nested_nav: bool = False) -> byt
                 <dc:description>Original book description.</dc:description>
               </metadata>
               <manifest>
-                <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                <item
+                  id="chapter"
+                  href="chapter.xhtml"
+                  media-type="application/xhtml+xml" />
                 <item id="style" href="style.css" media-type="text/css" />
                 <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
                 {nav_manifest_item}
