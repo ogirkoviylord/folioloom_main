@@ -1874,6 +1874,57 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
         )
 
+    def test_selects_epub_preview_candidate_after_front_matter(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=1_000,
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="book.epub",
+            content=_make_epub(
+                {
+                    "OPS/title.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Title Page</h1>
+                        <p>Folio Loom Press</p>
+                        <p>Copyright © 2026 Folio Loom Press</p>
+                        <p>ISBN 978-1-4028-9462-6</p>
+                        <p>12 Example Street, Kyiv 01001</p>
+                        <p>https://publisher.example/books</p>
+                        <p>contact@publisher.example</p>
+                      </body>
+                    </html>
+                    """,
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body>
+                        <h1>Chapter 1</h1>
+                        <p>The first real chapter opened with a quiet room.</p>
+                        <p>The second paragraph gave the reader a voice.</p>
+                      </body>
+                    </html>
+                    """,
+                }
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        candidate = service.select_preview_candidate(user_telegram_id=42)
+
+        self.assertEqual(candidate.document_kind, DocumentKind.EPUB)
+        self.assertIn("The first real chapter", candidate.source_text)
+        self.assertNotIn("Folio Loom Press", candidate.source_text)
+        self.assertNotIn("Copyright", candidate.source_text)
+        self.assertNotIn("ISBN", candidate.source_text)
+        self.assertNotIn("Example Street", candidate.source_text)
+        self.assertNotIn("publisher.example", candidate.source_text)
+        self.assertNotIn("contact@", candidate.source_text)
+
     def test_preview_candidate_requires_pending_translation(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),

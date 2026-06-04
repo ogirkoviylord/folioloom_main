@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -3991,6 +3992,10 @@ def _is_meaningful_preview_block(block: FormatTextBlock) -> bool:
         return False
     if _looks_like_preview_boilerplate(text):
         return False
+    if block.source_block_id.startswith("epub:") and _looks_like_epub_front_matter(
+        text
+    ):
+        return False
     return _letter_count(text) >= 12
 
 
@@ -4036,6 +4041,43 @@ def _looks_like_preview_boilerplate(text: str) -> bool:
             "розділ ",
             "частина ",
         )
+    ):
+        return True
+    return False
+
+
+def _looks_like_epub_front_matter(text: str) -> bool:
+    normalized = " ".join(text.strip().lower().split())
+    is_short_metadata_line = len(normalized) <= 180
+    if is_short_metadata_line and re.search(
+        r"\b(?:https?://|www\.)\S+", normalized
+    ):
+        return True
+    if is_short_metadata_line and re.search(
+        r"\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", normalized
+    ):
+        return True
+    if re.search(r"\bisbn(?:-1[03])?\b", normalized):
+        return True
+    if (
+        "©" in text
+        or "copyright" in normalized
+        or "all rights reserved" in normalized
+    ):
+        return True
+    if is_short_metadata_line and re.search(
+        r"\b\d{1,6}\s+[\w .'-]+"
+        r"(?:street|st\.|road|rd\.|avenue|ave\.|lane|drive|dr\.|"
+        r"boulevard|blvd\.|square|sq\.)\b",
+        normalized,
+    ):
+        return True
+    if len(normalized) <= 100 and (
+        normalized.endswith(" press")
+        or " published by " in f" {normalized} "
+        or " publisher" in normalized
+        or " publishing" in normalized
+        or " imprint" in normalized
     ):
         return True
     return False
