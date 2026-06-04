@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -25,6 +26,14 @@ class CostRunSummary:
     total_tokens: int
     estimated_cost_usd: float
     log_href: str
+    usage_available: bool = True
+
+
+@dataclass(frozen=True)
+class CostUsageTotals:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,7 @@ class CostAnalytics:
     top_runs: tuple[CostRunSummary, ...]
     top_users: tuple[CostUserSummary, ...]
     beta_safety: BetaSafetyCostSummary | None = None
+    unavailable_run_count: int = 0
 
 
 def build_cost_analytics(
@@ -70,6 +80,7 @@ def build_cost_analytics(
     now: datetime | None = None,
     rates: CostRates | None = None,
     limit: int = 5,
+    usage_lookup: Callable[[str], object | None] | None = None,
 ) -> CostAnalytics:
     current = _current_reporting_time(now)
     reporting_tz = current.tzinfo or UTC
@@ -77,7 +88,8 @@ def build_cost_analytics(
     today = current.date()
     last_7_start = today - timedelta(days=6)
     month = (today.year, today.month)
-    runs = _read_runs(log_root, active_rates)
+    all_runs = _read_runs(log_root, active_rates, usage_lookup=usage_lookup)
+    runs = [run for run in all_runs if run.usage_available]
     run_dates = {
         run: _reporting_date(run.started_at, reporting_tz) for run in runs
     }
@@ -122,6 +134,7 @@ def build_cost_analytics(
         ),
         top_runs=tuple(top_runs),
         top_users=top_users,
+        unavailable_run_count=len(all_runs) - len(runs),
     )
 
 
@@ -182,19 +195,29 @@ def _near_or_over_cap(total: float, cap: float | None, fraction: float) -> bool:
     return total >= cap * fraction
 
 
-def _read_runs(log_root: str | Path, rates: CostRates) -> list[CostRunSummary]:
+def _read_runs(
+    log_root: str | Path,
+    rates: CostRates,
+    *,
+    usage_lookup: Callable[[str], object | None] | None,
+) -> list[CostRunSummary]:
     root = Path(log_root)
     if not root.exists():
         return []
     runs: list[CostRunSummary] = []
     for run_json in root.glob("*/run.json"):
-        run = _read_run(run_json, rates)
+        run = _read_run(run_json, rates, usage_lookup=usage_lookup)
         if run is not None:
             runs.append(run)
     return runs
 
 
-def _read_run(run_json: Path, rates: CostRates) -> CostRunSummary | None:
+def _read_run(
+    run_json: Path,
+    rates: CostRates,
+    *,
+    usage_lookup: Callable[[str], object | None] | None,
+) -> CostRunSummary | None:
     try:
         data = json.loads(run_json.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -204,13 +227,19 @@ def _read_run(run_json: Path, rates: CostRates) -> CostRunSummary | None:
     totals = data.get("totals")
     if not isinstance(totals, dict):
         totals = {}
+    job_id = _string(data.get("job_id"), fallback=run_json.parent.name)
     prompt_tokens = _int(totals.get("prompt_tokens"))
     completion_tokens = _int(totals.get("completion_tokens"))
     total_tokens = _int(totals.get("total_tokens")) or (
         prompt_tokens + completion_tokens
     )
+    usage = _lookup_usage(job_id, usage_lookup)
+    if usage is not None and usage.total_tokens > 0:
+        prompt_tokens = usage.prompt_tokens
+        completion_tokens = usage.completion_tokens
+        total_tokens = usage.total_tokens
     return CostRunSummary(
-        job_id=_string(data.get("job_id"), fallback=run_json.parent.name),
+        job_id=job_id,
         order_id=_optional_string(data.get("order_id")),
         user_id=_optional_string(data.get("user_id")),
         file_name=_string(data.get("file_name"), fallback="unknown"),
@@ -220,6 +249,31 @@ def _read_run(run_json: Path, rates: CostRates) -> CostRunSummary | None:
         total_tokens=total_tokens,
         estimated_cost_usd=_estimate_cost(prompt_tokens, completion_tokens, rates),
         log_href="/admin/logs",
+        usage_available=total_tokens > 0,
+    )
+
+
+def _lookup_usage(
+    job_id: str,
+    usage_lookup: Callable[[str], object | None] | None,
+) -> CostUsageTotals | None:
+    if usage_lookup is None or not job_id:
+        return None
+    try:
+        usage = usage_lookup(job_id)
+    except (LookupError, ValueError):
+        return None
+    if usage is None:
+        return None
+    prompt_tokens = _int(getattr(usage, "prompt_tokens", None))
+    completion_tokens = _int(getattr(usage, "completion_tokens", None))
+    total_tokens = _int(getattr(usage, "total_tokens", None)) or (
+        prompt_tokens + completion_tokens
+    )
+    return CostUsageTotals(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
     )
 
 
