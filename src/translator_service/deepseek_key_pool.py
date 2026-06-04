@@ -18,6 +18,10 @@ from translator_service.provider_throttle import (
     ProviderThrottleConfig,
     ProviderThrottleSnapshot,
 )
+from translator_service.translation_context import (
+    TranslationContextMemory,
+    translate_with_context,
+)
 
 CHANNEL_HEALTH_HEALTHY = "healthy"
 CHANNEL_HEALTH_BUSY = "busy"
@@ -244,7 +248,14 @@ class DeepSeekKeyPoolTranslator:
             )
             return min(provider_slots, channel_slots)
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+        translation_context: TranslationContextMemory | None = None,
+    ) -> str:
         attempted_labels: set[str] = set()
         last_rate_error: DeepSeekApiError | None = None
 
@@ -253,10 +264,12 @@ class DeepSeekKeyPoolTranslator:
             attempted_labels.add(channel.label)
             started_at = self._clock()
             try:
-                translated = channel.client.translate(
+                translated = translate_with_context(
+                    channel.client,
                     text=text,
                     source_language=source_language,
                     target_language=target_language,
+                    translation_context=translation_context,
                 )
                 latency_ms = self._elapsed_ms_since(started_at)
                 self._record_channel_success(channel, latency_ms=latency_ms)
