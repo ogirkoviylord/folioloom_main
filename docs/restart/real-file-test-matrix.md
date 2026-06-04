@@ -148,6 +148,74 @@ For every beta release candidate, create a short report with:
 - local/offline EPUBCheck output;
 - known failures and go/no-go decision.
 
+### Issue #75 Local Evidence Slice - 2026-06-04
+
+This is metadata-only local evidence, not a free-beta release approval and not a
+full Telegram/provider end-to-end pass. The run used public-domain/permissive
+internet fixtures, kept raw source documents and translated outputs out of git
+and docs, and used synthetic no-provider translations only to exercise final
+assembly/openability paths.
+
+Environment:
+
+- branch: `codex/issue-75-real-file-matrix`
+- commit: `08ab21bab5db2987e4297c57c4685d94272eade1`
+- scope: local temp-only run; no real `.env*`, no `var/`, no server/runtime
+  data, no private/user data, no online validators, no committed raw artifacts
+- tools: local project upload/content validators, persistent planner/assembly,
+  `/opt/homebrew/bin/soffice`, EPUBCheck v5.3.0 with a temporary Temurin JRE
+  21 runtime outside the repository
+
+Command summary:
+
+- Matrix runner: `PYTHONPATH=src python3` one-off local runner from the
+  repository root. The runner was not committed as a reusable harness; it
+  downloaded/copied public fixtures to `/tmp/folioloom-issue-75-gate-b`,
+  called project upload/content validators, persistent TXT/DOCX/EPUB planners,
+  synthetic no-provider final assembly and wrote metadata-only summary JSON to
+  `/tmp/folioloom-issue-75-gate-b/run2/metadata-summary.json`.
+- DOCX smoke command shape:
+  `/opt/homebrew/bin/soffice --headless --convert-to pdf --outdir /tmp/folioloom-issue-75-gate-b/outputs2 /tmp/folioloom-issue-75-gate-b/outputs2/<fixture>.docx`.
+- EPUBCheck command shape:
+  `<temp Temurin JRE 21>/bin/java -jar /tmp/folioloom-issue-75-gate-b/epubcheck/epubcheck-5.3.0/epubcheck.jar /tmp/folioloom-issue-75-gate-b/outputs2/<fixture>.epub`.
+- TXT final-artifact check: local UTF-8 decode of assembled temp outputs.
+- `git diff --check` passed after docs updates.
+
+Fixture manifest and results:
+
+| Fixture id | Format | Language pair | Source/license | Result | Metadata-only evidence |
+| --- | --- | --- | --- | --- | --- |
+| `txt-small-dracula-en-ru` | TXT | EN -> RU | Source: `https://www.gutenberg.org/ebooks/345`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Upload/content validation passed; 207 work units; final UTF-8 artifact assembled. |
+| `txt-long-war-and-peace-en-ru` | TXT | EN -> RU | Source: `https://www.gutenberg.org/ebooks/2600`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Local long slice, 184,919 bytes; upload/content validation passed; 3,293 work units; final UTF-8 artifact assembled. |
+| `txt-cyrillic-detstvo-ru-uk` | TXT | RU -> UK | Source: `https://ru.wikisource.org/wiki/Детство_(Толстой)/Глава_I`; license/terms: `https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use`; rights basis: Wikisource Tolstoy public-domain source text under Wikimedia text terms. | Pass | Cyrillic TXT slice; upload/content validation passed; 4 work units; final UTF-8 artifact assembled. |
+| `docx-simple-kobzar-en-ru` | DOCX | EN -> RU | Source: `https://www.gutenberg.org/ebooks/68486`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Local DOCX generated outside git from public-domain text; upload/content validation passed; 1 work unit; assembled DOCX converted to PDF with LibreOffice headless, no repair marker in CLI output. |
+| `docx-complex-dracula-en-ru` | DOCX | EN -> RU | Source: `https://www.gutenberg.org/ebooks/345`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Local structured DOCX generated outside git from public-domain text; upload/content validation passed; 3 work units; assembled DOCX converted to PDF with LibreOffice headless, no repair marker in CLI output. |
+| `epub-simple-kobzar-en-ru` | EPUB | EN -> RU | Source: `https://www.gutenberg.org/ebooks/68486`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Upload/content validation passed; 171 work units; assembled EPUB passed EPUBCheck v5.3.0 with `0` fatals, errors, warnings and infos. |
+| `epub-complex-dracula-en-ru` | EPUB | EN -> RU | Source: `https://www.gutenberg.org/ebooks/345`; license: `https://www.gutenberg.org/policy/license.html`; rights basis: Project Gutenberg page records Public domain in the USA. | Pass | Upload/content validation passed; 211 work units; assembled EPUB passed EPUBCheck v5.3.0 with `0` fatals, errors, warnings and infos. |
+
+Known failures:
+
+- None for the selected metadata-only no-provider fixtures.
+- The first full-source runner attempt was abandoned in favor of this bounded
+  local slice; no raw source or output artifact from that attempt is part of the
+  release evidence.
+- Issue #76 remains open because this pass did not perform full local
+  LibreOffice Writer visual QA with human-readable structure notes.
+
+Limitations:
+
+- Provider-backed preview/full translation was not run.
+- Telegram bot upload UX, Continue flow, progress UI and My Books/history were
+  not run.
+- DOCX evidence used LibreOffice headless conversion smoke, not a full manual
+  Writer visual QA pass; issue #76 remains the required follow-up for that
+  Gate B item.
+- EPUBCheck passed selected no-provider assembled outputs; repeat validation is
+  still needed on provider-backed release-candidate outputs.
+- Full novel-scale stress for the complete War and Peace source remains a
+  possible follow-up; this run used a long local slice to avoid turning the
+  evidence pass into a load/stress test.
+
 ## Pass / Fail Criteria
 
 A fixture passes only when:
