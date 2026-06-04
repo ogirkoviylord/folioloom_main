@@ -100,6 +100,25 @@ status remains Unknown until a PR/checks page is inspected. This does not
 change UI/copy, database/schema/state, provider configuration, runtime `var/`
 data, supported formats, deployment, or release readiness.
 
+Issue #162 implementation slice on 2026-06-04: branch
+`codex/issue-162-provider-failure-diagnostics` adds safe provider failure
+diagnostics for translation work-unit attempts. Worker/scheduler provider
+failures now keep the existing retry policy but record a safe category such as
+`rate_limited`, `timeout`, `unavailable_5xx`, `auth`, `billing`,
+`malformed_response`, `unsafe_model_output`, `network`, `circuit_open` or
+`provider_other` in work-unit attempt metadata and scheduler event payloads.
+Admin translation details, trace and effective export can show the persisted
+category, retry/status metadata, terminal reason, provider id, redacted channel
+fingerprint and adaptive circuit snapshot even if live provider status later
+returns to `ok`. Local verification passed focused provider/store/worker/
+scheduler/admin tests, targeted `ruff --select F,I`, compileall,
+`git diff --check`, and full unittest discover with 1243 tests `OK
+(skipped=14)`. CI status remains Unknown until a PR/checks page is inspected.
+This does not add raw source/translated text, prompts, provider payloads,
+tracebacks, API keys, full provider key ids, schema/table migrations, runtime
+`var/` operations, deployment, provider selection/retry-policy changes, payment
+behavior or release readiness.
+
 Owner decisions recorded during issue #71:
 
 - 2026-05-16: free closed beta waits for complete Gate B evidence; no implicit

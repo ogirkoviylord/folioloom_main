@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
@@ -78,6 +79,7 @@ from translator_service.admin.secrets import (
 )
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
+    TranslationProviderFailureAttempt,
     TranslationRunDetails,
     TranslationRunFragmentDetail,
     TranslationRunSummary,
@@ -2851,11 +2853,13 @@ def _translation_work_unit_diagnostic(
             store.list_work_units(job_id),
             key=lambda unit: getattr(unit, "sequence", 0),
         )
+        selected = _select_diagnostic_work_unit(units)
+        if selected is None:
+            return None
+        attempts = store.list_work_unit_attempts(getattr(selected, "id", ""))
+        events = store.list_scheduler_events(job_id)
     finally:
         store.close()
-    selected = _select_diagnostic_work_unit(units)
-    if selected is None:
-        return None
     last_error = getattr(selected, "last_error", None)
     return TranslationWorkUnitDiagnostic(
         sequence=getattr(selected, "sequence", 0),
@@ -2865,7 +2869,71 @@ def _translation_work_unit_diagnostic(
         max_attempts=max(0, int(getattr(selected, "max_attempts", 0) or 0)),
         last_error=_safe_work_unit_error_summary(last_error),
         updated_at=getattr(selected, "updated_at", None),
+        provider_attempts=_translation_provider_failure_attempts(
+            attempts,
+            events,
+            work_unit_id=getattr(selected, "id", ""),
+        ),
     )
+
+
+def _translation_provider_failure_attempts(
+    attempts: list[object],
+    events: list[object],
+    *,
+    work_unit_id: str,
+) -> tuple[TranslationProviderFailureAttempt, ...]:
+    attempt_status = {
+        max(0, int(getattr(attempt, "attempt_number", 0) or 0)): _status_value(
+            getattr(attempt, "status", "unknown")
+        )
+        for attempt in attempts
+    }
+    rows: list[TranslationProviderFailureAttempt] = []
+    for event in events:
+        if getattr(event, "work_unit_id", None) != work_unit_id:
+            continue
+        payload = _json_payload(getattr(event, "payload_json", ""))
+        provider_failure = payload.get("provider_failure")
+        if not isinstance(provider_failure, dict):
+            continue
+        attempt_number = max(0, int(provider_failure.get("attempt_number", 0) or 0))
+        channel = provider_failure.get("channel")
+        if not isinstance(channel, dict):
+            channel = {}
+        adaptive = provider_failure.get("adaptive_circuit")
+        if not isinstance(adaptive, dict):
+            adaptive = {}
+        rows.append(
+            TranslationProviderFailureAttempt(
+                attempt_number=attempt_number,
+                status=attempt_status.get(
+                    attempt_number,
+                    _status_value(getattr(event, "event_type", "unknown")),
+                ),
+                failure_category=str(
+                    provider_failure.get("failure_category") or "provider_other"
+                ),
+                provider_id=str(provider_failure.get("provider_id") or "Unknown"),
+                http_status_bucket=_optional_string(
+                    provider_failure.get("http_status_bucket")
+                ),
+                retry_after_seconds=_optional_int(
+                    provider_failure.get("retry_after_seconds")
+                ),
+                latency_ms=_optional_float(provider_failure.get("latency_ms")),
+                terminal_reason=_optional_string(
+                    provider_failure.get("terminal_reason")
+                    or payload.get("terminal_reason")
+                ),
+                channel_fingerprint=_optional_string(
+                    channel.get("channel_fingerprint")
+                ),
+                channel_health=_optional_string(channel.get("health")),
+                circuit_state=_optional_string(adaptive.get("circuit_state")),
+            )
+        )
+    return tuple(sorted(rows, key=lambda row: row.attempt_number))
 
 
 def _persistent_job_store_readable(settings: Settings) -> bool:
@@ -2891,6 +2959,43 @@ def _select_diagnostic_work_unit(units: list[object]) -> object | None:
 
 def _status_value(status: object) -> str:
     return getattr(status, "value", str(status))
+
+
+def _json_payload(value: object) -> dict[str, object]:
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_work_unit_error_summary(error: object | None) -> str | None:

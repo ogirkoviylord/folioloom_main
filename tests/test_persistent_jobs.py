@@ -1,8 +1,9 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
+import json
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from translator_service.persistent_jobs import (
     JobUsageSummary,
@@ -210,6 +211,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
     def test_stale_completion_cannot_overwrite_newer_claim(self):
         from datetime import timedelta
+
         from translator_service.scheduler import SchedulerLimits
 
         store = self._memory_store()
@@ -444,7 +446,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         )
 
         store = self._memory_store()
-        job = _job_with_units(store)
+        _job_with_units(store)
         claim = store.claim_next_scheduled_work_unit(
             worker_id="worker-a",
             lease_seconds=300,
@@ -471,12 +473,105 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(len(attempts), 1)
         self.assertEqual(attempts[0].error_message, "provider timeout")
 
-    def test_expired_lease_is_recovered_for_retry(self):
-        from datetime import timedelta
-        from translator_service.scheduler import SchedulerLimits
+    def test_provider_failure_diagnostic_is_persisted_on_attempt_and_event(self):
+        from translator_service.provider_failure_diagnostics import (
+            ProviderFailureCategory,
+            ProviderFailureDiagnostic,
+        )
+        from translator_service.scheduler import (
+            SchedulerLimits,
+            WorkUnitFailureKind,
+        )
 
         store = self._memory_store()
         job = _job_with_units(store)
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        diagnostic = ProviderFailureDiagnostic(
+            failure_category=ProviderFailureCategory.TIMEOUT,
+            http_status_bucket=None,
+            provider_id="deepseek",
+            channel_fingerprint="chan_123456789abc",
+            latency_ms=842.0,
+            adaptive_circuit_snapshot={"circuit_state": "closed"},
+        )
+
+        failed = store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="retryable provider failure",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=600,
+            provider_failure_diagnostic=diagnostic,
+        )
+
+        attempts = store.list_work_unit_attempts(claim.work_unit_id)
+        events = store.list_scheduler_events(job.id)
+        latest_payload = json.loads(events[-1].payload_json)
+
+        self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_RETRYABLE)
+        self.assertEqual(attempts[0].error_code, "timeout")
+        self.assertEqual(attempts[0].error_message, "provider failure: timeout")
+        self.assertEqual(latest_payload["failure_kind"], "retryable_provider")
+        self.assertEqual(latest_payload["provider_failure"]["failure_category"], "timeout")
+        self.assertEqual(latest_payload["provider_failure"]["provider_id"], "deepseek")
+        self.assertEqual(latest_payload["provider_failure"]["latency_ms"], 842.0)
+        self.assertEqual(latest_payload["terminal_reason"], None)
+
+    def test_terminal_provider_failure_records_max_attempts_reason(self):
+        from translator_service.provider_failure_diagnostics import (
+            ProviderFailureCategory,
+            ProviderFailureDiagnostic,
+        )
+        from translator_service.scheduler import (
+            SchedulerLimits,
+            WorkUnitFailureKind,
+        )
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        store._connection.execute(
+            "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+            (job.id,),
+        )
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        failed = store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="retryable provider failure",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=600,
+            provider_failure_diagnostic=ProviderFailureDiagnostic(
+                failure_category=ProviderFailureCategory.RATE_LIMITED,
+                http_status_bucket="429",
+                provider_id="deepseek",
+            ),
+        )
+
+        events = store.list_scheduler_events(job.id)
+        latest_payload = json.loads(events[-1].payload_json)
+
+        self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_TERMINAL)
+        self.assertEqual(latest_payload["provider_failure"]["failure_category"], "rate_limited")
+        self.assertEqual(latest_payload["terminal_reason"], "max_attempts_reached")
+
+    def test_expired_lease_is_recovered_for_retry(self):
+        from datetime import timedelta
+
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        _job_with_units(store)
         claim = store.claim_next_scheduled_work_unit(
             worker_id="worker-a",
             lease_seconds=1,
