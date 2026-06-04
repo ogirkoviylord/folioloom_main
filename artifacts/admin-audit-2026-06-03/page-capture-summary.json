@@ -1,0 +1,4666 @@
+[
+  {
+    "name": "01-login-after-invalid",
+    "path": "artifacts/admin-audit-2026-06-03/01-login-after-invalid.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM CONSOLE Admin Login Password Sign in",
+      "buttons": [
+        "Sign in"
+      ],
+      "forms": [
+        {
+          "action": "/admin/login",
+          "buttons": [
+            "Sign in"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "password",
+              "placeholder": null,
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Password"
+          ],
+          "method": "post",
+          "text": "Password Sign in"
+        }
+      ],
+      "headings": [
+        "Admin Login"
+      ],
+      "height": 720,
+      "links": [],
+      "nav": [],
+      "scrollHeight": 720,
+      "tables": [],
+      "title": "Admin Login",
+      "url": "http://127.0.0.1:62063/admin/login",
+      "width": 1280
+    }
+  },
+  {
+    "name": "02-overview",
+    "path": "artifacts/admin-audit-2026-06-03/02-overview.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Overview DEVELOPMENT Triage inbox Actionable beta operations items only. Each row explains what happened, why it is shown now, what is affected, and the next step. Action needed Required integrations need setup Add connection rows and required secrets before launch. AFFECTED Telegram integration WHY NOW Required integration has no healthy configured connection. Open integrations Next step Blocked DeepSeek keys missing Add at least one active DeepSeek key for translations. AFFECTED DeepSeek provider WHY NOW No active DeepSeek key is available for translation work. Open provider Next step Action needed Secret safety needs review 7 secret or key item(s) need attention. AFFECTED Admin secrets and keys WHY NOW Secret safety metadata reported items needing review. Open settings Next step",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Overview",
+        "Triage inbox"
+      ],
+      "height": 720,
+      "links": [
+        {
+          "href": "/admin/integrations",
+          "text": "Open integrations"
+        },
+        {
+          "href": "/admin/ai-providers",
+          "text": "Open provider"
+        },
+        {
+          "href": "/admin/settings",
+          "text": "Open settings"
+        }
+      ],
+      "nav": [
+        {
+          "active": true,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 720,
+      "tables": [],
+      "title": "Overview · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/overview",
+      "width": 1280
+    }
+  },
+  {
+    "name": "03-live",
+    "path": "artifacts/admin-audit-2026-06-03/03-live.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Live Monitor DEVELOPMENT Live Monitor Keep this screen open to separate waiting work from active processing, provider capacity, token spend, failures, and server health. Open monitor Active processing 0 Jobs currently running or translating. Queued translations 0 Jobs waiting for worker or provider capacity. Failed today 0 Runs that ended with a failure today. Tokens today 0 Provider token usage from runs started today. Tokens last hour 0 Recent token usage for spotting spend spikes. Server health online Local CPU, memory, disk, and uptime snapshot. CPU n/a Current server CPU load when metrics are available. Memory n/a Current server memory use when metrics are available. Disk 25.9% Current server disk use when metrics are available. Uptime n/a How long the local process host has been up. What needs attention Queue growing while active processing stays flat means work is waiting. Degraded channels, 429s, timeouts, or no provider slots point to provider capacity. Failures today above zero need a recent run check before inviting more beta users. High disk, memory, or CPU can explain slow workers even when the queue is small. DeepSeek runtime Runtime cards show existing provider status only: active request slots, key channels, adaptive limit, circuit state, and reload state. SOURCE not reporting STATUS not reporting FRESHNESS not reporting CHANNELS none RELOAD No reload pending DEGRADED CHANNELS 0 429 COUNT 0 TIMEOUT COUNT 0 UNSAFE MODEL OUTPUTS 0 ADAPTIVE LIMIT n/a PROVIDER CIRCUIT not reporting AVAILABLE PROVIDER SLOTS n/a Recent runs Recent rows are metadata-only. Progress counts translated fragments, ETA is an estimate, and Resources shows active provider requests, total request capacity, key channels, and available provider slots. STATUS JOB FILE DIRECTION STAGE PROGRESS ETA RESOURCES TOKENS No recent runs yet.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Live Monitor",
+        "Live Monitor",
+        "What needs attention",
+        "DeepSeek runtime",
+        "Recent runs"
+      ],
+      "height": 720,
+      "links": [
+        {
+          "href": "/admin/live",
+          "text": "Open monitor"
+        }
+      ],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": true,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1544,
+      "tables": [
+        {
+          "headers": [
+            "STATUS",
+            "JOB",
+            "FILE",
+            "DIRECTION",
+            "STAGE",
+            "PROGRESS",
+            "ETA",
+            "RESOURCES",
+            "TOKENS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STATUS JOB FILE DIRECTION STAGE PROGRESS ETA RESOURCES TOKENS No recent runs yet."
+        }
+      ],
+      "title": "Live Monitor · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/live",
+      "width": 1280
+    }
+  },
+  {
+    "name": "04-translations",
+    "path": "artifacts/admin-audit-2026-06-03/04-translations.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Translations DEVELOPMENT Translations Review translation runs by date, state, file, language direction, token usage, and safe error metadata. Status All Running Ready Failed Cancelled Partial From To Apply filters STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/translations",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "status",
+              "placeholder": null,
+              "tag": "select",
+              "type": null,
+              "value": "all"
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Status All Running Ready Failed Cancelled Partial",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "Status All Running Ready Failed Cancelled Partial From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Translations",
+        "Translations"
+      ],
+      "height": 720,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": true,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 720,
+      "tables": [
+        {
+          "headers": [
+            "STARTED",
+            "STATUS",
+            "JOB",
+            "FILE",
+            "DIRECTION",
+            "FRAGMENTS",
+            "TOKENS",
+            "ERROR",
+            "ACTIONS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found."
+        }
+      ],
+      "title": "Translations · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/translations",
+      "width": 1280
+    }
+  },
+  {
+    "name": "05-users",
+    "path": "artifacts/admin-audit-2026-06-03/05-users.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Users DEVELOPMENT Users Per-user settings and security state inferred from activity events. USER CHANNEL INTERFACE LAST TARGET PREVIEW SECURITY LAST SEEN No users recorded yet.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Users",
+        "Users"
+      ],
+      "height": 720,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": true,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 720,
+      "tables": [
+        {
+          "headers": [
+            "USER",
+            "CHANNEL",
+            "INTERFACE",
+            "LAST TARGET",
+            "PREVIEW",
+            "SECURITY",
+            "LAST SEEN"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "USER CHANNEL INTERFACE LAST TARGET PREVIEW SECURITY LAST SEEN No users recorded yet."
+        }
+      ],
+      "title": "Users · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/users",
+      "width": 1280
+    }
+  },
+  {
+    "name": "06-providers",
+    "path": "artifacts/admin-audit-2026-06-03/06-providers.png",
+    "info": {
+      "alerts": [
+        "No runtime channels reported.",
+        "No DeepSeek balance snapshot yet.",
+        "No keys configured yet. Test key"
+      ],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER AI Providers DEVELOPMENT AI Providers Manage model providers, API keys, and provider-level capabilities separately from user-facing integrations. AI PROVIDER DeepSeek 0 active keys DeepSeek model API used for translation and analysis. Provider incident state Read-only diagnosis from existing safe metadata. Probe, change and danger actions stay below this section. KEYS CONFIGURED 0 total Inventory metadata only; raw key values and secret ids stay hidden. KEYS VALID No keys configured Last validation state from existing safe provider health metadata. KEYS ENABLED 0 active / 0 paused Keys currently allowed for runtime use versus paused/read-only rows. RUNTIME SEES CHANNELS Unknown Separates missing usable channels from degraded runtime with channels. RELOAD STATE No reload requested Whether saved key/settings changes are waiting for bot or worker runtime. BALANCE Unknown DeepSeek balance metadata only; not a paid billing ledger. SAFE FAILURE CATEGORIES Unknown Provider counters are separated from model-output safety blocks. FALLBACK CAPACITY Unknown Read-only capacity signal from existing runtime state. Provider health missing keys ACTIVE KEYS 0 DISABLED KEYS 0 LAST VALIDATION not checked LAST ERROR n/a Runtime status not reported RUNTIME SOURCE unknown RELOAD INTERVAL n/a LAST RELOAD n/a FRESHNESS not reporting RUNTIME ERROR n/a NO RELOAD REQUESTED n/a Processing summary Read-only diagnostics from existing DeepSeek runtime data. These values explain current processing state; they are not controls or production readiness guarantees. ACTIVE KEY CHANNELS Unknown Runtime has not reported how many configured channels are usable. ACTIVE REQUESTS Unknown Current provider requests are not available yet. AVAILABLE CAPACITY SLOTS Unknown Open request slots are not available yet. ADAPTIVE LIMIT Unknown The adaptive throttle limit is not available yet. COOLING/DEGRADED CHANNELS Unknown Channel health has not been reported by runtime. PROVIDER WARNING COUNTS Unknown Rate-limit, auth, billing, and timeout counts are not available yet. A",
+      "buttons": [
+        "Sign out",
+        "Reload now",
+        "Refresh balance",
+        "Test all active keys No active admin-managed keys are available to test.",
+        "Add key"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/runtime/reload",
+          "buttons": [
+            "Reload now"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Reload now"
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/balance/refresh",
+          "buttons": [
+            "Refresh balance"
+          ],
+          "idx": 2,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Refresh balance Open DeepSeek top-up"
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/keys/test-all",
+          "buttons": [
+            "Test all active keys No active admin-managed keys are available to test."
+          ],
+          "idx": 3,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Test all active keys No active admin-managed keys are available to test."
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/keys",
+          "buttons": [
+            "Add key"
+          ],
+          "idx": 4,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "main",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "value",
+              "placeholder": "Paste new value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            },
+            {
+              "name": "weight",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1"
+            },
+            {
+              "name": "max_parallel_requests",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1"
+            }
+          ],
+          "labels": [
+            "Label Owner-facing name, for example main or backup.",
+            "API key Pasted once, stored encrypted, then shown only masked.",
+            "Weight Relative share of new DeepSeek requests.",
+            "Max parallel requests Simultaneous requests allowed for this key."
+          ],
+          "method": "post",
+          "text": "Label Owner-facing name, for example main or backup. API key Pasted once, stored encrypted, then shown only masked. Weight Relative share of new DeepSeek requests. Max parallel requests Simultaneous requests allowed for this key. Add key"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "AI Providers",
+        "AI Providers",
+        "DeepSeek"
+      ],
+      "height": 720,
+      "links": [
+        {
+          "href": "https://platform.deepseek.com/usage",
+          "text": "Open DeepSeek top-up"
+        },
+        {
+          "href": "/admin/ai-providers/deepseek/keys",
+          "text": "Manage DeepSeek keys"
+        }
+      ],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": true,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 2824,
+      "tables": [],
+      "title": "AI Providers · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/ai-providers",
+      "width": 1280
+    }
+  },
+  {
+    "name": "07-provider-keys",
+    "path": "artifacts/admin-audit-2026-06-03/07-provider-keys.png",
+    "info": {
+      "alerts": [
+        "No DeepSeek keys are configured."
+      ],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER DeepSeek Keys DEVELOPMENT DeepSeek Keys Read the DeepSeek key inventory, adjust admin-managed key labels and capacity, and keep raw secret values hidden. Back to providers Test all active keys No active admin-managed keys are available to test. Reload DeepSeek runtime READY ADMIN KEYS 0 PAUSED ADMIN KEYS 0 READ-ONLY ENV KEYS 0 Field guide Ready admin keys encrypted keys added here and currently available for use Paused admin keys admin-managed keys kept on record but not used while paused Read-only env keys keys supplied by the server environment; shown only as masked metadata Weight relative share of new requests for this key; higher means more traffic Max parallel requests maximum simultaneous DeepSeek requests allowed for this key Add admin-managed key New values are stored encrypted. After saving, this page only shows a masked value. Label Owner-facing name, for example main or backup. API key Pasted once, stored encrypted, then shown only masked. Weight Relative share of new DeepSeek requests. Max parallel requests Simultaneous requests allowed for this key. Add key Key inventory Admin-managed rows are editable. Server environment rows are read-only and do not expose raw secrets or secret ids. No DeepSeek keys are configured.",
+      "buttons": [
+        "Sign out",
+        "Test all active keys No active admin-managed keys are available to test.",
+        "Reload DeepSeek runtime",
+        "Add key"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/keys/test-all",
+          "buttons": [
+            "Test all active keys No active admin-managed keys are available to test."
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Test all active keys No active admin-managed keys are available to test."
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/runtime/reload",
+          "buttons": [
+            "Reload DeepSeek runtime"
+          ],
+          "idx": 2,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Reload DeepSeek runtime"
+        },
+        {
+          "action": "/admin/ai-providers/deepseek/keys",
+          "buttons": [
+            "Add key"
+          ],
+          "idx": 3,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "main",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "value",
+              "placeholder": "Paste new value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            },
+            {
+              "name": "weight",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1"
+            },
+            {
+              "name": "max_parallel_requests",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1"
+            }
+          ],
+          "labels": [
+            "Label Owner-facing name, for example main or backup.",
+            "API key Pasted once, stored encrypted, then shown only masked.",
+            "Weight Relative share of new DeepSeek requests.",
+            "Max parallel requests Simultaneous requests allowed for this key."
+          ],
+          "method": "post",
+          "text": "Label Owner-facing name, for example main or backup. API key Pasted once, stored encrypted, then shown only masked. Weight Relative share of new DeepSeek requests. Max parallel requests Simultaneous requests allowed for this key. Add key"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "DeepSeek Keys",
+        "DeepSeek Keys",
+        "Field guide",
+        "Add admin-managed key",
+        "Key inventory"
+      ],
+      "height": 720,
+      "links": [
+        {
+          "href": "/admin/ai-providers",
+          "text": "Back to providers"
+        }
+      ],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": true,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1099,
+      "tables": [],
+      "title": "DeepSeek Keys · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/ai-providers/deepseek/keys",
+      "width": 1280
+    }
+  },
+  {
+    "name": "08-beta-controls",
+    "path": "artifacts/admin-audit-2026-06-03/08-beta-controls.png",
+    "info": {
+      "alerts": [
+        "No Telegram IDs are allowlisted."
+      ],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Beta Controls DEVELOPMENT Secret & Config Safety Review configured secrets, provider keys, failed validations, and items that need a local check. Closed Beta Allowlist Add trusted Telegram numeric user IDs now, then enable enforcement when the beta cohort is ready. Allowlist enforcement: off All Telegram users can use the bot while the list is off. Enable allowlist Telegram user ID Add ID No Telegram IDs are allowlisted. Beta Safety Controls Live budget guardrails for the closed beta. These values protect beta spend and can pause new translation starts without exposing document text. Pause all beta translations Global daily cost cap USD Global monthly cost cap USD Per-user daily cost cap USD Per-user monthly cost cap USD Per-user daily job limit Max estimated cost per job USD Budget warning fraction Save beta safety Total 7 Missing 7 Needs check 0 Failed 0 Disabled 0 Safety summary OWNER TYPE ITEM STATUS MASKED VALUE ACTION DeepSeek AI provider API key pool No provider keys are configured. missing not stored Open Discord Integration Discord bot token Required secret is not configured. missing not stored Open Instagram Integration Instagram access token Required secret is not configured. missing not stored Open Telegram Integration Telegram bot token Required secret is not configured. missing not stored Open Webhooks Integration Webhook signing secret Optional secret is not configured. missing not stored Open Website Widget Integration Widget signing secret Optional secret is not configured. missing not stored Open WhatsApp Integration WhatsApp access token Required secret is not configured. missing not stored Open",
+      "buttons": [
+        "Sign out",
+        "Enable allowlist",
+        "Add ID",
+        "Save beta safety"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/settings/beta-allowlist/toggle",
+          "buttons": [
+            "Enable allowlist"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "enabled",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "true"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Enable allowlist"
+        },
+        {
+          "action": "/admin/settings/beta-allowlist/add",
+          "buttons": [
+            "Add ID"
+          ],
+          "idx": 2,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "telegram_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Telegram user ID"
+          ],
+          "method": "post",
+          "text": "Telegram user ID Add ID"
+        },
+        {
+          "action": "/admin/settings/beta-safety",
+          "buttons": [
+            "Save beta safety"
+          ],
+          "idx": 3,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "BETA_TRANSLATIONS_PAUSED",
+              "placeholder": null,
+              "tag": "input",
+              "type": "checkbox",
+              "value": "true"
+            },
+            {
+              "name": "BETA_GLOBAL_DAILY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "5.0"
+            },
+            {
+              "name": "BETA_GLOBAL_MONTHLY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "50.0"
+            },
+            {
+              "name": "BETA_USER_DAILY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1.0"
+            },
+            {
+              "name": "BETA_USER_MONTHLY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "10.0"
+            },
+            {
+              "name": "BETA_USER_DAILY_JOB_LIMIT",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "3"
+            },
+            {
+              "name": "BETA_MAX_JOB_ESTIMATED_COST_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "2.0"
+            },
+            {
+              "name": "BETA_COST_WARNING_FRACTION",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "0.8"
+            }
+          ],
+          "labels": [
+            "Pause all beta translations",
+            "Global daily cost cap USD",
+            "Global monthly cost cap USD",
+            "Per-user daily cost cap USD",
+            "Per-user monthly cost cap USD",
+            "Per-user daily job limit",
+            "Max estimated cost per job USD",
+            "Budget warning fraction"
+          ],
+          "method": "post",
+          "text": "Pause all beta translations Global daily cost cap USD Global monthly cost cap USD Per-user daily cost cap USD Per-user monthly cost cap USD Per-user daily job limit Max estimated cost per job USD Budget warning fraction Save beta safety"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Beta Controls",
+        "Secret & Config Safety",
+        "Closed Beta Allowlist",
+        "Beta Safety Controls",
+        "Safety summary"
+      ],
+      "height": 720,
+      "links": [
+        {
+          "href": "/admin/ai-providers",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        }
+      ],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": true,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1523,
+      "tables": [
+        {
+          "headers": [
+            "OWNER",
+            "TYPE",
+            "ITEM",
+            "STATUS",
+            "MASKED VALUE",
+            "ACTION"
+          ],
+          "idx": 0,
+          "rows": 7,
+          "sample": "OWNER TYPE ITEM STATUS MASKED VALUE ACTION DeepSeek AI provider API key pool No provider keys are configured. missing not stored Open Discord Integration Discord bot token Required secret is not configured. missing not stored Open Instagram Integration Instagram access token Required secret is not configured. missing not stored Open Telegram Integration Telegram bot token Required secret is not configured. missing not stored Open Webhooks Integration Webhook signing secret Optional secret is not configured. missing not stored Open Website Widget Integration Widget signing secret Optional secre"
+        }
+      ],
+      "title": "Beta Controls · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/beta-controls",
+      "width": 1280
+    }
+  },
+  {
+    "name": "09-safety-upload",
+    "path": "artifacts/admin-audit-2026-06-03/09-safety-upload.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Sign out SIGNED IN AS BOOTSTRAP-OWNER Upload Safety DEVELOPMENT Upload Safety Metadata-only scanner and upload-safety ledger status for accepted, blocked, and failed-closed uploads. SCANNER HEALTH unknown SIGNATURE DB AGE n/a SCANNED 0 ACCEPTED 0 BLOCKED 0 FAILED CLOSED 0 ACCESS VIOLATIONS 0 TOP REASONS n/a Final action AV verdict Container verdict Reason Channel user Format From To Apply filters TIME USER FILE / JOB FORMAT SIZE AV CONTAINER REASON ACTION ACCESS No upload safety records found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/upload-safety",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "final_action",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "av_verdict",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "container_verdict",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "reason_code",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "channel_user_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "declared_format",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Final action",
+            "AV verdict",
+            "Container verdict",
+            "Reason",
+            "Channel user",
+            "Format",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "Final action AV verdict Container verdict Reason Channel user Format From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Upload Safety",
+        "Upload Safety"
+      ],
+      "height": 720,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": true,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 760,
+      "tables": [
+        {
+          "headers": [
+            "TIME",
+            "USER",
+            "FILE / JOB",
+            "FORMAT",
+            "SIZE",
+            "AV",
+            "CONTAINER",
+            "REASON",
+            "ACTION",
+            "ACCESS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "TIME USER FILE / JOB FORMAT SIZE AV CONTAINER REASON ACTION ACCESS No upload safety records found."
+        }
+      ],
+      "title": "Upload Safety · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/upload-safety",
+      "width": 1280
+    }
+  },
+  {
+    "name": "10-settings",
+    "path": "artifacts/admin-audit-2026-06-03/10-settings.png",
+    "info": {
+      "alerts": [
+        "No Telegram IDs are allowlisted."
+      ],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced SIGNED IN AS BOOTSTRAP-OWNER Settings DEVELOPMENT Secret & Config Safety Review configured secrets, provider keys, failed validations, and items that need a local check. Closed Beta Allowlist Add trusted Telegram numeric user IDs now, then enable enforcement when the beta cohort is ready. Allowlist enforcement: off All Telegram users can use the bot while the list is off. Enable allowlist Telegram user ID Add ID No Telegram IDs are allowlisted. Beta Safety Controls Live budget guardrails for the closed beta. These values protect beta spend and can pause new translation starts without exposing document text. Pause all beta translations Global daily cost cap USD Global monthly cost cap USD Per-user daily cost cap USD Per-user monthly cost cap USD Per-user daily job limit Max estimated cost per job USD Budget warning fraction Save beta safety Total 7 Missing 7 Needs check 0 Failed 0 Disabled 0 Safety summary OWNER TYPE ITEM STATUS MASKED VALUE ACTION DeepSeek AI provider API key pool No provider keys are configured. missing not stored Open Discord Integration Discord bot token Required secret is not configured. missing not stored Open Instagram Integration Instagram access token Required secret is not configured. missing not stored Open Telegram Integration Telegram bot token Required secret is not configured. missing not stored Open Webhooks Integration Webhook signing secret Optional secret is not configured. missing not stored Open Website Widget Integration Widget signing secret Optional secret is not configured. missing not stored Open WhatsApp Integration WhatsApp access token Required secret is not configured. missing not stored Open",
+      "buttons": [
+        "Sign out",
+        "Enable allowlist",
+        "Add ID",
+        "Save beta safety"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/settings/beta-allowlist/toggle",
+          "buttons": [
+            "Enable allowlist"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "enabled",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "true"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Enable allowlist"
+        },
+        {
+          "action": "/admin/settings/beta-allowlist/add",
+          "buttons": [
+            "Add ID"
+          ],
+          "idx": 2,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "telegram_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Telegram user ID"
+          ],
+          "method": "post",
+          "text": "Telegram user ID Add ID"
+        },
+        {
+          "action": "/admin/settings/beta-safety",
+          "buttons": [
+            "Save beta safety"
+          ],
+          "idx": 3,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "BETA_TRANSLATIONS_PAUSED",
+              "placeholder": null,
+              "tag": "input",
+              "type": "checkbox",
+              "value": "true"
+            },
+            {
+              "name": "BETA_GLOBAL_DAILY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "5.0"
+            },
+            {
+              "name": "BETA_GLOBAL_MONTHLY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "50.0"
+            },
+            {
+              "name": "BETA_USER_DAILY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "1.0"
+            },
+            {
+              "name": "BETA_USER_MONTHLY_COST_CAP_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "10.0"
+            },
+            {
+              "name": "BETA_USER_DAILY_JOB_LIMIT",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "3"
+            },
+            {
+              "name": "BETA_MAX_JOB_ESTIMATED_COST_USD",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "2.0"
+            },
+            {
+              "name": "BETA_COST_WARNING_FRACTION",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "0.8"
+            }
+          ],
+          "labels": [
+            "Pause all beta translations",
+            "Global daily cost cap USD",
+            "Global monthly cost cap USD",
+            "Per-user daily cost cap USD",
+            "Per-user monthly cost cap USD",
+            "Per-user daily job limit",
+            "Max estimated cost per job USD",
+            "Budget warning fraction"
+          ],
+          "method": "post",
+          "text": "Pause all beta translations Global daily cost cap USD Global monthly cost cap USD Per-user daily cost cap USD Per-user monthly cost cap USD Per-user daily job limit Max estimated cost per job USD Budget warning fraction Save beta safety"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Settings",
+        "Secret & Config Safety",
+        "Closed Beta Allowlist",
+        "Beta Safety Controls",
+        "Safety summary"
+      ],
+      "height": 970,
+      "links": [
+        {
+          "href": "/admin/ai-providers",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        },
+        {
+          "href": "/admin/integrations",
+          "text": "Open"
+        }
+      ],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": true,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 2129,
+      "tables": [
+        {
+          "headers": [
+            "OWNER",
+            "TYPE",
+            "ITEM",
+            "STATUS",
+            "MASKED VALUE",
+            "ACTION"
+          ],
+          "idx": 0,
+          "rows": 7,
+          "sample": "OWNER TYPE ITEM STATUS MASKED VALUE ACTION DeepSeek AI provider API key pool No provider keys are configured. missing not stored Open Discord Integration Discord bot token Required secret is not configured. missing not stored Open Instagram Integration Instagram access token Required secret is not configured. missing not stored Open Telegram Integration Telegram bot token Required secret is not configured. missing not stored Open Webhooks Integration Webhook signing secret Optional secret is not configured. missing not stored Open Website Widget Integration Widget signing secret Optional secre"
+        }
+      ],
+      "title": "Settings · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/settings",
+      "width": 599
+    }
+  },
+  {
+    "name": "11-logs",
+    "path": "artifacts/admin-audit-2026-06-03/11-logs.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Translation Logs DEVELOPMENT Translation Logs Review translation runs by date, state, file, language direction, token usage, and safe error metadata. Status All Running Ready Failed Cancelled Partial From To Apply filters STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/logs",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "status",
+              "placeholder": null,
+              "tag": "select",
+              "type": null,
+              "value": "all"
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Status All Running Ready Failed Cancelled Partial",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "Status All Running Ready Failed Cancelled Partial From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Translation Logs",
+        "Translation Logs"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": true,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1211,
+      "tables": [
+        {
+          "headers": [
+            "STARTED",
+            "STATUS",
+            "JOB",
+            "FILE",
+            "DIRECTION",
+            "FRAGMENTS",
+            "TOKENS",
+            "ERROR",
+            "ACTIONS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found."
+        }
+      ],
+      "title": "Translation Logs · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/logs",
+      "width": 599
+    }
+  },
+  {
+    "name": "12-reader",
+    "path": "artifacts/admin-audit-2026-06-03/12-reader.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Internal Reader DEVELOPMENT Internal Reader Generate owner-only before/after reports for approved local TXT/DOCX/EPUB fixtures. Raw text visibility is enabled for this internal reader only. Reports may show source document text and translated output. Keep them out of issues, PRs, safe log archives, screenshots and support notes unless the owner explicitly approves that exact excerpt. Sample fixture Manual path test_samples/docx_translation_bot_stress_test_v3_en.ru.docx test_samples/russian_profile_regression.en-ru.docx test_samples/russian_profile_regression.en-ru.epub test_samples/russian_profile_regression.en-ru.txt test_samples/sample_book.en.docx test_samples/sample_book.en.epub test_samples/sample_book.en.txt test_samples/ukrainian_profile_regression.en-uk.docx test_samples/ukrainian_profile_regression.en-uk.epub test_samples/ukrainian_profile_regression.en-uk.txt Pick a repository sample, or leave this on Manual path and enter an approved local file below. Source path Translation mapping JSON path Optional JSON object mapping source_block_id to translated text. Format Auto TXT DOCX EPUB Max fragment chars Open reader",
+      "buttons": [
+        "Sign out",
+        "Open reader"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/internal-reader/preview",
+          "buttons": [
+            "Open reader"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "source_select",
+              "placeholder": null,
+              "tag": "select",
+              "type": null,
+              "value": ""
+            },
+            {
+              "name": "source",
+              "placeholder": "test_samples/sample_book.en.epub",
+              "tag": "input",
+              "type": null,
+              "value": ""
+            },
+            {
+              "name": "mapping",
+              "placeholder": "/tmp/reader-demo-translations.json",
+              "tag": "input",
+              "type": null,
+              "value": ""
+            },
+            {
+              "name": "format",
+              "placeholder": null,
+              "tag": "select",
+              "type": null,
+              "value": "auto"
+            },
+            {
+              "name": "max_fragment_chars",
+              "placeholder": null,
+              "tag": "input",
+              "type": "number",
+              "value": "5000"
+            }
+          ],
+          "labels": [
+            "Sample fixture Manual path test_samples/docx_translation_bot_stress_test_v3_en.ru.docx test_samples/russian_profile_regression.en-ru.docx test_samples/russian_profile_regression.en-ru.epub test_samples/russian_profile_regression.en-ru.txt test_samples/sample_book.en.docx test_samples/sample_book.en.epub test_samples/sample_book.en.txt test_samples/ukrainian_profile_regression.en-uk.docx test_samples/ukrainian_profile_regression.en-uk.epub test_samples/ukrainian_profile_regression.en-uk.txt Pick a repository sample, or leave this on Manual path and enter an approved local file below.",
+            "Source path",
+            "Translation mapping JSON path Optional JSON object mapping source_block_id to translated text.",
+            "Format Auto TXT DOCX EPUB",
+            "Max fragment chars"
+          ],
+          "method": "get",
+          "text": "Sample fixture Manual path test_samples/docx_translation_bot_stress_test_v3_en.ru.docx test_samples/russian_profile_regression.en-ru.docx test_samples/russian_profile_regression.en-ru.epub test_samples/russian_profile_regression.en-ru.txt test_samples/sample_book.en.docx test_samples/sample_book.en.epub test_samples/sample_book.en.txt test_samples/ukrainian_profile_regression.en-uk.docx test_samples/ukrainian_profile_regression.en-uk.epub test_samples/ukrainian_profile_regression.en-uk.txt Pick "
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Internal Reader",
+        "Internal Reader",
+        "Raw text visibility is enabled for this internal reader only."
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": true,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1654,
+      "tables": [],
+      "title": "Internal Reader · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/internal-reader",
+      "width": 599
+    }
+  },
+  {
+    "name": "13-activity",
+    "path": "artifacts/admin-audit-2026-06-03/13-activity.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Activity DEVELOPMENT Activity User commands, buttons, settings, translation lifecycle events, and security outcomes collected automatically by the service. User Channel user Surface Event Action Outcome Job From To Apply filters TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No activity events found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/activity",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "actor_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "channel_user_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "surface",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "event_type",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "action",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "outcome",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "job_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "User",
+            "Channel user",
+            "Surface",
+            "Event",
+            "Action",
+            "Outcome",
+            "Job",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "User Channel user Surface Event Action Outcome Job From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Activity",
+        "Activity"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": true,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1373,
+      "tables": [
+        {
+          "headers": [
+            "TIME",
+            "USER",
+            "SURFACE",
+            "EVENT",
+            "TARGET",
+            "OUTCOME",
+            "JOB",
+            "METADATA"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No activity events found."
+        }
+      ],
+      "title": "Activity · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/activity",
+      "width": 599
+    }
+  },
+  {
+    "name": "14-operations",
+    "path": "artifacts/admin-audit-2026-06-03/14-operations.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Operations DEVELOPMENT Queued 0 Running 0 Failed 0 Queue depth 0 Oldest pending n/a Jobs STATE JOB ID ORDER ID STARTED/UPDATED FRAGMENTS TOTAL TOKENS WORKER IDS ERROR LOGS ACTIONS No persistent jobs found. Workers 0 workers are currently visible to the admin console.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Operations",
+        "Jobs",
+        "Workers"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": true,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1307,
+      "tables": [
+        {
+          "headers": [
+            "STATE",
+            "JOB ID",
+            "ORDER ID",
+            "STARTED/UPDATED",
+            "FRAGMENTS",
+            "TOTAL TOKENS",
+            "WORKER IDS",
+            "ERROR",
+            "LOGS",
+            "ACTIONS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STATE JOB ID ORDER ID STARTED/UPDATED FRAGMENTS TOTAL TOKENS WORKER IDS ERROR LOGS ACTIONS No persistent jobs found."
+        }
+      ],
+      "title": "Operations · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/operations/jobs",
+      "width": 599
+    }
+  },
+  {
+    "name": "15-audit",
+    "path": "artifacts/admin-audit-2026-06-03/15-audit.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Audit DEVELOPMENT Audit Every sensitive admin change will be visible here with actor, outcome, reason, and redacted metadata.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Audit",
+        "Audit"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": true,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 970,
+      "tables": [],
+      "title": "Audit · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/audit",
+      "width": 599
+    }
+  },
+  {
+    "name": "16-integrations",
+    "path": "artifacts/admin-audit-2026-06-03/16-integrations.png",
+    "info": {
+      "alerts": [
+        "No connections configured yet.",
+        "No connections configured yet.",
+        "No connections configured yet.",
+        "No connections configured yet.",
+        "No connections configured yet.",
+        "No connections configured yet."
+      ],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Integrations DEVELOPMENT Integrations Connect user-facing channels, embedded surfaces, webhooks, and external automation. MESSENGER BOT CHANNEL Telegram 0 active connections MESSENGER BOT CHANNEL WhatsApp 0 active connections MESSENGER BOT CHANNEL Instagram 0 active connections MESSENGER BOT CHANNEL Discord 0 active connections WEBSITE WIDGET Website Widget 0 active connections WEBHOOK Webhooks 0 active connections",
+      "buttons": [
+        "Sign out",
+        "Add connection",
+        "Add connection",
+        "Add connection",
+        "Add connection",
+        "Add connection",
+        "Add connection"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/integrations/telegram/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:telegram.bot_token",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "Telegram bot token"
+          ],
+          "method": "post",
+          "text": "Connection name Telegram bot token Add connection"
+        },
+        {
+          "action": "/admin/integrations/whatsapp/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 2,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:whatsapp.access_token",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "WhatsApp access token"
+          ],
+          "method": "post",
+          "text": "Connection name WhatsApp access token Add connection"
+        },
+        {
+          "action": "/admin/integrations/instagram/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 3,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:instagram.access_token",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "Instagram access token"
+          ],
+          "method": "post",
+          "text": "Connection name Instagram access token Add connection"
+        },
+        {
+          "action": "/admin/integrations/discord/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 4,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:discord.bot_token",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "Discord bot token"
+          ],
+          "method": "post",
+          "text": "Connection name Discord bot token Add connection"
+        },
+        {
+          "action": "/admin/integrations/website_widget/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 5,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:website_widget.signing_secret",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "Widget signing secret"
+          ],
+          "method": "post",
+          "text": "Connection name Widget signing secret Add connection"
+        },
+        {
+          "action": "/admin/integrations/webhooks/connections",
+          "buttons": [
+            "Add connection"
+          ],
+          "idx": 6,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            },
+            {
+              "name": "label",
+              "placeholder": "stable",
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "secret:webhooks.signing_secret",
+              "placeholder": "Paste secret value",
+              "tag": "input",
+              "type": "password",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Connection name",
+            "Webhook signing secret"
+          ],
+          "method": "post",
+          "text": "Connection name Webhook signing secret Add connection"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Integrations",
+        "Integrations"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": true,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1780,
+      "tables": [],
+      "title": "Integrations · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/integrations",
+      "width": 599
+    }
+  },
+  {
+    "name": "17-billing",
+    "path": "artifacts/admin-audit-2026-06-03/17-billing.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Billing DEVELOPMENT Billing Payment providers, subscriptions, invoices, revenue, refunds, webhooks, tax settings, and payout status will live here. Payment providers Stripe and other billing services will be configured inside Billing.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Billing",
+        "Billing",
+        "Payment providers"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": true,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1032,
+      "tables": [],
+      "title": "Billing · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/billing",
+      "width": 599
+    }
+  },
+  {
+    "name": "18-costs",
+    "path": "artifacts/admin-audit-2026-06-03/18-costs.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Costs DEVELOPMENT Token Spend Estimated model costs from translation run totals. Billing setup stays separate from this usage view. Today 0 $0.0000 Last 7 days 0 $0.0000 Month to date 0 $0.0000 Most expensive runs STARTED JOB ORDER USER FILE INPUT OUTPUT TOTAL COST LOGS No cost data found. Beta safety budget DAILY CAP $5.0000 DAILY RESERVED $0.0000 DAILY CONSUMED $0.0000 DAILY REMAINING $5.0000 MONTHLY CAP $50.0000 MONTHLY RESERVED $0.0000 MONTHLY CONSUMED $0.0000 MONTHLY REMAINING $50.0000 TRANSLATIONS PAUSED no WARNING no Top users (all time) USER INPUT OUTPUT TOTAL TOKENS COST No user spend data found.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Costs",
+        "Token Spend",
+        "Most expensive runs",
+        "Beta safety budget",
+        "Top users (all time)"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": true,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1833,
+      "tables": [
+        {
+          "headers": [
+            "STARTED",
+            "JOB",
+            "ORDER",
+            "USER",
+            "FILE",
+            "INPUT",
+            "OUTPUT",
+            "TOTAL",
+            "COST",
+            "LOGS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STARTED JOB ORDER USER FILE INPUT OUTPUT TOTAL COST LOGS No cost data found."
+        },
+        {
+          "headers": [
+            "USER",
+            "INPUT",
+            "OUTPUT",
+            "TOTAL TOKENS",
+            "COST"
+          ],
+          "idx": 1,
+          "rows": 1,
+          "sample": "USER INPUT OUTPUT TOTAL TOKENS COST No user spend data found."
+        }
+      ],
+      "title": "Costs · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/costs",
+      "width": 599
+    }
+  },
+  {
+    "name": "19-quality",
+    "path": "artifacts/admin-audit-2026-06-03/19-quality.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Quality DEVELOPMENT Translation Quality METEOR core and chrF scores for the latest offline QA run. Candidate, source, and reference text stay out of the admin UI. var/quality-runs/latest.jsonl Run quality check Avg METEOR n/a Avg chrF n/a Scored 0 Missing 10 Extra 0 No quality run found Put model QA outputs in var/quality-runs/latest.jsonl to compare candidates against the reference regression corpus. Russian (ru) AVG METEOR n/a AVG CHRF n/a SCORED 0 MISSING 6 SAMPLE CATEGORY DIRECTION METEOR CHRF STATUS ERROR ru-business-acme-obligation business_legal en -> ru n/a n/a missing ru-literary-rain-window literary en -> ru n/a n/a missing ru-ordinary-calque-decision-overview ordinary_prose en -> ru n/a n/a missing ru-technical-api-placeholder-callback technical en -> ru n/a n/a missing ru-pl-orthography-sample mixed_language pl -> ru n/a n/a missing ru-uk-literary-door literary uk -> ru n/a n/a missing Ukrainian (uk) AVG METEOR n/a AVG CHRF n/a SCORED 0 MISSING 4 SAMPLE CATEGORY DIRECTION METEOR CHRF STATUS ERROR uk-literary-rain-window literary en -> uk n/a n/a missing uk-ordinary-calque-decision-overview ordinary_prose en -> uk n/a n/a missing uk-technical-api-placeholder-callback technical en -> uk n/a n/a missing uk-ru-calque-participation-duration russian_calque ru -> uk n/a n/a missing",
+      "buttons": [
+        "Sign out",
+        "Run quality check"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/quality/run",
+          "buttons": [
+            "Run quality check"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Run quality check"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Quality",
+        "Translation Quality",
+        "No quality run found",
+        "Russian (ru)",
+        "Ukrainian (uk)"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": true,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 2345,
+      "tables": [
+        {
+          "headers": [
+            "SAMPLE",
+            "CATEGORY",
+            "DIRECTION",
+            "METEOR",
+            "CHRF",
+            "STATUS",
+            "ERROR"
+          ],
+          "idx": 0,
+          "rows": 6,
+          "sample": "SAMPLE CATEGORY DIRECTION METEOR CHRF STATUS ERROR ru-business-acme-obligation business_legal en -> ru n/a n/a missing ru-literary-rain-window literary en -> ru n/a n/a missing ru-ordinary-calque-decision-overview ordinary_prose en -> ru n/a n/a missing ru-technical-api-placeholder-callback technical en -> ru n/a n/a missing ru-pl-orthography-sample mixed_language pl -> ru n/a n/a missing ru-uk-literary-door literary uk -> ru n/a n/a missing"
+        },
+        {
+          "headers": [
+            "SAMPLE",
+            "CATEGORY",
+            "DIRECTION",
+            "METEOR",
+            "CHRF",
+            "STATUS",
+            "ERROR"
+          ],
+          "idx": 1,
+          "rows": 4,
+          "sample": "SAMPLE CATEGORY DIRECTION METEOR CHRF STATUS ERROR uk-literary-rain-window literary en -> uk n/a n/a missing uk-ordinary-calque-decision-overview ordinary_prose en -> uk n/a n/a missing uk-technical-api-placeholder-callback technical en -> uk n/a n/a missing uk-ru-calque-participation-duration russian_calque ru -> uk n/a n/a missing"
+        }
+      ],
+      "title": "Quality · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/quality",
+      "width": 599
+    }
+  },
+  {
+    "name": "20-security-events",
+    "path": "artifacts/admin-audit-2026-06-03/20-security-events.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Security DEVELOPMENT Security Blocked actions, cooldowns, policy trips, and suspicious service behavior from the shared activity log. TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No security events recorded yet.",
+      "buttons": [
+        "Sign out"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Security",
+        "Security"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": true,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1028,
+      "tables": [
+        {
+          "headers": [
+            "TIME",
+            "USER",
+            "SURFACE",
+            "EVENT",
+            "TARGET",
+            "OUTCOME",
+            "JOB",
+            "METADATA"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No security events recorded yet."
+        }
+      ],
+      "title": "Security · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/security/events",
+      "width": 599
+    }
+  },
+  {
+    "name": "21-translations-filter-error",
+    "path": "artifacts/admin-audit-2026-06-03/21-translations-filter-error.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced SIGNED IN AS BOOTSTRAP-OWNER Translations DEVELOPMENT Translations Review translation runs by date, state, file, language direction, token usage, and safe error metadata. Status All Running Ready Failed Cancelled Partial From To Apply filters STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/translations",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "status",
+              "placeholder": null,
+              "tag": "select",
+              "type": null,
+              "value": "failed"
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Status All Running Ready Failed Cancelled Partial",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "Status All Running Ready Failed Cancelled Partial From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Translations",
+        "Translations"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": true,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 970,
+      "tables": [
+        {
+          "headers": [
+            "STARTED",
+            "STATUS",
+            "JOB",
+            "FILE",
+            "DIRECTION",
+            "FRAGMENTS",
+            "TOKENS",
+            "ERROR",
+            "ACTIONS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "STARTED STATUS JOB FILE DIRECTION FRAGMENTS TOKENS ERROR ACTIONS No translation logs found."
+        }
+      ],
+      "title": "Translations · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/translations?status=failed&user_id=bad-user&limit=1",
+      "width": 599
+    }
+  },
+  {
+    "name": "22-activity-filter",
+    "path": "artifacts/admin-audit-2026-06-03/22-activity-filter.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced Logs Reader Activity Operations Audit Integrations Billing Costs Quality Security Events SIGNED IN AS BOOTSTRAP-OWNER Activity DEVELOPMENT Activity User commands, buttons, settings, translation lifecycle events, and security outcomes collected automatically by the service. User Channel user Surface Event Action Outcome Job From To Apply filters TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No activity events found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/activity",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "actor_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "channel_user_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "surface",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "event_type",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": "translation"
+            },
+            {
+              "name": "action",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "outcome",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "job_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "User",
+            "Channel user",
+            "Surface",
+            "Event",
+            "Action",
+            "Outcome",
+            "Job",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "User Channel user Surface Event Action Outcome Job From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Activity",
+        "Activity"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": false,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": true,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1373,
+      "tables": [
+        {
+          "headers": [
+            "TIME",
+            "USER",
+            "SURFACE",
+            "EVENT",
+            "TARGET",
+            "OUTCOME",
+            "JOB",
+            "METADATA"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "TIME USER SURFACE EVENT TARGET OUTCOME JOB METADATA No activity events found."
+        }
+      ],
+      "title": "Activity · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/activity?event_type=translation&user_id=123&limit=5",
+      "width": 599
+    }
+  },
+  {
+    "name": "23-upload-safety-filter",
+    "path": "artifacts/admin-audit-2026-06-03/23-upload-safety-filter.png",
+    "info": {
+      "alerts": [],
+      "bodyStart": "FOLIOLOOM Admin Console Overview Live Translations Users Providers Beta Controls Safety Settings Advanced SIGNED IN AS BOOTSTRAP-OWNER Upload Safety DEVELOPMENT Upload Safety Metadata-only scanner and upload-safety ledger status for accepted, blocked, and failed-closed uploads. SCANNER HEALTH unknown SIGNATURE DB AGE n/a SCANNED 0 ACCEPTED 0 BLOCKED 0 FAILED CLOSED 0 ACCESS VIOLATIONS 0 TOP REASONS n/a Final action AV verdict Container verdict Reason Channel user Format From To Apply filters TIME USER FILE / JOB FORMAT SIZE AV CONTAINER REASON ACTION ACCESS No upload safety records found.",
+      "buttons": [
+        "Sign out",
+        "Apply filters"
+      ],
+      "forms": [
+        {
+          "action": "/admin/logout",
+          "buttons": [
+            "Sign out"
+          ],
+          "idx": 0,
+          "inputs": [
+            {
+              "name": "csrf_token",
+              "placeholder": null,
+              "tag": "input",
+              "type": "hidden",
+              "value": "[redacted-csrf-token]"
+            }
+          ],
+          "labels": [],
+          "method": "post",
+          "text": "Sign out"
+        },
+        {
+          "action": "/admin/upload-safety",
+          "buttons": [
+            "Apply filters"
+          ],
+          "idx": 1,
+          "inputs": [
+            {
+              "name": "final_action",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "av_verdict",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "container_verdict",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "reason_code",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "channel_user_id",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "declared_format",
+              "placeholder": null,
+              "tag": "input",
+              "type": "text",
+              "value": ""
+            },
+            {
+              "name": "date_from",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            },
+            {
+              "name": "date_to",
+              "placeholder": null,
+              "tag": "input",
+              "type": "date",
+              "value": ""
+            }
+          ],
+          "labels": [
+            "Final action",
+            "AV verdict",
+            "Container verdict",
+            "Reason",
+            "Channel user",
+            "Format",
+            "From",
+            "To"
+          ],
+          "method": "get",
+          "text": "Final action AV verdict Container verdict Reason Channel user Format From To Apply filters"
+        }
+      ],
+      "headings": [
+        "Admin Console",
+        "Upload Safety",
+        "Upload Safety"
+      ],
+      "height": 970,
+      "links": [],
+      "nav": [
+        {
+          "active": false,
+          "href": "/admin/overview",
+          "text": "Overview"
+        },
+        {
+          "active": false,
+          "href": "/admin/live",
+          "text": "Live"
+        },
+        {
+          "active": false,
+          "href": "/admin/translations",
+          "text": "Translations"
+        },
+        {
+          "active": false,
+          "href": "/admin/users",
+          "text": "Users"
+        },
+        {
+          "active": false,
+          "href": "/admin/ai-providers",
+          "text": "Providers"
+        },
+        {
+          "active": false,
+          "href": "/admin/beta-controls",
+          "text": "Beta Controls"
+        },
+        {
+          "active": true,
+          "href": "/admin/upload-safety",
+          "text": "Safety"
+        },
+        {
+          "active": false,
+          "href": "/admin/settings",
+          "text": "Settings"
+        },
+        {
+          "active": false,
+          "href": "/admin/logs",
+          "text": "Logs"
+        },
+        {
+          "active": false,
+          "href": "/admin/internal-reader",
+          "text": "Reader"
+        },
+        {
+          "active": false,
+          "href": "/admin/activity",
+          "text": "Activity"
+        },
+        {
+          "active": false,
+          "href": "/admin/operations/jobs",
+          "text": "Operations"
+        },
+        {
+          "active": false,
+          "href": "/admin/audit",
+          "text": "Audit"
+        },
+        {
+          "active": false,
+          "href": "/admin/integrations",
+          "text": "Integrations"
+        },
+        {
+          "active": false,
+          "href": "/admin/billing",
+          "text": "Billing"
+        },
+        {
+          "active": false,
+          "href": "/admin/costs",
+          "text": "Costs"
+        },
+        {
+          "active": false,
+          "href": "/admin/quality",
+          "text": "Quality"
+        },
+        {
+          "active": false,
+          "href": "/admin/security/events",
+          "text": "Security Events"
+        }
+      ],
+      "scrollHeight": 1295,
+      "tables": [
+        {
+          "headers": [
+            "TIME",
+            "USER",
+            "FILE / JOB",
+            "FORMAT",
+            "SIZE",
+            "AV",
+            "CONTAINER",
+            "REASON",
+            "ACTION",
+            "ACCESS"
+          ],
+          "idx": 0,
+          "rows": 1,
+          "sample": "TIME USER FILE / JOB FORMAT SIZE AV CONTAINER REASON ACTION ACCESS No upload safety records found."
+        }
+      ],
+      "title": "Upload Safety · FolioLoom Console",
+      "url": "http://127.0.0.1:62063/admin/upload-safety?verdict=infected&status=blocked&user_id=123",
+      "width": 599
+    }
+  }
+]
