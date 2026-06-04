@@ -165,6 +165,9 @@ Confirmed facts:
   read, edited or printed by agents.
 - Retention/TTL policy is proposed in docs, but Gate B TTL cleanup remains
   unchecked.
+- Owner approved current/pre-release internal use of all uploaded files for
+  analytics and product improvement on 2026-06-02. Release-version analytics
+  file-use and consent behavior remains TBD and is tracked in issue #207.
 
 Checklist:
 
@@ -184,6 +187,8 @@ Checklist:
 - [ ] Access controls reviewed, if applicable.
 - [ ] Destructive operations reviewed and approved by human owner.
 - [ ] Retention or user-data behavior changes have explicit human approval.
+- [ ] Release-version analytics file-use and consent policy is decided or
+  explicitly deferred by the owner before any public/legal/privacy claims.
 
 ## 7. Security readiness
 

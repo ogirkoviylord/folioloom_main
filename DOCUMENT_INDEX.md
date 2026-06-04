@@ -86,6 +86,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   report, issue #191 sandboxed XHTML chapter preview and issue #193 limited
   CSS/raster resource inlining before any book-like reader dependency, and
   keeping EPUBCheck as validation/reference only.
+- `docs/superpowers/specs/book-manuscript-translation-mvp.md` - proposed MVP
+  contract for issue #165. It fixes the first `book_manuscript` bar as
+  structure preservation plus clean translation across TXT/DOCX/EPUB, records
+  future terminology/glossary/analytics/new-format/quality issues and does not
+  claim Gate B or release readiness.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
