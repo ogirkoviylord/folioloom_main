@@ -23,6 +23,11 @@ from translator_service.protected_text import (
     protect_text,
     restore_protected_text,
 )
+from translator_service.provider_failure_diagnostics import (
+    ProviderFailureDiagnostic,
+    build_provider_failure_diagnostic,
+    provider_diagnostic_is_actionable,
+)
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.scheduler import (
@@ -488,20 +493,27 @@ def run_next_scheduled_stored_text_work_unit(
             translator=translator,
             job_context=job_context,
         )
-    except Exception:
+    except Exception as error:
+        provider_failure_diagnostic = _provider_failure_diagnostic_for_error(
+            error,
+            translator=translator,
+        )
         logger.error(
             "Scheduled worker failed safely: job_id=%s work_unit_id=%s error=%s",
             claim.job_id,
             claim.work_unit_id,
-            _safe_retryable_provider_error_message(),
+            _safe_provider_failure_error_message(provider_failure_diagnostic),
         )
         return _fail_claimed_work_unit_or_ignore_stale(
             store=store,
             claim=claim,
             failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-            error_message=_safe_retryable_provider_error_message(),
+            error_message=_safe_provider_failure_error_message(
+                provider_failure_diagnostic
+            ),
             retry_base_delay_seconds=retry_base_delay_seconds,
             retry_max_delay_seconds=retry_max_delay_seconds,
+            provider_failure_diagnostic=provider_failure_diagnostic,
         )
 
     try:
@@ -568,6 +580,7 @@ def _fail_claimed_work_unit_or_ignore_stale(
     error_message: str,
     retry_base_delay_seconds: int,
     retry_max_delay_seconds: int,
+    provider_failure_diagnostic: ProviderFailureDiagnostic | None = None,
 ) -> PersistentWorkUnit | None:
     try:
         return store.fail_claimed_work_unit(
@@ -577,6 +590,7 @@ def _fail_claimed_work_unit_or_ignore_stale(
             error_message=error_message,
             retry_base_delay_seconds=retry_base_delay_seconds,
             retry_max_delay_seconds=retry_max_delay_seconds,
+            provider_failure_diagnostic=provider_failure_diagnostic,
         )
     except ValueError as error:
         if _is_stale_work_unit_claim(error):
@@ -592,6 +606,29 @@ def _fail_claimed_work_unit_or_ignore_stale(
 
 def _safe_retryable_provider_error_message() -> str:
     return "retryable provider failure"
+
+
+def _safe_provider_failure_error_message(
+    diagnostic: ProviderFailureDiagnostic | None,
+) -> str:
+    if diagnostic is None:
+        return _safe_retryable_provider_error_message()
+    return f"provider failure: {diagnostic.failure_category.value}"
+
+
+def _provider_failure_diagnostic_for_error(
+    error: BaseException,
+    *,
+    translator: object,
+) -> ProviderFailureDiagnostic | None:
+    diagnostic = build_provider_failure_diagnostic(
+        error,
+        translator=translator,
+        provider_id="deepseek",
+    )
+    if not provider_diagnostic_is_actionable(diagnostic, error):
+        return None
+    return diagnostic
 
 
 def _is_successful_completed_work_unit(work_unit: PersistentWorkUnit) -> bool:

@@ -104,6 +104,21 @@ class TranslationRunFragmentDetail:
 
 
 @dataclass(frozen=True)
+class TranslationProviderFailureAttempt:
+    attempt_number: int
+    status: str
+    failure_category: str
+    provider_id: str
+    http_status_bucket: str | None = None
+    retry_after_seconds: int | None = None
+    latency_ms: float | None = None
+    terminal_reason: str | None = None
+    channel_fingerprint: str | None = None
+    channel_health: str | None = None
+    circuit_state: str | None = None
+
+
+@dataclass(frozen=True)
 class TranslationWorkUnitDiagnostic:
     sequence: int
     status: str
@@ -112,6 +127,7 @@ class TranslationWorkUnitDiagnostic:
     max_attempts: int
     last_error: str | None
     updated_at: datetime | None
+    provider_attempts: tuple[TranslationProviderFailureAttempt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -431,6 +447,15 @@ def _render_effective_summary(
                 f"- last_error: `{diagnostic.last_error or 'n/a'}`",
             ]
         )
+        for attempt in diagnostic.provider_attempts:
+            lines.append(
+                "- provider_attempt: "
+                f"`#{attempt.attempt_number} {attempt.failure_category}`"
+                f" status=`{attempt.status}`"
+                f" retry_after=`{attempt.retry_after_seconds or 0}`"
+                f" terminal_reason=`{attempt.terminal_reason or 'n/a'}`"
+                f" circuit=`{attempt.circuit_state or 'Unknown'}`"
+            )
     if summary.error_message:
         lines.extend(["", "## Error", "", summary.error_message])
     lines.append("")

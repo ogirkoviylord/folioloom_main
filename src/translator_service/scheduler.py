@@ -133,5 +133,6 @@ class SchedulerRepository(Protocol):
         error_message: str,
         retry_base_delay_seconds: int,
         retry_max_delay_seconds: int,
+        provider_failure_diagnostic: object | None = None,
     ) -> object:
         pass

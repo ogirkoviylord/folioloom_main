@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
@@ -8,7 +9,11 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeChannel,
     AIProviderRuntimeStatus,
 )
-from translator_service.admin.translation_logs import get_translation_run_details
+from translator_service.admin.translation_logs import (
+    TranslationProviderFailureAttempt,
+    TranslationWorkUnitDiagnostic,
+    get_translation_run_details,
+)
 from translator_service.admin.translation_trace import build_translation_trace
 from translator_service.admin.views import translation_trace_body
 from translator_service.translation_run_logs import (
@@ -200,6 +205,85 @@ class AdminTranslationTraceTest(unittest.TestCase):
         self.assertEqual(trace.next_action.label, "Review advanced log")
         self.assertIn("Unknown", html)
         self.assertIn("Review advanced log", html)
+
+    def test_trace_uses_persisted_provider_attempt_when_runtime_is_ok(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-trace-persisted-provider",
+                    order_id="order-trace-persisted-provider",
+                    user_id="telegram:42",
+                    file_name="persisted.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.finish(status="failed", error_message="retryable provider failure")
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            self.assertIsNotNone(details)
+            assert details is not None
+            details = replace(
+                details,
+                work_unit_diagnostic=TranslationWorkUnitDiagnostic(
+                    sequence=7,
+                    status="failed_terminal",
+                    source_block_ids=("block-secret",),
+                    attempt_count=3,
+                    max_attempts=3,
+                    last_error="provider failure: rate_limited",
+                    updated_at=datetime(2026, 5, 31, tzinfo=UTC),
+                    provider_attempts=(
+                        TranslationProviderFailureAttempt(
+                            attempt_number=3,
+                            status="failed_terminal",
+                            failure_category="rate_limited",
+                            provider_id="deepseek",
+                            http_status_bucket="429",
+                            retry_after_seconds=0,
+                            latency_ms=842.0,
+                            terminal_reason="max_attempts_reached",
+                            channel_fingerprint="chan_safe123456",
+                            channel_health="cooling_down",
+                            circuit_state="open",
+                        ),
+                    ),
+                ),
+            )
+
+            trace = build_translation_trace(
+                details,
+                runtime_statuses=(
+                    AIProviderRuntimeStatus(
+                        provider_id="deepseek",
+                        source="admin_store",
+                        status="ok",
+                        reload_interval_seconds=30.0,
+                        last_reloaded_at=datetime(2026, 5, 31, tzinfo=UTC),
+                        active_channels=(
+                            AIProviderRuntimeChannel(
+                                label="primary",
+                                weight=1,
+                                max_parallel_requests=2,
+                                health="healthy",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            html = translation_trace_body(trace)
+
+        self.assertEqual(trace.failure_category, "Provider")
+        self.assertIn("rate_limited", html)
+        self.assertIn("max_attempts_reached", html)
+        self.assertIn("chan_safe123456", html)
+        self.assertIn("429", html)
+        self.assertIn("open", html)
+        self.assertNotIn("block-secret", html)
+        self.assertNotIn("SECRET", html)
 
 
 if __name__ == "__main__":

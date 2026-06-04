@@ -3175,6 +3175,7 @@ def _work_unit_diagnostic_panel(details: TranslationRunDetails, run_id: str) -> 
     )
     updated_at = _format_datetime(diagnostic.updated_at)
     last_error = diagnostic.last_error or "n/a"
+    provider_attempts = _work_unit_provider_attempts(diagnostic.provider_attempts)
     return f"""
     <div class="split-heading">
       <h4>Work unit needing attention</h4>
@@ -3188,6 +3189,41 @@ def _work_unit_diagnostic_panel(details: TranslationRunDetails, run_id: str) -> 
       <dt>Updated</dt><dd>{escape(updated_at)}</dd>
       <dt>Last error</dt><dd>{escape(last_error)}</dd>
     </dl>
+    {provider_attempts}
+    """
+
+
+def _work_unit_provider_attempts(attempts: tuple[object, ...]) -> str:
+    if not attempts:
+        return ""
+    rows = []
+    for attempt in attempts[-5:]:
+        values = [
+            f"#{getattr(attempt, 'attempt_number', 0)}",
+            str(getattr(attempt, "failure_category", "provider_other")),
+            str(getattr(attempt, "status", "unknown")),
+        ]
+        http_status = getattr(attempt, "http_status_bucket", None)
+        if http_status:
+            values.append(f"http={http_status}")
+        retry_after = getattr(attempt, "retry_after_seconds", None)
+        if retry_after is not None:
+            values.append(f"retry_after={retry_after}s")
+        terminal_reason = getattr(attempt, "terminal_reason", None)
+        if terminal_reason:
+            values.append(str(terminal_reason))
+        circuit_state = getattr(attempt, "circuit_state", None)
+        if circuit_state:
+            values.append(f"circuit={circuit_state}")
+        channel_fingerprint = getattr(attempt, "channel_fingerprint", None)
+        if channel_fingerprint:
+            values.append(str(channel_fingerprint))
+        rows.append(f"<li>{escape(' · '.join(values))}</li>")
+    return f"""
+    <div class="diagnostic-note">
+      <strong>Provider attempt history</strong>
+      <ul>{''.join(rows)}</ul>
+    </div>
     """
 
 
