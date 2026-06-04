@@ -48,11 +48,12 @@ hardening/quarantine evidence for issue #73 and scoped local malware/AV
 scanning evidence for issue #95, and release-wide logs/admin raw-text
 redaction evidence for issue #78, and a metadata-only local no-provider
 real-file adapter/persistent-plan evidence pass for issue #75 on 2026-06-04.
+Issue #79 also records provider-failure diagnostics/user-message evidence.
 Gate B still has release blockers without full evidence: TTL cleanup/delete
 behavior, Telegram/provider real-file end-to-end preview/translation evidence,
-restart/cancel/resume scenarios, capacity/provider-failure release evidence,
-full manual DOCX visual QA, Alerts MVP, backups visibility, backup export
-verification, restore rehearsal, and approved beta-server smoke.
+restart/cancel/resume scenarios, capacity release evidence, full manual DOCX
+visual QA, Alerts MVP, backups visibility, backup export verification, restore
+rehearsal, and approved beta-server smoke.
 
 No owner-approved Gate B deferrals were found in the inspected repository
 documents.
@@ -75,7 +76,7 @@ documents.
 | Worker restart does not lose accepted jobs. | Blocked | Persistent jobs/work units and worker loop are documented in `CURRENT_PROJECT_STATE.md`, `docs/HANDOFF.md`. | No release artifact proving accepted jobs survive worker restart. | Needed: worker restart scenario with durable job/work-unit evidence. | Yes if performed on live/beta runtime data. | Follow-up: worker restart recovery evidence. |
 | Bot restart does not make existing jobs invisible. | Blocked | Backend as source of truth is an active decision in `docs/DECISIONS.md`; bot state is adapter-only. | No release artifact proving jobs remain visible after bot restart. | Needed: bot restart scenario covering history/My Books/status. | Yes if performed on live/beta runtime data. | Follow-up: bot restart visibility evidence. |
 | Scheduler worker capacity is consistent with provider channel capacity. | Blocked | Prior recorded tests cover scheduler/provider slices; `docs/HANDOFF.md` and `CURRENT_PROJECT_STATE.md` cite targeted suites and PR #39 provider-failure regression coverage. | No Gate B release artifact for one key at capacity 1 serial behavior, multiple free keys, and no duplicate work-unit claims. | Needed: focused capacity evidence report and relevant tests. | Yes for provider/key/capacity changes or real provider/server runs. | Follow-up: scheduler/provider capacity evidence issue. |
-| Provider failure creates diagnosable metadata and safe user messaging. | Blocked | PR #39 and issue #31 evidence are documented; unsafe model-output classification is active in `docs/DECISIONS.md`. | No full release artifact proving safe user messages and metadata across provider failure classes. | Needed: provider failure tests/report for timeout, auth/billing/rate-limit/unavailable/malformed and unsafe model output. | Yes for provider contract/user-facing diagnostics changes. | Follow-up: provider failure safe diagnostics issue. |
+| Provider failure creates diagnosable metadata and safe user messaging. | Pass | Issue #79 was closed on 2026-06-04 after triage linked the completed implementation slice #162 and merged PR #279. PR #279 records safe provider failure categories for work-unit attempts: `rate_limited`, `timeout`, `unavailable_5xx`, `auth`, `billing`, `malformed_response`, `unsafe_model_output`, `network`, `circuit_open` and `provider_other`; persists metadata-only diagnostics through work-unit attempt / scheduler event paths; and surfaces them in admin translation details, failure trace and effective export. User-facing failed-job messaging ignores internal `job.error_message`, and preview-failure messaging uses a generic safe error even when provider exceptions include raw source text or fake keys. | This does not prove scheduler/provider capacity, approved beta-server smoke, real-provider runtime behavior, real-file matrix, restart/recovery evidence or full Gate B readiness. | PR #279 visible GitHub `Python checks`: success. Local verification for #162: focused provider/store/worker/scheduler/admin tests, targeted ruff, compileall, `git diff --check` and full unittest discover `1243 tests OK (skipped=14)`. #79 triage rerun: `PYTHONPATH=src python3 -m unittest tests.test_bot_messages tests.test_bot_translation_service tests.test_worker tests.test_scheduler_runner tests.test_persistent_jobs tests.test_postgres_scheduler tests.test_deepseek_client tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_admin_translation_trace`: `Ran 337 tests`, `OK (skipped=14)`. | No for recorded synthetic/local metadata-only evidence. Yes for provider contract changes, user-facing diagnostic changes, real provider/server runs, provider key handling, deployment or runtime data inspection. | Keep diagnostics metadata-only and keep provider internals out of user UX. Do not treat this pass as capacity evidence, beta-server smoke, real-file QA or full Gate B readiness. |
 | Local EPUBCheck release validation passes for EPUB fixtures. | Partial | Issue #75 local combined pass on 2026-06-04 ran EPUBCheck v5.3.0 using a temporary Temurin JRE 21 runtime on two no-provider assembled public-domain EPUB outputs: Kobzar and Dracula. Both returned `0 fatals / 0 errors / 0 warnings / 0 infos`. | This did not run provider-backed translated EPUBs, server/runtime data, or the older failing project fixtures from the 2026-05-17 exploratory check. | Temp-only EPUBCheck 5.3.0 plus temp-only JRE; no production dependency, no online validator, raw EPUB/source/output not committed. | No for local/offline EPUBCheck as a release tool; yes to change tool policy, use online validators, add production dependencies or retain raw artifacts in git/docs. | Repeat on provider-backed release-candidate outputs before checking the Gate B item. |
 | DOCX openability/visual QA passes for DOCX fixtures. | Partial | Issue #75 local combined pass on 2026-06-04 generated two public-domain DOCX fixtures outside git and assembled no-provider final DOCX artifacts. LibreOffice headless PDF conversion passed for simple Kobzar and structured Dracula outputs; CLI output contained no repair marker. | Headless conversion is not a full manual Writer visual QA pass and does not prove provider-backed translated DOCX output fidelity or absence of blocker visual issues in a human-reviewed document. Issue #76 remains open for the required local LibreOffice Writer visual QA notes. | `/opt/homebrew/bin/soffice --headless --convert-to pdf` against temp-only assembled DOCX outputs. | No for local LibreOffice metadata-only QA on authorized fixtures; yes for private/runtime data, online services, changing the pass/fail threshold or retaining raw artifacts in git/docs. | Repeat as manual/local Writer QA on provider-backed release-candidate DOCX outputs before checking the Gate B item. |
 | Admin Alerts MVP is visible and tested. | Blocked | `CURRENT_PROJECT_STATE.md`, `docs/HANDOFF.md`, `docs/ROADMAP.md` list Alerts MVP as a gap. Issue #71 approved a metadata-only owner runbook/report as the Gate B path instead of new admin UI. | No owner report artifact exists yet. | Needed: documented owner report with provider, queue/worker, disk/storage, failed-job and backup/restore signals. | No for metadata-only owner report using safe summaries; yes for new admin operational controls or security-sensitive surfaces. | Follow-up: Alerts owner report issue. |
@@ -121,6 +122,14 @@ Only the following are confirmed by repository evidence:
   issue #109 is metadata-only and does not use real `.env*`, `var/`, live server
   or user data. This checks only the malware/AV scanning item, not broader
   upload hardening, retention, server smoke or full Gate B readiness.
+- Provider failure safe diagnostics and user-message evidence for issue #79
+  passed on 2026-06-04: issue #162 and merged PR #279 add metadata-only
+  provider failure categories, persist safe work-unit/scheduler diagnostics and
+  expose them through admin details/trace/effective export, while existing bot
+  message tests verify failed-job and preview-failure user messages remain
+  generic and do not expose provider internals, raw source text or keys. This
+  does not prove scheduler/provider capacity, approved beta-server smoke,
+  real-file matrix, restart/recovery evidence or full Gate B readiness.
 - Issue #75 local real-file adapter/persistent-plan evidence passed on
   2026-06-04 for 7 metadata-only fixtures covering TXT, DOCX and EPUB. This
   confirms public-domain/permissive fixture intake, upload/content validation,
@@ -145,7 +154,6 @@ These block free closed beta unless the owner explicitly approves deferral:
   metadata-only no-provider adapter/persistent-plan evidence only.
 - Cancel/resume/restart, worker restart and bot restart release evidence.
 - Scheduler/provider capacity release evidence.
-- Provider failure safe diagnostics and user-message evidence.
 - EPUB validation for issue #75 selected no-provider public-domain outputs
   passed EPUBCheck 5.3.0, but provider-backed release-candidate EPUB evidence is
   still missing.
@@ -174,8 +182,8 @@ High or Critical risks relevant to Gate B:
   redaction.
 - R-016: admin auth/security and SSH-tunnel-only model must not be weakened.
 - R-018: real `.env*` files exist and must not be read or edited.
-- R-019 and R-025: external provider failures/costs require safe diagnostics and
-  caps.
+- R-019 and R-025: external provider failures/costs require maintaining safe
+  diagnostics and caps.
 - R-026: deployment and rollback are Critical and require approval.
 - R-027: backup/restore recoverability not evidenced.
 - R-029 to R-031: agents must not overstate release readiness or skip evidence.
@@ -344,41 +352,37 @@ without separate explicit human approval.
    Acceptance: one key at capacity 1 remains serial; multiple free keys progress
    multiple documents; no duplicate work-unit claims.
 
-6. Provider failure safe diagnostics.
-   Acceptance: provider timeout/auth/billing/rate-limit/unavailable/malformed
-   and unsafe-model-output scenarios produce safe user messages and metadata.
-
-7. EPUB validation.
+6. EPUB validation.
    Acceptance: EPUB fixtures pass local/offline EPUBCheck, or failures are
    triaged with explicit beta decision. Errors block fixtures by default;
    warnings are recorded and triaged. Current status: blocked after exploratory
    local EPUBCheck v5.3.0 found validation errors in selected EPUB fixtures on
    2026-05-17.
 
-8. DOCX openability/visual QA.
+7. DOCX openability/visual QA.
    Acceptance: DOCX outputs open in approved reader/tool and manual QA notes
    capture structure/fidelity risks. Approved threshold: local LibreOffice
    Writer, opens without repair/recovery prompt and no blocker visual issues;
    pixel-perfect source parity is not required.
 
-9. Alerts MVP.
+8. Alerts MVP.
    Acceptance: provider, queue/worker, disk, backup and failed-job signals are
    documented in a metadata-only owner report, with no secrets/raw text. New
    admin UI is deferred unless separately approved.
 
-10. Backups visibility.
+9. Backups visibility.
     Acceptance: latest backup/export/verify state is visible in admin or a
     documented metadata-only owner runbook report.
 
-11. Backup export verify.
+10. Backup export verify.
     Acceptance: approved backup manifest passes `scripts/verify_backup_export.py`
     and output summary is stored as evidence.
 
-12. Restore rehearsal.
+11. Restore rehearsal.
     Acceptance: approved restore rehearsal from backup artifact passes restore
     runbook acceptance criteria.
 
-13. Server smoke evidence.
+12. Server smoke evidence.
     Acceptance: approved beta target records `scripts/server_smoke_check.sh`
     output and confirms admin remains SSH-tunnel-only.
 
@@ -401,8 +405,8 @@ validation policy. Exploratory local EPUBCheck v5.3.0 evidence shows selected
 EPUB fixtures currently fail validation, so EPUB validation is blocked.
 
 Blocks beta: every unchecked Gate B item without evidence or explicit owner
-deferral, especially TTL, real files, restart/capacity/provider failures,
-EPUB/DOCX QA, alerts/backups, backup/restore and approved beta-server smoke.
+deferral, especially TTL, real files, restart/capacity, EPUB/DOCX QA,
+alerts/backups, backup/restore and approved beta-server smoke.
 
 Safest next step: create small GitHub issues for the blockers above, use only
 synthetic or owner-approved fixtures/data, and collect approved
