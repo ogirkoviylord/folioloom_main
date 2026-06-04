@@ -120,7 +120,7 @@ def _summary_facts(
     safe_error_summary: str,
 ) -> tuple[TranslationTraceFact, ...]:
     summary = details.summary
-    return (
+    facts = [
         TranslationTraceFact("Run id", run_id),
         TranslationTraceFact("Job id", summary.job_id or "Unknown"),
         TranslationTraceFact("User", summary.user_id or "Unknown"),
@@ -128,7 +128,9 @@ def _summary_facts(
         TranslationTraceFact("Status", summary.status or "Unknown"),
         TranslationTraceFact("Failure category", failure_category),
         TranslationTraceFact("Safe error", safe_error_summary),
-    )
+    ]
+    facts.extend(_provider_attempt_facts(details))
+    return tuple(facts)
 
 
 def _document_facts(details: TranslationRunDetails) -> tuple[TranslationTraceFact, ...]:
@@ -287,6 +289,8 @@ def _failure_category(
         "document_assembly_failures",
     ):
         return "Document processing"
+    if _provider_attempts(details):
+        return "Provider"
     if provider is not None and provider.has_incident_signal and status == "failed":
         return "Provider"
     if _looks_provider_related(safe_error_summary) and status == "failed":
@@ -309,6 +313,47 @@ def _safe_error_summary(details: TranslationRunDetails, job: Any | None) -> str:
         if text:
             return text
     return "Unknown"
+
+
+def _provider_attempt_facts(
+    details: TranslationRunDetails,
+) -> tuple[TranslationTraceFact, ...]:
+    attempts = _provider_attempts(details)
+    if not attempts:
+        return ()
+    latest = attempts[-1]
+    attempt_label = (
+        f"#{latest.attempt_number} {latest.failure_category}"
+        f" status={latest.status}"
+    )
+    if latest.http_status_bucket:
+        attempt_label = f"{attempt_label} http={latest.http_status_bucket}"
+    if latest.retry_after_seconds is not None:
+        attempt_label = f"{attempt_label} retry_after={latest.retry_after_seconds}s"
+    if latest.latency_ms is not None:
+        attempt_label = f"{attempt_label} latency={latest.latency_ms:g}ms"
+    facts = [
+        TranslationTraceFact("Provider attempt", attempt_label),
+        TranslationTraceFact("Provider id", latest.provider_id or "Unknown"),
+    ]
+    if latest.terminal_reason:
+        facts.append(TranslationTraceFact("Terminal reason", latest.terminal_reason))
+    if latest.channel_fingerprint:
+        facts.append(
+            TranslationTraceFact("Channel fingerprint", latest.channel_fingerprint)
+        )
+    if latest.channel_health:
+        facts.append(TranslationTraceFact("Channel health", latest.channel_health))
+    if latest.circuit_state:
+        facts.append(TranslationTraceFact("Circuit state", latest.circuit_state))
+    return tuple(facts)
+
+
+def _provider_attempts(details: TranslationRunDetails) -> tuple[Any, ...]:
+    diagnostic = details.work_unit_diagnostic
+    if diagnostic is None:
+        return ()
+    return tuple(getattr(diagnostic, "provider_attempts", ()) or ())
 
 
 def _event_detail(payload: dict[str, Any]) -> str:

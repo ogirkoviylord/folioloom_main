@@ -1,8 +1,9 @@
+import json
 import os
+import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
@@ -14,8 +15,11 @@ from translator_service.postgres_scheduler import (
     PostgresSchedulerStore,
     initialize_postgres_scheduler_schema,
 )
+from translator_service.provider_failure_diagnostics import (
+    ProviderFailureCategory,
+    ProviderFailureDiagnostic,
+)
 from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
-
 
 POSTGRES_DSN = os.getenv("TEST_POSTGRES_DSN")
 
@@ -385,6 +389,38 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertIsNone(failed.claim_token)
         self.assertEqual(len(attempts), 1)
         self.assertEqual(events[-1].event_type, "work_unit_retry_scheduled")
+
+    def test_provider_failure_diagnostic_is_persisted_on_attempt_and_event(self):
+        job = self._create_txt_job_with_unit()
+        claim = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="retryable provider failure",
+            retry_base_delay_seconds=30,
+            retry_max_delay_seconds=600,
+            provider_failure_diagnostic=ProviderFailureDiagnostic(
+                failure_category=ProviderFailureCategory.AUTH,
+                http_status_bucket="4xx",
+                provider_id="deepseek",
+                channel_fingerprint="chan_abcdef123456",
+            ),
+        )
+
+        attempts = self.store.list_work_unit_attempts(claim.work_unit_id)
+        events = self.store.list_scheduler_events(job.id)
+        payload = json.loads(events[-1].payload_json)
+
+        self.assertEqual(attempts[0].error_code, "auth")
+        self.assertEqual(attempts[0].error_message, "provider failure: auth")
+        self.assertEqual(payload["provider_failure"]["failure_category"], "auth")
+        self.assertEqual(payload["provider_failure"]["http_status_bucket"], "4xx")
 
     def test_stale_completion_with_wrong_token_leaves_claim_intact(self):
         self._create_txt_job_with_unit()
