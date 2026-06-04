@@ -113,11 +113,14 @@ fingerprint and adaptive circuit snapshot even if live provider status later
 returns to `ok`. Local verification passed focused provider/store/worker/
 scheduler/admin tests, targeted `ruff --select F,I`, compileall,
 `git diff --check`, and full unittest discover with 1243 tests `OK
-(skipped=14)`. CI status remains Unknown until a PR/checks page is inspected.
-This does not add raw source/translated text, prompts, provider payloads,
-tracebacks, API keys, full provider key ids, schema/table migrations, runtime
-`var/` operations, deployment, provider selection/retry-policy changes, payment
-behavior or release readiness.
+(skipped=14)`. PR #279 visible GitHub `Python checks` succeeded. Issue #79 was
+closed on 2026-06-04 after focused triage confirmed the provider-failure
+diagnostics/user-message Gate B item is covered by #162/#279 plus existing safe
+bot-message coverage. This does not add raw source/translated text, prompts,
+provider payloads, tracebacks, API keys, full provider key ids, schema/table
+migrations, runtime `var/` operations, deployment, provider
+selection/retry-policy changes, payment behavior, scheduler/provider capacity
+evidence, beta-server smoke evidence or full Gate B/release readiness.
 
 Issue #133 implementation slice on 2026-06-04: branch
 `codex/issue-133-costs-zero-usage` makes Admin -> Costs use read-only
