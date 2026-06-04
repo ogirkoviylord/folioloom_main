@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
 from translator_service.admin.translation_logs import (
+    build_effective_translation_run_archive,
+    build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
 )
@@ -208,6 +210,88 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn("run_started", [event.event_type for event in details.events])
         self.assertNotIn("Original paragraph", repr(details))
         self.assertNotIn("Перекладений абзац", repr(details))
+
+    def test_translation_run_archive_keeps_book_audit_metadata_only(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-book-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="novel.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {
+                            "translation_mode": "book_manuscript",
+                            "translation_mode_profile": "book-manuscript-v1",
+                        }
+                    ),
+                ),
+            )
+            logger.record_event(
+                "provider_failure",
+                {
+                    "prompt": "ARCHIVE PROMPT SENTINEL",
+                    "error_message": (
+                        "Traceback (most recent call last) provider diagnostics "
+                        "api_key=sk-archive-secret"
+                    ),
+                },
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="ARCHIVE RAW SOURCE SENTINEL",
+                    translated_text=(
+                        "Вот перевод: Комната затихла, but he had reliable "
+                        "information that the disease was serious."
+                    ),
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                )
+            )
+            logger.finish(status="ready", result_file_name="novel.ru.txt")
+
+            archive = build_translation_run_archive(temp_dir, logger.run_dir.name)
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(archive)
+        self.assertIsNotNone(effective_archive)
+        archive_text = _archive_text(archive.content) + _archive_text(
+            effective_archive.content
+        )
+        self.assertIn("book_mode_audit", archive_text)
+        self.assertIn("provider_commentary", archive_text)
+        self.assertIn("untranslated_source_residue", archive_text)
+        self.assertNotIn("ARCHIVE RAW SOURCE SENTINEL", archive_text)
+        self.assertNotIn("ARCHIVE PROMPT SENTINEL", archive_text)
+        self.assertNotIn("provider diagnostics", archive_text)
+        self.assertNotIn("sk-archive-secret", archive_text)
+        self.assertNotIn("Traceback", archive_text)
+        self.assertNotIn("Вот перевод", archive_text)
+        self.assertNotIn("disease was serious", archive_text)
+
+def _archive_text(content: bytes) -> str:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    with ZipFile(BytesIO(content)) as archive:
+        return "\n".join(
+            archive.read(name).decode("utf-8", errors="ignore")
+            for name in archive.namelist()
+        )
 
 
 if __name__ == "__main__":
