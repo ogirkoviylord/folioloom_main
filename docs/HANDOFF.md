@@ -34,10 +34,10 @@ safe retry metadata. This does not make cancel/resume/restart Gate B fully
 complete and does not prove durable cross-restart automatic delivery tracking.
 
 Что пока нестабильно или не закрыто для beta:
-TTL cleanup/delete verification, real-file
-TXT/DOCX/EPUB release matrix, local/offline EPUBCheck validation, DOCX
-openability/visual QA, Alerts MVP, Backups visibility, restore rehearsal artifact,
-cancel/resume/restart release evidence и server smoke evidence.
+TTL cleanup/delete verification, provider-backed Telegram real-file
+TXT/DOCX/EPUB release matrix, full manual DOCX visual QA, Alerts MVP, Backups
+visibility, restore rehearsal artifact, cancel/resume/restart release evidence
+и server smoke evidence.
 
 Что неизвестно: `.github/workflows/checks.yml` существует, но GitHub Actions
 run/pass status для отдельной ветки остается Unknown until a PR check exists
@@ -50,6 +50,22 @@ verification passed on branch `codex/issue-72-gate-b-baseline`:
 `scripts/predeploy_check.sh` passed. This is local evidence only; it does not
 prove CI, server smoke, real-file matrix, restart, backup/restore or other Gate
 B blockers.
+
+Issue #75 local real-file evidence slice on 2026-06-04: branch
+`codex/issue-75-real-file-matrix` ran a metadata-only, temp-only, no-provider
+adapter/persistent-plan pass for 7 public-domain/permissive fixtures found from
+popular internet sources. The pass covered TXT Dracula small, TXT War and Peace
+long slice, TXT Cyrillic Detstvo slice, DOCX simple Kobzar, DOCX structured
+Dracula, EPUB Kobzar and EPUB Dracula. Upload/content validation, persistent
+job/work-unit planning and synthetic final assembly passed for all fixtures.
+DOCX outputs passed local LibreOffice headless PDF conversion with no repair
+marker in CLI output, and EPUB outputs passed EPUBCheck v5.3.0 with `0` fatals,
+errors or warnings using a temporary local JRE. Raw source documents and
+translated outputs were not committed or included in docs. This is partial
+Gate B evidence only: it does not prove Telegram bot upload UX, provider-backed
+preview/full translation, manual DOCX Writer visual QA, server smoke,
+restart/cancel/resume, retention/delete behavior, CI or full free-beta
+readiness.
 
 Issue #78 redaction update on 2026-05-28: release-wide logs/admin raw-text
 redaction evidence passed locally on branch `codex/issue-78-gate-b-redaction`
