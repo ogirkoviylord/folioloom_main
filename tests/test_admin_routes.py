@@ -42,6 +42,7 @@ from translator_service.beta_safety import (
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
 from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
 from translator_service.translation_run_logs import (
@@ -2485,6 +2486,107 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(reader.status_code, 200)
         self.assertIn("No work units found.", reader.text)
         self.assertFalse(job_db.exists())
+
+    def test_translation_reader_decodes_persisted_translation_batch(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            source_file = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First source paragraph.\n\nSecond source paragraph.",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-batch-reader",
+                    user_id="telegram:42",
+                    file_id="file-batch-reader",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="epub-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=(
+                                "epub:chapter.xhtml:0",
+                                "epub:chapter.xhtml:1",
+                            ),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source_file.object_key,
+                        ),
+                    ],
+                )
+                claimed = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                assert claimed is not None
+                translated_parts = (
+                    "Перший перекладений абзац.",
+                    "Другий перекладений абзац.",
+                )
+                store.complete_work_unit(
+                    claimed.id,
+                    translated_text=format_translation_batch_contract(translated_parts),
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=11,
+                )
+                logger = TranslationRunLogger.start(
+                    root=run_root,
+                    metadata=TranslationRunMetadata(
+                        job_id=job.id,
+                        order_id="order-batch-reader",
+                        user_id="telegram:42",
+                        file_name="book.epub",
+                        document_kind="epub",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=1,
+                    ),
+                )
+            finally:
+                store.close()
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            reader = client.get(f"/admin/logs/{logger.run_dir.name}/reader")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+
+        self.assertEqual(reader.status_code, 200)
+        self.assertIn("Перший перекладений абзац.", reader.text)
+        self.assertIn("Другий перекладений абзац.", reader.text)
+        self.assertNotIn("translation_block", reader.text)
+        self.assertEqual(details_api.status_code, 200)
+        fragments = details_api.json()["details"]["fragments"]
+        self.assertEqual(
+            fragments[0]["translated_text_chars"],
+            len("\n\n".join(translated_parts)),
+        )
 
     def test_translation_text_diagnostics_all_issues_filter(self):
         with TemporaryDirectory() as temp_dir:

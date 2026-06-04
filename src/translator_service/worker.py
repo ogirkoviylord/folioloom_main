@@ -12,6 +12,7 @@ from translator_service.file_storage import (
     StoredFile,
     StoredFileKind,
 )
+from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
@@ -819,7 +820,7 @@ def _translate_work_unit_text(
     )
     total_usage = _add_provider_usage(total_usage, retry_usage)
     return _WorkUnitTranslationResult(
-        translated_text="\n\n".join(parsed),
+        translated_text=format_translation_batch_contract(parsed),
         usage=total_usage,
     )
 

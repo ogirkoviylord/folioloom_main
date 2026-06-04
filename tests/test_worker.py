@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
@@ -287,6 +288,34 @@ class WorkerTest(unittest.TestCase):
         )
         self.assertEqual(completed_callbacks, [completed])
 
+    def test_multiblock_work_unit_stores_translation_batch_contract(self):
+        store = self._store()
+        job = _job_with_stored_multi_block_unit(
+            store,
+            "intermediate/job-1/unit-1.txt",
+            source_language="en",
+            target_language="uk",
+        )
+        translator = RecordingTranslator()
+
+        completed = run_next_persistent_work_unit(
+            store=store,
+            job_id=job.id,
+            worker_id="worker-a",
+            source_loader=lambda unit: "First paragraph\n\nSecond paragraph",
+            translator=translator,
+        )
+
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(completed.sequence, 1)
+        self.assertEqual(
+            completed.translated_text,
+            "<translation_batch>"
+            '<translation_block id="0">[uk] First paragraph</translation_block>'
+            '<translation_block id="1">[uk] Second paragraph</translation_block>'
+            "</translation_batch>",
+        )
+
     def test_returns_none_when_no_pending_work_units_exist(self):
         store = self._store()
         job = _job_with_units(store)
@@ -542,7 +571,9 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
             self.assertEqual(
                 completed.translated_text,
-                "Алиса прошептала Марку.\n\nМарк открыл дверь.",
+                format_translation_batch_contract(
+                    ("Алиса прошептала Марку.", "Марк открыл дверь.")
+                ),
             )
             self.assertGreaterEqual(len(translator.contexts), 3)
             self.assertEqual(translator.contexts[0], TranslationContextMemory())
@@ -881,7 +912,9 @@ class WorkerTest(unittest.TestCase):
                 [unit.translated_text for unit in persisted_units],
                 [
                     "[uk] Intro paragraph.",
-                    "[uk] Source\n\n[uk] Target",
+                    format_translation_batch_contract(
+                        ("[uk] Source", "[uk] Target")
+                    ),
                     "[uk] Outro paragraph.",
                 ],
             )
@@ -925,10 +958,14 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
             self.assertEqual(
                 completed.translated_text,
-                "Английский + нидерландский: Встреча назначена на вторник "
-                "в четверть четвертого.\n\n"
-                "CJK: Метка 東京-大阪 должна оставаться читаемой; "
-                "пример на китайском: сохраните переменную {{变量}}.",
+                format_translation_batch_contract(
+                    (
+                        "Английский + нидерландский: Встреча назначена на вторник "
+                        "в четверть четвертого.",
+                        "CJK: Метка 東京-大阪 должна оставаться читаемой; "
+                        "пример на китайском: сохраните переменную {{变量}}.",
+                    )
+                ),
             )
             self.assertEqual(
                 [call[1] for call in translator.calls],
@@ -968,9 +1005,13 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
             self.assertEqual(
                 completed.translated_text,
-                "Английский + нидерландский: встреча назначена на вторник "
-                "в четверть четвертого.\n\n"
-                "Обычное английское предложение.",
+                format_translation_batch_contract(
+                    (
+                        "Английский + нидерландский: встреча назначена на вторник "
+                        "в четверть четвертого.",
+                        "Обычное английское предложение.",
+                    )
+                ),
             )
             self.assertEqual(
                 [call[1] for call in translator.calls],
@@ -1181,7 +1222,12 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(
                 [unit.translated_text for unit in persisted_units],
                 [
-                    "[uk] First body paragraph.\n\n[uk] Second body paragraph.",
+                    format_translation_batch_contract(
+                        (
+                            "[uk] First body paragraph.",
+                            "[uk] Second body paragraph.",
+                        )
+                    ),
                     "[uk] Contents",
                     "[uk] Chapter 1",
                 ],

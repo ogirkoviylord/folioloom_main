@@ -152,6 +152,18 @@ ledgers, database schema/state, runtime `var/` data, deployment, auth/RBAC,
 secrets/env files, provider behavior, raw text diagnostic boundaries or release
 readiness.
 
+EPUB/work-unit alignment fix on 2026-06-04: branch
+`codex/fix-epub-work-unit-alignment` changes new multi-block persistent work
+units to store a normalized `<translation_batch>` with stable
+`translation_block id` values instead of plain `\n\n`-joined translated text.
+Persistent assembly already maps batch ids back to source block ids, and the
+run-log Text Diagnostics/Reader decodes stored batches back into readable
+paragraph text for the owner-only diagnostic surface. This reduces paragraph
+boundary drift during EPUB/DOCX assembly without schema changes, runtime data
+mutation, deployment, provider configuration changes or release-readiness
+claims. Existing legacy plain-text multi-block work units remain supported by
+the assembly fallback.
+
 Owner decisions recorded during issue #71:
 
 - 2026-05-16: free closed beta waits for complete Gate B evidence; no implicit
