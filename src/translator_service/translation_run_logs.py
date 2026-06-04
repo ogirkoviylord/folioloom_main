@@ -5,6 +5,10 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
+from translator_service.book_mode_output_audit import (
+    BookModeAuditChunk,
+    audit_book_mode_output,
+)
 from translator_service.security_telemetry import (
     build_security_event,
     normalize_security_event,
@@ -44,6 +48,8 @@ class TranslationFragmentLog:
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
     source_block_ids: tuple[str, ...] = ()
+    block_kind: str = "plain"
+    audit_metadata: tuple[tuple[str, str], ...] = ()
     prompt_tier: str | None = None
     source_text_hash: str | None = None
     retry_count: int = 0
@@ -79,6 +85,11 @@ class TranslationRunLogger:
             "cache_hits": 0,
         }
         self._security = _empty_security_totals()
+        self._book_mode_audit_enabled = _is_book_mode_metadata(metadata)
+        self._book_mode_audit = _empty_book_mode_audit_totals(
+            enabled=self._book_mode_audit_enabled,
+            target_language=metadata.target_language,
+        )
 
     @classmethod
     def start(
@@ -145,6 +156,7 @@ class TranslationRunLogger:
         self._totals["elapsed_seconds"] += fragment.elapsed_seconds
         self._totals["retry_count"] += fragment.retry_count
         self._totals["cache_hits"] += 1 if fragment.cache_hit else 0
+        self._record_book_mode_audit(fragment)
         self.record_event(
             "work_unit_failed" if fragment.status == "failed" else "work_unit_finished",
             {
@@ -210,7 +222,24 @@ class TranslationRunLogger:
             "fragment_count": self._fragment_count,
             "totals": dict(self._totals),
             "security": dict(self._security),
+            "book_mode_audit": _book_mode_audit_snapshot(self._book_mode_audit),
         }
+
+    def _record_book_mode_audit(self, fragment: TranslationFragmentLog) -> None:
+        if not self._book_mode_audit_enabled:
+            return
+        _record_book_mode_audit_chunk(
+            self._book_mode_audit,
+            target_language=self._metadata.target_language,
+            chunk_id=(
+                fragment.source_block_ids[0]
+                if fragment.source_block_ids
+                else f"fragment:{fragment.sequence}"
+            ),
+            translated_text=fragment.translated_text,
+            block_kind=fragment.block_kind,
+            audit_metadata=fragment.audit_metadata,
+        )
 
 
 def finish_running_translation_runs_for_job(
@@ -268,6 +297,60 @@ def finish_running_translation_runs_for_job(
     return finished
 
 
+def record_book_mode_audit_fragment_for_job(
+    root: str | Path | None,
+    *,
+    job_id: str,
+    sequence: int,
+    translated_text: str,
+    source_block_ids: tuple[str, ...] = (),
+    block_kind: str = "plain",
+    audit_metadata: tuple[tuple[str, str], ...] = (),
+) -> int:
+    if root is None or not job_id:
+        return 0
+    root_path = Path(root)
+    if not root_path.exists():
+        return 0
+
+    updated = 0
+    for run_json in root_path.glob("*/run.json"):
+        try:
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
+            continue
+        if snapshot.get("status") != "running":
+            continue
+        if not _is_book_mode_snapshot(snapshot):
+            continue
+
+        audit = _book_mode_audit_from_snapshot(snapshot)
+        chunk_id = (
+            source_block_ids[0] if source_block_ids else f"fragment:{sequence}"
+        )
+        _record_book_mode_audit_chunk(
+            audit,
+            target_language=_string_value(snapshot.get("target_language")),
+            chunk_id=chunk_id,
+            translated_text=translated_text,
+            block_kind=block_kind,
+            audit_metadata=audit_metadata,
+        )
+        snapshot["book_mode_audit"] = _book_mode_audit_snapshot(audit)
+        run_json.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (run_json.parent / "summary.md").write_text(
+            _render_summary(snapshot),
+            encoding="utf-8",
+        )
+        updated += 1
+    return updated
+
+
 def _append_run_event(
     run_dir: Path,
     event_type: str,
@@ -289,6 +372,7 @@ def _fragment_to_dict(fragment: TranslationFragmentLog) -> dict:
     data = asdict(fragment)
     source_text = data.pop("source_text")
     translated_text = data.pop("translated_text")
+    data.pop("audit_metadata", None)
     if data.get("error_message") is not None:
         data["error_message"] = _safe_error_message(
             data["error_message"],
@@ -425,6 +509,18 @@ def _render_summary(snapshot: dict) -> str:
             value = security[key]
             if value:
                 lines.append(f"- {key}: `{value}`")
+    audit = snapshot.get("book_mode_audit") or {}
+    if audit.get("enabled"):
+        lines.extend(["", "## Book Mode Audit", ""])
+        lines.append(f"- chunks_audited: `{audit.get('chunks_audited') or 0}`")
+        lines.append(
+            f"- chunks_with_findings: `{audit.get('chunks_with_findings') or 0}`"
+        )
+        lines.append(f"- total_findings: `{audit.get('total_findings') or 0}`")
+        lines.append(
+            "- counts_by_code: "
+            f"`{json.dumps(audit.get('counts_by_code') or {}, sort_keys=True)}`"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -513,6 +609,214 @@ def _empty_security_totals() -> dict[str, int]:
         "security_user_cooldowns": 0,
         "other_security_events": 0,
     }
+
+
+_BOOK_MODE_TRANSLATION_MODE = "book_manuscript"
+_BOOK_MODE_PROFILE = "book-manuscript-v1"
+_BOOK_MODE_AUDIT_CODE_ALIASES = {
+    "english_navigation_heading_residue": "english_navigation_residue",
+    "provider_commentary_wrapper": "provider_commentary",
+    "suspicious_all_english_chunk": "untranslated_source_residue",
+}
+_BOOK_MODE_AUDIT_CODES = {
+    "untranslated_source_residue",
+    "english_navigation_residue",
+    "language_metadata_mismatch",
+    "provider_commentary",
+}
+
+
+def _is_book_mode_metadata(metadata: TranslationRunMetadata) -> bool:
+    policy = _json_object(metadata.translation_policy)
+    if _is_book_mode_policy(policy):
+        return True
+    stack = (
+        metadata.translation_stack
+        if isinstance(metadata.translation_stack, dict)
+        else {}
+    )
+    return _has_book_mode_marker(stack)
+
+
+def _is_book_mode_snapshot(snapshot: dict) -> bool:
+    policy = _json_object(
+        _optional_string_value(snapshot.get("translation_policy"))
+    )
+    if _is_book_mode_policy(policy):
+        return True
+    stack = snapshot.get("translation_stack")
+    return _has_book_mode_marker(stack if isinstance(stack, dict) else {})
+
+
+def _is_book_mode_policy(policy: dict) -> bool:
+    return (
+        policy.get("translation_mode") == _BOOK_MODE_TRANSLATION_MODE
+        or policy.get("translation_mode_profile") == _BOOK_MODE_PROFILE
+    )
+
+
+def _has_book_mode_marker(value: object) -> bool:
+    if isinstance(value, dict):
+        if _is_book_mode_policy(value):
+            return True
+        return any(_has_book_mode_marker(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_book_mode_marker(item) for item in value)
+    return value in {_BOOK_MODE_TRANSLATION_MODE, _BOOK_MODE_PROFILE}
+
+
+def _json_object(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _empty_book_mode_audit_totals(
+    *,
+    enabled: bool,
+    target_language: str,
+) -> dict:
+    return {
+        "schema_version": "book-mode-audit-run-v1",
+        "enabled": enabled,
+        "target_language": _language_root(target_language),
+        "chunks_audited": 0,
+        "chunks_with_findings": 0,
+        "total_findings": 0,
+        "codes": [],
+        "counts_by_code": {},
+        "counts_by_category": {},
+        "counts_by_severity": {},
+    }
+
+
+def _book_mode_audit_from_snapshot(snapshot: dict) -> dict:
+    target_language = _string_value(snapshot.get("target_language"))
+    audit = _empty_book_mode_audit_totals(
+        enabled=True,
+        target_language=target_language,
+    )
+    existing = snapshot.get("book_mode_audit")
+    if not isinstance(existing, dict):
+        return audit
+    for key in ("chunks_audited", "chunks_with_findings", "total_findings"):
+        audit[key] = max(0, _int_value(existing.get(key)))
+    for key in ("counts_by_code", "counts_by_category", "counts_by_severity"):
+        value = existing.get(key)
+        audit[key] = _int_counter(value) if isinstance(value, dict) else {}
+    return audit
+
+
+def _record_book_mode_audit_chunk(
+    audit: dict,
+    *,
+    target_language: str,
+    chunk_id: str,
+    translated_text: str,
+    block_kind: str,
+    audit_metadata: tuple[tuple[str, str], ...],
+) -> None:
+    audit["chunks_audited"] += 1
+    result = audit_book_mode_output(
+        chunks=(
+            BookModeAuditChunk(
+                block_id=chunk_id,
+                translated_text=translated_text,
+                block_kind=block_kind,
+                metadata=audit_metadata,
+            ),
+        ),
+        target_language=target_language,
+    )
+    if not result.findings:
+        return
+    audit["chunks_with_findings"] += 1
+    for finding in result.findings:
+        _record_book_mode_audit_finding(audit, finding)
+
+
+def _record_book_mode_audit_finding(audit: dict, finding) -> None:
+    code = _book_mode_audit_code(finding.code)
+    category = _book_mode_audit_category(finding.category)
+    severity = _book_mode_audit_severity(finding.severity)
+    audit["total_findings"] += 1
+    _increment_counter(audit["counts_by_code"], code)
+    _increment_counter(audit["counts_by_category"], category)
+    _increment_counter(audit["counts_by_severity"], severity)
+
+
+def _book_mode_audit_snapshot(audit: dict) -> dict:
+    snapshot = {
+        key: value
+        for key, value in audit.items()
+        if key
+        not in {
+            "codes",
+            "counts_by_code",
+            "counts_by_category",
+            "counts_by_severity",
+        }
+    }
+    counts_by_code = _sorted_counter(audit["counts_by_code"])
+    snapshot["codes"] = list(counts_by_code)
+    snapshot["counts_by_code"] = counts_by_code
+    snapshot["counts_by_category"] = _sorted_counter(audit["counts_by_category"])
+    snapshot["counts_by_severity"] = _sorted_counter(audit["counts_by_severity"])
+    return snapshot
+
+
+def _book_mode_audit_code(code: str) -> str:
+    normalized = code.strip().lower() or "unknown"
+    normalized = _BOOK_MODE_AUDIT_CODE_ALIASES.get(normalized, normalized)
+    return normalized if normalized in _BOOK_MODE_AUDIT_CODES else "other"
+
+
+def _book_mode_audit_category(category: str) -> str:
+    return category.strip().lower() or "unknown"
+
+
+def _book_mode_audit_severity(severity: str) -> str:
+    return severity.strip().lower() or "unknown"
+
+
+def _increment_counter(counter: dict[str, int], key: str) -> None:
+    counter[key] = counter.get(key, 0) + 1
+
+
+def _sorted_counter(counter: dict[str, int]) -> dict[str, int]:
+    return {key: counter[key] for key in sorted(counter)}
+
+
+def _int_counter(value: dict) -> dict[str, int]:
+    return {
+        str(key): count
+        for key, raw_count in value.items()
+        if (count := _int_value(raw_count)) > 0
+    }
+
+
+def _int_value(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _string_value(value: object) -> str:
+    return str(value) if value is not None else ""
+
+
+def _optional_string_value(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _language_root(language_code: str) -> str:
+    normalized = language_code.strip().lower().replace("_", "-")
+    return normalized.split("-", 1)[0] if normalized else ""
 
 
 def _security_counter_name(event_type: str) -> str:
