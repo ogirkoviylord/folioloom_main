@@ -124,11 +124,13 @@ FolioLoom - это Telegram-first сервис для перевода авто�
   owner-only text diagnostics остается утвержденным исключением; остальные
   admin/log/archive/telemetry surfaces остаются redacted/metadata-only.
 - Не показывать payment UI и не запускать paid jobs до Gate C.
-- Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения владельца.
-- Не реализовывать FB2 из GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) без
-  owner approval, Architect review, supported-subset decision, safety plan,
-  rights-approved fixtures и отдельной agent-ready implementation issue.
+- Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного approved
+  format-specific implementation issue.
+- Не реализовывать committed future formats, включая FB2 из GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23), без
+  owner implementation approval, Architect review, supported-subset decision,
+  safety plan, rights-approved fixtures и отдельной agent-ready implementation
+  issue.
 - Не делать большие переписывания без отдельного плана и review.
 - Не публиковать admin console в интернет до public-production hardening.
 - Не трактовать beta safety accounting как paid ledger.
@@ -164,11 +166,14 @@ Translation-quality learning metrics:
 - Paid beta без Telegram Stars/XTR invoice flow, payment ledger, idempotency, refunds, `/paysupport`, reconciliation и support/refund policy.
 - Stripe/YooKassa/card flow как immediate Telegram path.
 - Subscriptions, referrals, coupons, teams.
-- PDF, OCR, MOBI, FB2, batch ZIP или arbitrary file parser.
-- FB2 из GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) остается
-  deferred idea: owner decision TBD, authorized FB2 fixtures Unknown,
-  dependency impact Unknown.
+- Immediate PDF, OCR, MOBI, FB2, batch ZIP или arbitrary file parser
+  implementation.
+- Committed future formats beyond TXT/DOCX/EPUB are RTF (#4), FB2 from GitHub
+  issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23),
+  PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU. They are
+  not current MVP scope; implementation order, supported subsets,
+  rights-approved fixtures, dependency impact and verification depth remain
+  `TBD` through issue #208 and format-specific architecture review.
 - Public website/customer portal.
 - WhatsApp, Discord, public API или другие каналы.
 - User-facing provider/model picker.

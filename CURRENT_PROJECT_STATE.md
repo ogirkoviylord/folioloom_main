@@ -231,13 +231,15 @@ product yet.
 - Backups visibility page.
 - Scheduler/runtime consistency smoke as a release artifact.
 
-## Deferred ideas / not approved for implementation
+## Committed future formats / not approved for implementation yet
 
-- FB2 support is recorded as GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). Current
-  state: idea only. Owner decision is TBD; authorized FB2 fixtures are Unknown;
-  dependency impact is Unknown. FB2 remains outside the approved TXT/DOCX/EPUB
-  closed-beta scope until explicit owner approval and Architect review.
+- FolioLoom is committed to future support for RTF (#4), FB2
+  ([#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)), PDF/OCR,
+  HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU.
+- These formats remain outside the current TXT/DOCX/EPUB closed-beta scope.
+  Issue #208 owns prioritization and issue breakdown. Authorized fixtures,
+  supported subsets, dependency impact and verification depth remain `TBD` until
+  format-specific architecture review and implementation approval.
 
 ## Paid beta blockers
 

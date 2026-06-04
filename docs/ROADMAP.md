@@ -232,10 +232,10 @@ Acceptance criteria:
 - Paid beta, Telegram Stars/XTR, payment ledger, pricing changes.
 - Public production, public admin exposure, public website/customer portal.
 - Новые форматы кроме TXT/DOCX/EPUB.
-- FB2 support from GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23); it is a
-  deferred idea only until owner approval, Architect review and a separate
-  agent-ready implementation issue exist.
+- New committed future formats beyond TXT/DOCX/EPUB, including FB2 from GitHub
+  issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23), until
+  issue #208 prioritizes them and separate format-specific implementation
+  issues are approved.
 - Большие переписывания scheduler, bot state или translation core.
 
 ## 6. Phase 2 - Improve observability and admin/debugging
@@ -259,6 +259,9 @@ Tasks:
   implemented by PR #160 and closed through #145-#152. Follow-up admin work
   should be scoped separately, including raw prompt diagnostics, Alerts/Backups
   visibility and any new release-evidence surfaces.
+- Treat issue #165 as a docs-only Book/Manuscript MVP contract: structure
+  preservation plus clean translation, with format-specific TXT/DOCX/EPUB
+  expectations and no release-readiness claims.
 - Описать support/debug workflow для owner: какие admin pages смотреть, какие
   scripts запускать, какие artifacts сохранять.
 - Preserve the issue #30 admin guardrail: bulk provider key probes should wait
@@ -283,6 +286,10 @@ Later:
   admin console rewrites. The first 2026-05-31 Beta Operations Console stack is
   implemented by PR #160, but Gate B evidence remains separate until
   implemented and verified.
+- Future book/manuscript work is split out of #165: terminology/name policy
+  (#204), read-only glossary viewer (#205), editable glossary workflow (#206),
+  release-version analytics file-use and consent policy (#207), future format
+  prioritization (#208) and stricter quality rubric (#209).
 
 ## 7. Phase 3 - Testing and reliability
 
@@ -373,16 +380,25 @@ Acceptance criteria:
   support/refund policy.
 - Stripe/YooKassa/card flow.
 - Public website/customer portal, public signup, WhatsApp/Discord/public API.
-- PDF/OCR/MOBI/FB2/batch ZIP/arbitrary parser.
+- Immediate PDF/OCR/MOBI/FB2/batch ZIP/arbitrary parser implementation.
 - FB2 from GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) without
-  explicit owner approval, supported-subset decision, fixture rights basis,
-  dependency review and Architect-approved safety/verification plan.
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) and other
+  committed future formats without a format-specific approved implementation
+  issue, supported-subset decision, fixture rights basis, dependency review and
+  Architect-approved safety/verification plan.
 - Public admin exposure или изменение SSH-tunnel-only модели.
 - Major rewrites of scheduler, bot runtime, provider layer or translation core.
 - New external providers or user-facing provider/model picker.
 - Complex automation beyond the current worker/scheduler needs.
 - Legal/privacy/AUP/refund text without owner/counsel decision.
+- Book/manuscript future scope without separate issues: terminology/name
+  controls, glossary viewer/editor, stricter literary/editorial quality rubric,
+  user analytics consent/release policy and new formats beyond TXT/DOCX/EPUB.
+- New format implementation beyond TXT/DOCX/EPUB. Committed future format
+  families are tracked as post-MVP roadmap scope: RTF (#4), FB2 (#23), PDF/OCR,
+  HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and image-heavy CBZ/CBR/DJVU.
+  Issue #208 owns prioritization and issue breakdown; implementation requires
+  separate format-specific approval and architecture review.
 - Repo-wide ruff cleanup as a free closed-beta release blocker.
 
 ## 11. Backlog candidates
@@ -413,6 +429,17 @@ Acceptance criteria:
   Suggested acceptance criteria: checklist references Gate B, common
   verification commands, server smoke, backup/restore, real-file matrix and
   human approvals.
+
+- Task: Prioritize committed future document/book formats (#208).
+  Phase: Later
+  Priority: Medium
+  Risk: High
+  Agent suitability: needs idea intake and architecture review
+  Suggested acceptance criteria: rank RTF (#4), FB2 (#23), PDF/OCR, HTML/HTM,
+  ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU by user value, parser and
+  resource risk, fixture rights basis, dependency/deployment impact,
+  privacy/security surface and QA/release burden; produce a format-specific
+  issue breakdown and do not implement any format in #208.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

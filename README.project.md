@@ -52,13 +52,14 @@ deployment, backup/restore workflow и широкий unittest suite.
 | Admin console through SSH tunnel | Subscriptions, referrals, coupons, teams |
 | Backup/restore workflow | Stripe/YooKassa/card flow as immediate Telegram path |
 
-Deferred format ideas:
+Committed future formats:
 
-- FB2 support is captured as GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). Owner
-  decision is TBD. FB2 remains unsupported for the next beta unless the owner
-  explicitly approves a scope change, Architect review and a separate
-  agent-ready implementation issue.
+- FolioLoom is committed to future support for RTF (#4), FB2
+  ([#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)), PDF/OCR,
+  HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU.
+- These formats remain unsupported for the next beta. Issue #208 owns
+  prioritization and issue breakdown before any format-specific implementation
+  approval.
 
 ### Beta Safety / Cost Guard
 
