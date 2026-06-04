@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from xml.etree import ElementTree
@@ -38,6 +39,18 @@ def parse_translation_batch_contract(
         expected_count=expected_count,
         required_markers=required_markers,
     ).translated_texts
+
+
+def format_translation_batch_contract(translated_texts: Sequence[str]) -> str:
+    lines = ["<translation_batch>"]
+    for index, translated_text in enumerate(translated_texts):
+        lines.append(
+            f'<translation_block id="{index}">'
+            f"{html.escape(translated_text, quote=False)}"
+            "</translation_block>"
+        )
+    lines.append("</translation_batch>")
+    return "".join(lines)
 
 
 def validate_translation_batch_contract(
