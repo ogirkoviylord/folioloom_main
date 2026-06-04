@@ -1824,6 +1824,7 @@ def costs_body(analytics: CostAnalytics) -> str:
     <section class="metrics">{metric_cards}</section>
     <section class="panel table-panel">
       <h3>Most expensive runs</h3>
+      {_cost_unavailable_note(analytics.unavailable_run_count)}
       <table class="log-table">
         <thead>
           <tr>
@@ -2146,6 +2147,18 @@ def _cost_run_rows(runs: tuple[CostRunSummary, ...]) -> str:
         </tr>
         """
     return "\n".join(_cost_run_row(run) for run in runs)
+
+
+def _cost_unavailable_note(count: int) -> str:
+    if count <= 0:
+        return ""
+    noun = "run" if count == 1 else "runs"
+    return f"""
+      <p class="empty-state">
+        {count} {noun} with metadata had unavailable usage totals and is
+        excluded from cost ranking.
+      </p>
+    """
 
 
 def _cost_run_row(run: CostRunSummary) -> str:

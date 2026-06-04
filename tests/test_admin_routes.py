@@ -1544,6 +1544,69 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertFalse(payload["translations_paused"])
             self.assertFalse(payload["warning"])
 
+    def test_costs_page_uses_persistent_usage_when_run_log_totals_are_zero(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_db = root / "jobs.sqlite3"
+            run_root = root / "runs"
+            store = SQLiteTranslationJobStore(str(job_db))
+            try:
+                job = _persistent_job(store, order_id="order-costs-stale")
+                [unit] = _add_units(store, job.id)
+                store.complete_work_unit(
+                    unit.id,
+                    translated_text="Translated text hidden from costs.",
+                    prompt_tokens=1_500,
+                    completion_tokens=500,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=1_500,
+                )
+            finally:
+                store.close()
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    user_id=job.user_id,
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    translator_model="deepseek",
+                ),
+            )
+            logger.finish(status="ready", result_file_name="book.uk.txt")
+            settings = Settings(
+                admin_db_path=str(root / "admin.sqlite3"),
+                persistent_jobs_db_path=str(job_db),
+                translation_run_log_root=str(run_root),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get("/admin/costs")
+            api = client.get("/admin/api/costs")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(job.id, page.text)
+        self.assertIn("<td>1500</td>", page.text)
+        self.assertIn("<td>500</td>", page.text)
+        self.assertIn("<td>2000</td>", page.text)
+        self.assertIn("$0.0010", page.text)
+        self.assertNotIn("Translated text hidden from costs.", page.text)
+        self.assertEqual(api.status_code, 200)
+        payload = api.json()
+        self.assertEqual(payload["tokens_today"], 2000)
+        self.assertEqual(payload["top_runs"][0]["job_id"], job.id)
+        self.assertEqual(payload["top_runs"][0]["prompt_tokens"], 1500)
+        self.assertEqual(payload["top_runs"][0]["completion_tokens"], 500)
+        self.assertEqual(payload["top_runs"][0]["total_tokens"], 2000)
+        self.assertEqual(payload["top_users"][0]["total_tokens"], 2000)
+        self.assertEqual(payload["unavailable_run_count"], 0)
+
     def test_beta_safety_admin_views_and_api_do_not_expose_raw_document_text(self):
         raw_text = "SECRET RAW DOCUMENT TEXT SHOULD NOT APPEAR"
         with TemporaryDirectory() as temp_dir:
