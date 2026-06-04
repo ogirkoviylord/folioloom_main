@@ -423,6 +423,12 @@ Owner decisions recorded during issue #71:
   future issues. Owner also approved current/pre-release internal use of all
   uploaded files for analytics and product improvement; release-version behavior
   remains TBD.
+- 2026-06-04: Owner clarified that future formats beyond TXT/DOCX/EPUB are a
+  committed roadmap, not merely optional candidates. The committed future
+  families are RTF (#4), FB2 (#23), PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI,
+  AZW3/KPF and CBZ/CBR/DJVU. Current MVP and Gate B remain TXT/DOCX/EPUB;
+  issue #208 owns prioritization and issue breakdown before any format-specific
+  implementation approval.
 - 2026-06-01: During the follow-up live EPUB translation, backend/admin state
   showed the job still translating and progressing past the previously failed
   work unit, while the Telegram message could remain stuck on the queued copy.
@@ -932,16 +938,18 @@ core flow, release gates, operational visibility and documentation.
   by PR #160 and issues #145-#152 as closed; handle prompt diagnostics,
   Alerts/Backups visibility and release evidence as separate follow-ups;
 - keep issue #165 as a docs-only Book/Manuscript MVP contract and keep
-  terminology/name handling, glossary, analytics release policy, new formats and
-  stricter quality criteria in separate future issues;
+  terminology/name handling, glossary, analytics release policy, committed
+  future formats and stricter quality criteria in separate future issues;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
-- держать payments, public production, public admin и новые форматы вне
-  текущего scope.
-- GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)
-  about FB2 is a deferred idea only; owner decision TBD, authorized fixtures
-  Unknown and dependency impact Unknown.
+- держать payments, public production, public admin и committed future formats
+  вне текущего MVP/release scope.
+- Committed future formats beyond TXT/DOCX/EPUB are RTF (#4), FB2 (#23),
+  PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU. Issue
+  #208 owns prioritization and issue breakdown; authorized fixtures, supported
+  subsets, dependency impact and verification depth remain `TBD` until
+  format-specific planning.
 
 ## 3. Что уже работает
 
@@ -1607,11 +1615,15 @@ Potential issues to verify:
 - Recommended default: metadata-only by default, raw file inspection only by
   explicit owner action outside normal agent tasks.
 
-- Question: Should FB2 from GitHub issue #23 be explored after Gate B work?
-- Why it matters: FB2 expands parser, fixture, dependency, QA and support scope
-  beyond the approved TXT/DOCX/EPUB beta.
-- Suggested options: keep deferred; run idea intake/spike later; reject for now.
-- Recommended default: keep deferred until owner approval and Architect review.
+- Question: What order should issue #208 use for committed future formats?
+- Why it matters: RTF, FB2, PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI,
+  AZW3/KPF and CBZ/CBR/DJVU expand parser, fixture, dependency, QA, privacy and
+  support scope beyond the current TXT/DOCX/EPUB beta.
+- Suggested options: prioritize low-parser-risk text formats first; prioritize
+  user-demand formats first; run separate architecture spikes for PDF/OCR and
+  image-heavy formats.
+- Recommended default: keep current MVP on TXT/DOCX/EPUB and use #208 to rank
+  committed future formats before opening implementation issues.
 
 - Question: When should paid beta planning start?
 - Why it matters: payments/pricing are high-risk and Gate C is blocked.

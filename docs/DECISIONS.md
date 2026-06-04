@@ -17,6 +17,40 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-04 - Product decision: committed future format roadmap
+
+Status: Active
+
+Decision:
+- FolioLoom is committed to adding more document/book formats beyond the
+  current TXT/DOCX/EPUB closed-beta MVP.
+- The committed future format families currently recorded are RTF (#4), FB2
+  (#23), PDF including scanned/OCR PDFs, HTML/HTM, ODT, legacy DOC, MOBI,
+  AZW3/KPF and image-heavy CBZ/CBR/DJVU.
+- Issue #208 owns prioritization, supported-subset definition and issue
+  breakdown for this future format roadmap.
+- This decision is a roadmap commitment. It does not change the current
+  TXT/DOCX/EPUB MVP, Gate B release scope, free closed-beta readiness, or
+  payment/public-production scope.
+
+Evidence:
+- Owner clarified in the current Codex thread on 2026-06-04 that these are not
+  only candidates: they are committed future scope that FolioLoom will
+  eventually implement.
+
+Consequences:
+- Roadmap docs should describe these formats as committed future scope, not as
+  merely rejected, optional or discovery-only ideas.
+- Implementation of any new format still requires a separate agent-ready issue,
+  owner implementation approval, architecture review, fixture rights basis,
+  parser/resource safety plan, dependency/deployment impact review, privacy and
+  security review, and format-specific verification plan.
+- Agents must keep the current MVP and release gates focused on TXT/DOCX/EPUB
+  until a format-specific issue is approved and verified.
+
+Human approval required to change:
+- yes; this affects long-term product scope and high-risk parser/QA surface.
+
 ### 2026-06-02 - Product/architecture decision: Book/Manuscript MVP contract
 
 Status: Active
@@ -37,8 +71,9 @@ Decision:
   remains `TBD`.
 
 Evidence:
-- Owner approved these decisions in conversation on 2026-06-02 while scoping
-  GitHub issue #165.
+- Owner recorded these decisions in the GitHub issue #165 owner comment on
+  2026-06-02:
+  <https://github.com/ogirkoviylord/folioloom_main/issues/165#issuecomment-4602294496>.
 - `docs/superpowers/specs/book-manuscript-translation-mvp.md` records the
   proposed MVP contract and separates future work into issues #204-#209.
 - Existing follow-up implementation/audit issues #166-#170 cover deterministic
@@ -49,9 +84,9 @@ Consequences:
 - Issue #165 should stay docs-only and must not implement code, provider calls,
   real-file runs, raw artifact retention, new formats, release readiness or
   Gate B claims.
-- New formats beyond TXT/DOCX/EPUB remain future backlog and require separate
-  owner approval, architecture review, fixture rights basis, safety plan and
-  verification plan.
+- New formats beyond TXT/DOCX/EPUB are committed future roadmap, but remain out
+  of issue #165 and require separate owner implementation approval,
+  architecture review, fixture rights basis, safety plan and verification plan.
 - Analytics/product-improvement file use is a high-risk privacy/user-data area:
   current owner direction is recorded, but release-version policy, user consent,
   legal/privacy copy, retention and deletion behavior remain future gated work.
@@ -634,7 +669,7 @@ Decision:
 - MVP для free closed beta ограничен TXT, DOCX и EPUB.
 - MVP включает upload, validation, rights confirmation, target language selection, estimate, confirmation, persistent jobs/work units, worker processing, progress/cancel, partial/final result, My Books/history/resume/delete, beta allowlist, cost caps, kill switch, admin visibility и backup/restore workflow.
 - Не делаем сейчас: paid public SaaS, public self-serve signup, PDF/OCR/MOBI/FB2/batch ZIP, arbitrary parser, public admin, subscriptions, referrals, coupons, teams, user-facing provider/model picker.
-- FB2 support from GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23) is a deferred idea only. It does not change the beta MVP unless the owner approves a scope change and Architect review defines the supported subset, parser/resource safety plan, fixture rights basis, dependency impact and verification plan.
+- Future format support, including FB2 from GitHub issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23), is committed long-term roadmap but not part of the current free closed-beta MVP. It does not change the beta MVP unless a format-specific implementation issue is approved and Architect review defines the supported subset, parser/resource safety plan, fixture rights basis, dependency impact and verification plan.
 
 Evidence:
 - `README.md`: Supported / Not Supported.
@@ -1689,8 +1724,11 @@ Human approval required to change:
 - Не публиковать admin console в интернет без approved hardening plan.
 - Не считать beta safety accounting платежным ledger.
 - Не считать проект production-ready.
-- Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного решения.
-- Не реализовывать FB2 из GitHub issue #23 без owner approval, Architect review и отдельного agent-ready implementation issue.
+- Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного approved
+  format-specific implementation issue.
+- Не реализовывать committed future formats, включая FB2 из GitHub issue #23,
+  без owner implementation approval, Architect review и отдельного agent-ready
+  implementation issue.
 - Не отправлять user documents в public malware scanning services по умолчанию.
 - Не считать malware/AV scanning implemented без focused issue, tests and Gate
   B evidence.

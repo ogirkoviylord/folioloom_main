@@ -39,10 +39,10 @@ Week 2 exit: free closed-beta go/no-go note with release artifacts.
 - Stripe/YooKassa/card flow.
 - Subscriptions/referrals/coupons/team seats.
 - PDF/OCR/MOBI/FB2/batch ZIP.
-- FB2 support from GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23). It is a
-  deferred idea only; owner decision is TBD and implementation needs Architect
-  review.
+- Committed future formats beyond TXT/DOCX/EPUB, including FB2 from GitHub issue
+  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23), until issue
+  #208 prioritizes them and separate format-specific implementation issues have
+  Architect review and approval.
 - Public admin.
 - Public website/customer portal.
 - WhatsApp/Discord/API channels.
