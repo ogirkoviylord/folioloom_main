@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 ## 1. Текущее состояние проекта
 
@@ -81,6 +81,24 @@ ruff on changed Python files passed, and `git diff --check` passed. CI status
 remains Unknown until a PR/checks page is inspected. This does not mutate
 runtime data, change schema/state, deploy code, read secrets/env files, or
 claim broader Gate B/release readiness.
+
+Issue #167 implementation slice on 2026-06-04: branch
+`codex/issue-167-book-manuscript-policy-profile` generalizes
+`book_manuscript` policy/profile context across persistent TXT, EPUB and DOCX
+job plans. Policy snapshots now record a format-neutral
+`book-manuscript-v1` profile and carry book/manuscript style context into
+translation context memory; DOCX `document_form` keeps its existing
+`docx-document-form-v1` profile and strict route. Duplicate-policy matching
+uses the same profile helper so signatures stay aligned with persistent jobs.
+Run-log policy snapshots retain `translation_mode` and
+`translation_mode_profile` metadata, but do not serialize
+`translation_context_memory`, avoiding document-derived `entity_choices`,
+`source_text` or `target_text` in `run.json` and admin archives. Local
+verification passed focused bot/planner/policy tests, targeted ruff,
+compileall and full unittest discover with 1231 tests `OK (skipped=13)`. CI
+status remains Unknown until a PR/checks page is inspected. This does not
+change UI/copy, database/schema/state, provider configuration, runtime `var/`
+data, supported formats, deployment, or release readiness.
 
 Owner decisions recorded during issue #71:
 

@@ -12,7 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from translator_service.admin.translation_logs import list_translation_run_summaries
+from translator_service.admin.translation_logs import (
+    build_translation_run_archive,
+    list_translation_run_summaries,
+)
 from translator_service.beta_access import BetaAccessDenied, BetaAccessPolicy
 from translator_service.beta_safety import (
     BetaSafetyDecision,
@@ -1947,6 +1950,62 @@ class BotTranslationServiceTest(unittest.TestCase):
             "Secret preview sentence",
             json.dumps(candidate.metadata, ensure_ascii=False),
         )
+
+    def test_run_log_policy_book_profile_excludes_entity_context_text(self):
+        from zipfile import ZipFile
+
+        with TemporaryDirectory() as temp_dir:
+            run_log_root = Path(temp_dir) / "translation-runs"
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=80,
+                translation_run_log_root=run_log_root,
+            )
+            pending = PendingTranslation(
+                user_telegram_id=42,
+                file_name="chapter.txt",
+                content=(
+                    b"Alice met Bob in Paris. "
+                    b"Quiet chapter opening kept the narrator voice."
+                ),
+                source_language="en",
+                target_language="uk",
+                price_usd=0.0,
+                fragment_count=1,
+                rights_confirmed=True,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+
+            logger = service._start_translation_run_logger(
+                pending=pending,
+                document_kind=DocumentKind.TXT,
+                job_id="job-policy-redaction",
+                translator=RecordingTranslator(),
+            )
+
+            self.assertIsNotNone(logger)
+            run_text = (logger.run_dir / "run.json").read_text(encoding="utf-8")
+            archive = build_translation_run_archive(run_log_root, logger.run_dir.name)
+            self.assertIsNotNone(archive)
+            with ZipFile(io.BytesIO(archive.content)) as archive_file:
+                archive_text = "\n".join(
+                    archive_file.read(name).decode("utf-8", errors="ignore")
+                    for name in archive_file.namelist()
+                )
+
+        for artifact_text in (run_text, archive_text):
+            self.assertIn("book_manuscript", artifact_text)
+            self.assertIn("book-manuscript-v1", artifact_text)
+            self.assertNotIn("Book/manuscript mode", artifact_text)
+            self.assertNotIn("Alice", artifact_text)
+            self.assertNotIn("Bob", artifact_text)
+            self.assertNotIn("Paris", artifact_text)
+            self.assertNotIn("translation_context_memory", artifact_text)
+            self.assertNotIn("entity_choices", artifact_text)
+            self.assertNotIn("source_text", artifact_text)
+            self.assertNotIn("target_text", artifact_text)
 
     def test_generates_preview_translation_with_beta_safety_accounting(self):
         with TemporaryDirectory() as temp_dir:

@@ -76,8 +76,8 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
 )
 from translator_service.persistent_planner import (
-    _docx_translation_mode_profile,
     _translation_context_with_mode_profile,
+    _translation_mode_profile_for_document_kind,
     create_persistent_docx_job_plan,
     create_persistent_epub_job_plan,
     create_persistent_txt_job_plan,
@@ -4206,15 +4206,29 @@ def _translation_policy_snapshot_for_pending(
         )
         return None
 
+    translation_mode_profile = _translation_mode_profile_for_document_kind(
+        pending.translation_mode,
+        document_kind=document_kind.value,
+    )
+    translation_context = None
+    if translation_mode_profile is not None:
+        translation_context = _translation_context_with_mode_profile(
+            translation_context,
+            translation_mode_profile,
+        )
     policy = build_translation_policy(
         text=source_text,
         source_language=pending.source_language,
         target_language=pending.target_language,
+        translation_context=translation_context,
     )
     return _translation_policy_with_rights_confirmation(
         translation_policy_signature(policy),
         rights_confirmation=_rights_confirmation_payload(pending),
         translation_mode=pending.translation_mode,
+        translation_mode_profile=translation_mode_profile.signature
+        if translation_mode_profile is not None
+        else None,
         upload_safety=_upload_safety_run_policy_marker(pending),
     )
 
@@ -4278,6 +4292,7 @@ def _translation_policy_with_rights_confirmation(
     *,
     rights_confirmation: dict,
     translation_mode: str | None = None,
+    translation_mode_profile: str | None = None,
     upload_safety: dict | None = None,
 ) -> str | None:
     if not translation_policy:
@@ -4288,6 +4303,8 @@ def _translation_policy_with_rights_confirmation(
     payload["rights_confirmation"] = rights_confirmation
     if translation_mode is not None:
         payload["translation_mode"] = translation_mode
+    if translation_mode_profile is not None:
+        payload["translation_mode_profile"] = translation_mode_profile
     if upload_safety is not None:
         payload["upload_safety"] = upload_safety
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -4651,10 +4668,9 @@ def _duplicate_policy_signature_for_units(
         source_text,
         target_language=target_language,
     )
-    translation_mode_profile = (
-        _docx_translation_mode_profile(translation_mode)
-        if document_kind is DocumentKind.DOCX
-        else None
+    translation_mode_profile = _translation_mode_profile_for_document_kind(
+        translation_mode,
+        document_kind=document_kind.value,
     )
     if translation_mode_profile is not None:
         translation_context = _translation_context_with_mode_profile(
