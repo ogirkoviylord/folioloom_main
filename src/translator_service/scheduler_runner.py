@@ -81,6 +81,7 @@ def run_scheduler_once(
                 store=store,
                 storage=storage,
                 beta_safety_guard=beta_safety_guard,
+                translation_run_log_root=translation_run_log_root,
             )
             return SchedulerRunOnceSummary(
                 completed_units=0,
@@ -150,6 +151,7 @@ def run_scheduler_once(
         store=store,
         storage=storage,
         beta_safety_guard=beta_safety_guard,
+        translation_run_log_root=translation_run_log_root,
     )
     return SchedulerRunOnceSummary(
         completed_units=completed_units,
@@ -272,9 +274,11 @@ def _run_scheduled_parallel_once(
                 try:
                     translation_result = future.result()
                 except Exception as error:
-                    provider_failure_diagnostic = _provider_failure_diagnostic_for_error(
-                        error,
-                        translator=translator,
+                    provider_failure_diagnostic = (
+                        _provider_failure_diagnostic_for_error(
+                            error,
+                            translator=translator,
+                        )
                     )
                     logger.error(
                         "Scheduled parallel worker failed safely: "
@@ -428,11 +432,18 @@ def assemble_due_jobs(
     store: SQLiteTranslationJobStore,
     storage: LocalObjectStorage,
     beta_safety_guard: BetaSafetyGuard | None = None,
+    translation_run_log_root: str | Path | None = None,
 ) -> int:
     assembled = 0
     for job in store.list_jobs_by_status(PersistentTranslationJobStatus.ASSEMBLING):
         if job.final_object_key is not None:
             store.mark_job_assembled(job.id, partial=False)
+            _finish_assembled_translation_run(
+                translation_run_log_root,
+                job_id=job.id,
+                status="ready",
+                result_file_name=_stored_file_name(storage, job.final_object_key),
+            )
             _record_assembled_beta_safety_terminal(
                 beta_safety_guard=beta_safety_guard,
                 job_id=job.id,
@@ -442,6 +453,12 @@ def assemble_due_jobs(
             continue
         if job.partial_object_key is not None:
             store.mark_job_assembled(job.id, partial=True)
+            _finish_assembled_translation_run(
+                translation_run_log_root,
+                job_id=job.id,
+                status="partial",
+                result_file_name=_stored_file_name(storage, job.partial_object_key),
+            )
             _record_assembled_beta_safety_terminal(
                 beta_safety_guard=beta_safety_guard,
                 job_id=job.id,
@@ -485,6 +502,12 @@ def assemble_due_jobs(
                 f"Unsupported document kind for assembly: {job.document_kind}"
             )
         store.mark_job_assembled(job.id, partial=partial)
+        _finish_assembled_translation_run(
+            translation_run_log_root,
+            job_id=job.id,
+            status="partial" if partial else "ready",
+            result_file_name=result_name,
+        )
         _record_assembled_beta_safety_terminal(
             beta_safety_guard=beta_safety_guard,
             job_id=job.id,
@@ -492,6 +515,30 @@ def assemble_due_jobs(
         )
         assembled += 1
     return assembled
+
+
+def _finish_assembled_translation_run(
+    root: str | Path | None,
+    *,
+    job_id: str,
+    status: str,
+    result_file_name: str | None,
+) -> None:
+    if root is None:
+        return
+    finish_running_translation_runs_for_job(
+        root,
+        job_id=job_id,
+        status=status,
+        result_file_name=result_file_name,
+    )
+
+
+def _stored_file_name(storage: LocalObjectStorage, object_key: str) -> str | None:
+    try:
+        return storage.get_metadata(object_key).file_name
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _record_assembled_beta_safety_terminal(
