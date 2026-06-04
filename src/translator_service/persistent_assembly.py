@@ -2,16 +2,20 @@ import logging
 from collections.abc import Sequence
 from xml.etree import ElementTree
 
-from translator_service.documents import DocumentFormat
 from translator_service.document_sandbox import SandboxTranslationUnit
-from translator_service.file_storage import LocalObjectStorage, StoredFile, StoredFileKind
+from translator_service.documents import DocumentFormat
+from translator_service.file_storage import (
+    LocalObjectStorage,
+    StoredFile,
+    StoredFileKind,
+)
+from translator_service.format_adapters.epub import (
+    assemble_epub_content_from_block_translations,
+)
+from translator_service.format_adapters.txt import TXT_ADAPTER_VERSION
 from translator_service.format_adapters.txt_layout import (
     assemble_txt_document,
     parse_txt_document,
-)
-from translator_service.format_adapters.txt import TXT_ADAPTER_VERSION
-from translator_service.format_adapters.epub import (
-    assemble_epub_content_from_block_translations,
 )
 from translator_service.persistent_jobs import (
     PersistentWorkUnit,
@@ -22,7 +26,6 @@ from translator_service.translation_runner import (
     _extract_docx_blocks,
     _replace_docx_blocks,
 )
-
 
 _DOCX_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -48,7 +51,9 @@ def assemble_persistent_txt_result(
         )
     source_content = storage.get_bytes(job.source_object_key)
     document = parse_txt_document(source_content)
-    translated_by_segment_id = _translated_text_by_block_id(store.list_work_units(job_id))
+    translated_by_segment_id = _translated_text_by_block_id(
+        store.list_work_units(job_id)
+    )
     assembled_text = assemble_txt_document(
         document,
         translated_by_segment_id=translated_by_segment_id,
@@ -328,7 +333,51 @@ def _parse_lenient_translation_batch(
     if len(blocks) != expected_count:
         return None
 
-    return ["".join(block.itertext()).strip() for block in blocks]
+    ordered_by_id = _translation_batch_parts_ordered_by_id(
+        blocks,
+        expected_count=expected_count,
+    )
+    if ordered_by_id is not None:
+        return ordered_by_id
+    if any("id" in block.attrib for block in blocks):
+        return None
+
+    return [_translation_block_text(block) for block in blocks]
+
+
+def _translation_batch_parts_ordered_by_id(
+    blocks: list[ElementTree.Element],
+    *,
+    expected_count: int,
+) -> list[str] | None:
+    block_ids = [block.attrib.get("id") for block in blocks]
+    if any(block_id is None for block_id in block_ids):
+        return None
+
+    try:
+        parsed_ids = [int(str(block_id)) for block_id in block_ids]
+    except ValueError:
+        return None
+
+    id_set = set(parsed_ids)
+    if len(id_set) != len(parsed_ids):
+        return None
+    if id_set == set(range(expected_count)):
+        offset = 0
+    elif id_set == set(range(1, expected_count + 1)):
+        offset = 1
+    else:
+        return None
+
+    translated_by_index = {
+        parsed_id - offset: _translation_block_text(block)
+        for parsed_id, block in zip(parsed_ids, blocks, strict=True)
+    }
+    return [translated_by_index[index] for index in range(expected_count)]
+
+
+def _translation_block_text(block: ElementTree.Element) -> str:
+    return "".join(block.itertext()).strip()
 
 
 def _local_name(tag: str) -> str:
