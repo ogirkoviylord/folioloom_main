@@ -1,0 +1,146 @@
+[
+  {
+    "height": 720,
+    "name": "10-settings-desktop",
+    "scrollHeight": 1523,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nSettings\nDEVELOPMENT\nSecret & Config Safety\n\nReview configured secrets, provider keys, failed validations, and items that need a local check.\n\nClosed Beta Allowlist\n\nAdd trusted Telegram numeric user IDs now, then enable enforcement when the beta cohort is ready.\n\nAllowlist enforcement: off All Telegram users can use the bot while the list is off.\nEnable allowlist\nTelegram user ID\nAdd ID\n\nNo Telegram IDs are allowlisted.\n\nBeta Safety Controls\n\nLive budget guardrails for the closed beta. These values protect beta spend and can pause new translation starts without exposing document text.\n\nPause all beta translations\nGlobal daily cost cap USD\nGlobal monthly cost cap USD\nPer-user daily cost cap USD\nPer-user monthly cost cap USD\nPer-user daily job limit\nMax estimated cost per job USD\nBudget warning fraction\nSave beta safety\nTotal\n7\nMissing\n7\nNeeds check\n0\nFailed\n0\nDisabled\n0\nSafety summary\nOWNER\tTYPE\tITEM\tSTATUS\tMASKED VALUE\tACTION\nDeepSeek\tAI provider\tAPI key pool\nNo provider keys are configured.\n\t\nmissing\n\tnot stored\tOpen\nDiscord\tIntegratio",
+    "title": "Settings · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/settings",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "11-logs-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nTranslation Logs\nDEVELOPMENT\nTranslation Logs\n\nReview translation runs by date, state, file, language direction, token usage, and safe error metadata.\n\nStatus\nAll\nRunning\nReady\nFailed\nCancelled\nPartial\nFrom\nTo\nApply filters\nSTARTED\tSTATUS\tJOB\tFILE\tDIRECTION\tFRAGMENTS\tTOKENS\tERROR\tACTIONS\nNo translation logs found.",
+    "title": "Translation Logs · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/logs",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "12-reader-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nInternal Reader\nDEVELOPMENT\nInternal Reader\n\nGenerate owner-only before/after reports for approved local TXT/DOCX/EPUB fixtures.\n\nRaw text visibility is enabled for this internal reader only.\n\nReports may show source document text and translated output. Keep them out of issues, PRs, safe log archives, screenshots and support notes unless the owner explicitly approves that exact excerpt.\n\nSample fixture\nManual path\ntest_samples/docx_translation_bot_stress_test_v3_en.ru.docx\ntest_samples/russian_profile_regression.en-ru.docx\ntest_samples/russian_profile_regression.en-ru.epub\ntest_samples/russian_profile_regression.en-ru.txt\ntest_samples/sample_book.en.docx\ntest_samples/sample_book.en.epub\ntest_samples/sample_book.en.txt\ntest_samples/ukrainian_profile_regression.en-uk.docx\ntest_samples/ukrainian_profile_regression.en-uk.epub\ntest_samples/ukrainian_profile_regression.en-uk.txt\nPick a repository sample, or leave this on Manual path and enter an approved l",
+    "title": "Internal Reader · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/internal-reader",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "13-activity-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nActivity\nDEVELOPMENT\nActivity\n\nUser commands, buttons, settings, translation lifecycle events, and security outcomes collected automatically by the service.\n\nUser\nChannel user\nSurface\nEvent\nAction\nOutcome\nJob\nFrom\nTo\nApply filters\nTIME\tUSER\tSURFACE\tEVENT\tTARGET\tOUTCOME\tJOB\tMETADATA\nNo activity events found.",
+    "title": "Activity · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/activity",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "14-operations-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nOperations\nDEVELOPMENT\nQueued\n0\nRunning\n0\nFailed\n0\nQueue depth\n0\nOldest pending\nn/a\nJobs\nSTATE\tJOB ID\tORDER ID\tSTARTED/UPDATED\tFRAGMENTS\tTOTAL TOKENS\tWORKER IDS\tERROR\tLOGS\tACTIONS\nNo persistent jobs found.\nWorkers\n\n0 workers are currently visible to the admin console.",
+    "title": "Operations · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/operations/jobs",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "15-audit-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nAudit\nDEVELOPMENT\nAudit\n\nEvery sensitive admin change will be visible here with actor, outcome, reason, and redacted metadata.",
+    "title": "Audit · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/audit",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "16-integrations-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nIntegrations\nDEVELOPMENT\nIntegrations\n\nConnect user-facing channels, embedded surfaces, webhooks, and external automation.\n\nMESSENGER BOT CHANNEL\nTelegram\n0 active connections\nMESSENGER BOT CHANNEL\nWhatsApp\n0 active connections\nMESSENGER BOT CHANNEL\nInstagram\n0 active connections\nMESSENGER BOT CHANNEL\nDiscord\n0 active connections\nWEBSITE WIDGET\nWebsite Widget\n0 active connections\nWEBHOOK\nWebhooks\n0 active connections",
+    "title": "Integrations · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/integrations",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "17-billing-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nBilling\nDEVELOPMENT\nBilling\n\nPayment providers, subscriptions, invoices, revenue, refunds, webhooks, tax settings, and payout status will live here.\n\nPayment providers\n\nStripe and other billing services will be configured inside Billing.",
+    "title": "Billing · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/billing",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "18-costs-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nCosts\nDEVELOPMENT\nToken Spend\n\nEstimated model costs from translation run totals. Billing setup stays separate from this usage view.\n\nToday\n0\n$0.0000\nLast 7 days\n0\n$0.0000\nMonth to date\n0\n$0.0000\nMost expensive runs\nSTARTED\tJOB\tORDER\tUSER\tFILE\tINPUT\tOUTPUT\tTOTAL\tCOST\tLOGS\nNo cost data found.\nBeta safety budget\nDAILY CAP\n$5.0000\nDAILY RESERVED\n$0.0000\nDAILY CONSUMED\n$0.0000\nDAILY REMAINING\n$5.0000\nMONTHLY CAP\n$50.0000\nMONTHLY RESERVED\n$0.0000\nMONTHLY CONSUMED\n$0.0000\nMONTHLY REMAINING\n$50.0000\nTRANSLATIONS PAUSED\nno\nWARNING\nno\nTop users (all time)\nUSER\tINPUT\tOUTPUT\tTOTAL TOKENS\tCOST\nNo user spend data found.",
+    "title": "Costs · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/costs",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "19-quality-desktop",
+    "scrollHeight": 1353,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nQuality\nDEVELOPMENT\nTranslation Quality\n\nMETEOR core and chrF scores for the latest offline QA run. Candidate, source, and reference text stay out of the admin UI.\n\nvar/quality-runs/latest.jsonl\nRun quality check\nAvg METEOR\nn/a\nAvg chrF\nn/a\nScored\n0\nMissing\n10\nExtra\n0\nNo quality run found\n\nPut model QA outputs in var/quality-runs/latest.jsonl to compare candidates against the reference regression corpus.\n\nRussian (ru)\nAVG METEOR\nn/a\nAVG CHRF\nn/a\nSCORED\n0\nMISSING\n6\nSAMPLE\tCATEGORY\tDIRECTION\tMETEOR\tCHRF\tSTATUS\tERROR\nru-business-acme-obligation\tbusiness_legal\ten -> ru\tn/a\tn/a\t\nmissing\n\t\nru-literary-rain-window\tliterary\ten -> ru\tn/a\tn/a\t\nmissing\n\t\nru-ordinary-calque-decision-overview\tordinary_prose\ten -> ru\tn/a\tn/a\t\nmissing\n\t\nru-technical-api-placeholder-callback\ttechnical\ten -> ru\tn/a\tn/a\t\nmissing\n\t\nru-pl-orthography-sample\tmixed_language\tpl -> ru\tn/a\tn/a\t\nmissing\n\t\nru-uk-literary-door\tliterary\tuk -> ru\tn/a\tn/a\t\nmissing\n\t\nUkrainian (uk)\nAVG METEOR\nn/a\nA",
+    "title": "Quality · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/quality",
+    "width": 1280
+  },
+  {
+    "height": 720,
+    "name": "20-security-events-desktop",
+    "scrollHeight": 1050,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\nSign out\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nSecurity\nDEVELOPMENT\nSecurity\n\nBlocked actions, cooldowns, policy trips, and suspicious service behavior from the shared activity log.\n\nTIME\tUSER\tSURFACE\tEVENT\tTARGET\tOUTCOME\tJOB\tMETADATA\nNo security events recorded yet.",
+    "title": "Security · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/security/events",
+    "width": 1280
+  },
+  {
+    "height": 812,
+    "name": "24-mobile-overview",
+    "scrollHeight": 1526,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nOverview\nDEVELOPMENT\nTriage inbox\n\nActionable beta operations items only. Each row explains what happened, why it is shown now, what is affected, and the next step.\n\nAction needed\nRequired integrations need setup\nAdd connection rows and required secrets before launch.\nAFFECTED\nTelegram integration\nWHY NOW\nRequired integration has no healthy configured connection.\nOpen integrations\nNext step\nBlocked\nDeepSeek keys missing\nAdd at least one active DeepSeek key for translations.\nAFFECTED\nDeepSeek provider\nWHY NOW\nNo active DeepSeek key is available for translation work.\nOpen provider\nNext step\nAction needed\nSecret safety needs review\n7 secret or key item(s) need attention.\nAFFECTED\nAdmin secrets and keys\nWHY NOW\nSecret safety metadata reported items needing review.\nOpen settings\nNext step",
+    "title": "Overview · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/overview",
+    "width": 375
+  },
+  {
+    "height": 812,
+    "name": "25-mobile-providers",
+    "scrollHeight": 5091,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nAI Providers\nDEVELOPMENT\nAI Providers\n\nManage model providers, API keys, and provider-level capabilities separately from user-facing integrations.\n\nAI PROVIDER\n\nDeepSeek\n0 active keys\n\nDeepSeek model API used for translation and analysis.\n\nProvider incident state\n\nRead-only diagnosis from existing safe metadata. Probe, change and danger actions stay below this section.\n\nKEYS CONFIGURED\n0 total\nInventory metadata only; raw key values and secret ids stay hidden.\nKEYS VALID\nNo keys configured\nLast validation state from existing safe provider health metadata.\nKEYS ENABLED\n0 active / 0 paused\nKeys currently allowed for runtime use versus paused/read-only rows.\nRUNTIME SEES CHANNELS\nUnknown\nSeparates missing usable channels from degraded runtime with channels.\nRELOAD STATE\nNo reload requested\nWhether saved key/settings changes are waiting for bot or worker",
+    "title": "AI Providers · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/ai-providers",
+    "width": 375
+  },
+  {
+    "height": 812,
+    "name": "26-mobile-settings",
+    "scrollHeight": 2563,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nSettings\nDEVELOPMENT\nSecret & Config Safety\n\nReview configured secrets, provider keys, failed validations, and items that need a local check.\n\nClosed Beta Allowlist\n\nAdd trusted Telegram numeric user IDs now, then enable enforcement when the beta cohort is ready.\n\nAllowlist enforcement: off All Telegram users can use the bot while the list is off.\nEnable allowlist\nTelegram user ID\nAdd ID\n\nNo Telegram IDs are allowlisted.\n\nBeta Safety Controls\n\nLive budget guardrails for the closed beta. These values protect beta spend and can pause new translation starts without exposing document text.\n\nPause all beta translations\nGlobal daily cost cap USD\nGlobal monthly cost cap USD\nPer-user daily cost cap USD\nPer-user monthly cost cap USD\nPer-user daily job limit\nMax estimated cost per job USD\nBudget warning fraction\nSave beta safety\nTotal\n7\nMissing\n7\nNeeds check\n0",
+    "title": "Settings · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/settings",
+    "width": 375
+  },
+  {
+    "height": 812,
+    "name": "27-mobile-translations",
+    "scrollHeight": 1078,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nTranslations\nDEVELOPMENT\nTranslations\n\nReview translation runs by date, state, file, language direction, token usage, and safe error metadata.\n\nStatus\nAll\nRunning\nReady\nFailed\nCancelled\nPartial\nFrom\nTo\nApply filters\nSTARTED\tSTATUS\tJOB\tFILE\tDIRECTION\tFRAGMENTS\tTOKENS\tERROR\tACTIONS\nNo translation logs found.",
+    "title": "Translations · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/translations",
+    "width": 375
+  },
+  {
+    "height": 812,
+    "name": "28-mobile-reader",
+    "scrollHeight": 1869,
+    "text": "FOLIOLOOM\n\nAdmin Console\nOverview\nLive\nTranslations\nUsers\nProviders\nBeta Controls\nSafety\nSettings\nAdvanced\nLogs\nReader\nActivity\nOperations\nAudit\nIntegrations\nBilling\nCosts\nQuality\nSecurity Events\n\nSIGNED IN AS BOOTSTRAP-OWNER\n\nInternal Reader\nDEVELOPMENT\nInternal Reader\n\nGenerate owner-only before/after reports for approved local TXT/DOCX/EPUB fixtures.\n\nRaw text visibility is enabled for this internal reader only.\n\nReports may show source document text and translated output. Keep them out of issues, PRs, safe log archives, screenshots and support notes unless the owner explicitly approves that exact excerpt.\n\nSample fixture\nManual path\ntest_samples/docx_translation_bot_stress_test_v3_en.ru.docx\ntest_samples/russian_profile_regression.en-ru.docx\ntest_samples/russian_profile_regression.en-ru.epub\ntest_samples/russian_profile_regression.en-ru.txt\ntest_samples/sample_book.en.docx\ntest_samples/sample_book.en.epub\ntest_samples/sample_book.en.txt\ntest_samples/ukrainian_profile_regression.en-",
+    "title": "Internal Reader · FolioLoom Console",
+    "url": "http://127.0.0.1:62063/admin/internal-reader",
+    "width": 375
+  }
+]
