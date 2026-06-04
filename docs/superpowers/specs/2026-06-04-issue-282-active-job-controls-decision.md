@@ -1,8 +1,8 @@
 # Issue #282 Active Job Controls Decision Record
 
 Issue: #282
-Status: architecture review; owner decision still required for destructive or
-expanded writable behavior
+Status: owner decision recorded for pause/cancel narrowing; destructive delete
+requires separate owner-approved implementation scope
 Date: 2026-06-04
 
 ## Routing Receipt
@@ -13,7 +13,7 @@ Date: 2026-06-04
 - Primary role / skill: Architect Agent, `architecture-review`.
   `docs/RISK_REGISTER.md`, `docs/QUALITY_GATES.md`,
   `docs/superpowers/specs/2026-06-04-active-translation-admin-controls-spike.md`.
-- Approval status for this PR: not required for docs-only analysis.
+- Approval status for this PR: approved with owner evidence in the current
 - Approval status for implementation/runtime operations: missing for any new,
   expanded, destructive, deployment, schema/state, auth/security, privacy,
   payment or runtime-data operation.
@@ -42,40 +42,35 @@ Confirmed from current `main`:
   translation logs with safe generic messages.
 - Bot status copy already has admin paused and admin deleted messages.
 
-Assumptions:
+Owner decision evidence:
 
-- The owner wants operational intervention during closed beta, but not broad
-  destructive or bulk mutation.
-- Current-main controls may remain as existing behavior while future expansion
-  is narrowed into owner-approved follow-up issues.
+  destructive active-job delete out of #282 and approved continuing with the
+  separate-delete decision path.
 
 Unknown / TBD:
 
-- Exact owner decision for keeping, narrowing or removing the existing
-  destructive delete control is not recorded in issue #282 comments.
-- Runtime safety of current-main delete across backups, restore, retention,
-  object storage and user-visible history is not proven by this issue.
+- Runtime safety of destructive active-job delete across backups, restore,
+  retention, object storage and user-visible history is not proven by this
+  issue and remains separate implementation scope.
 
 ## Architect Verdict
 
+SAFE for this PR as docs-only architecture decision.
+
 NEEDS HUMAN APPROVAL for destructive delete semantics and any expanded writable
-behavior.
+behavior beyond the decision recorded here.
 
-SAFE for this PR only as docs-only architecture analysis.
+## Owner Decision
 
-## Recommended Owner Decision
-
-Recommended decision to record in issue #282:
+Recorded decision:
 
 1. Keep `pause` as an allowed single-job admin control for queued and
    translating/running jobs only.
 2. Keep `cancel` as an allowed single-job admin control for queued and
    translating/running jobs only.
-3. Do not expand destructive `delete` in #282. Treat active-job delete as a
-   separate critical-risk decision owned by issue #284. Until #284 is approved,
-   future work should either leave existing current-main behavior unchanged or
-   replace the visible admin affordance with a safer cancel/archive design in a
-   separate owner-approved implementation issue.
+3. Do not approve destructive `delete` in #282. Treat active-job delete as a
+   separate critical-risk implementation scope after the #284 architecture
+   review.
 4. Do not add bulk pause/cancel/delete controls in this issue.
 5. Do not add retry, requeue or mark-failed controls in this issue; those are
    owned by issue #283.
@@ -155,9 +150,10 @@ Required behavior:
 
 Decision status:
 
-- `TBD` owner approval for destructive active-job deletion remains required.
-- Issue #284 owns destructive-delete review before expansion or new
-  implementation.
+- Destructive active-job deletion is not approved in #282.
+- Issue #284 owns the destructive-delete architecture review.
+- Any future delete implementation or UI expansion requires a separate
+  owner-approved implementation issue.
 
 Current-main affected data classes from repository evidence:
 
@@ -172,7 +168,7 @@ Current-main affected data classes from repository evidence:
 - running translation log status, through a safe finish helper;
 - metadata-only user activity event.
 
-Data classes that still need #284 review before approval:
+Data classes that remain relevant to separate delete implementation scope:
 
 - backup/restore artifacts;
 - retention/TTL expectations;
@@ -181,7 +177,7 @@ Data classes that still need #284 review before approval:
 - object-storage edge cases and missing-object handling;
 - run-log archives and summaries after delete.
 
-Required confirmation if delete remains available:
+Required confirmation if delete is separately approved later:
 
 - Explicit destructive warning.
 - Single-job scope only.
@@ -206,7 +202,7 @@ Later implementation or narrowing must include:
 
 ## Required Approval Gates
 
-Owner approval is required before:
+Owner approval is still required before:
 
 - expanding or changing pause/cancel semantics;
 - adding or expanding destructive delete behavior;
