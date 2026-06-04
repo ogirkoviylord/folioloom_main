@@ -15,6 +15,7 @@ from translator_service.deepseek_key_pool import (
     DeepSeekKeyPoolTranslator,
 )
 from translator_service.provider_throttle import ProviderThrottleConfig
+from translator_service.translation_context import TranslationContextMemory
 
 
 class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
@@ -96,6 +97,28 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertEqual(snapshot.last_selected_at, 100.0)
         self.assertEqual(snapshot.last_success_at, 100.0)
         self.assertIsNone(snapshot.last_error)
+
+    def test_forwards_translation_context_to_context_aware_client(self):
+        factory = RecordingClientFactory({"key-a": ["ok"]})
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[DeepSeekChannelConfig(api_key="key-a", label="a")],
+            client_factory=factory,
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+        context = TranslationContextMemory(
+            style_summary="Keep the established book manuscript voice."
+        )
+
+        result = pool.translate(
+            text="source",
+            source_language="en",
+            target_language="ru",
+            translation_context=context,
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(factory.contexts, [context])
 
     def test_permanent_error_is_recorded_and_not_replayed_on_other_channels(self):
         factory = RecordingClientFactory(
@@ -592,6 +615,7 @@ class RecordingClientFactory:
             for key, results in results_by_key.items()
         }
         self.calls = []
+        self.contexts = []
 
     def __call__(self, *, api_key: str):
         return RecordingClient(api_key=api_key, factory=self)
@@ -603,8 +627,16 @@ class RecordingClient:
         self.factory = factory
         self.last_usage = None
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+        translation_context: TranslationContextMemory | None = None,
+    ) -> str:
         self.factory.calls.append((self.api_key, text))
+        self.factory.contexts.append(translation_context)
         result = self.factory.results_by_key[self.api_key].pop(0)
         if isinstance(result, Exception):
             raise result
