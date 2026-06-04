@@ -14,6 +14,67 @@ fixtures may live in the repo. Real source documents and translated outputs stay
 out of git by default unless the owner explicitly approves retention for that
 fixture.
 
+## Book / Manuscript Mode Exploratory Checks And Evidence
+
+Current owner and invited-friend manual checks are exploratory bot-flow checks.
+Their purpose is to find pipeline bugs and file-structure problems in uploaded
+books/manuscripts, not to create publisher-facing examples or release-quality
+evidence. Bad, unreadable, or structurally broken translated outputs from this
+stage should be reviewed only as needed for debugging and should not be retained
+as official evidence.
+
+Official book/manuscript real-file evidence must be rerun later on a stable
+release candidate and must be clean-only. Use public-domain, clearly
+permissive-licensed, self-authored, publisher-approved, or otherwise
+owner-confirmed authorized fixtures. Known or suspected pirated books and
+unclear-source manual bot checks may help exploratory debugging, but they must
+not be recorded as release, Gate B, publisher, PR, or issue evidence.
+
+Manual checks should use the normal Telegram bot flow when the goal is to
+validate the user-facing experience. For official evidence, record metadata
+only:
+
+```yaml
+fixtures:
+  - id: book-epub-clean-en-ru-001
+    mode: book
+    flow: telegram_bot
+    format: epub
+    source_language: en
+    target_language: ru
+    source_url: TBD
+    license_url: TBD
+    rights_basis: public-domain
+    raw_source_in_git: false
+    translated_output_in_git: false
+    gate_b_completion_claim: false
+    expected_checks:
+      upload: TBD
+      estimate: TBD
+      final_artifact: TBD
+      openability: TBD
+      toc_or_headings: TBD
+      residue_audit: TBD
+      epubcheck: TBD
+```
+
+Initial official book/manuscript evidence should cover `EN -> RU` first. Add
+the same metadata-only slice for other target languages later, after owner
+approval or an explicit issue records the target-language scope; until then,
+additional target languages remain `TBD`.
+
+| Slice | Official evidence allowed when | Required checks |
+| --- | --- | --- |
+| EPUB book `EN -> RU` | Clean rights basis plus source/license URL | Bot upload, estimate, final artifact presence, source/target language metadata, TOC/nav/headings, openability, local/offline EPUBCheck, residue audit |
+| DOCX manuscript `EN -> RU` | Clean rights basis plus source/license URL, self-authored file, or publisher-approved file | Bot upload, estimate, final artifact presence, headings/paragraph structure, language metadata where applicable, local LibreOffice opens without repair, no blocker visual issues, residue audit |
+| TXT long prose `EN -> RU` | Clean rights basis plus source/license URL | Bot upload, estimate, final artifact presence, encoding, paragraphs/chapter markers, work-unit/progress visibility for long files, residue audit |
+
+Raw source books, translated outputs, screenshots with document text, excerpts,
+and output links stay out of the repo, docs, issues, PRs, and release reports by
+default. Server/runtime retention, backup retention, and TTL/delete verification
+are separate user-data and release-gate topics; this slice does not claim they
+are solved.
+
 ## Manifest Idea
 
 Keep corpus metadata in a manifest such as `real_corpus_manifest.yml`.
