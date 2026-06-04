@@ -26,6 +26,7 @@ from translator_service.scheduler import (
 )
 from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
+    record_book_mode_audit_fragment_for_job,
 )
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
@@ -114,6 +115,10 @@ def run_scheduler_once(
         if completed is not None:
             if completed.status.value in {"translated", "cached"}:
                 completed_units = 1
+                _record_book_mode_audit_for_work_unit(
+                    translation_run_log_root,
+                    completed,
+                )
             elif completed.status.value.startswith("failed"):
                 failed_units = 1
                 _finish_failed_translation_run_for_work_unit(
@@ -315,6 +320,10 @@ def _run_scheduled_parallel_once(
                     raise
                 if completed.status.value in {"translated", "cached"}:
                     completed_units += 1
+                    _record_book_mode_audit_for_work_unit(
+                        translation_run_log_root,
+                        completed,
+                    )
                     if usage_completed_callback is not None:
                         usage_completed_callback(completed)
                 elif completed.status.value.startswith("failed"):
@@ -359,6 +368,22 @@ def _failed_unit_count(work_unit: PersistentWorkUnit | None) -> int:
     if work_unit is None:
         return 0
     return 1 if work_unit.status.value.startswith("failed") else 0
+
+
+def _record_book_mode_audit_for_work_unit(
+    translation_run_log_root: str | Path | None,
+    work_unit: PersistentWorkUnit,
+) -> None:
+    translated_text = work_unit.translated_text or ""
+    if not translated_text:
+        return
+    record_book_mode_audit_fragment_for_job(
+        translation_run_log_root,
+        job_id=work_unit.job_id,
+        sequence=work_unit.sequence,
+        translated_text=translated_text,
+        source_block_ids=work_unit.source_block_ids,
+    )
 
 
 def _finish_failed_translation_run_for_work_unit(

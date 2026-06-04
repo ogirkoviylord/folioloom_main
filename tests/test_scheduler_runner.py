@@ -406,6 +406,83 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(guard.released_jobs, [(job.id, "terminal_failure")])
             self.assertEqual(guard.consumed_jobs, [])
 
+    def test_run_once_records_book_mode_audit_metadata_for_scheduled_success(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="SCHEDULED RAW SOURCE SENTINEL",
+            )
+            translation_policy = json.dumps(
+                {
+                    "translation_mode": "book_manuscript",
+                    "translation_mode_profile": "book-manuscript-v1",
+                }
+            )
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE translation_jobs SET translation_policy = ? WHERE id = ?",
+                    (translation_policy, job.id),
+                )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=1,
+                    translation_policy=translation_policy,
+                ),
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=BookAuditRunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                translation_run_log_root=run_log_root,
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            summary_md = (logger.run_dir / "summary.md").read_text(encoding="utf-8")
+            artifact_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    logger.run_dir / "run.json",
+                    logger.run_dir / "summary.md",
+                    logger.run_dir / "events.jsonl",
+                )
+            )
+
+        audit = snapshot["book_mode_audit"]
+        self.assertEqual(summary.completed_units, 1)
+        self.assertTrue(audit["enabled"])
+        self.assertEqual(audit["chunks_audited"], 1)
+        self.assertEqual(audit["chunks_with_findings"], 1)
+        self.assertEqual(
+            audit["counts_by_code"],
+            {"untranslated_source_residue": 1},
+        )
+        self.assertIn("## Book Mode Audit", summary_md)
+        self.assertNotIn("SCHEDULED RAW SOURCE SENTINEL", artifact_text)
+        self.assertNotIn("scheduled translated sentinel", artifact_text)
+        self.assertNotIn("source_text", artifact_text)
+        self.assertNotIn("translated_text", artifact_text)
+
     def test_run_once_keeps_run_log_running_when_scheduled_unit_retries(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1407,6 +1484,20 @@ class RunnerTranslator:
         target_language: str,
     ) -> str:
         return f"[{target_language}] {text}"
+
+
+class BookAuditRunnerTranslator(RunnerTranslator):
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        return (
+            "Кімната стихла, but she could not remember where the "
+            "scheduled translated sentinel was hidden."
+        )
 
 
 class FailingRunnerTranslator:

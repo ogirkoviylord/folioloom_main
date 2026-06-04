@@ -375,6 +375,27 @@ Owner decisions recorded during issue #71:
   translation jobs, trigger provider retries, change admin UI, use real
   documents or runtime `var/` data, add dependencies, change legal/privacy,
   auth/RBAC, payments, deployment, database/state or claim release readiness.
+- 2026-06-04: Issue
+  [#169](https://github.com/ogirkoviylord/folioloom_main/issues/169)
+  implementation slice is locally verified on branch
+  `codex/issue-169-safe-run-metadata`. Book-mode translation run evidence now
+  records metadata-only audit counters in `run.json` and `summary.md` when the
+  run policy/stack identifies `book_manuscript` or `book-manuscript-v1`.
+  Recorded evidence is limited to schema version, enabled flag, target language
+  root, audited/finding counts, canonical codes and counts by code/category/
+  severity for `untranslated_source_residue`, `english_navigation_residue`,
+  `language_metadata_mismatch` and `provider_commentary`. Fragment artifacts
+  still omit raw source text and translated text, audit metadata used for a
+  finding is not persisted in fragment JSON, and scheduled worker success
+  updates only existing metadata counters by `job_id`. Local verification: focused
+  translation-run/admin-archive/book-audit tests passed; related
+  `tests.test_bot_translation_service` passed; compileall over `src` passed;
+  targeted `ruff --select F,I` passed; `git diff --check` passed; full
+  `PYTHONPATH=src python3 -m unittest discover -s tests` ran 1236 tests with
+  `OK (skipped=13)`. CI status remains Unknown until a PR/checks page is
+  inspected. This does not block jobs, trigger provider retries, redesign
+  admin, add raw snippets to logs/admin/artifacts, repair runtime data, deploy
+  or claim release readiness.
 - 2026-06-01: Owner approved permanent, owner-only raw translation text
   diagnostics after a failed EPUB translation showed that safe exports did not
   contain enough information to compare source work units, translated output and

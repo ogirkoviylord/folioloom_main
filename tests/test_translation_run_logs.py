@@ -8,6 +8,7 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
     finish_running_translation_runs_for_job,
+    record_book_mode_audit_fragment_for_job,
 )
 
 
@@ -85,6 +86,146 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertIn("job-1", summary)
             self.assertIn("deepseek-v4-flash", summary)
 
+    def test_book_mode_audit_records_metadata_counts_without_text(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-book-audit",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    translation_policy=json.dumps(
+                        {
+                            "translation_mode": "book_manuscript",
+                            "translation_mode_profile": "book-manuscript-v1",
+                        }
+                    ),
+                ),
+            )
+
+            logger.record_event(
+                "provider_failure",
+                {
+                    "prompt": "SYSTEM PROMPT BOOK AUDIT SENTINEL",
+                    "last_error": (
+                        "Traceback (most recent call last) Provider internals "
+                        "sk-bookaudit-secret"
+                    ),
+                },
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="RAW SOURCE BOOK AUDIT SENTINEL",
+                    translated_text=(
+                        "Here is the translation: Кімната затамувала подих."
+                    ),
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                )
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=2,
+                    source_text="RAW SOURCE RESIDUE SENTINEL",
+                    translated_text=(
+                        "Кімната стихла, but she could not remember where "
+                        "the letter was hidden."
+                    ),
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                )
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=3,
+                    source_text="RAW NAVIGATION SENTINEL",
+                    translated_text="Chapter One",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    source_block_ids=("epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0",),
+                )
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=4,
+                    source_text="RAW METADATA SENTINEL",
+                    translated_text="Назва книги",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    audit_metadata=(("xml:lang", "en-US"),),
+                )
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            summary = (logger.run_dir / "summary.md").read_text(encoding="utf-8")
+            artifact_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    logger.run_dir / "run.json",
+                    logger.run_dir / "summary.md",
+                    logger.run_dir / "events.jsonl",
+                    logger.run_dir / "fragments" / "0001.json",
+                    logger.run_dir / "fragments" / "0002.json",
+                    logger.run_dir / "fragments" / "0003.json",
+                    logger.run_dir / "fragments" / "0004.json",
+                )
+            )
+
+        audit = snapshot["book_mode_audit"]
+        self.assertTrue(audit["enabled"])
+        self.assertEqual(audit["chunks_audited"], 4)
+        self.assertEqual(audit["chunks_with_findings"], 4)
+        self.assertEqual(audit["total_findings"], 4)
+        self.assertEqual(
+            audit["codes"],
+            [
+                "english_navigation_residue",
+                "language_metadata_mismatch",
+                "provider_commentary",
+                "untranslated_source_residue",
+            ],
+        )
+        self.assertEqual(
+            audit["counts_by_code"],
+            {
+                "english_navigation_residue": 1,
+                "language_metadata_mismatch": 1,
+                "provider_commentary": 1,
+                "untranslated_source_residue": 1,
+            },
+        )
+        self.assertIn("## Book Mode Audit", summary)
+        self.assertIn("counts_by_code", summary)
+        self.assertNotIn("RAW SOURCE BOOK AUDIT SENTINEL", artifact_text)
+        self.assertNotIn("RAW SOURCE RESIDUE SENTINEL", artifact_text)
+        self.assertNotIn("RAW NAVIGATION SENTINEL", artifact_text)
+        self.assertNotIn("RAW METADATA SENTINEL", artifact_text)
+        self.assertNotIn("Here is the translation", artifact_text)
+        self.assertNotIn("letter was hidden", artifact_text)
+        self.assertNotIn("Chapter One", artifact_text)
+        self.assertNotIn("Назва книги", artifact_text)
+        self.assertNotIn("SYSTEM PROMPT BOOK AUDIT SENTINEL", artifact_text)
+        self.assertNotIn("Provider internals", artifact_text)
+        self.assertNotIn("sk-bookaudit-secret", artifact_text)
+        self.assertNotIn("Traceback", artifact_text)
+
     def test_records_security_events_as_counters_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
@@ -128,6 +269,64 @@ class TranslationRunLoggerTest(unittest.TestCase):
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("## Security", summary)
             self.assertIn("unsafe_model_outputs", summary)
+
+    def test_book_mode_audit_job_helper_updates_only_running_runs(self):
+        policy = json.dumps(
+            {
+                "translation_mode": "book_manuscript",
+                "translation_mode_profile": "book-manuscript-v1",
+            }
+        )
+        with TemporaryDirectory() as temp_dir:
+            finished = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-book-audit",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translation_policy=policy,
+                ),
+            )
+            finished.finish(status="ready", result_file_name="book.uk.txt")
+            running = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-book-audit",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    translation_policy=policy,
+                ),
+            )
+
+            updated = record_book_mode_audit_fragment_for_job(
+                temp_dir,
+                job_id="job-book-audit",
+                sequence=1,
+                translated_text=(
+                    "Кімната стихла, but she could not remember where the "
+                    "letter was hidden."
+                ),
+            )
+            finished_snapshot = json.loads(
+                (finished.run_dir / "run.json").read_text()
+            )
+            running_snapshot = json.loads((running.run_dir / "run.json").read_text())
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(finished_snapshot["book_mode_audit"]["chunks_audited"], 0)
+        self.assertEqual(running_snapshot["book_mode_audit"]["chunks_audited"], 1)
+        self.assertEqual(
+            running_snapshot["book_mode_audit"]["counts_by_code"],
+            {"untranslated_source_residue": 1},
+        )
 
     def test_redacts_run_artifact_error_details(self):
         with TemporaryDirectory() as temp_dir:
