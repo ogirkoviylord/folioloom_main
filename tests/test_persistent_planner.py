@@ -7,7 +7,6 @@ from tempfile import TemporaryDirectory
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
-    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
     DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     EPUB_ADAPTER_VERSION,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
@@ -20,6 +19,7 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
 )
 from translator_service.persistent_planner import (
+    BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
     create_persistent_docx_job_plan,
     create_persistent_epub_job_plan,
     create_persistent_txt_job_plan,
@@ -117,6 +117,50 @@ class PersistentPlannerTest(unittest.TestCase):
             )
             self.assertEqual(translation_policy["text_type"], "technical")
             self.assertEqual(translation_policy["target_language"], "ru")
+
+    def test_txt_book_manuscript_mode_persists_format_neutral_profile(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="chapter.txt",
+                content_type="text/plain; charset=utf-8",
+                content=(
+                    b"Quiet chapter opening.\n\n"
+                    b"The narrator kept the same voice in the next scene."
+                ),
+            )
+
+            plan = create_persistent_txt_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-txt-book",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="chapter.txt",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+
+            self.assertEqual(
+                translation_policy["translation_mode"],
+                TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            self.assertEqual(
+                translation_policy["translation_mode_profile"],
+                BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
+            )
+            self.assertIn(
+                "preserve chapter, scene, paragraph, dialogue",
+                translation_policy["translation_context_memory"]["style_summary"],
+            )
 
     def test_creates_docx_job_and_stored_work_units_from_adapter_plan(self):
         with TemporaryDirectory() as temp_dir:
@@ -307,10 +351,10 @@ class PersistentPlannerTest(unittest.TestCase):
             )
             self.assertEqual(
                 translation_policy["translation_mode_profile"],
-                DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
+                BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
             )
             self.assertIn(
-                "allowing natural prose continuity",
+                "allow natural prose flow",
                 translation_policy["translation_context_memory"]["style_summary"],
             )
 
@@ -444,6 +488,58 @@ class PersistentPlannerTest(unittest.TestCase):
                 )
             )
             self.assertEqual(plan.work_units, persisted_units)
+
+    def test_epub_book_manuscript_mode_persists_format_neutral_profile(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="novel.epub",
+                content_type="application/epub+zip",
+                content=_make_epub(
+                    {
+                        "OPS/chapter.xhtml": """
+                        <html xmlns="http://www.w3.org/1999/xhtml">
+                          <body>
+                            <p>Quiet chapter opening.</p>
+                            <p>The narrator kept the same voice.</p>
+                          </body>
+                        </html>
+                        """,
+                    },
+                ),
+            )
+
+            plan = create_persistent_epub_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-epub-book",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="novel.epub",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            translation_policy = json.loads(persisted_job.translation_policy)
+
+            self.assertEqual(
+                translation_policy["translation_mode"],
+                TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            self.assertEqual(
+                translation_policy["translation_mode_profile"],
+                BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
+            )
+            self.assertIn(
+                "narrator, speaker, and character continuity",
+                translation_policy["translation_context_memory"]["style_summary"],
+            )
 
 
 if __name__ == "__main__":

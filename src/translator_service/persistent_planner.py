@@ -5,9 +5,9 @@ from hashlib import sha256
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import (
     DOCX_ADAPTER_VERSION,
-    DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE,
     DOCX_TRANSLATION_MODE_DOCUMENT_FORM_PROFILE,
     EPUB_ADAPTER_VERSION,
+    TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TXT_ADAPTER_VERSION,
     FormatTranslationUnit,
     docx_translation_mode_profile_signature,
@@ -29,6 +29,14 @@ from translator_service.translation_context import (
 from translator_service.translation_policy import (
     build_translation_policy,
     translation_policy_signature,
+)
+
+BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE = "book-manuscript-v1"
+BOOK_MANUSCRIPT_STYLE_SUMMARY = (
+    "Book/manuscript mode: preserve chapter, scene, paragraph, dialogue, "
+    "narrator, speaker, and character continuity; allow natural prose flow "
+    "where the source is narrative while keeping structured, technical, table, "
+    "code, protected-marker, and output-contract content conservative and exact."
 )
 
 
@@ -84,6 +92,10 @@ def create_persistent_txt_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            translation_mode_profile=_translation_mode_profile_for_document_kind(
+                translation_mode,
+                document_kind="txt",
+            ),
             upload_safety_id=upload_safety_id,
             accepted_source_object_key=source_object_key,
         ),
@@ -155,8 +167,9 @@ def create_persistent_docx_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
-            translation_mode_profile=_docx_translation_mode_profile(
-                translation_mode
+            translation_mode_profile=_translation_mode_profile_for_document_kind(
+                translation_mode,
+                document_kind="docx",
             ),
             upload_safety_id=upload_safety_id,
             accepted_source_object_key=source_object_key,
@@ -225,6 +238,10 @@ def create_persistent_epub_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            translation_mode_profile=_translation_mode_profile_for_document_kind(
+                translation_mode,
+                document_kind="epub",
+            ),
             upload_safety_id=upload_safety_id,
             accepted_source_object_key=source_object_key,
         ),
@@ -321,6 +338,22 @@ class _TranslationModeProfile:
     style_summary: str
 
 
+def _translation_mode_profile_for_document_kind(
+    translation_mode: str | None,
+    *,
+    document_kind: str,
+) -> _TranslationModeProfile | None:
+    normalized_mode = translation_mode.strip().lower() if translation_mode else None
+    if normalized_mode == TRANSLATION_MODE_BOOK_MANUSCRIPT:
+        return _TranslationModeProfile(
+            signature=BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
+            style_summary=BOOK_MANUSCRIPT_STYLE_SUMMARY,
+        )
+    if document_kind.strip().lower() == "docx":
+        return _docx_translation_mode_profile(translation_mode)
+    return None
+
+
 def _docx_translation_mode_profile(
     translation_mode: str | None,
 ) -> _TranslationModeProfile | None:
@@ -333,15 +366,6 @@ def _docx_translation_mode_profile(
                 "addresses, dates, numbers, signatures, and non-translatable "
                 "fields; use conservative wording and avoid prose-style "
                 "paraphrase."
-            ),
-        )
-    if signature == DOCX_TRANSLATION_MODE_BOOK_MANUSCRIPT_PROFILE:
-        return _TranslationModeProfile(
-            signature=signature,
-            style_summary=(
-                "DOCX book/manuscript mode: preserve document structure while "
-                "allowing natural prose continuity, paragraph flow, and "
-                "editorial style where the source supports it."
             ),
         )
     return None
