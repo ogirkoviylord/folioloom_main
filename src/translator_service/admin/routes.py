@@ -2549,7 +2549,19 @@ def _split_channel_user_id(user_id: str) -> tuple[str | None, str | None]:
 
 
 def _cost_analytics(settings: Settings):
-    analytics = build_cost_analytics(settings.translation_run_log_root)
+    store = None
+    usage_lookup = None
+    if _persistent_job_store_readable(settings):
+        store = open_persistent_job_store(settings)
+        usage_lookup = store.get_usage_summary
+    try:
+        analytics = build_cost_analytics(
+            settings.translation_run_log_root,
+            usage_lookup=usage_lookup,
+        )
+    finally:
+        if store is not None:
+            store.close()
     return type(analytics)(
         tokens_today=analytics.tokens_today,
         tokens_last_7_days=analytics.tokens_last_7_days,
@@ -2560,6 +2572,7 @@ def _cost_analytics(settings: Settings):
         top_runs=analytics.top_runs,
         top_users=analytics.top_users,
         beta_safety=_beta_safety_cost_summary(settings),
+        unavailable_run_count=analytics.unavailable_run_count,
     )
 
 

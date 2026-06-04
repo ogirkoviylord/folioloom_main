@@ -4,8 +4,10 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from translator_service.admin.costs import CostRates, build_cost_analytics
+from translator_service.admin.views import costs_body
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -147,6 +149,82 @@ class AdminCostAnalyticsTest(unittest.TestCase):
         self.assertEqual(analytics.estimated_cost_month_to_date_usd, 0.00248)
         self.assertEqual(analytics.top_runs[0].estimated_cost_usd, 0.00248)
         self.assertEqual(analytics.top_users[0].estimated_cost_usd, 0.00248)
+
+    def test_uses_usage_lookup_when_run_totals_are_stale_zeroes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_run(
+                root,
+                run_id="run-stale",
+                job_id="job-stale",
+                user_id="telegram:42",
+                started_at="2026-05-09T09:00:00+00:00",
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+
+            analytics = build_cost_analytics(
+                root,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                usage_lookup=lambda job_id: SimpleNamespace(
+                    job_id=job_id,
+                    prompt_tokens=1_500,
+                    completion_tokens=500,
+                    total_tokens=2_000,
+                ),
+            )
+
+        self.assertEqual(analytics.tokens_today, 2_000)
+        self.assertEqual(analytics.top_runs[0].job_id, "job-stale")
+        self.assertEqual(analytics.top_runs[0].prompt_tokens, 1_500)
+        self.assertEqual(analytics.top_runs[0].completion_tokens, 500)
+        self.assertEqual(analytics.top_runs[0].total_tokens, 2_000)
+        self.assertEqual(analytics.top_runs[0].estimated_cost_usd, 0.00097)
+        self.assertEqual(
+            [(user.user_id, user.total_tokens) for user in analytics.top_users],
+            [("telegram:42", 2_000)],
+        )
+        self.assertEqual(analytics.unavailable_run_count, 0)
+
+    def test_excludes_unavailable_runs_from_rankings_and_says_so(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_run(
+                root,
+                run_id="run-unavailable",
+                job_id="job-unavailable",
+                user_id="telegram:zero",
+                started_at="2026-05-09T09:00:00+00:00",
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+            _write_run(
+                root,
+                run_id="run-available",
+                job_id="job-available",
+                user_id="telegram:active",
+                started_at="2026-05-09T10:00:00+00:00",
+                prompt_tokens=100,
+                completion_tokens=50,
+            )
+
+            analytics = build_cost_analytics(
+                root,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+            )
+
+        self.assertEqual(analytics.tokens_today, 150)
+        self.assertEqual([run.job_id for run in analytics.top_runs], ["job-available"])
+        self.assertEqual(
+            [(user.user_id, user.total_tokens) for user in analytics.top_users],
+            [("telegram:active", 150)],
+        )
+        self.assertEqual(analytics.unavailable_run_count, 1)
+
+        html = costs_body(analytics)
+        self.assertIn("1 run with metadata had unavailable usage totals", html)
+        self.assertIn("job-available", html)
+        self.assertNotIn("job-unavailable", html)
 
     def test_limit_zero_returns_no_top_rows(self):
         with TemporaryDirectory() as temp_dir:

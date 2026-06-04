@@ -119,6 +119,23 @@ tracebacks, API keys, full provider key ids, schema/table migrations, runtime
 `var/` operations, deployment, provider selection/retry-policy changes, payment
 behavior or release readiness.
 
+Issue #133 implementation slice on 2026-06-04: branch
+`codex/issue-133-costs-zero-usage` makes Admin -> Costs use read-only
+persistent work-unit usage as the effective source when translation `run.json`
+totals are stale zeroes. `Most expensive runs`, summary windows and
+`Top users (all time)` now show non-zero prompt/completion/total token counts
+and estimated model cost when persisted usage exists; runs with metadata but no
+available usage totals are excluded from cost ranking and counted with an
+explicit unavailable-usage note. Local verification passed focused admin costs
+and admin route tests, full unittest discover with 1247 tests `OK
+(skipped=14)`, `PYTHONPATH=src python3 -m compileall src`, targeted
+`ruff --select F,I` on changed Python files and `git diff --check`. CI status
+remains Unknown until a PR/checks page is inspected. This is read-only admin
+analytics; it does not change beta safety budget accounting, payment/billing
+ledgers, database schema/state, runtime `var/` data, deployment, auth/RBAC,
+secrets/env files, provider behavior, raw text diagnostic boundaries or release
+readiness.
+
 Owner decisions recorded during issue #71:
 
 - 2026-05-16: free closed beta waits for complete Gate B evidence; no implicit
