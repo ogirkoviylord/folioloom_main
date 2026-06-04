@@ -46,12 +46,14 @@ allowlist, rights confirmation, free preview, beta caps, kill switch, SSH-tunnel
 admin policy, no-payments scope, safe beta telemetry, scoped upload
 hardening/quarantine evidence for issue #73 and scoped local malware/AV
 scanning evidence for issue #95, and release-wide logs/admin raw-text
-redaction evidence for issue #78. Gate B still has release blockers without
-stored evidence: TTL cleanup/delete
-behavior, real-file TXT/DOCX/EPUB matrix, restart/cancel/resume scenarios,
-capacity release evidence, EPUB/DOCX validation, Alerts MVP, backups
-visibility, backup export verification, restore rehearsal, and approved
-beta-server smoke.
+redaction evidence for issue #78, and a metadata-only local no-provider
+real-file adapter/persistent-plan evidence pass for issue #75 on 2026-06-04.
+Issue #79 also records provider-failure diagnostics/user-message evidence.
+Gate B still has release blockers without full evidence: TTL cleanup/delete
+behavior, Telegram/provider real-file end-to-end preview/translation evidence,
+restart/cancel/resume scenarios, capacity release evidence, full manual DOCX
+visual QA, Alerts MVP, backups visibility, backup export verification, restore
+rehearsal, and approved beta-server smoke.
 
 No owner-approved Gate B deferrals were found in the inspected repository
 documents.
@@ -69,14 +71,14 @@ documents.
 | Upload hardening/quarantine baseline is active. | Pass | Issue #73 local verification on 2026-05-28 adds stdlib-only content/container validation before accepted source creation for TXT/DOCX/EPUB. Low-level upload validation now accepts only TXT/DOCX/EPUB and rejects PDF plus unsupported extensions. Negative synthetic fixtures cover wrong extension/content mismatch, invalid or binary-looking TXT, corrupt ZIP, traversal/absolute paths, duplicate archive members, archive entry count, member and total uncompressed size, high compression ratio / zip-bomb-like archives, missing expected DOCX/EPUB structure and executable-looking embedded paths. The `require_upload_scan` flow remains quarantine-first: clean scan is followed by container validation before `ACCEPTED_SOURCE_CREATED`; unsafe containers transition to `CONTAINER_BLOCKED` or `CONTAINER_FAILED` and then `REJECTED`, record metadata-only upload-safety activity, create no accepted original source, pending upload, parser/sandbox call or persistent job/work unit. Existing worker tests keep quarantine and unaccepted source object keys from translation workers. Issue #95 separately checks the local malware/AV scanning item. | This does not prove TTL/quarantine cleanup, durable Upload Safety Ledger persistence beyond the existing in-process ledger slice, real-file matrix, approved beta-server smoke or full Gate B readiness. | `PYTHONPATH=src python3 -m unittest tests.test_documents tests.test_upload_safety_ledger tests.test_bot_translation_service tests.test_worker tests.test_admin_upload_safety tests.test_format_adapters tests.test_order_estimates`: `Ran 222 tests`, `OK`; `PYTHONPATH=src python3 -m unittest discover -s tests`: `Ran 1116 tests in 19.491s`, `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`: passed; touched-file `python3 -m ruff check ...`: passed; `git diff --check`: passed; `scripts/predeploy_check.sh`: `Ran 64 tests`, `OK`, lint/checks passed. Reviewer Agent requested changes for executable-looking embedded archive paths, the Implementer fixed them with RED/GREEN tests, and the repeat Reviewer pass approved. | No for this local synthetic evidence. Yes for deployment, live/beta server operations, real `.env*`, runtime `var/`, real user data, retention/delete/TTL, database/schema/durable ledger changes, public scanning or changing fail-closed policy. | Keep upload hardening negative fixtures in release regression checks. Do not treat this pass as TTL/quarantine cleanup, real-file QA, approved beta-server smoke, full Gate B or free-beta readiness. |
 | Local malware/AV scanning gate is active before parsing, or explicitly deferred by owner in the Gate B evidence report. | Pass | Owner accepted local scanning on 2026-05-22 and selected local/internal ClamAV `clamd` `INSTREAM` on 2026-05-26. Prerequisite issues #93, #94, #101, #102, #103 and #109 are closed. Issue #94 gates parser/estimate/preview/persistent-job access on Upload Safety Ledger accepted-source state when `require_upload_scan` is enabled. Issue #93 adds the app-side `clamd` adapter and fail-closed verdict taxonomy. Issue #109 adds internal-only `clamd` runtime shape and metadata-only local runtime smoke evidence: isolated compose project, no real `.env*`, no `var/`, no live server and no user data; app image reached internal `clamd`; safe metadata reported `status=ok`, `scanner_version=ClamAV 1.4.4`, `signature_database_version=28010`, `eicar_verdict=infected`. Current issue #95 local verification on branch `codex/issue-95-malware-gate-b-evidence`, working tree based on commit `5845842`, passed focused scanner/upload/runtime/deployment tests, full unittest, compileall and predeploy. Public malware scanning services do not receive user documents by default. | Approved beta-server smoke remains a separate Gate B item. Broader upload hardening/quarantine, TTL/quarantine cleanup and real-file matrix remain separate Gate B blockers. | `PYTHONPATH=src python3 -m unittest tests.test_document_scanner tests.test_clamd_runtime tests.test_upload_safety_ledger tests.test_bot_translation_service tests.test_bot_runtime tests.test_server_deployment_config`: `Ran 210 tests in 9.647s`, `OK`; `PYTHONPATH=src python3 -m unittest discover -s tests`: `Ran 1099 tests in 21.211s`, `OK (skipped=13)`; `PYTHONPATH=src python3 -m compileall src`: passed; `scripts/predeploy_check.sh`: `Ran 64 tests`, `OK`, lint passed, CLI smoke/shell syntax/documentation check/compile/diff hygiene passed. | No for this metadata-only local/synthetic evidence. Yes for production deployment, live/beta server operations, real `.env*`, runtime `var/`, real user data, external scanning, retention/runtime data behavior, public scanner exposure or changing fail-closed beta policy. | Keep scanner behavior in release regression checks. Do not treat this pass as full Gate B or free-beta readiness. |
 | TTL cleanup is active for sources, finals, partials and quarantine. | Blocked | Retention defaults are proposed in `docs/restart/upload-safety-and-retention.md`; `docs/DECISIONS.md` marks baseline as Proposed; Gate B item is unchecked. | No idempotent cleanup/delete verification, no evidence for source/final/partial/quarantine object lifecycle. | Needed: retention/delete tests and release report; avoid real user data unless approved. | Yes; this is user-data handling/destructive-adjacent. | Follow-up: TTL cleanup/delete verification issue. |
-| Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact. | Blocked | Matrix template exists in `docs/restart/real-file-test-matrix.md`; Gate B item is unchecked. Issue #71 approved public-domain/permissive-license corpus policy. | No corpus manifest, no execution report, no artifact links, no pass/fail table. | Needed: fixture manifest with source/license URL and rights basis, commands, metadata-only artifact summary by default, release report. | No for public-domain/permissive-license metadata-only corpus policy; yes for raw source/output retention in git or use of private/runtime data. | Follow-up: real-file TXT/DOCX/EPUB matrix issue. |
+| Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact. | Partial | Issue #75 local metadata-only pass on 2026-06-04 used public-domain/permissive internet fixtures from Project Gutenberg and Wikisource, kept raw source/output artifacts out of git and docs, validated upload/content, created persistent job/work-unit plans, assembled synthetic no-provider final artifacts and recorded pass/fail metadata for 7 fixtures. | This did not run Telegram bot upload UX, provider-backed preview/full translation, live/server smoke, restart/cancel/resume, raw admin/log inspection on real runtime data or full-retention artifact handling. | Local temp-only runner; metadata summary only. Fixtures: TXT Dracula small, TXT War and Peace long slice, TXT Cyrillic Detstvo slice, DOCX simple Kobzar, DOCX structured Dracula, EPUB Kobzar, EPUB Dracula. | No for this local public-domain/permissive metadata-only pass. Yes for private/runtime data, raw artifact retention in git/docs, live beta/server data, online services, deployment or retention/destructive actions. | Keep #75 as partial evidence only; follow up with Telegram/provider end-to-end real-file evidence before closing the Gate B item. |
 | Cancel/resume/restart scenarios pass. | Blocked | Issue #30 PRs #36-#39 reduced one focused cancel/provider/admin reliability risk; docs state this does not complete Gate B. | No stored release evidence for cancel/resume/restart matrix across bot/worker/server restarts. | Needed: real-file or integration-style scenario report. | Usually no for synthetic/local tests; yes if using beta server/user data. | Follow-up: cancel/resume/restart evidence issue. |
 | Worker restart does not lose accepted jobs. | Blocked | Persistent jobs/work units and worker loop are documented in `CURRENT_PROJECT_STATE.md`, `docs/HANDOFF.md`. | No release artifact proving accepted jobs survive worker restart. | Needed: worker restart scenario with durable job/work-unit evidence. | Yes if performed on live/beta runtime data. | Follow-up: worker restart recovery evidence. |
 | Bot restart does not make existing jobs invisible. | Blocked | Backend as source of truth is an active decision in `docs/DECISIONS.md`; bot state is adapter-only. | No release artifact proving jobs remain visible after bot restart. | Needed: bot restart scenario covering history/My Books/status. | Yes if performed on live/beta runtime data. | Follow-up: bot restart visibility evidence. |
 | Scheduler worker capacity is consistent with provider channel capacity. | Blocked | Prior recorded tests cover scheduler/provider slices; `docs/HANDOFF.md` and `CURRENT_PROJECT_STATE.md` cite targeted suites and PR #39 provider-failure regression coverage. | No Gate B release artifact for one key at capacity 1 serial behavior, multiple free keys, and no duplicate work-unit claims. | Needed: focused capacity evidence report and relevant tests. | Yes for provider/key/capacity changes or real provider/server runs. | Follow-up: scheduler/provider capacity evidence issue. |
 | Provider failure creates diagnosable metadata and safe user messaging. | Pass | Issue #79 was closed on 2026-06-04 after triage linked the completed implementation slice #162 and merged PR #279. PR #279 records safe provider failure categories for work-unit attempts: `rate_limited`, `timeout`, `unavailable_5xx`, `auth`, `billing`, `malformed_response`, `unsafe_model_output`, `network`, `circuit_open` and `provider_other`; persists metadata-only diagnostics through work-unit attempt / scheduler event paths; and surfaces them in admin translation details, failure trace and effective export. User-facing failed-job messaging ignores internal `job.error_message`, and preview-failure messaging uses a generic safe error even when provider exceptions include raw source text or fake keys. | This does not prove scheduler/provider capacity, approved beta-server smoke, real-provider runtime behavior, real-file matrix, restart/recovery evidence or full Gate B readiness. | PR #279 visible GitHub `Python checks`: success. Local verification for #162: focused provider/store/worker/scheduler/admin tests, targeted ruff, compileall, `git diff --check` and full unittest discover `1243 tests OK (skipped=14)`. #79 triage rerun: `PYTHONPATH=src python3 -m unittest tests.test_bot_messages tests.test_bot_translation_service tests.test_worker tests.test_scheduler_runner tests.test_persistent_jobs tests.test_postgres_scheduler tests.test_deepseek_client tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_admin_translation_trace`: `Ran 337 tests`, `OK (skipped=14)`. | No for recorded synthetic/local metadata-only evidence. Yes for provider contract changes, user-facing diagnostic changes, real provider/server runs, provider key handling, deployment or runtime data inspection. | Keep diagnostics metadata-only and keep provider internals out of user UX. Do not treat this pass as capacity evidence, beta-server smoke, real-file QA or full Gate B readiness. |
-| Local EPUBCheck release validation passes for EPUB fixtures. | Blocked | Matrix requires EPUB validation; Gate B item is unchecked. Issue #71 approved local/offline EPUBCheck as the required Gate B validation tool. EPUBCheck is a release verification tool, not a production dependency; online EPUB validation services are not approved. Exploratory local EPUBCheck v5.3.0 run on 2026-05-17 worked as a tool check but selected EPUB fixtures failed validation. | `test_samples/sample_book.en.epub` failed with 3 errors: missing `dcterms:modified`, missing `nav`, undefined fragment identifier. `test_samples/russian_profile_regression.en-ru.epub` failed with 2 errors: missing `dcterms:modified`, missing `nav`. `artifacts/Amerika - Franz Kafka - EPUB.uk.quotes-fixed.epub` failed with 110 errors, primarily duplicate XHTML IDs and missing CSS resource `page.css`. | Needed: per-fixture EPUBCheck command/output summary and fixes or explicit beta triage for failing EPUB outputs. Errors block fixtures; warnings are recorded and triaged. | No for local/offline EPUBCheck as a release tool; yes to change tool policy, use online validators or add production dependencies. | Follow-up: EPUB validation issue. |
-| DOCX openability/visual QA passes for DOCX fixtures. | Blocked | Matrix requires DOCX openability/visual notes; Gate B item is unchecked. Issue #71 approved local LibreOffice Writer as the Gate B reader/tool and "opens without repair/recovery prompt plus no blocker visual issues" as the pass threshold. | No approved fixture-level LibreOffice openability report or visual QA notes are recorded yet. | Needed: DOCX output artifacts and metadata-only visual QA notes using the approved threshold. | No for local LibreOffice metadata-only QA on authorized fixtures; yes for private/runtime data, online services or changing the pass/fail threshold. | Follow-up: DOCX openability/visual QA issue. |
+| Local EPUBCheck release validation passes for EPUB fixtures. | Partial | Issue #75 local combined pass on 2026-06-04 ran EPUBCheck v5.3.0 using a temporary Temurin JRE 21 runtime on two no-provider assembled public-domain EPUB outputs: Kobzar and Dracula. Both returned `0 fatals / 0 errors / 0 warnings / 0 infos`. | This did not run provider-backed translated EPUBs, server/runtime data, or the older failing project fixtures from the 2026-05-17 exploratory check. | Temp-only EPUBCheck 5.3.0 plus temp-only JRE; no production dependency, no online validator, raw EPUB/source/output not committed. | No for local/offline EPUBCheck as a release tool; yes to change tool policy, use online validators, add production dependencies or retain raw artifacts in git/docs. | Repeat on provider-backed release-candidate outputs before checking the Gate B item. |
+| DOCX openability/visual QA passes for DOCX fixtures. | Partial | Issue #75 local combined pass on 2026-06-04 generated two public-domain DOCX fixtures outside git and assembled no-provider final DOCX artifacts. LibreOffice headless PDF conversion passed for simple Kobzar and structured Dracula outputs; CLI output contained no repair marker. | Headless conversion is not a full manual Writer visual QA pass and does not prove provider-backed translated DOCX output fidelity or absence of blocker visual issues in a human-reviewed document. Issue #76 remains open for the required local LibreOffice Writer visual QA notes. | `/opt/homebrew/bin/soffice --headless --convert-to pdf` against temp-only assembled DOCX outputs. | No for local LibreOffice metadata-only QA on authorized fixtures; yes for private/runtime data, online services, changing the pass/fail threshold or retaining raw artifacts in git/docs. | Repeat as manual/local Writer QA on provider-backed release-candidate DOCX outputs before checking the Gate B item. |
 | Admin Alerts MVP is visible and tested. | Blocked | `CURRENT_PROJECT_STATE.md`, `docs/HANDOFF.md`, `docs/ROADMAP.md` list Alerts MVP as a gap. Issue #71 approved a metadata-only owner runbook/report as the Gate B path instead of new admin UI. | No owner report artifact exists yet. | Needed: documented owner report with provider, queue/worker, disk/storage, failed-job and backup/restore signals. | No for metadata-only owner report using safe summaries; yes for new admin operational controls or security-sensitive surfaces. | Follow-up: Alerts owner report issue. |
 | Backups visibility is visible in admin or a documented owner runbook report exists for the beta. | Blocked | Backup/restore scripts and restore runbook exist; Backups visibility is listed as a gap. Issue #71 approved a metadata-only owner runbook/report as the Gate B path, with admin UI deferred. | No owner report artifact exists yet. | Needed: latest backup/export timestamp, manifest verify result, restore rehearsal status and blockers in a metadata-only owner report. | No for metadata-only owner report using safe summaries; yes for backup/user-data surfaces or new admin UI. | Follow-up: Backups owner report issue. |
 | Backup export passes `scripts/verify_backup_export.py`. | Blocked | `README.md`, `docs/QUALITY_GATES.md`, `docs/deployment/restore-runbook.md` document the command. | No manifest path or verification output artifact. | Needed: `python3 scripts/verify_backup_export.py <manifest>` output against approved backup. | Yes if using real beta/server backup data. | Follow-up: backup export verify issue. |
@@ -128,6 +130,14 @@ Only the following are confirmed by repository evidence:
   generic and do not expose provider internals, raw source text or keys. This
   does not prove scheduler/provider capacity, approved beta-server smoke,
   real-file matrix, restart/recovery evidence or full Gate B readiness.
+- Issue #75 local real-file adapter/persistent-plan evidence passed on
+  2026-06-04 for 7 metadata-only fixtures covering TXT, DOCX and EPUB. This
+  confirms public-domain/permissive fixture intake, upload/content validation,
+  persistent job/work-unit planning, no-provider synthetic final assembly,
+  TXT UTF-8 decode, DOCX LibreOffice headless conversion and EPUBCheck 5.3.0
+  validation on selected outputs. It does not prove Telegram UX, provider-backed
+  preview/full translation, server smoke, restart/cancel/resume, retention or
+  full Gate B readiness.
 - Common verification commands passed in issue #72 local verification on
   2026-05-23: full unittest suite `Ran 1046 tests`, `OK (skipped=13)`,
   compileall passed, and `scripts/predeploy_check.sh` passed. This does not
@@ -139,12 +149,18 @@ Only the following are confirmed by repository evidence:
 These block free closed beta unless the owner explicitly approves deferral:
 
 - TTL cleanup/delete verification for source/final/partial/quarantine objects.
-- Authorized real-file TXT/DOCX/EPUB matrix and stored release report.
+- Authorized real-file TXT/DOCX/EPUB matrix still needs provider-backed
+  Telegram/preview/full-translation release evidence. Issue #75 has local
+  metadata-only no-provider adapter/persistent-plan evidence only.
 - Cancel/resume/restart, worker restart and bot restart release evidence.
 - Scheduler/provider capacity release evidence.
-- EPUB validation remains blocked: exploratory local EPUBCheck v5.3.0 ran on
-  selected project EPUB fixtures on 2026-05-17 and found validation errors.
-- DOCX openability/visual QA report.
+- EPUB validation for issue #75 selected no-provider public-domain outputs
+  passed EPUBCheck 5.3.0, but provider-backed release-candidate EPUB evidence is
+  still missing.
+- DOCX openability/visual QA has local headless LibreOffice smoke evidence for
+  issue #75, but issue #76 remains open because full manual Writer visual QA
+  with metadata-only structure notes on provider-backed release-candidate
+  outputs is still missing.
 - Admin Alerts MVP or approved owner-runbook alternative.
 - Backups visibility in admin or documented owner runbook report.
 - Backup export verification artifact.
@@ -336,41 +352,37 @@ without separate explicit human approval.
    Acceptance: one key at capacity 1 remains serial; multiple free keys progress
    multiple documents; no duplicate work-unit claims.
 
-6. Provider failure safe diagnostics.
-   Acceptance: provider timeout/auth/billing/rate-limit/unavailable/malformed
-   and unsafe-model-output scenarios produce safe user messages and metadata.
-
-7. EPUB validation.
+6. EPUB validation.
    Acceptance: EPUB fixtures pass local/offline EPUBCheck, or failures are
    triaged with explicit beta decision. Errors block fixtures by default;
    warnings are recorded and triaged. Current status: blocked after exploratory
    local EPUBCheck v5.3.0 found validation errors in selected EPUB fixtures on
    2026-05-17.
 
-8. DOCX openability/visual QA.
+7. DOCX openability/visual QA.
    Acceptance: DOCX outputs open in approved reader/tool and manual QA notes
    capture structure/fidelity risks. Approved threshold: local LibreOffice
    Writer, opens without repair/recovery prompt and no blocker visual issues;
    pixel-perfect source parity is not required.
 
-9. Alerts MVP.
+8. Alerts MVP.
    Acceptance: provider, queue/worker, disk, backup and failed-job signals are
    documented in a metadata-only owner report, with no secrets/raw text. New
    admin UI is deferred unless separately approved.
 
-10. Backups visibility.
+9. Backups visibility.
     Acceptance: latest backup/export/verify state is visible in admin or a
     documented metadata-only owner runbook report.
 
-11. Backup export verify.
+10. Backup export verify.
     Acceptance: approved backup manifest passes `scripts/verify_backup_export.py`
     and output summary is stored as evidence.
 
-12. Restore rehearsal.
+11. Restore rehearsal.
     Acceptance: approved restore rehearsal from backup artifact passes restore
     runbook acceptance criteria.
 
-13. Server smoke evidence.
+12. Server smoke evidence.
     Acceptance: approved beta target records `scripts/server_smoke_check.sh`
     output and confirms admin remains SSH-tunnel-only.
 
