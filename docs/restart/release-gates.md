@@ -85,7 +85,17 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
 - [ ] Scheduler worker capacity is consistent with provider channel capacity:
   one key at capacity 1 remains serial, and multiple free keys can progress
   multiple documents without duplicate work-unit claims.
-- [ ] Provider failure creates diagnosable metadata and safe user messaging.
+- [x] Provider failure creates diagnosable metadata and safe user messaging.
+  Evidence: issue #79 was closed on 2026-06-04 after triage linked the
+  completed implementation slice #162 and merged PR #279. Safe provider failure
+  diagnostics are persisted as metadata-only work-unit attempt / scheduler
+  event details and surfaced in admin translation details, failure trace and
+  effective export. User-facing failed-job and preview-failure messages remain
+  generic and do not expose provider internals, raw source text or keys.
+  Focused verification rerun for #79 passed 337 tests with `OK (skipped=14)`.
+  This checks only the provider-failure diagnostics/user-message item, not
+  scheduler/provider capacity, server smoke, real-file matrix or full Gate B
+  readiness.
 - [ ] EPUBCheck or equivalent release validation passes for EPUB fixtures.
 - [ ] DOCX openability/visual QA passes for DOCX fixtures.
 - [ ] Admin Alerts MVP is visible and tested.
