@@ -117,9 +117,13 @@ of literary quality.
 | --- | --- | --- |
 | Language metadata | Update target-language metadata where the format supports it | Proposed; implementation evidence Unknown |
 | Navigation/headings | Preserve order and visible structure; translate visible labels/headings where supported | Proposed; implementation evidence Unknown |
-| Untranslated residue | Do not leave large accidental source-language passages in the result | Proposed; terminology exceptions are future work |
+| Untranslated residue | Define deterministic source-language residue checks before enforcement; no broad source-language passages should pass once issue #166 thresholds are implemented | Proposed; thresholds/heuristics `TBD` until audit implementation evidence |
 | Provider commentary | Zero tolerance for provider explanations, wrappers, apologies or meta comments | Confirmed owner decision |
 | Structure preservation | Preserve TXT paragraphs, DOCX openability/common structure, EPUB spine/nav | Proposed; release evidence Unknown |
+
+Issue #165 names the QA categories only. Blocking thresholds, sample-size rules
+and language-specific heuristics are future implementation evidence, primarily
+through issue #166 and related audit follow-ups.
 
 ## Future Features Out Of Scope For #165
 
@@ -127,8 +131,9 @@ of literary quality.
 - Read-only glossary viewer: issue #205.
 - Editable glossary workflow: issue #206.
 - Release-version analytics file-use and consent policy: issue #207.
-- Future formats beyond TXT/DOCX/EPUB: issue #208, plus existing RTF issue #4
-  and FB2 issue #23.
+- Committed future formats beyond TXT/DOCX/EPUB: issue #208 owns
+  prioritization and issue breakdown, with existing RTF issue #4 and FB2 issue
+  #23.
 - Stricter book/manuscript quality rubric: issue #209.
 - Deterministic audit primitives and implementation follow-ups: issues #166-#170.
 
@@ -145,27 +150,34 @@ Owner decision on 2026-06-02:
 This spec does not implement analytics, retention, deletion, legal/privacy copy,
 user consent UI or release behavior.
 
-## Future Format Candidates
+## Committed Future Format Roadmap Boundary
 
 Current MVP support remains TXT/DOCX/EPUB only.
 
-Future candidates recorded for backlog:
+Owner decision on 2026-06-04:
+
+- The future format families below are committed roadmap scope.
+- Implementation order, supported subsets, fixture rights basis, dependency
+  impact and verification depth are `TBD` until issue #208 and format-specific
+  implementation issues.
+- This #165 spec does not approve implementation, release claims or MVP scope
+  expansion for any format beyond TXT/DOCX/EPUB.
+
+Committed future format families:
 
 - Already tracked: RTF (#4), FB2 (#23).
-- Common/platform candidate with high implementation risk: PDF, especially
-  scanned/OCR PDFs. User demand evidence is `Unknown` until issue #208 research.
-- Medium candidates: HTML/HTM, ODT, legacy DOC.
-- Kindle/platform candidates: MOBI, AZW3 and KPF.
-- Defer for now: CBZ/CBR/DJVU and image-heavy formats because they imply image,
-  OCR or comics workflows rather than the current text-first translator.
+- Common/platform high-risk path: PDF, including scanned/OCR PDFs.
+- Document/web text formats: HTML/HTM, ODT, legacy DOC.
+- Kindle/platform formats: MOBI, AZW3 and KPF.
+- Image-heavy/comics formats: CBZ/CBR/DJVU.
 
 Source basis checked on 2026-06-02:
 
 - Amazon KDP supported manuscript formats include DOC/DOCX, KPF, EPUB, RTF and
   PDF with constraints:
   <https://kdp.amazon.com/en_US/help/topic/G200634390>
-- Kobo documents support EPUB/EPUB2/EPUB3, PDF, MOBI, TXT, HTML, RTF, CBZ and
-  CBR:
+- Kobo lists support across Books, Documents, Text and Comic Books categories,
+  including EPUB/EPUB2/EPUB3, PDF, MOBI, TXT, HTML, RTF, CBZ and CBR:
   <https://help.kobo.com/hc/en-us/articles/360017763713-File-formats-your-Kobo-eReader-and-Kobo-Books-app-support>
 - Calibre metadata/conversion tooling covers a broad set including AZW/AZW3,
   MOBI, FB2, ODT, RTF, HTML, PDF, CBZ/CBR, TXT and DOCX:

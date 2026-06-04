@@ -17,7 +17,7 @@
 | ID | Risk | Area | Level | Evidence | Impact | Mitigation | Owner | Status |
 |---|---|---|---|---|---|---|---|---|
 | R-001 | Potential: целевая аудитория будущих paid users не зафиксирована | Product | Medium | `docs/PROJECT_BRIEF.md` помечает будущих платных пользователей как TBD | Агенты могут строить не тот paid/public продукт | Держать paid/public вне scope до решения; фиксировать ICP перед Gate C/D | Human / Orchestrator | Needs decision |
-| R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; RTF #4, FB2 #23 and next-format prioritization #208 are future/discovery only | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
+| R-002 | Scope creep за пределы TXT/DOCX/EPUB, Telegram-first и closed beta | Product | High | `README.md`, `README.project.md`, `docs/DECISIONS.md`, `docs/PROJECT_BRIEF.md` запрещают PDF/OCR/MOBI/FB2/public SaaS сейчас; RTF #4, FB2 #23 and next-format prioritization #208 are committed future roadmap, not current MVP implementation | Раздувание QA, security, support и parser surface | Любое расширение форматов/каналов только через Architect plan, fixture rights basis, dependency review, verification plan and human approval | Human / Architect | Open |
 | R-003 | Unclear MVP readiness: foundation есть, но Gate B не закрыт | Product | High | `docs/restart/release-gates.md` содержит unchecked Gate B items; `CURRENT_PROJECT_STATE.md` перечисляет gaps; issue #56 verifies only the free-preview slice | Beta может быть открыта без upload safety, TTL, real-file QA, restore evidence or other Gate B checks | Перед beta нужен Gate B evidence report или signed deferrals | Reviewer / Human | Open |
 | R-004 | Formal success criteria для beta могли быть неясными | Product | Medium | `docs/DECISIONS.md` and `docs/PROJECT_BRIEF.md` record owner-approved free beta success metrics from 2026-05-17 | Метрики могут быть забыты или смешаны с language-specific translation-quality scores | Keep hard guardrails separate from translation-quality learning metrics; Reviewer checks release evidence against the approved metrics | Human / Scribe | Mitigated / watch |
 | R-005 | Core workflow instability в cancel/resume/restart/worker recovery | Technical | High | Gate B unchecked: cancel/resume/restart, worker restart, bot restart; код содержит persistent jobs/work units and worker loop; issue #30 child PRs #36-#39 added focused cancel/provider/admin regression coverage | Accepted jobs могут стать невидимыми, stuck или потерять partial/final state | Targeted restart/cancel/resume tests, server smoke evidence, release report; keep issue #30 safeguards intact | Architect / Reviewer | Open |
@@ -57,10 +57,10 @@
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
 - Scope creep: High risk, потому что active docs ограничивают текущий продукт Telegram-first closed beta и TXT/DOCX/EPUB.
-  Future formats are tracked separately: RTF #4, FB2 #23 and next-format
-  prioritization #208. Implementation of any format beyond TXT/DOCX/EPUB needs
-  owner approval, Architect review, fixture rights basis, dependency review and
-  verification plan.
+  Future formats are committed roadmap scope but tracked separately: RTF #4,
+  FB2 #23 and next-format prioritization #208. Implementation of any format
+  beyond TXT/DOCX/EPUB needs owner implementation approval, Architect review,
+  fixture rights basis, dependency review and verification plan.
 - Unclear MVP: Medium/High risk; MVP scope описан, and free-preview evidence
   exists for the implementation slice, but readiness не подтвержден, пока Gate B
   не закрыт.
@@ -257,11 +257,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   timeout/unavailable/error behavior is tested; logs/admin contain metadata
   only.
 
-- Task: Run FB2 idea intake only if owner wants to revisit issue #23.
+- Task: Prioritize committed future formats through issue #208.
   Risk reduced: R-002, R-008, R-009, R-014.
-  Priority: Low / deferred.
+  Priority: Medium / later.
   Suggested owner: Human / Architect.
-  Acceptance criteria: owner decision recorded; supported FB2 subset, authorized
+  Acceptance criteria: RTF (#4), FB2 (#23), PDF/OCR, HTML/HTM, ODT, legacy DOC,
+  MOBI, AZW3/KPF and CBZ/CBR/DJVU are ranked; supported subsets, authorized
   fixture rights basis, dependency impact, parser/resource safety constraints
   and verification plan are defined before any implementation issue exists.
 
