@@ -99,6 +99,65 @@ class SchedulerRunnerTest(unittest.TestCase):
                 "[uk] First paragraph",
             )
 
+    def test_run_once_finishes_running_run_log_when_single_unit_job_assembles(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="notes",
+                source_text="SCHEDULED RAW SOURCE SENTINEL",
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id="order-1",
+                    user_id="telegram:42",
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=1,
+                ),
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(),
+                lease_seconds=300,
+                translation_run_log_root=run_log_root,
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            artifact_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    logger.run_dir / "run.json",
+                    logger.run_dir / "summary.md",
+                    logger.run_dir / "events.jsonl",
+                )
+            )
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(snapshot["status"], "ready")
+            self.assertIsNotNone(snapshot["finished_at"])
+            self.assertEqual(snapshot["result_file_name"], "notes.uk.txt")
+            self.assertIn("run_finished", events_jsonl)
+            self.assertNotIn("SCHEDULED RAW SOURCE SENTINEL", artifact_text)
+            self.assertNotIn("[uk] SCHEDULED RAW SOURCE SENTINEL", artifact_text)
+
     def test_run_once_requires_upload_safety_policy_when_gate_is_enabled(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
