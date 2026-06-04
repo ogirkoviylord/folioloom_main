@@ -144,6 +144,7 @@ from translator_service.internal_reader import (
     load_translation_mapping,
     reject_runtime_var_path,
 )
+from translator_service.output_contracts import parse_translation_batch_contract
 from translator_service.persistent_job_store import (
     open_persistent_job_store,
     sqlite_store_exists,
@@ -2753,7 +2754,7 @@ def _translation_work_unit_fragments(
 
 
 def _translation_work_unit_fragment(unit: object) -> TranslationRunFragmentDetail:
-    translated_text = getattr(unit, "translated_text", None) or ""
+    translated_text = _diagnostic_translated_text(unit)
     prompt_tokens = max(0, int(getattr(unit, "prompt_tokens", 0) or 0))
     completion_tokens = max(0, int(getattr(unit, "completion_tokens", 0) or 0))
     return TranslationRunFragmentDetail(
@@ -2821,7 +2822,7 @@ def _translation_text_diagnostics(
                     "status": getattr(unit.status, "value", str(unit.status)),
                     "source_block_ids": unit.source_block_ids,
                     "source_text": _diagnostic_source_text(storage, unit),
-                    "translated_text": unit.translated_text or "",
+                    "translated_text": _diagnostic_translated_text(unit),
                     "attempt_count": unit.attempt_count,
                     "max_attempts": unit.max_attempts,
                     "last_error": (
@@ -3040,6 +3041,20 @@ def _diagnostic_source_text(storage: LocalObjectStorage, unit) -> str:
         return "[source object key rejected]"
     except OSError:
         return "[source object unavailable]"
+
+
+def _diagnostic_translated_text(unit) -> str:
+    translated_text = getattr(unit, "translated_text", None) or ""
+    source_block_ids = tuple(getattr(unit, "source_block_ids", ()) or ())
+    if len(source_block_ids) <= 1:
+        return translated_text
+    parsed = parse_translation_batch_contract(
+        translated_text,
+        expected_count=len(source_block_ids),
+    )
+    if parsed is None:
+        return translated_text
+    return "\n\n".join(parsed)
 
 
 def _user_translation_summaries(

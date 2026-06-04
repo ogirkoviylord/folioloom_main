@@ -79,6 +79,12 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   beta-server smoke or full Gate B readiness.
 - [ ] TTL cleanup is active for sources, finals, partials and quarantine.
 - [ ] Real TXT/DOCX/EPUB matrix is executed and stored as a release artifact.
+  Partial local evidence: issue #75 on 2026-06-04 ran a metadata-only
+  no-provider adapter/persistent-plan pass for 7 public-domain/permissive
+  fixtures covering TXT, DOCX and EPUB. Raw source/output artifacts stayed out
+  of git and docs. This does not check the item because Telegram/provider
+  preview/full-translation evidence, restart/cancel/resume and server smoke are
+  still missing.
 - [ ] Cancel/resume/restart scenarios pass.
 - [ ] Worker restart does not lose accepted jobs.
 - [ ] Bot restart does not make existing jobs invisible.
@@ -97,7 +103,14 @@ Global repo-wide ruff cleanup is not a gate. Targeted lint inside
   scheduler/provider capacity, server smoke, real-file matrix or full Gate B
   readiness.
 - [ ] EPUBCheck or equivalent release validation passes for EPUB fixtures.
+  Partial local evidence: issue #75 EPUB outputs for Kobzar and Dracula passed
+  EPUBCheck v5.3.0 with zero fatals, errors or warnings using a temporary local
+  JRE. Repeat on provider-backed release-candidate outputs is still required.
 - [ ] DOCX openability/visual QA passes for DOCX fixtures.
+  Partial local evidence: issue #75 DOCX outputs for Kobzar and Dracula passed
+  LibreOffice headless PDF conversion with no repair marker in CLI output. Full
+  manual Writer visual QA on provider-backed release-candidate outputs is still
+  required.
 - [ ] Admin Alerts MVP is visible and tested.
 - [ ] Backups visibility is visible in admin or a documented owner runbook
   report exists for the beta.
