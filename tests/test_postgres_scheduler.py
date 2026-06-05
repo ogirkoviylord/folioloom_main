@@ -27,6 +27,7 @@ from translator_service.scheduler import (
     ProviderCapacitySlotDiagnosticStatus,
     ProviderSlotInventoryItem,
     ProviderSlotLeaseStatus,
+    SchedulerBackpressureState,
     SchedulerLimits,
     WorkUnitFailureKind,
 )
@@ -61,6 +62,7 @@ class PostgresSchedulerContractTest(unittest.TestCase):
             "recover_expired_provider_slot_leases",
             "list_provider_slot_leases",
             "get_provider_capacity_diagnostics",
+            "get_scheduler_backpressure_diagnostics",
         ]
 
         for method_name in expected_methods:
@@ -522,6 +524,55 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         )
         self.assertEqual(diagnostic.caps[0].active_leases, 1)
         self.assertTrue(diagnostic.caps[0].at_limit)
+
+    def test_backpressure_diagnostics_use_durable_queue_and_capacity(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        self._create_txt_job_with_unit(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+        )
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_shared",
+            max_parallel_requests=2,
+            capacity_source="admin",
+        )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-account-shared",
+            max_parallel_requests=1,
+            channel_ids=("chan_shared",),
+        )
+        self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+
+        diagnostics = self.store.get_scheduler_backpressure_diagnostics(
+            provider_id="deepseek",
+            capacity_caps=[cap],
+        )
+
+        self.assertEqual(
+            diagnostics.backpressure_state,
+            SchedulerBackpressureState.CAP_PRESSURE,
+        )
+        self.assertEqual(diagnostics.queue_depth_units, 1)
+        self.assertEqual(diagnostics.eligible_waiting_units, 1)
+        self.assertEqual(diagnostics.active_work_units, 1)
+        self.assertEqual(diagnostics.provider_active_leases, 1)
+        self.assertEqual(diagnostics.provider_cap_denied_slots, 1)
+        self.assertIn("account_model_cap_pressure", diagnostics.pressure_reasons)
 
     def test_provider_slot_release_is_claim_scoped_and_idempotent(self):
         _, claim = self._claim_txt_job()
