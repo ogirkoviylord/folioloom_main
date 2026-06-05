@@ -94,6 +94,76 @@ class WorkerTest(unittest.TestCase):
         self.assertTrue(guard.closed)
         self.assertTrue(store.closed)
 
+    def test_worker_main_reruns_scheduler_after_wakeup_hint(self):
+        from translator_service import worker
+        from translator_service.scheduler import SchedulerLimits
+
+        class WakeupNotifier:
+            def __init__(self):
+                self.waits = 0
+                self.timeouts = []
+
+            def wait_for_wakeup(self, *, timeout_seconds: float) -> bool:
+                self.waits += 1
+                self.timeouts.append(timeout_seconds)
+                if self.waits == 1:
+                    return True
+                raise KeyboardInterrupt
+
+        notifier = WakeupNotifier()
+        settings = SimpleNamespace(
+            object_storage_root="objects",
+            translation_run_log_root="run-logs",
+            scheduler_lease_seconds=300,
+            scheduler_retry_base_delay_seconds=30,
+            scheduler_retry_max_delay_seconds=600,
+            scheduler_poll_seconds=30,
+            require_upload_scan=True,
+            scheduler_wakeup_notifier=notifier,
+        )
+        store = _FakePostgresStore()
+        guard = SimpleNamespace(closed=False)
+        guard.close = lambda: setattr(guard, "closed", True)
+        scheduler_calls = []
+
+        def run_once(**kwargs):
+            scheduler_calls.append(kwargs)
+
+        with patch("translator_service.config.Settings", return_value=settings), patch(
+            "translator_service.bot.runtime.build_deepseek_translator",
+            return_value=object(),
+        ), patch(
+            "translator_service.bot.runtime.bot_runtime_config_from_settings",
+            return_value=object(),
+        ), patch(
+            "translator_service.bot.runtime.build_beta_safety_guard",
+            return_value=guard,
+        ), patch(
+            "translator_service.worker.effective_worker_parallel_units",
+            return_value=1,
+        ), patch(
+            "translator_service.worker.scheduler_limits_from_settings",
+            return_value=SchedulerLimits(),
+        ), patch(
+            "translator_service.worker.open_scheduler_store",
+            return_value=store,
+        ), patch(
+            "translator_service.scheduler_runner.run_scheduler_once",
+            side_effect=run_once,
+        ), patch(
+            "translator_service.worker.time.sleep",
+            side_effect=AssertionError("poll sleep should not run after wake-up"),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                worker.main()
+
+        self.assertEqual(len(scheduler_calls), 2)
+        self.assertIs(scheduler_calls[0]["store"], store)
+        self.assertIs(scheduler_calls[1]["store"], store)
+        self.assertEqual(notifier.timeouts, [30.0, 30.0])
+        self.assertTrue(guard.closed)
+        self.assertTrue(store.closed)
+
     def test_open_scheduler_store_returns_sqlite_store_for_sqlite_backend(self):
         from translator_service.config import Settings
         from translator_service.worker import open_scheduler_store
