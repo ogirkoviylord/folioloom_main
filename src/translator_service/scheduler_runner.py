@@ -20,6 +20,7 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
 )
 from translator_service.scheduler import (
+    ProviderSlotLease,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
@@ -30,13 +31,19 @@ from translator_service.translation_run_logs import (
 )
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
+    _acquire_provider_slot_lease_for_claim,
     _allowed_source_object_keys_for_work_unit,
+    _defer_claimed_work_unit_for_provider_capacity,
     _fail_claimed_work_unit_or_ignore_stale,
     _is_stale_work_unit_claim,
     _job_translation_context,
     _provider_failure_diagnostic_for_error,
+    _provider_slot_failure_release_reason,
+    _provider_slot_stale_release_reason,
+    _release_provider_slot_lease,
     _safe_provider_failure_error_message,
     load_scheduled_work_unit_text,
+    refresh_scheduled_provider_slot_inventory,
     run_next_scheduled_stored_text_work_unit,
     translate_claimed_scheduled_stored_text_work_unit,
 )
@@ -178,9 +185,11 @@ def _run_scheduled_parallel_once(
     require_upload_safety_policy: bool,
     beta_safety_guard: BetaSafetyGuard | None,
 ) -> tuple[int, int]:
+    refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
+
     completed_units = 0
     failed_units = 0
-    active: dict[Future[object], SchedulerClaim] = {}
+    active: dict[Future[object], tuple[SchedulerClaim, ProviderSlotLease | None]] = {}
     capacity = max(1, max_parallel_units)
     worker_sequence = 0
 
@@ -206,8 +215,6 @@ def _run_scheduled_parallel_once(
                     raise ValueError(
                         f"Claimed work unit does not exist: {claim.work_unit_id}"
                     )
-                if work_unit_started_callback is not None:
-                    work_unit_started_callback(work_unit)
                 try:
                     source_text = load_scheduled_work_unit_text(
                         storage=storage,
@@ -256,92 +263,127 @@ def _run_scheduled_parallel_once(
                     )
                     continue
 
+                lease_attempt = _acquire_provider_slot_lease_for_claim(
+                    store=store,
+                    translator=translator,
+                    claim=claim,
+                    lease_seconds=lease_seconds,
+                )
+                if lease_attempt.required and lease_attempt.lease is None:
+                    _defer_claimed_work_unit_for_provider_capacity(
+                        store=store,
+                        claim=claim,
+                    )
+                    break
+
+                if work_unit_started_callback is not None:
+                    work_unit_started_callback(work_unit)
+
                 future = executor.submit(
                     translate_claimed_scheduled_stored_text_work_unit,
                     work_unit=work_unit,
                     source_text=source_text,
                     translator=translator,
                     job_context=_job_translation_context(store, claim.job_id),
+                    provider_slot_lease=lease_attempt.lease,
                 )
-                active[future] = claim
+                active[future] = (claim, lease_attempt.lease)
 
             if not active:
                 break
 
             completed_futures, _ = wait(active, return_when=FIRST_COMPLETED)
             for future in completed_futures:
-                claim = active.pop(future)
+                claim, provider_slot_lease = active.pop(future)
+                release_reason = "released"
                 try:
-                    translation_result = future.result()
-                except Exception as error:
-                    provider_failure_diagnostic = (
-                        _provider_failure_diagnostic_for_error(
-                            error,
-                            translator=translator,
+                    try:
+                        translation_result = future.result()
+                    except Exception as error:
+                        release_reason = "retryable_failure"
+                        provider_failure_diagnostic = (
+                            _provider_failure_diagnostic_for_error(
+                                error,
+                                translator=translator,
+                            )
                         )
-                    )
-                    logger.error(
-                        "Scheduled parallel worker failed safely: "
-                        "job_id=%s work_unit_id=%s error=%s",
-                        claim.job_id,
-                        claim.work_unit_id,
-                        _safe_provider_failure_error_message(
-                            provider_failure_diagnostic
-                        ),
-                    )
-                    failed = _fail_claimed_work_unit_or_ignore_stale(
-                        store=store,
-                        claim=claim,
-                        failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-                        error_message=_safe_provider_failure_error_message(
-                            provider_failure_diagnostic
-                        ),
-                        retry_base_delay_seconds=retry_base_delay_seconds,
-                        retry_max_delay_seconds=retry_max_delay_seconds,
-                        provider_failure_diagnostic=provider_failure_diagnostic,
-                    )
-                    failed_units += _failed_unit_count(failed)
-                    _finish_failed_translation_run_for_work_unit(
-                        translation_run_log_root,
-                        work_unit=failed,
-                        beta_safety_guard=beta_safety_guard,
-                    )
-                    continue
-
-                try:
-                    completed = store.complete_claimed_work_unit(
-                        work_unit_id=claim.work_unit_id,
-                        claim_token=claim.claim_token,
-                        translated_text=translation_result.translated_text,
-                        prompt_tokens=translation_result.usage.prompt_tokens,
-                        completion_tokens=translation_result.usage.completion_tokens,
-                        cache_hit_tokens=(
-                            translation_result.usage.prompt_cache_hit_tokens
-                        ),
-                        cache_miss_tokens=(
-                            translation_result.usage.prompt_cache_miss_tokens
-                        ),
-                    )
-                except ValueError as error:
-                    if _is_stale_work_unit_claim(error):
-                        logger.warning(
-                            "Ignoring stale scheduled work-unit completion: "
-                            "job_id=%s work_unit_id=%s",
+                        logger.error(
+                            "Scheduled parallel worker failed safely: "
+                            "job_id=%s work_unit_id=%s error=%s",
                             claim.job_id,
                             claim.work_unit_id,
+                            _safe_provider_failure_error_message(
+                                provider_failure_diagnostic
+                            ),
+                        )
+                        failed = _fail_claimed_work_unit_or_ignore_stale(
+                            store=store,
+                            claim=claim,
+                            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+                            error_message=_safe_provider_failure_error_message(
+                                provider_failure_diagnostic
+                            ),
+                            retry_base_delay_seconds=retry_base_delay_seconds,
+                            retry_max_delay_seconds=retry_max_delay_seconds,
+                            provider_failure_diagnostic=provider_failure_diagnostic,
+                        )
+                        release_reason = _provider_slot_failure_release_reason(failed)
+                        failed_units += _failed_unit_count(failed)
+                        _finish_failed_translation_run_for_work_unit(
+                            translation_run_log_root,
+                            work_unit=failed,
+                            beta_safety_guard=beta_safety_guard,
                         )
                         continue
-                    raise
-                if completed.status.value in {"translated", "cached"}:
-                    completed_units += 1
-                    _record_book_mode_audit_for_work_unit(
-                        translation_run_log_root,
-                        completed,
+
+                    try:
+                        completed = store.complete_claimed_work_unit(
+                            work_unit_id=claim.work_unit_id,
+                            claim_token=claim.claim_token,
+                            translated_text=translation_result.translated_text,
+                            prompt_tokens=translation_result.usage.prompt_tokens,
+                            completion_tokens=(
+                                translation_result.usage.completion_tokens
+                            ),
+                            cache_hit_tokens=(
+                                translation_result.usage.prompt_cache_hit_tokens
+                            ),
+                            cache_miss_tokens=(
+                                translation_result.usage.prompt_cache_miss_tokens
+                            ),
+                        )
+                        release_reason = "completed"
+                    except ValueError as error:
+                        if _is_stale_work_unit_claim(error):
+                            logger.warning(
+                                "Ignoring stale scheduled work-unit completion: "
+                                "job_id=%s work_unit_id=%s",
+                                claim.job_id,
+                                claim.work_unit_id,
+                            )
+                            release_reason = _provider_slot_stale_release_reason(
+                                store=store,
+                                claim=claim,
+                            )
+                            continue
+                        raise
+                    if completed.status.value in {"translated", "cached"}:
+                        completed_units += 1
+                        _record_book_mode_audit_for_work_unit(
+                            translation_run_log_root,
+                            completed,
+                        )
+                        if usage_completed_callback is not None:
+                            usage_completed_callback(completed)
+                    elif completed.status.value.startswith("failed"):
+                        failed_units += 1
+                finally:
+                    _release_provider_slot_lease(
+                        store=store,
+                        claim=claim,
+                        provider_slot_lease=provider_slot_lease,
+                        release_reason=release_reason,
                     )
-                    if usage_completed_callback is not None:
-                        usage_completed_callback(completed)
-                elif completed.status.value.startswith("failed"):
-                    failed_units += 1
 
     return completed_units, failed_units
 
