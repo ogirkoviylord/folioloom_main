@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
+SCHEDULER_FAIR_QUEUE_POLICY = "least_active_user_job_v1"
+
 
 class SchedulerJobStatus(StrEnum):
     QUEUED = "queued"

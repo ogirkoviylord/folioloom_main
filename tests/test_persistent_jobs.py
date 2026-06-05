@@ -12,6 +12,7 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
+from translator_service.scheduler import SCHEDULER_FAIR_QUEUE_POLICY
 
 
 class SQLiteTranslationJobStoreTest(unittest.TestCase):
@@ -154,6 +155,9 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(claimed_unit.claim_token, claim.claim_token)
         self.assertIsNotNone(claimed_unit.lease_until)
         self.assertEqual(claimed_unit.attempt_count, 1)
+        events = store.list_scheduler_events(job.id)
+        payload = json.loads(events[-1].payload_json)
+        self.assertEqual(payload["queue_policy"], SCHEDULER_FAIR_QUEUE_POLICY)
 
     def test_scheduler_claim_does_not_overwrite_lost_candidate(self):
         from translator_service.scheduler import SchedulerLimits
@@ -385,6 +389,146 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
         self.assertEqual(first.job_id, first_user_first_job.id)
         self.assertEqual(second.job_id, other_user_job.id)
+
+    def test_scheduled_fair_queue_prevents_large_job_from_monopolizing_slots(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        large_job = _job_with_unit_count(
+            store,
+            order_id="order-large",
+            user_id="user-large",
+            file_id="file-large",
+            unit_count=4,
+        )
+        small_a = _job_with_unit_count(
+            store,
+            order_id="order-small-a",
+            user_id="user-small-a",
+            file_id="file-small-a",
+            unit_count=1,
+        )
+        small_b = _job_with_unit_count(
+            store,
+            order_id="order-small-b",
+            user_id="user-small-b",
+            file_id="file-small-b",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=3,
+            max_active_units_per_job=3,
+            max_active_units_per_user=3,
+            max_active_jobs_per_user=3,
+        )
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+        third = store.claim_next_scheduled_work_unit(
+            worker_id="worker-c",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, large_job.id)
+        self.assertEqual({second.job_id, third.job_id}, {small_a.id, small_b.id})
+        self.assertNotIn(large_job.id, {second.job_id, third.job_id})
+
+    def test_scheduled_fair_queue_allows_same_user_rotation_when_caps_allow(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        first_job = _job_with_unit_count(
+            store,
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+            unit_count=2,
+        )
+        second_job = _job_with_unit_count(
+            store,
+            order_id="order-2",
+            user_id="user-42",
+            file_id="file-2",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=2,
+            max_active_units_per_job=1,
+            max_active_units_per_user=2,
+            max_active_jobs_per_user=2,
+        )
+
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_job.id)
+        self.assertEqual(second.job_id, second_job.id)
+        self.assertNotEqual(first.work_unit_id, second.work_unit_id)
+
+    def test_scheduled_fair_queue_moves_past_retryable_failure_backoff(self):
+        from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+
+        store = self._memory_store()
+        retrying_job = _job_with_unit_count(
+            store,
+            order_id="order-retry",
+            user_id="user-retry",
+            file_id="file-retry",
+            unit_count=1,
+        )
+        ready_job = _job_with_unit_count(
+            store,
+            order_id="order-ready",
+            user_id="user-ready",
+            file_id="file-ready",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=1,
+            max_active_units_per_job=1,
+            max_active_units_per_user=1,
+            max_active_jobs_per_user=1,
+        )
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        failed = store.fail_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="provider timeout",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=60,
+        )
+        next_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(claim.job_id, retrying_job.id)
+        self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_RETRYABLE)
+        self.assertEqual(next_claim.job_id, ready_job.id)
 
     def test_scheduled_claim_priority_aging_prevents_old_job_starvation(self):
         from translator_service.scheduler import SchedulerLimits
@@ -910,6 +1054,23 @@ def _job_with_units(
     user_id: str = "user-42",
     file_id: str = "file-1",
 ):
+    return _job_with_unit_count(
+        store,
+        order_id=order_id,
+        user_id=user_id,
+        file_id=file_id,
+        unit_count=2,
+    )
+
+
+def _job_with_unit_count(
+    store: SQLiteTranslationJobStore,
+    *,
+    order_id: str,
+    user_id: str,
+    file_id: str,
+    unit_count: int,
+):
     job = store.create_job(
         order_id=order_id,
         user_id=user_id,
@@ -926,23 +1087,15 @@ def _job_with_units(
         job.id,
         [
             WorkUnitPlan(
-                sequence=1,
-                source_block_ids=("chapter-1:p1",),
-                source_text_hash="hash-1",
+                sequence=sequence,
+                source_block_ids=(f"chapter-1:p{sequence}",),
+                source_text_hash=f"hash-{sequence}",
                 prompt_tier="plain",
                 source_language="en",
                 target_language="uk",
-                source_object_key="intermediate/job-1/unit-1.txt",
-            ),
-            WorkUnitPlan(
-                sequence=2,
-                source_block_ids=("chapter-1:p2",),
-                source_text_hash="hash-2",
-                prompt_tier="plain",
-                source_language="en",
-                target_language="uk",
-                source_object_key="intermediate/job-1/unit-2.txt",
-            ),
+                source_object_key=f"intermediate/{file_id}/unit-{sequence}.txt",
+            )
+            for sequence in range(1, max(1, unit_count) + 1)
         ],
     )
     return job

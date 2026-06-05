@@ -32,6 +32,7 @@ from translator_service.persistent_jobs import (
 )
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_POLICY,
     ProviderCapacityCap,
     ProviderCapacityDiagnostics,
     ProviderSlot,
@@ -421,7 +422,9 @@ class PostgresSchedulerStore:
                       END DESC,
                       tj.priority DESC,
                       tj.created_at ASC,
-                      wu.sequence ASC
+                      tj.id ASC,
+                      wu.sequence ASC,
+                      wu.id ASC
                     FOR UPDATE OF wu SKIP LOCKED
                     LIMIT 1
                 )
@@ -522,6 +525,7 @@ class PostgresSchedulerStore:
                     "worker_id": worker_id,
                     "claim_token": claim_token,
                     "lease_until": _to_db_time(updated["lease_until"]),
+                    "queue_policy": SCHEDULER_FAIR_QUEUE_POLICY,
                 },
                 now=_now(),
             )
