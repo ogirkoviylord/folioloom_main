@@ -17,6 +17,50 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-05 - Architecture decision: keep simple fair queue policy until evidence requires DRR/WFQ
+
+Status: Proposed
+
+Decision:
+- For issue #303, the PR-ready recommendation is to keep the simple
+  `least_active_user_job_v1` fair queue policy from issue #302 as the current
+  Phase 2 queue policy.
+- Weighted fair queueing and deficit round robin should stay deferred until
+  observed or simulated queue evidence shows that the simple policy is too
+  crude for mixed FolioLoom workloads.
+- DRR/WFQ must not be used to replace provider-capacity correctness. Provider
+  capacity remains bounded by PostgreSQL work-unit leases, provider-slot
+  leases and provider capacity caps.
+- If a future DRR/WFQ implementation needs persisted policy state, admin
+  diagnostics, externally visible priority behavior, ETA/user-facing copy,
+  pricing/payment priority, or deployment/runtime changes, it requires the
+  matching explicit approval gate before implementation.
+
+Evidence:
+- GitHub issue #303 explicitly asks to upgrade to weighted fair queueing or
+  deficit round robin only if evidence shows the simple policy is too crude.
+- The current issue #302 implementation path records a stable policy id,
+  deterministic tie-breakers and regression coverage for large-job monopoly,
+  same-user rotation and retry backoff behavior.
+- No repository evidence currently proves that DRR/WFQ complexity is required
+  before Phase 3 ETA/backpressure work or real queue diagnostics.
+
+Consequences:
+- Issue #303 should be a decision/evaluation PR, not a scheduler rewrite.
+- Future queue-policy upgrades should be evidence-driven and should keep active
+  provider calls non-preemptive.
+- Diagnostics should continue to explain provider capacity separately from
+  queue policy so operators can distinguish "no safe slot exists" from "this
+  job was not next by policy".
+- This does not close Gate B, launch free beta, change user-facing UX or claim
+  production readiness.
+
+Human approval required to change:
+- yes if changing scheduler/job/work-unit selection behavior, adding persisted
+  policy state, adding admin controls/diagnostics beyond approved read-only
+  metadata, exposing priority/ETA to users, changing pricing/payment priority,
+  or changing deployment/runtime behavior.
+
 ### 2026-06-04 - Product decision: committed future format roadmap
 
 Status: Active

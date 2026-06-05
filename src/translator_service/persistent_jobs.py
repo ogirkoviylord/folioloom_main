@@ -12,6 +12,7 @@ from translator_service.scheduler import (
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
+    build_scheduler_queue_policy_diagnostics,
     calculate_retry_decision,
 )
 
@@ -526,7 +527,28 @@ class SQLiteTranslationJobStore:
 
         row = self._connection.execute(
             """
-            SELECT wu.*
+            SELECT
+              wu.*,
+              (
+                  SELECT COUNT(*)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.status = ?
+              ) AS queue_policy_active_user_units,
+              (
+                  SELECT COUNT(DISTINCT active.job_id)
+                  FROM work_units active
+                  JOIN translation_jobs active_tj ON active_tj.id = active.job_id
+                  WHERE active_tj.user_id = tj.user_id
+                    AND active.status = ?
+              ) AS queue_policy_active_user_jobs,
+              (
+                  SELECT COUNT(*)
+                  FROM work_units active
+                  WHERE active.job_id = wu.job_id
+                    AND active.status = ?
+              ) AS queue_policy_active_job_units
             FROM work_units wu
             JOIN translation_jobs tj ON tj.id = wu.job_id
             WHERE tj.status IN (?, ?)
@@ -596,6 +618,9 @@ class SQLiteTranslationJobStore:
             LIMIT 1
             """,
             (
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                PersistentWorkUnitStatus.TRANSLATING.value,
                 PersistentTranslationJobStatus.QUEUED.value,
                 PersistentTranslationJobStatus.TRANSLATING.value,
                 PersistentWorkUnitStatus.PENDING.value,
@@ -729,6 +754,21 @@ class SQLiteTranslationJobStore:
                     "claim_token": claim_token,
                     "lease_until": _to_db_time(lease_until),
                     "queue_policy": SCHEDULER_FAIR_QUEUE_POLICY,
+                    "queue_policy_diagnostics": build_scheduler_queue_policy_diagnostics(
+                        active_user_units_before_claim=row[
+                            "queue_policy_active_user_units"
+                        ],
+                        active_user_jobs_before_claim=row[
+                            "queue_policy_active_user_jobs"
+                        ],
+                        active_job_units_before_claim=row[
+                            "queue_policy_active_job_units"
+                        ],
+                        max_active_units_per_job=max_active_units_per_job,
+                        max_active_units_per_user=max_active_units_per_user,
+                        max_active_jobs_per_user=max_active_jobs_per_user,
+                        priority_aging_seconds=priority_aging_seconds,
+                    ),
                 },
                 now=now,
             )

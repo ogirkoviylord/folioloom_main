@@ -4,6 +4,39 @@ from enum import StrEnum
 from typing import Protocol
 
 SCHEDULER_FAIR_QUEUE_POLICY = "least_active_user_job_v1"
+SCHEDULER_FAIR_QUEUE_ORDERING = (
+    "active_user_units_asc",
+    "active_user_jobs_asc",
+    "active_job_units_asc",
+    "effective_priority_desc",
+    "job_priority_desc",
+    "job_created_at_asc",
+    "job_id_asc",
+    "work_unit_sequence_asc",
+    "work_unit_id_asc",
+)
+
+
+def build_scheduler_queue_policy_diagnostics(
+    *,
+    active_user_units_before_claim: int,
+    active_user_jobs_before_claim: int,
+    active_job_units_before_claim: int,
+    max_active_units_per_job: int,
+    max_active_units_per_user: int,
+    max_active_jobs_per_user: int,
+    priority_aging_seconds: int,
+) -> dict[str, object]:
+    return {
+        "active_user_units_before_claim": max(0, int(active_user_units_before_claim)),
+        "active_user_jobs_before_claim": max(0, int(active_user_jobs_before_claim)),
+        "active_job_units_before_claim": max(0, int(active_job_units_before_claim)),
+        "max_active_units_per_job": max(1, int(max_active_units_per_job)),
+        "max_active_units_per_user": max(1, int(max_active_units_per_user)),
+        "max_active_jobs_per_user": max(1, int(max_active_jobs_per_user)),
+        "priority_aging_seconds": max(0, int(priority_aging_seconds)),
+        "ordering": list(SCHEDULER_FAIR_QUEUE_ORDERING),
+    }
 
 
 class SchedulerJobStatus(StrEnum):
