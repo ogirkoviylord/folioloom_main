@@ -38,10 +38,12 @@ from translator_service.scheduler import (
     ProviderSlot,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
+    SchedulerBackpressureDiagnostics,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
     build_provider_capacity_diagnostics,
+    build_scheduler_backpressure_diagnostics,
     build_scheduler_queue_policy_diagnostics,
     calculate_retry_decision,
 )
@@ -1086,6 +1088,115 @@ class PostgresSchedulerStore:
             {"job_id": job_id},
         ).fetchall()
         return [_scheduler_event_from_row(row) for row in rows]
+
+    def get_scheduler_backpressure_diagnostics(
+        self,
+        *,
+        provider_id: str | None = None,
+        capacity_caps: list[ProviderCapacityCap] | None = None,
+        provider_capacity: ProviderCapacityDiagnostics | None = None,
+        throttle_available_slots: int | None = None,
+        throttle_circuit_state: str | None = None,
+        throughput_window_seconds: int = 300,
+        now: datetime | None = None,
+    ) -> SchedulerBackpressureDiagnostics:
+        current_time = now or _now()
+        window_seconds = max(1, int(throughput_window_seconds))
+        window_start = current_time - timedelta(seconds=window_seconds)
+        if provider_capacity is None and provider_id:
+            provider_capacity = self.get_provider_capacity_diagnostics(
+                provider_id=provider_id,
+                capacity_caps=capacity_caps,
+                now=current_time,
+            )
+        row = self.connection.execute(
+            """
+            SELECT
+              (
+                SELECT COUNT(*)
+                FROM work_units wu
+                JOIN translation_jobs tj ON tj.id = wu.job_id
+                WHERE tj.status IN ('queued', 'translating')
+                  AND tj.cancel_requested_at IS NULL
+                  AND wu.status IN ('pending', 'failed', 'failed_retryable')
+              ) AS queue_depth_units,
+              (
+                SELECT COUNT(*)
+                FROM work_units wu
+                JOIN translation_jobs tj ON tj.id = wu.job_id
+                WHERE tj.status IN ('queued', 'translating')
+                  AND tj.cancel_requested_at IS NULL
+                  AND wu.status IN ('pending', 'failed', 'failed_retryable')
+                  AND wu.available_at <= %(now)s
+                  AND (wu.lease_until IS NULL OR wu.lease_until <= %(now)s)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM work_units earlier
+                      WHERE earlier.job_id = wu.job_id
+                        AND earlier.sequence < wu.sequence
+                        AND earlier.status IN (
+                            'pending',
+                            'failed',
+                            'failed_retryable'
+                        )
+                  )
+              ) AS eligible_waiting_units,
+              (
+                SELECT COUNT(*)
+                FROM work_units wu
+                JOIN translation_jobs tj ON tj.id = wu.job_id
+                WHERE tj.status IN ('queued', 'translating')
+                  AND tj.cancel_requested_at IS NULL
+                  AND wu.status = 'failed_retryable'
+                  AND wu.available_at > %(now)s
+              ) AS delayed_retry_units,
+              (
+                SELECT COUNT(*)
+                FROM work_units
+                WHERE status = 'translating'
+              ) AS active_work_units,
+              (
+                SELECT COUNT(*)
+                FROM work_units wu
+                JOIN translation_jobs tj ON tj.id = wu.job_id
+                WHERE tj.status IN ('queued', 'translating')
+                  AND tj.cancel_requested_at IS NULL
+                  AND wu.status = 'failed_retryable'
+              ) AS retry_pressure_units,
+              (
+                SELECT COUNT(*)
+                FROM work_units
+                WHERE status = 'translating'
+                  AND lease_until IS NOT NULL
+                  AND lease_until <= %(now)s
+              ) AS expired_work_unit_leases,
+              (
+                SELECT COUNT(*)
+                FROM work_units
+                WHERE status IN ('translated', 'cached')
+                  AND completed_at IS NOT NULL
+                  AND completed_at >= %(window_start)s
+              ) AS recent_completed_units
+            """,
+            {
+                "now": current_time,
+                "window_start": window_start,
+            },
+        ).fetchone()
+        return build_scheduler_backpressure_diagnostics(
+            queue_depth_units=row["queue_depth_units"],
+            eligible_waiting_units=row["eligible_waiting_units"],
+            delayed_retry_units=row["delayed_retry_units"],
+            active_work_units=row["active_work_units"],
+            retry_pressure_units=row["retry_pressure_units"],
+            expired_work_unit_leases=row["expired_work_unit_leases"],
+            provider_capacity=provider_capacity,
+            throttle_available_slots=throttle_available_slots,
+            throttle_circuit_state=throttle_circuit_state,
+            recent_completed_units=row["recent_completed_units"],
+            throughput_window_seconds=window_seconds,
+            now=current_time,
+        )
 
     def recover_expired_leases(
         self,
