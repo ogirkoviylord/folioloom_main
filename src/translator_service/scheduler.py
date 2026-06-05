@@ -43,6 +43,11 @@ class ProviderSlotLeaseStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class ProviderCapacityCapScope(StrEnum):
+    ACCOUNT = "account"
+    MODEL = "model"
+
+
 @dataclass(frozen=True)
 class SchedulerLimits:
     max_active_units_per_job: int = 1
@@ -81,6 +86,15 @@ class ProviderSlotInventoryItem:
     channel_id: str
     max_parallel_requests: int
     capacity_source: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderCapacityCap:
+    provider_id: str
+    cap_id: str
+    scope: ProviderCapacityCapScope
+    max_parallel_requests: int
+    channel_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

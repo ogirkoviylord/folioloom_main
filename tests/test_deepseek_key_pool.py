@@ -109,6 +109,46 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertNotIn("primary", inventory_repr)
         self.assertNotIn("backup", inventory_repr)
 
+    def test_provider_capacity_caps_expose_safe_default_account_and_model_caps(self):
+        factory = RecordingClientFactory({"secret-key-a": ["ok"], "secret-key-b": ["ok"]})
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(
+                    api_key="secret-key-a",
+                    label="primary",
+                    max_parallel_requests=2,
+                ),
+                DeepSeekChannelConfig(
+                    api_key="secret-key-b",
+                    label="backup",
+                    max_parallel_requests=1,
+                ),
+            ],
+            client_factory=factory,
+        )
+
+        caps = pool.provider_capacity_caps()
+
+        self.assertEqual(
+            [(cap.scope.value, cap.cap_id, cap.max_parallel_requests) for cap in caps],
+            [
+                ("account", "deepseek-account-default", 3),
+                ("model", "deepseek-model-default", 3),
+            ],
+        )
+        self.assertEqual(
+            [cap.channel_ids for cap in caps],
+            [
+                ("deepseek-channel-1", "deepseek-channel-2"),
+                ("deepseek-channel-1", "deepseek-channel-2"),
+            ],
+        )
+        caps_repr = repr(caps)
+        self.assertNotIn("secret-key-a", caps_repr)
+        self.assertNotIn("secret-key-b", caps_repr)
+        self.assertNotIn("primary", caps_repr)
+        self.assertNotIn("backup", caps_repr)
+
     def test_provider_slot_channel_lease_binds_translation_to_safe_channel_id(self):
         factory = RecordingClientFactory(
             {

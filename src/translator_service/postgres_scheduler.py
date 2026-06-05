@@ -32,6 +32,7 @@ from translator_service.persistent_jobs import (
 )
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
+    ProviderCapacityCap,
     ProviderSlot,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
@@ -1213,60 +1214,90 @@ class PostgresSchedulerStore:
         work_unit_claim_token: str,
         lease_seconds: int,
         channel_id: str | None = None,
+        capacity_caps: list[ProviderCapacityCap] | None = None,
     ) -> ProviderSlotLease | None:
         now = _now()
         lease_until = now + timedelta(seconds=max(1, lease_seconds))
         lease_token = uuid4().hex
+        safe_capacity_caps = _provider_capacity_caps_for_provider(
+            capacity_caps or [],
+            provider_id=provider_id,
+        )
         with self.connection.transaction():
-            row = self.connection.execute(
+            self.connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%(lock_key)s))",
+                {
+                    "lock_key": (
+                        "translator_service.postgres_scheduler."
+                        f"provider_slot_lease.{provider_id}"
+                    )
+                },
+            )
+            candidates = self.connection.execute(
                 """
-                WITH candidate AS (
-                    SELECT ps.*
-                    FROM provider_slots ps
-                    WHERE ps.provider_id = %(provider_id)s
-                      AND (
-                        %(channel_id)s::text IS NULL
-                        OR ps.channel_id = %(channel_id)s
-                      )
-                      AND ps.enabled = TRUE
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM provider_slot_leases active_lease
-                          WHERE active_lease.provider_id = ps.provider_id
-                            AND active_lease.channel_id = ps.channel_id
-                            AND active_lease.slot_index = ps.slot_index
-                            AND active_lease.status = 'active'
-                      )
-                    ORDER BY ps.channel_id, ps.slot_index
-                    FOR UPDATE SKIP LOCKED
-                    LIMIT 1
-                )
+                SELECT ps.*
+                FROM provider_slots ps
+                WHERE ps.provider_id = %(provider_id)s
+                  AND (
+                    %(channel_id)s::text IS NULL
+                    OR ps.channel_id = %(channel_id)s
+                  )
+                  AND ps.enabled = TRUE
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM provider_slot_leases active_lease
+                      WHERE active_lease.provider_id = ps.provider_id
+                        AND active_lease.channel_id = ps.channel_id
+                        AND active_lease.slot_index = ps.slot_index
+                        AND active_lease.status = 'active'
+                  )
+                ORDER BY ps.channel_id, ps.slot_index
+                FOR UPDATE SKIP LOCKED
+                """,
+                {
+                    "provider_id": provider_id,
+                    "channel_id": channel_id,
+                },
+            ).fetchall()
+            row = None
+            for candidate in candidates:
+                if not _provider_capacity_caps_allow_candidate(
+                    self.connection,
+                    provider_id=provider_id,
+                    channel_id=candidate["channel_id"],
+                    capacity_caps=safe_capacity_caps,
+                ):
+                    continue
+                row = self.connection.execute(
+                    """
                 INSERT INTO provider_slot_leases (
                     id, lease_token, provider_id, channel_id, slot_index,
                     job_id, work_unit_id, worker_id, work_unit_claim_token,
                     status, acquired_at, lease_until, created_at, updated_at
                 )
-                SELECT
-                    %(lease_id)s, %(lease_token)s, provider_id, channel_id,
-                    slot_index, %(job_id)s, %(work_unit_id)s, %(worker_id)s,
-                    %(work_unit_claim_token)s, 'active', %(now)s,
-                    %(lease_until)s, %(now)s, %(now)s
-                FROM candidate
+                VALUES (
+                    %(lease_id)s, %(lease_token)s, %(provider_id)s,
+                    %(channel_id)s, %(slot_index)s, %(job_id)s,
+                    %(work_unit_id)s, %(worker_id)s, %(work_unit_claim_token)s,
+                    'active', %(now)s, %(lease_until)s, %(now)s, %(now)s
+                )
                 RETURNING *
                 """,
-                {
-                    "lease_id": f"provider-slot-lease-{uuid4().hex}",
-                    "lease_token": lease_token,
-                    "provider_id": provider_id,
-                    "channel_id": channel_id,
-                    "job_id": job_id,
-                    "work_unit_id": work_unit_id,
-                    "worker_id": worker_id,
-                    "work_unit_claim_token": work_unit_claim_token,
-                    "now": now,
-                    "lease_until": lease_until,
-                },
-            ).fetchone()
+                    {
+                        "lease_id": f"provider-slot-lease-{uuid4().hex}",
+                        "lease_token": lease_token,
+                        "provider_id": provider_id,
+                        "channel_id": candidate["channel_id"],
+                        "slot_index": candidate["slot_index"],
+                        "job_id": job_id,
+                        "work_unit_id": work_unit_id,
+                        "worker_id": worker_id,
+                        "work_unit_claim_token": work_unit_claim_token,
+                        "now": now,
+                        "lease_until": lease_until,
+                    },
+                ).fetchone()
+                break
         if row is None:
             return None
         return _provider_slot_lease_from_row(row)
@@ -1526,6 +1557,71 @@ def _provider_slot_lease_from_row(row) -> ProviderSlotLease:
         released_at=row["released_at"],
         release_reason=row["release_reason"],
     )
+
+
+def _provider_capacity_caps_for_provider(
+    capacity_caps: list[ProviderCapacityCap],
+    *,
+    provider_id: str,
+) -> list[ProviderCapacityCap]:
+    safe_caps: list[ProviderCapacityCap] = []
+    for cap in capacity_caps:
+        if cap.provider_id != provider_id:
+            continue
+        channel_ids = tuple(
+            sorted({channel_id for channel_id in cap.channel_ids if channel_id})
+        )
+        safe_caps.append(
+            ProviderCapacityCap(
+                provider_id=provider_id,
+                cap_id=cap.cap_id,
+                scope=cap.scope,
+                max_parallel_requests=max(0, int(cap.max_parallel_requests)),
+                channel_ids=channel_ids,
+            )
+        )
+    return safe_caps
+
+
+def _provider_capacity_caps_allow_candidate(
+    connection,
+    *,
+    provider_id: str,
+    channel_id: str,
+    capacity_caps: list[ProviderCapacityCap],
+) -> bool:
+    for cap in capacity_caps:
+        if cap.channel_ids and channel_id not in cap.channel_ids:
+            continue
+        if cap.max_parallel_requests <= 0:
+            return False
+        if cap.channel_ids:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS active_count
+                FROM provider_slot_leases
+                WHERE provider_id = %(provider_id)s
+                  AND status = 'active'
+                  AND channel_id = ANY(%(channel_ids)s)
+                """,
+                {
+                    "provider_id": provider_id,
+                    "channel_ids": list(cap.channel_ids),
+                },
+            ).fetchone()
+        else:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS active_count
+                FROM provider_slot_leases
+                WHERE provider_id = %(provider_id)s
+                  AND status = 'active'
+                """,
+                {"provider_id": provider_id},
+            ).fetchone()
+        if int(row["active_count"]) >= cap.max_parallel_requests:
+            return False
+    return True
 
 
 def _provider_slot_release_reason(release_reason: str) -> str:

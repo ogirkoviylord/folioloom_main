@@ -27,6 +27,8 @@ from translator_service.persistent_jobs import (
     WorkUnitPlan,
 )
 from translator_service.scheduler import (
+    ProviderCapacityCap,
+    ProviderCapacityCapScope,
     ProviderSlotInventoryItem,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
@@ -1451,6 +1453,80 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertIsNone(unit.claim_token)
             self.assertEqual(base_store.list_work_unit_attempts(unit.id), [])
 
+    def test_run_once_skips_provider_call_when_account_cap_denies_slot(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(
+                base_store,
+                active_cap_counts={"deepseek-account-test": 1},
+            )
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = ProviderSlotAwareRunnerTranslator()
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+            )
+
+            [unit] = base_store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(len(store.acquire_calls), 1)
+            self.assertEqual(len(store.defer_calls), 1)
+            self.assertEqual(unit.status.value, "pending")
+            self.assertEqual(unit.attempt_count, 0)
+            self.assertEqual(base_store.list_work_unit_attempts(unit.id), [])
+
+    def test_run_once_skips_provider_call_when_model_cap_denies_slot(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(
+                base_store,
+                active_cap_counts={"deepseek-model-test": 1},
+            )
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = ProviderSlotAwareRunnerTranslator()
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+            )
+
+            [unit] = base_store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(len(store.acquire_calls), 1)
+            self.assertEqual(len(store.defer_calls), 1)
+            self.assertEqual(unit.status.value, "pending")
+            self.assertEqual(unit.attempt_count, 0)
+            self.assertEqual(base_store.list_work_unit_attempts(unit.id), [])
+
     def test_run_once_releases_provider_slot_lease_after_serial_success(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1788,10 +1864,12 @@ class ProviderSlotLeaseGuardedStore:
         *,
         acquire_available: bool = True,
         expired_recovered: int = 0,
+        active_cap_counts: dict[str, int] | None = None,
     ) -> None:
         self._store = store
         self.acquire_available = acquire_available
         self.expired_recovered = expired_recovered
+        self.active_cap_counts = dict(active_cap_counts or {})
         self.recover_expired_calls = 0
         self.recovered_expired_total = 0
         self.inventory: list[ProviderSlotInventoryItem] = []
@@ -1835,6 +1913,7 @@ class ProviderSlotLeaseGuardedStore:
         work_unit_claim_token: str,
         lease_seconds: int,
         channel_id: str | None = None,
+        capacity_caps: list[ProviderCapacityCap] | None = None,
     ) -> ProviderSlotLease | None:
         self.acquire_calls.append(
             {
@@ -1845,10 +1924,14 @@ class ProviderSlotLeaseGuardedStore:
                 "work_unit_claim_token": work_unit_claim_token,
                 "lease_seconds": lease_seconds,
                 "channel_id": channel_id,
+                "capacity_caps": list(capacity_caps or []),
             }
         )
         if not self.acquire_available:
             return None
+        for cap in capacity_caps or []:
+            if self.active_cap_counts.get(cap.cap_id, 0) >= cap.max_parallel_requests:
+                return None
         now = datetime.now(UTC)
         lease_token = f"slot-token-{len(self._leases) + 1}"
         lease = ProviderSlotLease(
@@ -1942,6 +2025,24 @@ class ProviderSlotAwareRunnerTranslator(RunnerTranslator):
                 max_parallel_requests=1,
                 capacity_source="test",
             )
+        ]
+
+    def provider_capacity_caps(self) -> list[ProviderCapacityCap]:
+        return [
+            ProviderCapacityCap(
+                provider_id="deepseek",
+                cap_id="deepseek-account-test",
+                scope=ProviderCapacityCapScope.ACCOUNT,
+                max_parallel_requests=1,
+                channel_ids=("deepseek-channel-1",),
+            ),
+            ProviderCapacityCap(
+                provider_id="deepseek",
+                cap_id="deepseek-model-test",
+                scope=ProviderCapacityCapScope.MODEL,
+                max_parallel_requests=1,
+                channel_ids=("deepseek-channel-1",),
+            ),
         ]
 
     @contextmanager
