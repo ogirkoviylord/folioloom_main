@@ -723,6 +723,19 @@ Out of scope:
 - public production claims;
 - exposing provider internals or secrets.
 
+Issue #304 implementation boundary:
+
+- add an internal `SchedulerBackpressureDiagnostics` /
+  `SchedulerEtaEstimate` input model;
+- derive queue depth, eligible waiting work, retry pressure, active work-unit
+  leases, provider-slot capacity pressure and recent throughput from durable
+  scheduler state and safe provider-capacity diagnostics;
+- return `Unknown` when throughput or capacity evidence is insufficient;
+- keep this as read-only metadata for diagnostics and future UX work;
+- do not add user-facing ETA copy, admission rejection, Redis wake-up,
+  payment priority, deployment/runtime/env/secrets changes, runtime data
+  operations, Gate B claims or release-readiness claims in this slice.
+
 ### Phase 4: More Keys And Workers
 
 Goal:

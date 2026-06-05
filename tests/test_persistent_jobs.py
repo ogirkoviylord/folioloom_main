@@ -12,7 +12,10 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
-from translator_service.scheduler import SCHEDULER_FAIR_QUEUE_POLICY
+from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_POLICY,
+    SchedulerBackpressureState,
+)
 
 
 class SQLiteTranslationJobStoreTest(unittest.TestCase):
@@ -165,6 +168,109 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(diagnostics["max_active_units_per_job"], 1)
         self.assertEqual(diagnostics["max_active_units_per_user"], 1)
         self.assertEqual(diagnostics["max_active_jobs_per_user"], 1)
+
+    def test_backpressure_diagnostics_empty_queue_are_idle(self):
+        store = self._memory_store()
+
+        diagnostics = store.get_scheduler_backpressure_diagnostics()
+
+        self.assertEqual(
+            diagnostics.backpressure_state,
+            SchedulerBackpressureState.IDLE,
+        )
+        self.assertEqual(diagnostics.queue_depth_units, 0)
+        self.assertEqual(diagnostics.eligible_waiting_units, 0)
+        self.assertEqual(diagnostics.pressure_reasons, ("no_eligible_work",))
+        self.assertEqual(diagnostics.eta.unknown_reason, "no_eligible_work")
+
+    def test_backpressure_diagnostics_count_mixed_jobs_from_durable_queue(self):
+        store = self._memory_store()
+        _job_with_unit_count(
+            store,
+            order_id="order-large",
+            user_id="user-large",
+            file_id="file-large",
+            unit_count=3,
+        )
+        _job_with_unit_count(
+            store,
+            order_id="order-small",
+            user_id="user-small",
+            file_id="file-small",
+            unit_count=1,
+        )
+
+        diagnostics = store.get_scheduler_backpressure_diagnostics()
+
+        self.assertEqual(
+            diagnostics.backpressure_state,
+            SchedulerBackpressureState.CAPACITY_WAIT,
+        )
+        self.assertEqual(diagnostics.queue_depth_units, 4)
+        self.assertEqual(diagnostics.eligible_waiting_units, 2)
+        self.assertEqual(diagnostics.active_work_units, 0)
+        self.assertIn("provider_capacity_unknown", diagnostics.pressure_reasons)
+
+    def test_backpressure_diagnostics_report_retry_and_expired_lease_pressure(self):
+        from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+
+        store = self._memory_store()
+        retry_job = _job_with_unit_count(
+            store,
+            order_id="order-retry",
+            user_id="user-retry",
+            file_id="file-retry",
+            unit_count=1,
+        )
+        retry_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-retry",
+            lease_seconds=300,
+            limits=SchedulerLimits(max_active_units_global=2),
+        )
+        store.fail_claimed_work_unit(
+            work_unit_id=retry_claim.work_unit_id,
+            claim_token=retry_claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="provider timeout",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=60,
+        )
+        expired_job = _job_with_unit_count(
+            store,
+            order_id="order-expired",
+            user_id="user-expired",
+            file_id="file-expired",
+            unit_count=1,
+        )
+        expired_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-expired",
+            lease_seconds=1,
+            limits=SchedulerLimits(max_active_units_global=2),
+        )
+
+        diagnostics = store.get_scheduler_backpressure_diagnostics(
+            now=expired_claim.lease_until + timedelta(seconds=1),
+        )
+
+        self.assertEqual(
+            diagnostics.backpressure_state,
+            SchedulerBackpressureState.RECOVERY_NEEDED,
+        )
+        self.assertEqual(diagnostics.queue_depth_units, 1)
+        self.assertEqual(diagnostics.delayed_retry_units, 1)
+        self.assertEqual(diagnostics.retry_pressure_units, 1)
+        self.assertEqual(diagnostics.active_work_units, 1)
+        self.assertEqual(diagnostics.expired_work_unit_leases, 1)
+        self.assertIn("lease_expiry_recovery", diagnostics.pressure_reasons)
+        self.assertIn("provider_failure_retry_pressure", diagnostics.pressure_reasons)
+        self.assertEqual(
+            store.get_job(retry_job.id).status,
+            PersistentTranslationJobStatus.TRANSLATING,
+        )
+        self.assertEqual(
+            store.get_job(expired_job.id).status,
+            PersistentTranslationJobStatus.TRANSLATING,
+        )
 
     def test_scheduler_claim_does_not_overwrite_lost_candidate(self):
         from translator_service.scheduler import SchedulerLimits

@@ -9,9 +9,12 @@ from uuid import uuid4
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
     SCHEDULER_FAIR_QUEUE_POLICY,
+    ProviderCapacityDiagnostics,
+    SchedulerBackpressureDiagnostics,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
+    build_scheduler_backpressure_diagnostics,
     build_scheduler_queue_policy_diagnostics,
     calculate_retry_decision,
 )
@@ -1008,6 +1011,140 @@ class SQLiteTranslationJobStore:
             (job_id,),
         ).fetchall()
         return [_scheduler_event_from_row(row) for row in rows]
+
+    def get_scheduler_backpressure_diagnostics(
+        self,
+        *,
+        provider_capacity: ProviderCapacityDiagnostics | None = None,
+        throttle_available_slots: int | None = None,
+        throttle_circuit_state: str | None = None,
+        throughput_window_seconds: int = 300,
+        now: datetime | None = None,
+    ) -> SchedulerBackpressureDiagnostics:
+        current_time = now or _now()
+        window_seconds = max(1, int(throughput_window_seconds))
+        window_start = current_time - timedelta(seconds=window_seconds)
+        queue_statuses = (
+            PersistentWorkUnitStatus.PENDING.value,
+            PersistentWorkUnitStatus.FAILED.value,
+            PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
+        )
+        job_statuses = (
+            PersistentTranslationJobStatus.QUEUED.value,
+            PersistentTranslationJobStatus.TRANSLATING.value,
+        )
+        queue_depth = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units wu
+            JOIN translation_jobs tj ON tj.id = wu.job_id
+            WHERE tj.status IN (?, ?)
+              AND wu.status IN (?, ?, ?)
+            """,
+            (*job_statuses, *queue_statuses),
+        ).fetchone()
+        eligible = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units wu
+            JOIN translation_jobs tj ON tj.id = wu.job_id
+            WHERE tj.status IN (?, ?)
+              AND wu.status IN (?, ?, ?)
+              AND (wu.available_at IS NULL OR datetime(wu.available_at) <= datetime(?))
+              AND (wu.lease_until IS NULL OR datetime(wu.lease_until) <= datetime(?))
+              AND NOT EXISTS (
+                  SELECT 1 FROM work_units earlier
+                  WHERE earlier.job_id = wu.job_id
+                    AND earlier.sequence < wu.sequence
+                    AND earlier.status IN (?, ?, ?)
+              )
+            """,
+            (
+                *job_statuses,
+                *queue_statuses,
+                _to_db_time(current_time),
+                _to_db_time(current_time),
+                *queue_statuses,
+            ),
+        ).fetchone()
+        delayed_retry = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units wu
+            JOIN translation_jobs tj ON tj.id = wu.job_id
+            WHERE tj.status IN (?, ?)
+              AND wu.status = ?
+              AND wu.available_at IS NOT NULL
+              AND datetime(wu.available_at) > datetime(?)
+            """,
+            (
+                *job_statuses,
+                PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
+                _to_db_time(current_time),
+            ),
+        ).fetchone()
+        active = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units
+            WHERE status = ?
+            """,
+            (PersistentWorkUnitStatus.TRANSLATING.value,),
+        ).fetchone()
+        retry_pressure = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units wu
+            JOIN translation_jobs tj ON tj.id = wu.job_id
+            WHERE tj.status IN (?, ?)
+              AND wu.status = ?
+            """,
+            (
+                *job_statuses,
+                PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
+            ),
+        ).fetchone()
+        expired_work_leases = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units
+            WHERE status = ?
+              AND lease_until IS NOT NULL
+              AND datetime(lease_until) <= datetime(?)
+            """,
+            (
+                PersistentWorkUnitStatus.TRANSLATING.value,
+                _to_db_time(current_time),
+            ),
+        ).fetchone()
+        recent_completed = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units
+            WHERE status IN (?, ?)
+              AND completed_at IS NOT NULL
+              AND datetime(completed_at) >= datetime(?)
+            """,
+            (
+                PersistentWorkUnitStatus.TRANSLATED.value,
+                PersistentWorkUnitStatus.CACHED.value,
+                _to_db_time(window_start),
+            ),
+        ).fetchone()
+        return build_scheduler_backpressure_diagnostics(
+            queue_depth_units=queue_depth["count"],
+            eligible_waiting_units=eligible["count"],
+            delayed_retry_units=delayed_retry["count"],
+            active_work_units=active["count"],
+            retry_pressure_units=retry_pressure["count"],
+            expired_work_unit_leases=expired_work_leases["count"],
+            provider_capacity=provider_capacity,
+            throttle_available_slots=throttle_available_slots,
+            throttle_circuit_state=throttle_circuit_state,
+            recent_completed_units=recent_completed["count"],
+            throughput_window_seconds=window_seconds,
+            now=current_time,
+        )
 
     def record_worker_heartbeat(
         self,

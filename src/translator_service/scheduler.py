@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from math import ceil
 from typing import Protocol
 
 SCHEDULER_FAIR_QUEUE_POLICY = "least_active_user_job_v1"
@@ -89,6 +90,16 @@ class ProviderCapacitySlotDiagnosticStatus(StrEnum):
     LEASED = "leased"
     EXPIRED_ACTIVE = "expired_active"
     CAP_DENIED = "cap_denied"
+
+
+class SchedulerBackpressureState(StrEnum):
+    IDLE = "idle"
+    READY = "ready"
+    CAPACITY_WAIT = "capacity_wait"
+    CAP_PRESSURE = "cap_pressure"
+    THROTTLE_PRESSURE = "throttle_pressure"
+    RETRY_PRESSURE = "retry_pressure"
+    RECOVERY_NEEDED = "recovery_needed"
 
 
 @dataclass(frozen=True)
@@ -207,6 +218,39 @@ class ProviderCapacityDiagnostics:
 
 
 @dataclass(frozen=True)
+class SchedulerEtaEstimate:
+    state: str
+    estimated_seconds_lower_bound: int | None
+    estimated_seconds_upper_bound: int | None
+    unknown_reason: str | None
+
+
+@dataclass(frozen=True)
+class SchedulerBackpressureDiagnostics:
+    generated_at: datetime
+    backpressure_state: SchedulerBackpressureState
+    pressure_reasons: tuple[str, ...]
+    queue_depth_units: int
+    eligible_waiting_units: int
+    delayed_retry_units: int
+    active_work_units: int
+    retry_pressure_units: int
+    expired_work_unit_leases: int
+    provider_capacity_state: str
+    provider_total_slots: int | None
+    provider_active_leases: int | None
+    provider_free_slots: int | None
+    provider_cap_denied_slots: int | None
+    provider_expired_active_leases: int | None
+    throttle_available_slots: int | None
+    throttle_circuit_state: str | None
+    recent_completed_units: int
+    throughput_window_seconds: int
+    eta: SchedulerEtaEstimate
+    diagnostic_scope: str = "internal_scheduler_backpressure_only"
+
+
+@dataclass(frozen=True)
 class RetryDecision:
     retryable: bool
     next_status: SchedulerWorkUnitStatus
@@ -320,6 +364,188 @@ def build_provider_capacity_diagnostics(
         released_leases=max(0, int(released_count)),
         slots=slot_diagnostics,
         caps=cap_diagnostics,
+    )
+
+
+def build_scheduler_backpressure_diagnostics(
+    *,
+    queue_depth_units: int,
+    eligible_waiting_units: int,
+    delayed_retry_units: int,
+    active_work_units: int,
+    retry_pressure_units: int,
+    expired_work_unit_leases: int,
+    provider_capacity: ProviderCapacityDiagnostics | None = None,
+    throttle_available_slots: int | None = None,
+    throttle_circuit_state: str | None = None,
+    recent_completed_units: int = 0,
+    throughput_window_seconds: int = 300,
+    now: datetime | None = None,
+) -> SchedulerBackpressureDiagnostics:
+    current_time = _aware_utc(now or utc_now())
+    queue_depth = max(0, int(queue_depth_units))
+    eligible_waiting = max(0, int(eligible_waiting_units))
+    delayed_retries = max(0, int(delayed_retry_units))
+    active_units = max(0, int(active_work_units))
+    retry_pressure = max(0, int(retry_pressure_units))
+    expired_work_leases = max(0, int(expired_work_unit_leases))
+    completed_units = max(0, int(recent_completed_units))
+    window_seconds = max(1, int(throughput_window_seconds))
+    safe_throttle_available = (
+        None
+        if throttle_available_slots is None
+        else max(0, int(throttle_available_slots))
+    )
+
+    provider_state = "unknown"
+    provider_total_slots = None
+    provider_active_leases = None
+    provider_free_slots = None
+    provider_cap_denied_slots = None
+    provider_expired_active_leases = None
+    if provider_capacity is not None:
+        provider_state = provider_capacity.capacity_state
+        provider_total_slots = max(0, int(provider_capacity.total_slots))
+        provider_active_leases = max(0, int(provider_capacity.active_leases))
+        provider_free_slots = max(0, int(provider_capacity.free_slots))
+        provider_cap_denied_slots = max(0, int(provider_capacity.cap_denied_slots))
+        provider_expired_active_leases = max(
+            0,
+            int(provider_capacity.expired_active_leases),
+        )
+
+    reasons: list[str] = []
+    if eligible_waiting == 0 and active_units == 0 and delayed_retries == 0:
+        reasons.append("no_eligible_work")
+    if eligible_waiting > 0 and provider_capacity is None:
+        reasons.append("provider_capacity_unknown")
+    if provider_capacity is not None and eligible_waiting > 0:
+        if provider_total_slots == 0 or provider_capacity.enabled_slots == 0:
+            reasons.append("no_provider_capacity")
+        elif provider_free_slots == 0:
+            reasons.append("no_provider_capacity")
+        if provider_cap_denied_slots > 0:
+            reasons.append("account_model_cap_pressure")
+        if provider_expired_active_leases > 0:
+            reasons.append("lease_expiry_recovery")
+    if expired_work_leases > 0:
+        reasons.append("lease_expiry_recovery")
+    if safe_throttle_available == 0 and eligible_waiting > 0:
+        reasons.append("adaptive_throttle_pressure")
+    if retry_pressure > 0 or delayed_retries > 0:
+        reasons.append("provider_failure_retry_pressure")
+
+    pressure_reasons = tuple(dict.fromkeys(reasons))
+    state = _scheduler_backpressure_state(
+        pressure_reasons=pressure_reasons,
+        eligible_waiting_units=eligible_waiting,
+        active_work_units=active_units,
+    )
+    eta = _scheduler_eta_estimate(
+        queue_depth_units=queue_depth,
+        active_work_units=active_units,
+        recent_completed_units=completed_units,
+        throughput_window_seconds=window_seconds,
+        pressure_reasons=pressure_reasons,
+        eligible_waiting_units=eligible_waiting,
+    )
+    return SchedulerBackpressureDiagnostics(
+        generated_at=current_time,
+        backpressure_state=state,
+        pressure_reasons=pressure_reasons,
+        queue_depth_units=queue_depth,
+        eligible_waiting_units=eligible_waiting,
+        delayed_retry_units=delayed_retries,
+        active_work_units=active_units,
+        retry_pressure_units=retry_pressure,
+        expired_work_unit_leases=expired_work_leases,
+        provider_capacity_state=provider_state,
+        provider_total_slots=provider_total_slots,
+        provider_active_leases=provider_active_leases,
+        provider_free_slots=provider_free_slots,
+        provider_cap_denied_slots=provider_cap_denied_slots,
+        provider_expired_active_leases=provider_expired_active_leases,
+        throttle_available_slots=safe_throttle_available,
+        throttle_circuit_state=throttle_circuit_state,
+        recent_completed_units=completed_units,
+        throughput_window_seconds=window_seconds,
+        eta=eta,
+    )
+
+
+def _scheduler_backpressure_state(
+    *,
+    pressure_reasons: tuple[str, ...],
+    eligible_waiting_units: int,
+    active_work_units: int,
+) -> SchedulerBackpressureState:
+    if "no_eligible_work" in pressure_reasons:
+        return SchedulerBackpressureState.IDLE
+    if "lease_expiry_recovery" in pressure_reasons:
+        return SchedulerBackpressureState.RECOVERY_NEEDED
+    if "adaptive_throttle_pressure" in pressure_reasons:
+        return SchedulerBackpressureState.THROTTLE_PRESSURE
+    if "account_model_cap_pressure" in pressure_reasons:
+        return SchedulerBackpressureState.CAP_PRESSURE
+    if (
+        "no_provider_capacity" in pressure_reasons
+        or "provider_capacity_unknown" in pressure_reasons
+    ):
+        return SchedulerBackpressureState.CAPACITY_WAIT
+    if "provider_failure_retry_pressure" in pressure_reasons:
+        return SchedulerBackpressureState.RETRY_PRESSURE
+    if eligible_waiting_units > 0 or active_work_units > 0:
+        return SchedulerBackpressureState.READY
+    return SchedulerBackpressureState.IDLE
+
+
+def _scheduler_eta_estimate(
+    *,
+    queue_depth_units: int,
+    active_work_units: int,
+    recent_completed_units: int,
+    throughput_window_seconds: int,
+    pressure_reasons: tuple[str, ...],
+    eligible_waiting_units: int,
+) -> SchedulerEtaEstimate:
+    blocking_reasons = (
+        "provider_capacity_unknown",
+        "no_provider_capacity",
+        "account_model_cap_pressure",
+        "adaptive_throttle_pressure",
+        "lease_expiry_recovery",
+    )
+    if queue_depth_units <= 0 and active_work_units <= 0:
+        return SchedulerEtaEstimate(
+            state="unknown",
+            estimated_seconds_lower_bound=None,
+            estimated_seconds_upper_bound=None,
+            unknown_reason="no_eligible_work",
+        )
+    if eligible_waiting_units > 0:
+        for reason in blocking_reasons:
+            if reason in pressure_reasons:
+                return SchedulerEtaEstimate(
+                    state="unknown",
+                    estimated_seconds_lower_bound=None,
+                    estimated_seconds_upper_bound=None,
+                    unknown_reason=reason,
+                )
+    if recent_completed_units <= 0:
+        return SchedulerEtaEstimate(
+            state="unknown",
+            estimated_seconds_lower_bound=None,
+            estimated_seconds_upper_bound=None,
+            unknown_reason="insufficient_throughput",
+        )
+    units_remaining = max(1, queue_depth_units + active_work_units)
+    seconds_per_unit = throughput_window_seconds / max(1, recent_completed_units)
+    midpoint = max(1.0, units_remaining * seconds_per_unit)
+    return SchedulerEtaEstimate(
+        state="bounded",
+        estimated_seconds_lower_bound=max(1, int(midpoint * 0.5)),
+        estimated_seconds_upper_bound=max(1, ceil(midpoint * 2.0)),
+        unknown_reason=None,
     )
 
 
@@ -574,4 +800,15 @@ class SchedulerRepository(Protocol):
         retry_max_delay_seconds: int,
         provider_failure_diagnostic: object | None = None,
     ) -> object:
+        pass
+
+    def get_scheduler_backpressure_diagnostics(
+        self,
+        *,
+        provider_capacity: ProviderCapacityDiagnostics | None = None,
+        throttle_available_slots: int | None = None,
+        throttle_circuit_state: str | None = None,
+        throughput_window_seconds: int = 300,
+        now: datetime | None = None,
+    ) -> SchedulerBackpressureDiagnostics:
         pass
