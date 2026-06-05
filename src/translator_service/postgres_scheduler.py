@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 try:
@@ -32,11 +32,24 @@ from translator_service.persistent_jobs import (
 )
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
+    ProviderSlot,
+    ProviderSlotLease,
+    ProviderSlotLeaseStatus,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
     calculate_retry_decision,
 )
+
+_PROVIDER_SLOT_RELEASE_REASONS = {
+    "cancelled",
+    "completed",
+    "lease_expired",
+    "released",
+    "retryable_failure",
+    "terminal_failure",
+    "worker_shutdown",
+}
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS translation_jobs (
@@ -131,6 +144,48 @@ CREATE TABLE IF NOT EXISTS worker_heartbeats (
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS provider_slots (
+    provider_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    slot_index INTEGER NOT NULL,
+    capacity_source TEXT,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(provider_id, channel_id, slot_index),
+    CHECK (slot_index >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS provider_slot_leases (
+    id TEXT PRIMARY KEY,
+    lease_token TEXT NOT NULL UNIQUE,
+    provider_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    slot_index INTEGER NOT NULL,
+    job_id TEXT NOT NULL REFERENCES translation_jobs(id),
+    work_unit_id TEXT NOT NULL REFERENCES work_units(id),
+    worker_id TEXT NOT NULL,
+    work_unit_claim_token TEXT NOT NULL,
+    status TEXT NOT NULL,
+    acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_until TIMESTAMPTZ NOT NULL,
+    released_at TIMESTAMPTZ,
+    release_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY(provider_id, channel_id, slot_index)
+        REFERENCES provider_slots(provider_id, channel_id, slot_index),
+    CHECK (status IN ('active', 'released', 'expired'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS provider_slot_leases_active_slot_idx
+    ON provider_slot_leases(provider_id, channel_id, slot_index)
+    WHERE status = 'active';
+
+CREATE UNIQUE INDEX IF NOT EXISTS provider_slot_leases_active_work_unit_idx
+    ON provider_slot_leases(work_unit_id)
+    WHERE status = 'active';
 """
 
 
@@ -157,6 +212,8 @@ class PostgresSchedulerStore:
 
     def clear_for_tests(self) -> None:
         with self.connection.transaction():
+            self.connection.execute("DELETE FROM provider_slot_leases")
+            self.connection.execute("DELETE FROM provider_slots")
             self.connection.execute("DELETE FROM scheduler_events")
             self.connection.execute("DELETE FROM work_unit_attempts")
             self.connection.execute("DELETE FROM worker_heartbeats")
@@ -737,6 +794,10 @@ class PostgresSchedulerStore:
             return False
         with self.connection.transaction():
             self.connection.execute(
+                "DELETE FROM provider_slot_leases WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            )
+            self.connection.execute(
                 "DELETE FROM work_unit_attempts WHERE job_id = %(job_id)s",
                 {"job_id": job_id},
             )
@@ -1024,6 +1085,236 @@ class PostgresSchedulerStore:
             return None
         return _worker_heartbeat_from_row(row)
 
+    def upsert_provider_slot_inventory(
+        self,
+        *,
+        provider_id: str,
+        channel_id: str,
+        max_parallel_requests: int,
+        capacity_source: str | None = None,
+    ) -> list[ProviderSlot]:
+        slot_count = max(1, max_parallel_requests)
+        now = _now()
+        with self.connection.transaction():
+            for slot_index in range(slot_count):
+                self.connection.execute(
+                    """
+                    INSERT INTO provider_slots (
+                        provider_id, channel_id, slot_index, capacity_source,
+                        enabled, created_at, updated_at
+                    )
+                    VALUES (
+                        %(provider_id)s, %(channel_id)s, %(slot_index)s,
+                        %(capacity_source)s, TRUE, %(now)s, %(now)s
+                    )
+                    ON CONFLICT(provider_id, channel_id, slot_index)
+                    DO UPDATE SET
+                        capacity_source = excluded.capacity_source,
+                        enabled = TRUE,
+                        updated_at = excluded.updated_at
+                    """,
+                    {
+                        "provider_id": provider_id,
+                        "channel_id": channel_id,
+                        "slot_index": slot_index,
+                        "capacity_source": capacity_source,
+                        "now": now,
+                    },
+                )
+            self.connection.execute(
+                """
+                UPDATE provider_slots
+                SET enabled = FALSE, updated_at = %(now)s
+                WHERE provider_id = %(provider_id)s
+                  AND channel_id = %(channel_id)s
+                  AND slot_index >= %(slot_count)s
+                """,
+                {
+                    "provider_id": provider_id,
+                    "channel_id": channel_id,
+                    "slot_count": slot_count,
+                    "now": now,
+                },
+            )
+        return self.list_provider_slots(
+            provider_id=provider_id,
+            channel_id=channel_id,
+        )
+
+    def list_provider_slots(
+        self,
+        *,
+        provider_id: str | None = None,
+        channel_id: str | None = None,
+    ) -> list[ProviderSlot]:
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM provider_slots
+            WHERE (%(provider_id)s::text IS NULL OR provider_id = %(provider_id)s)
+              AND (%(channel_id)s::text IS NULL OR channel_id = %(channel_id)s)
+            ORDER BY provider_id, channel_id, slot_index
+            """,
+            {"provider_id": provider_id, "channel_id": channel_id},
+        ).fetchall()
+        return [_provider_slot_from_row(row) for row in rows]
+
+    def acquire_provider_slot_lease(
+        self,
+        *,
+        provider_id: str,
+        job_id: str,
+        work_unit_id: str,
+        worker_id: str,
+        work_unit_claim_token: str,
+        lease_seconds: int,
+        channel_id: str | None = None,
+    ) -> ProviderSlotLease | None:
+        now = _now()
+        lease_until = now + timedelta(seconds=max(1, lease_seconds))
+        lease_token = uuid4().hex
+        with self.connection.transaction():
+            row = self.connection.execute(
+                """
+                WITH candidate AS (
+                    SELECT ps.*
+                    FROM provider_slots ps
+                    WHERE ps.provider_id = %(provider_id)s
+                      AND (
+                        %(channel_id)s::text IS NULL
+                        OR ps.channel_id = %(channel_id)s
+                      )
+                      AND ps.enabled = TRUE
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM provider_slot_leases active_lease
+                          WHERE active_lease.provider_id = ps.provider_id
+                            AND active_lease.channel_id = ps.channel_id
+                            AND active_lease.slot_index = ps.slot_index
+                            AND active_lease.status = 'active'
+                      )
+                    ORDER BY ps.channel_id, ps.slot_index
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                INSERT INTO provider_slot_leases (
+                    id, lease_token, provider_id, channel_id, slot_index,
+                    job_id, work_unit_id, worker_id, work_unit_claim_token,
+                    status, acquired_at, lease_until, created_at, updated_at
+                )
+                SELECT
+                    %(lease_id)s, %(lease_token)s, provider_id, channel_id,
+                    slot_index, %(job_id)s, %(work_unit_id)s, %(worker_id)s,
+                    %(work_unit_claim_token)s, 'active', %(now)s,
+                    %(lease_until)s, %(now)s, %(now)s
+                FROM candidate
+                RETURNING *
+                """,
+                {
+                    "lease_id": f"provider-slot-lease-{uuid4().hex}",
+                    "lease_token": lease_token,
+                    "provider_id": provider_id,
+                    "channel_id": channel_id,
+                    "job_id": job_id,
+                    "work_unit_id": work_unit_id,
+                    "worker_id": worker_id,
+                    "work_unit_claim_token": work_unit_claim_token,
+                    "now": now,
+                    "lease_until": lease_until,
+                },
+            ).fetchone()
+        if row is None:
+            return None
+        return _provider_slot_lease_from_row(row)
+
+    def release_provider_slot_lease(
+        self,
+        *,
+        lease_token: str,
+        work_unit_claim_token: str,
+        release_reason: str = "released",
+    ) -> ProviderSlotLease | None:
+        now = _now()
+        safe_release_reason = _provider_slot_release_reason(release_reason)
+        with self.connection.transaction():
+            row = self.connection.execute(
+                """
+                SELECT *
+                FROM provider_slot_leases
+                WHERE lease_token = %(lease_token)s
+                  AND work_unit_claim_token = %(work_unit_claim_token)s
+                FOR UPDATE
+                """,
+                {
+                    "lease_token": lease_token,
+                    "work_unit_claim_token": work_unit_claim_token,
+                },
+            ).fetchone()
+            if row is None:
+                return None
+            if row["status"] != ProviderSlotLeaseStatus.ACTIVE.value:
+                return _provider_slot_lease_from_row(row)
+            released = self.connection.execute(
+                """
+                UPDATE provider_slot_leases
+                SET status = 'released',
+                    released_at = %(now)s,
+                    release_reason = %(release_reason)s,
+                    updated_at = %(now)s
+                WHERE lease_token = %(lease_token)s
+                  AND work_unit_claim_token = %(work_unit_claim_token)s
+                  AND status = 'active'
+                RETURNING *
+                """,
+                {
+                    "lease_token": lease_token,
+                    "work_unit_claim_token": work_unit_claim_token,
+                    "release_reason": safe_release_reason,
+                    "now": now,
+                },
+            ).fetchone()
+        if released is None:
+            return None
+        return _provider_slot_lease_from_row(released)
+
+    def recover_expired_provider_slot_leases(self, *, now: datetime) -> int:
+        with self.connection.transaction():
+            rows = self.connection.execute(
+                """
+                UPDATE provider_slot_leases
+                SET status = 'expired',
+                    released_at = %(now)s,
+                    release_reason = 'lease_expired',
+                    updated_at = %(now)s
+                WHERE status = 'active'
+                  AND lease_until <= %(now)s
+                RETURNING id
+                """,
+                {"now": now},
+            ).fetchall()
+        return len(rows)
+
+    def list_provider_slot_leases(
+        self,
+        *,
+        status: ProviderSlotLeaseStatus | None = None,
+        provider_id: str | None = None,
+    ) -> list[ProviderSlotLease]:
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM provider_slot_leases
+            WHERE (%(status)s::text IS NULL OR status = %(status)s)
+              AND (%(provider_id)s::text IS NULL OR provider_id = %(provider_id)s)
+            ORDER BY acquired_at, id
+            """,
+            {
+                "status": status.value if status is not None else None,
+                "provider_id": provider_id,
+            },
+        ).fetchall()
+        return [_provider_slot_lease_from_row(row) for row in rows]
+
     def _require_job(self, job_id: str) -> PersistentTranslationJob:
         job = self.get_job(job_id)
         if job is None:
@@ -1149,6 +1440,43 @@ class PostgresSchedulerStore:
                 "created_at": now,
             },
         )
+
+
+def _provider_slot_from_row(row) -> ProviderSlot:
+    return ProviderSlot(
+        provider_id=row["provider_id"],
+        channel_id=row["channel_id"],
+        slot_index=int(row["slot_index"]),
+        capacity_source=row["capacity_source"],
+        enabled=bool(row["enabled"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _provider_slot_lease_from_row(row) -> ProviderSlotLease:
+    return ProviderSlotLease(
+        lease_id=row["id"],
+        lease_token=row["lease_token"],
+        provider_id=row["provider_id"],
+        channel_id=row["channel_id"],
+        slot_index=int(row["slot_index"]),
+        job_id=row["job_id"],
+        work_unit_id=row["work_unit_id"],
+        worker_id=row["worker_id"],
+        work_unit_claim_token=row["work_unit_claim_token"],
+        status=ProviderSlotLeaseStatus(row["status"]),
+        acquired_at=row["acquired_at"],
+        lease_until=row["lease_until"],
+        released_at=row["released_at"],
+        release_reason=row["release_reason"],
+    )
+
+
+def _provider_slot_release_reason(release_reason: str) -> str:
+    if release_reason in _PROVIDER_SLOT_RELEASE_REASONS:
+        return release_reason
+    return "released"
 
 
 def _now() -> datetime:
