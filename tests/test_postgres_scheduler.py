@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,8 @@ from translator_service.provider_failure_diagnostics import (
     ProviderFailureDiagnostic,
 )
 from translator_service.scheduler import (
+    ProviderCapacityCap,
+    ProviderCapacityCapScope,
     ProviderSlotInventoryItem,
     ProviderSlotLeaseStatus,
     SchedulerLimits,
@@ -239,6 +242,224 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertIsNotNone(first_lease)
         self.assertEqual(first_lease.status, ProviderSlotLeaseStatus.ACTIVE)
         self.assertIsNone(second_lease)
+
+    def test_provider_slot_account_cap_limits_one_key_with_multiple_slots(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        _, second_claim = self._claim_txt_job(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+            worker_id="worker-b",
+        )
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_shared",
+            max_parallel_requests=2,
+            capacity_source="admin",
+        )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-account-shared",
+            max_parallel_requests=1,
+            channel_ids=("chan_shared",),
+        )
+
+        first_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+        second_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=second_claim.job_id,
+            work_unit_id=second_claim.work_unit_id,
+            worker_id=second_claim.worker_id,
+            work_unit_claim_token=second_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+
+        self.assertIsNotNone(first_lease)
+        self.assertIsNone(second_lease)
+
+    def test_provider_slot_model_cap_limits_one_key_with_multiple_slots(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        _, second_claim = self._claim_txt_job(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+            worker_id="worker-b",
+        )
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_model",
+            max_parallel_requests=2,
+            capacity_source="admin",
+        )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-model-shared",
+            scope=ProviderCapacityCapScope.MODEL,
+            max_parallel_requests=1,
+            channel_ids=("chan_model",),
+        )
+
+        first_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+        second_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=second_claim.job_id,
+            work_unit_id=second_claim.work_unit_id,
+            worker_id=second_claim.worker_id,
+            work_unit_claim_token=second_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+
+        self.assertIsNotNone(first_lease)
+        self.assertIsNone(second_lease)
+
+    def test_provider_slot_account_cap_limits_multiple_keys_in_one_group(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        _, second_claim = self._claim_txt_job(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+            worker_id="worker-b",
+        )
+        for channel_id in ("chan_a", "chan_b"):
+            self.store.upsert_provider_slot_inventory(
+                provider_id="deepseek",
+                channel_id=channel_id,
+                max_parallel_requests=1,
+                capacity_source="admin",
+            )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-account-shared",
+            max_parallel_requests=1,
+            channel_ids=("chan_a", "chan_b"),
+        )
+
+        first_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+        second_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=second_claim.job_id,
+            work_unit_id=second_claim.work_unit_id,
+            worker_id=second_claim.worker_id,
+            work_unit_claim_token=second_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+        self.store.release_provider_slot_lease(
+            lease_token=first_lease.lease_token,
+            work_unit_claim_token=first_claim.claim_token,
+            release_reason="completed",
+        )
+        second_after_release = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=second_claim.job_id,
+            work_unit_id=second_claim.work_unit_id,
+            worker_id=second_claim.worker_id,
+            work_unit_claim_token=second_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+
+        self.assertIsNotNone(first_lease)
+        self.assertEqual(first_lease.channel_id, "chan_a")
+        self.assertIsNone(second_lease)
+        self.assertIsNotNone(second_after_release)
+
+    def test_provider_slot_account_cap_serializes_concurrent_workers(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        _, second_claim = self._claim_txt_job(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+            worker_id="worker-b",
+        )
+        for channel_id in ("chan_a", "chan_b"):
+            self.store.upsert_provider_slot_inventory(
+                provider_id="deepseek",
+                channel_id=channel_id,
+                max_parallel_requests=1,
+                capacity_source="admin",
+            )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-account-shared",
+            max_parallel_requests=1,
+            channel_ids=("chan_a", "chan_b"),
+        )
+        other_store = PostgresSchedulerStore(POSTGRES_DSN)
+        self.addCleanup(other_store.close)
+        barrier = threading.Barrier(2)
+        results = []
+
+        def acquire(store, claim):
+            barrier.wait(timeout=5)
+            results.append(
+                store.acquire_provider_slot_lease(
+                    provider_id="deepseek",
+                    job_id=claim.job_id,
+                    work_unit_id=claim.work_unit_id,
+                    worker_id=claim.worker_id,
+                    work_unit_claim_token=claim.claim_token,
+                    lease_seconds=300,
+                    capacity_caps=[cap],
+                )
+            )
+
+        first_thread = threading.Thread(target=acquire, args=(self.store, first_claim))
+        second_thread = threading.Thread(
+            target=acquire,
+            args=(other_store, second_claim),
+        )
+        first_thread.start()
+        second_thread.start()
+        first_thread.join(timeout=5)
+        second_thread.join(timeout=5)
+
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(sum(result is not None for result in results), 1)
+        self.assertEqual(sum(result is None for result in results), 1)
 
     def test_provider_slot_release_is_claim_scoped_and_idempotent(self):
         _, claim = self._claim_txt_job()
@@ -869,6 +1090,22 @@ class PostgresSmokeTranslator:
             prompt_cache_miss_tokens=8,
         )
         return f"[{target_language}] {text}"
+
+
+def _provider_capacity_cap(
+    *,
+    cap_id: str,
+    max_parallel_requests: int,
+    channel_ids: tuple[str, ...],
+    scope: ProviderCapacityCapScope = ProviderCapacityCapScope.ACCOUNT,
+) -> ProviderCapacityCap:
+    return ProviderCapacityCap(
+        provider_id="deepseek",
+        cap_id=cap_id,
+        scope=scope,
+        max_parallel_requests=max_parallel_requests,
+        channel_ids=channel_ids,
+    )
 
 
 class _ProviderUsage:
