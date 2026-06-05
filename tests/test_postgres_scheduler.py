@@ -21,6 +21,7 @@ from translator_service.provider_failure_diagnostics import (
     ProviderFailureDiagnostic,
 )
 from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_POLICY,
     ProviderCapacityCap,
     ProviderCapacityCapScope,
     ProviderCapacitySlotDiagnosticStatus,
@@ -142,8 +143,19 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual(claim.job_id, job.id)
         return job, claim
 
-    def _create_txt_job_with_units(self, *, unit_count=3):
-        job = self._create_txt_job_with_unit()
+    def _create_txt_job_with_units(
+        self,
+        *,
+        unit_count=3,
+        order_id="order-1",
+        file_id="file-1",
+        user_id="telegram:42",
+    ):
+        job = self._create_txt_job_with_unit(
+            order_id=order_id,
+            file_id=file_id,
+            user_id=user_id,
+        )
         if unit_count <= 1:
             return job
         self.store.add_work_units(
@@ -850,6 +862,52 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual(first.job_id, first_user_first_job.id)
         self.assertEqual(second.job_id, other_user_job.id)
 
+    def test_claim_fair_queue_prevents_large_job_from_monopolizing_slots(self):
+        large_job = self._create_txt_job_with_units(
+            order_id="order-large",
+            file_id="file-large",
+            user_id="telegram:42",
+            unit_count=4,
+        )
+        small_a = self._create_txt_job_with_units(
+            order_id="order-small-a",
+            file_id="file-small-a",
+            user_id="telegram:100",
+            unit_count=1,
+        )
+        small_b = self._create_txt_job_with_units(
+            order_id="order-small-b",
+            file_id="file-small-b",
+            user_id="telegram:200",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=3,
+            max_active_units_per_job=3,
+            max_active_units_per_user=3,
+            max_active_jobs_per_user=3,
+        )
+
+        first = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+        third = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-c",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, large_job.id)
+        self.assertEqual({second.job_id, third.job_id}, {small_a.id, small_b.id})
+        self.assertNotIn(large_job.id, {second.job_id, third.job_id})
+
     def test_claim_priority_aging_prevents_old_job_starvation(self):
         old_low_priority = self._create_txt_job_with_unit(
             order_id="order-old",
@@ -943,8 +1001,13 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
 
         persisted_job = self.store.get_job(job.id)
         events = self.store.list_scheduler_events(job.id)
+        claim_payload = json.loads(events[0].payload_json)
         self.assertEqual(completed.status.value, "translated")
         self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.ASSEMBLING)
+        self.assertEqual(
+            claim_payload["queue_policy"],
+            SCHEDULER_FAIR_QUEUE_POLICY,
+        )
         self.assertEqual(events[-1].event_type, "work_unit_completed")
 
     def test_retryable_failure_records_attempt_and_releases_claim(self):
