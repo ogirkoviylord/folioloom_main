@@ -19,7 +19,11 @@ from translator_service.provider_failure_diagnostics import (
     ProviderFailureCategory,
     ProviderFailureDiagnostic,
 )
-from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+from translator_service.scheduler import (
+    ProviderSlotLeaseStatus,
+    SchedulerLimits,
+    WorkUnitFailureKind,
+)
 
 POSTGRES_DSN = os.getenv("TEST_POSTGRES_DSN")
 
@@ -43,6 +47,12 @@ class PostgresSchedulerContractTest(unittest.TestCase):
             "record_worker_heartbeat",
             "get_worker_heartbeat",
             "recover_expired_leases",
+            "upsert_provider_slot_inventory",
+            "list_provider_slots",
+            "acquire_provider_slot_lease",
+            "release_provider_slot_lease",
+            "recover_expired_provider_slot_leases",
+            "list_provider_slot_leases",
         ]
 
         for method_name in expected_methods:
@@ -98,6 +108,33 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         )
         return job
 
+    def _claim_txt_job(
+        self,
+        *,
+        order_id="order-1",
+        file_id="file-1",
+        user_id="telegram:42",
+        worker_id="worker-a",
+    ):
+        job = self._create_txt_job_with_unit(
+            order_id=order_id,
+            file_id=file_id,
+            user_id=user_id,
+        )
+        claim = self.store.claim_next_scheduled_work_unit(
+            worker_id=worker_id,
+            lease_seconds=300,
+            limits=SchedulerLimits(
+                max_active_units_global=10,
+                max_active_units_per_job=1,
+                max_active_units_per_user=1,
+                max_active_jobs_per_user=1,
+            ),
+        )
+        self.assertIsNotNone(claim)
+        self.assertEqual(claim.job_id, job.id)
+        return job, claim
+
     def _create_txt_job_with_units(self, *, unit_count=3):
         job = self._create_txt_job_with_unit()
         if unit_count <= 1:
@@ -135,6 +172,188 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
 
         self.assertIsNotNone(first)
         self.assertIsNone(second)
+
+    def test_provider_slot_inventory_expands_key_capacity(self):
+        slots = self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=2,
+            capacity_source="admin",
+        )
+
+        self.assertEqual([slot.slot_index for slot in slots], [0, 1])
+        self.assertEqual([slot.enabled for slot in slots], [True, True])
+        self.assertEqual({slot.capacity_source for slot in slots}, {"admin"})
+
+        reduced = self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+
+        self.assertEqual([slot.slot_index for slot in reduced], [0, 1])
+        self.assertEqual([slot.enabled for slot in reduced], [True, False])
+
+    def test_provider_slot_acquire_does_not_double_lease_same_slot(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        _, second_claim = self._claim_txt_job(
+            order_id="order-2",
+            file_id="file-2",
+            user_id="telegram:100",
+            worker_id="worker-b",
+        )
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+
+        first_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+        )
+        second_lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=second_claim.job_id,
+            work_unit_id=second_claim.work_unit_id,
+            worker_id=second_claim.worker_id,
+            work_unit_claim_token=second_claim.claim_token,
+            lease_seconds=300,
+        )
+
+        self.assertIsNotNone(first_lease)
+        self.assertEqual(first_lease.status, ProviderSlotLeaseStatus.ACTIVE)
+        self.assertIsNone(second_lease)
+
+    def test_provider_slot_release_is_claim_scoped_and_idempotent(self):
+        _, claim = self._claim_txt_job()
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+        lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=claim.job_id,
+            work_unit_id=claim.work_unit_id,
+            worker_id=claim.worker_id,
+            work_unit_claim_token=claim.claim_token,
+            lease_seconds=300,
+        )
+
+        wrong_claim_release = self.store.release_provider_slot_lease(
+            lease_token=lease.lease_token,
+            work_unit_claim_token="wrong-claim-token",
+            release_reason="completed",
+        )
+        first_release = self.store.release_provider_slot_lease(
+            lease_token=lease.lease_token,
+            work_unit_claim_token=claim.claim_token,
+            release_reason="completed",
+        )
+        second_release = self.store.release_provider_slot_lease(
+            lease_token=lease.lease_token,
+            work_unit_claim_token=claim.claim_token,
+            release_reason="raw unsafe text should not persist",
+        )
+
+        self.assertIsNone(wrong_claim_release)
+        self.assertEqual(first_release.status, ProviderSlotLeaseStatus.RELEASED)
+        self.assertEqual(first_release.release_reason, "completed")
+        self.assertEqual(second_release.status, ProviderSlotLeaseStatus.RELEASED)
+        self.assertEqual(second_release.release_reason, "completed")
+
+    def test_provider_slot_expiry_recovers_without_touching_work_unit_claim(self):
+        _, claim = self._claim_txt_job()
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+        lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=claim.job_id,
+            work_unit_id=claim.work_unit_id,
+            worker_id=claim.worker_id,
+            work_unit_claim_token=claim.claim_token,
+            lease_seconds=1,
+        )
+
+        recovered = self.store.recover_expired_provider_slot_leases(
+            now=lease.lease_until + timedelta(seconds=1),
+        )
+        [expired] = self.store.list_provider_slot_leases(
+            status=ProviderSlotLeaseStatus.EXPIRED,
+        )
+        work_unit = self.store.get_work_unit(claim.work_unit_id)
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(expired.lease_token, lease.lease_token)
+        self.assertEqual(expired.release_reason, "lease_expired")
+        self.assertEqual(work_unit.status.value, "translating")
+        self.assertEqual(work_unit.claim_token, claim.claim_token)
+
+    def test_delete_job_removes_provider_slot_leases_first(self):
+        job, claim = self._claim_txt_job()
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+        self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=claim.job_id,
+            work_unit_id=claim.work_unit_id,
+            worker_id=claim.worker_id,
+            work_unit_claim_token=claim.claim_token,
+            lease_seconds=300,
+        )
+
+        deleted = self.store.delete_job(job.id)
+
+        self.assertTrue(deleted)
+        self.assertEqual(self.store.list_provider_slot_leases(), [])
+        self.assertIsNone(self.store.get_job(job.id))
+
+    def test_provider_slot_lease_schema_has_safe_metadata_columns(self):
+        columns = {
+            row["column_name"]
+            for row in self.store.connection.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'provider_slot_leases'
+                """
+            ).fetchall()
+        }
+
+        self.assertIn("lease_token", columns)
+        self.assertIn("work_unit_claim_token", columns)
+        self.assertNotIn("api_key", columns)
+        self.assertNotIn("source_text", columns)
+        self.assertNotIn("translated_text", columns)
+        self.assertNotIn("prompt", columns)
+        self.assertNotIn("provider_payload", columns)
+        self.assertNotIn("stack_trace", columns)
 
     def test_per_job_limit_of_one_preserves_unit_ordering(self):
         job = self._create_txt_job_with_units()
