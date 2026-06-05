@@ -282,14 +282,51 @@ Initial policy:
 
 Future smart policy:
 
-- use weighted fair scheduling or deficit round robin at provider-slot
-  acquisition time;
+- evaluate weighted fair scheduling or deficit round robin at provider-slot
+  acquisition time, but implement it only when observed or simulated queue
+  evidence shows the simple fair policy is too crude;
 - keep a per-job maximum parallel cap for book/manuscript quality;
 - let priority aging avoid starvation;
 - let adaptive throttle lower effective capacity for unhealthy channels without
   becoming the source of distributed correctness;
 - keep ETA/progress estimates based on observed throughput and queue position,
   not on optimistic maximum capacity.
+
+## Issue #303 Fairness Upgrade Decision
+
+Issue #303 should keep the simple `least_active_user_job_v1` policy from issue
+#302 and defer DRR/WFQ for now.
+
+Decision status: proposed PR-ready recommendation until accepted by the owner
+or merged through the normal PR workflow.
+
+Why:
+
+- the simple policy already separates queue policy from provider capacity;
+- it prevents a large job from taking every newly free slot while other jobs are
+  waiting;
+- it supports conservative per-job and per-user caps without adding persisted
+  policy state;
+- active provider calls remain non-preemptive;
+- retries and backoff remain governed by work-unit state rather than by a
+  separate fairness ledger;
+- there is no current repository evidence showing that weighted fairness,
+  deficits, token estimates or paid/free priority tiers are needed before ETA
+  and backpressure diagnostics exist.
+
+Deferred upgrade trigger:
+
+- real or simulated queue evidence shows starvation or poor distribution that
+  the simple policy cannot explain or fix;
+- work-unit cost estimates become reliable enough to justify token/page-based
+  fairness;
+- the owner approves any required scheduler behavior, persisted policy state,
+  admin diagnostics, ETA/UX, pricing/payment priority, or deployment/runtime
+  changes.
+
+This decision does not change provider-slot leases, provider capacity caps,
+Redis wake-up scope, ETA/user-facing UX, payment priority, deployment/runtime
+behavior, Gate B status, free beta status, or production readiness.
 
 ## Brainstormed Options
 
@@ -658,7 +695,8 @@ Scope:
 
 - per-job max parallel cap;
 - user/job fairness;
-- weighted fair scheduling or DRR/WFQ;
+- evaluation of weighted fair scheduling or DRR/WFQ, with implementation
+  deferred until evidence shows the simple policy is insufficient;
 - adaptive throttle as capacity input;
 - starvation and retry tests.
 
