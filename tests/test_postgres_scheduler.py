@@ -20,6 +20,7 @@ from translator_service.provider_failure_diagnostics import (
     ProviderFailureDiagnostic,
 )
 from translator_service.scheduler import (
+    ProviderSlotInventoryItem,
     ProviderSlotLeaseStatus,
     SchedulerLimits,
     WorkUnitFailureKind,
@@ -33,6 +34,7 @@ class PostgresSchedulerContractTest(unittest.TestCase):
         expected_methods = [
             "complete_claimed_work_unit",
             "fail_claimed_work_unit",
+            "defer_claimed_work_unit_for_provider_capacity",
             "attach_job_output",
             "list_jobs_by_status",
             "list_jobs_for_user",
@@ -278,7 +280,7 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual(second_release.status, ProviderSlotLeaseStatus.RELEASED)
         self.assertEqual(second_release.release_reason, "completed")
 
-    def test_provider_slot_expiry_recovers_without_touching_work_unit_claim(self):
+    def test_provider_slot_expiry_does_not_recover_active_work_unit_claim(self):
         _, claim = self._claim_txt_job()
         self.store.upsert_provider_slot_inventory(
             provider_id="deepseek",
@@ -299,16 +301,44 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         recovered = self.store.recover_expired_provider_slot_leases(
             now=lease.lease_until + timedelta(seconds=1),
         )
+        active = self.store.list_provider_slot_leases(
+            status=ProviderSlotLeaseStatus.ACTIVE,
+        )
+        work_unit = self.store.get_work_unit(claim.work_unit_id)
+
+        self.assertEqual(recovered, 0)
+        self.assertEqual([item.lease_token for item in active], [lease.lease_token])
+        self.assertEqual(work_unit.status.value, "translating")
+        self.assertEqual(work_unit.claim_token, claim.claim_token)
+
+    def test_provider_slot_expiry_recovers_after_work_unit_lease_is_stale(self):
+        _, claim = self._claim_txt_job()
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+        lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=claim.job_id,
+            work_unit_id=claim.work_unit_id,
+            worker_id=claim.worker_id,
+            work_unit_claim_token=claim.claim_token,
+            lease_seconds=1,
+        )
+
+        recovered = self.store.recover_expired_provider_slot_leases(
+            now=claim.lease_until + timedelta(seconds=1),
+        )
         [expired] = self.store.list_provider_slot_leases(
             status=ProviderSlotLeaseStatus.EXPIRED,
         )
-        work_unit = self.store.get_work_unit(claim.work_unit_id)
 
         self.assertEqual(recovered, 1)
         self.assertEqual(expired.lease_token, lease.lease_token)
         self.assertEqual(expired.release_reason, "lease_expired")
-        self.assertEqual(work_unit.status.value, "translating")
-        self.assertEqual(work_unit.claim_token, claim.claim_token)
 
     def test_delete_job_removes_provider_slot_leases_first(self):
         job, claim = self._claim_txt_job()
@@ -354,6 +384,37 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertNotIn("prompt", columns)
         self.assertNotIn("provider_payload", columns)
         self.assertNotIn("stack_trace", columns)
+
+    def test_defer_claimed_unit_for_provider_capacity_returns_pending_without_attempt(
+        self,
+    ):
+        _, claim = self._claim_txt_job()
+
+        deferred = self.store.defer_claimed_work_unit_for_provider_capacity(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+        )
+
+        attempts = self.store.list_work_unit_attempts(claim.work_unit_id)
+        events = self.store.list_scheduler_events(claim.job_id)
+        next_claim = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertIsNotNone(deferred)
+        self.assertEqual(deferred.status.value, "pending")
+        self.assertIsNone(deferred.worker_id)
+        self.assertIsNone(deferred.claim_token)
+        self.assertIsNone(deferred.lease_until)
+        self.assertEqual(deferred.attempt_count, 0)
+        self.assertEqual(attempts, [])
+        self.assertEqual(
+            events[-1].event_type,
+            "work_unit_provider_capacity_deferred",
+        )
+        self.assertEqual(next_claim.work_unit_id, claim.work_unit_id)
 
     def test_per_job_limit_of_one_preserves_unit_ordering(self):
         job = self._create_txt_job_with_units()
@@ -730,18 +791,20 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
                     )
                 ],
             )
+            translator = PostgresSmokeTranslator()
 
             summary = run_scheduler_once(
                 store=self.store,
                 storage=storage,
                 worker_id="postgres-smoke-worker",
-                translator=PostgresSmokeTranslator(),
+                translator=translator,
                 limits=SchedulerLimits(),
                 lease_seconds=300,
             )
 
             persisted_job = self.store.get_job(job.id)
             events = self.store.list_scheduler_events(job.id)
+            leases = self.store.list_provider_slot_leases()
             self.assertEqual(summary.completed_units, 1)
             self.assertEqual(summary.failed_units, 0)
             self.assertEqual(summary.assembled_jobs, 1)
@@ -755,12 +818,39 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
                 [event.event_type for event in events],
                 ["work_unit_claimed", "work_unit_completed"],
             )
+            self.assertEqual(len(leases), 1)
+            self.assertEqual(leases[0].status, ProviderSlotLeaseStatus.RELEASED)
+            self.assertEqual(leases[0].release_reason, "completed")
+            self.assertEqual(translator.channel_contexts, ["deepseek-channel-1"])
 
 
 class PostgresSmokeTranslator:
+    provider_id = "deepseek"
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
         self.last_usage: _ProviderUsage | None = None
+        self.channel_contexts: list[str] = []
+
+    def provider_slot_inventory(self) -> list[ProviderSlotInventoryItem]:
+        return [
+            ProviderSlotInventoryItem(
+                provider_id="deepseek",
+                channel_id="deepseek-channel-1",
+                max_parallel_requests=1,
+                capacity_source="test",
+            )
+        ]
+
+    def provider_slot_channel_lease(self, channel_id: str):
+        class _Context:
+            def __enter__(inner_self):
+                self.channel_contexts.append(channel_id)
+
+            def __exit__(inner_self, exc_type, exc_value, traceback):
+                return False
+
+        return _Context()
 
     def translate(
         self,
