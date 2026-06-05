@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_POLICY,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
@@ -589,7 +590,9 @@ class SQLiteTranslationJobStore:
               END DESC,
               tj.priority DESC,
               datetime(tj.created_at) ASC,
-              wu.sequence ASC
+              tj.id ASC,
+              wu.sequence ASC,
+              wu.id ASC
             LIMIT 1
             """,
             (
@@ -725,6 +728,7 @@ class SQLiteTranslationJobStore:
                     "worker_id": worker_id,
                     "claim_token": claim_token,
                     "lease_until": _to_db_time(lease_until),
+                    "queue_policy": SCHEDULER_FAIR_QUEUE_POLICY,
                 },
                 now=now,
             )
