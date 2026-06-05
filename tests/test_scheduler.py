@@ -1,8 +1,12 @@
+import unittest
 from datetime import UTC, datetime, timedelta
 from typing import get_type_hints
-import unittest
 
+from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.scheduler import (
+    ProviderSlot,
+    ProviderSlotLease,
+    ProviderSlotLeaseStatus,
     RetryDecision,
     SchedulerClaim,
     SchedulerJobStatus,
@@ -12,7 +16,6 @@ from translator_service.scheduler import (
     WorkUnitFailureKind,
     calculate_retry_decision,
 )
-from translator_service.persistent_jobs import SQLiteTranslationJobStore
 
 
 class SchedulerContractTest(unittest.TestCase):
@@ -99,6 +102,52 @@ class SchedulerContractTest(unittest.TestCase):
 
         self.assertEqual(claim.claim_token, "claim-token-1")
         self.assertEqual(claim.lease_until, lease_until)
+
+    def test_provider_slot_lease_status_values_are_persisted_contract_values(self):
+        self.assertEqual(
+            {status: status.value for status in ProviderSlotLeaseStatus},
+            {
+                ProviderSlotLeaseStatus.ACTIVE: "active",
+                ProviderSlotLeaseStatus.RELEASED: "released",
+                ProviderSlotLeaseStatus.EXPIRED: "expired",
+            },
+        )
+
+    def test_provider_slot_contract_carries_only_safe_metadata(self):
+        acquired_at = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+        lease_until = acquired_at + timedelta(minutes=5)
+
+        slot = ProviderSlot(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            slot_index=1,
+            capacity_source="admin",
+            enabled=True,
+            created_at=acquired_at,
+            updated_at=acquired_at,
+        )
+        lease = ProviderSlotLease(
+            lease_id="provider-slot-lease-1",
+            lease_token="lease-token-1",
+            provider_id=slot.provider_id,
+            channel_id=slot.channel_id,
+            slot_index=slot.slot_index,
+            job_id="job-1",
+            work_unit_id="job-1:unit-1",
+            worker_id="worker-a",
+            work_unit_claim_token="claim-token-1",
+            status=ProviderSlotLeaseStatus.ACTIVE,
+            acquired_at=acquired_at,
+            lease_until=lease_until,
+            released_at=None,
+            release_reason=None,
+        )
+
+        self.assertEqual(lease.provider_id, "deepseek")
+        self.assertEqual(lease.channel_id, "chan_abcdef123456")
+        self.assertEqual(lease.slot_index, 1)
+        self.assertEqual(lease.work_unit_claim_token, "claim-token-1")
+        self.assertEqual(lease.status, ProviderSlotLeaseStatus.ACTIVE)
 
     def test_scheduler_limits_have_safe_defaults(self):
         limits = SchedulerLimits()
