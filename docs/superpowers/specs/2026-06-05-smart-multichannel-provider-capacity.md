@@ -807,6 +807,18 @@ PR-ready for any implementation issue means:
   guardrails, docs drift and release-readiness claims;
 - no issue claims Gate B, free beta, release or production readiness.
 
+Issue #305 implementation boundary:
+
+- add wake-up notifier abstractions and diagnostics that explicitly state
+  notifications are hints only;
+- keep PostgreSQL polling as the fallback path when notifications are missing,
+  duplicated, out of order or unavailable;
+- make the worker re-enter `run_scheduler_once` after every wake-up so work
+  and provider-slot acquisition still re-read PostgreSQL;
+- do not add Redis service configuration, Redis durable state, env/secrets,
+  deployment/runtime changes, fairness changes, user-facing UX, Gate B claims
+  or release-readiness claims in this slice.
+
 ## Risks And Approval Gates
 
 Relevant risks:

@@ -41,6 +41,10 @@ from translator_service.scheduler import (
     WorkUnitFailureKind,
     utc_now,
 )
+from translator_service.scheduler_notifications import (
+    SchedulerWakeupNotifier,
+    wait_for_scheduler_wakeup,
+)
 from translator_service.translation_context import (
     TranslationContextMemory,
     translate_with_context,
@@ -1574,6 +1578,13 @@ def scheduler_limits_from_settings(
     )
 
 
+def build_scheduler_wakeup_notifier(settings) -> SchedulerWakeupNotifier | None:
+    notifier = getattr(settings, "scheduler_wakeup_notifier", None)
+    if callable(getattr(notifier, "wait_for_wakeup", None)):
+        return notifier
+    return None
+
+
 def main() -> None:
     from translator_service.bot.runtime import (
         bot_runtime_config_from_settings,
@@ -1592,6 +1603,7 @@ def main() -> None:
         settings,
         effective_global_capacity=worker_parallel_units,
     )
+    wakeup_notifier = build_scheduler_wakeup_notifier(settings)
     store = open_scheduler_store(settings)
     beta_safety_guard = None
     try:
@@ -1619,7 +1631,11 @@ def main() -> None:
                     False,
                 ),
             )
-            time.sleep(settings.scheduler_poll_seconds)
+            wait_for_scheduler_wakeup(
+                wakeup_notifier,
+                timeout_seconds=settings.scheduler_poll_seconds,
+                fallback_sleep=time.sleep,
+            )
     finally:
         if beta_safety_guard is not None:
             beta_safety_guard.close()
