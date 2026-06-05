@@ -19,7 +19,11 @@ from translator_service.provider_throttle import (
     ProviderThrottleConfig,
     ProviderThrottleSnapshot,
 )
-from translator_service.scheduler import ProviderSlotInventoryItem
+from translator_service.scheduler import (
+    ProviderCapacityCap,
+    ProviderCapacityCapScope,
+    ProviderSlotInventoryItem,
+)
 from translator_service.translation_context import (
     TranslationContextMemory,
     translate_with_context,
@@ -249,6 +253,27 @@ class DeepSeekKeyPoolTranslator:
                     capacity_source="deepseek_key_pool",
                 )
                 for channel in self._channels
+            ]
+
+    def provider_capacity_caps(self) -> list[ProviderCapacityCap]:
+        with self._condition:
+            channel_ids = tuple(channel.slot_channel_id for channel in self._channels)
+            configured_capacity = self._configured_capacity()
+            return [
+                ProviderCapacityCap(
+                    provider_id="deepseek",
+                    cap_id="deepseek-account-default",
+                    scope=ProviderCapacityCapScope.ACCOUNT,
+                    max_parallel_requests=configured_capacity,
+                    channel_ids=channel_ids,
+                ),
+                ProviderCapacityCap(
+                    provider_id="deepseek",
+                    cap_id="deepseek-model-default",
+                    scope=ProviderCapacityCapScope.MODEL,
+                    max_parallel_requests=configured_capacity,
+                    channel_ids=channel_ids,
+                ),
             ]
 
     @contextmanager

@@ -33,6 +33,7 @@ from translator_service.provider_failure_diagnostics import (
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.scheduler import (
+    ProviderCapacityCap,
     ProviderSlotInventoryItem,
     ProviderSlotLease,
     SchedulerClaim,
@@ -466,6 +467,15 @@ def _translator_provider_slot_inventory(
     return list(inventory())
 
 
+def _translator_provider_capacity_caps(
+    translator: PersistentWorkUnitTranslator,
+) -> list[ProviderCapacityCap]:
+    capacity_caps = getattr(translator, "provider_capacity_caps", None)
+    if not callable(capacity_caps):
+        return []
+    return list(capacity_caps())
+
+
 def _acquire_provider_slot_lease_for_claim(
     *,
     store: object,
@@ -489,6 +499,7 @@ def _acquire_provider_slot_lease_for_claim(
         worker_id=claim.worker_id,
         work_unit_claim_token=claim.claim_token,
         lease_seconds=lease_seconds,
+        capacity_caps=_translator_provider_capacity_caps(translator),
     )
     return _ProviderSlotLeaseAttempt(required=True, lease=lease)
 
