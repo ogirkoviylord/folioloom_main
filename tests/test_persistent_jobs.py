@@ -158,6 +158,13 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         events = store.list_scheduler_events(job.id)
         payload = json.loads(events[-1].payload_json)
         self.assertEqual(payload["queue_policy"], SCHEDULER_FAIR_QUEUE_POLICY)
+        diagnostics = payload["queue_policy_diagnostics"]
+        self.assertEqual(diagnostics["active_user_units_before_claim"], 0)
+        self.assertEqual(diagnostics["active_user_jobs_before_claim"], 0)
+        self.assertEqual(diagnostics["active_job_units_before_claim"], 0)
+        self.assertEqual(diagnostics["max_active_units_per_job"], 1)
+        self.assertEqual(diagnostics["max_active_units_per_user"], 1)
+        self.assertEqual(diagnostics["max_active_jobs_per_user"], 1)
 
     def test_scheduler_claim_does_not_overwrite_lost_candidate(self):
         from translator_service.scheduler import SchedulerLimits
@@ -481,6 +488,12 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(first.job_id, first_job.id)
         self.assertEqual(second.job_id, second_job.id)
         self.assertNotEqual(first.work_unit_id, second.work_unit_id)
+        second_events = store.list_scheduler_events(second_job.id)
+        second_payload = json.loads(second_events[-1].payload_json)
+        diagnostics = second_payload["queue_policy_diagnostics"]
+        self.assertEqual(diagnostics["active_user_units_before_claim"], 1)
+        self.assertEqual(diagnostics["active_user_jobs_before_claim"], 1)
+        self.assertEqual(diagnostics["active_job_units_before_claim"], 0)
 
     def test_scheduled_fair_queue_moves_past_retryable_failure_backoff(self):
         from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
@@ -1108,7 +1121,12 @@ class _ClaimRaceConnection:
 
     def execute(self, sql, parameters=()):
         cursor = self._connection.execute(sql, parameters)
-        if self._armed and "SELECT wu.*" in sql:
+        if (
+            self._armed
+            and "FROM work_units wu" in sql
+            and "ORDER BY" in sql
+            and "LIMIT 1" in sql
+        ):
             self._armed = False
             return _ClaimRaceCursor(self._connection, cursor)
         return cursor

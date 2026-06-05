@@ -1008,6 +1008,13 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
             claim_payload["queue_policy"],
             SCHEDULER_FAIR_QUEUE_POLICY,
         )
+        diagnostics = claim_payload["queue_policy_diagnostics"]
+        self.assertEqual(diagnostics["active_user_units_before_claim"], 0)
+        self.assertEqual(diagnostics["active_user_jobs_before_claim"], 0)
+        self.assertEqual(diagnostics["active_job_units_before_claim"], 0)
+        self.assertEqual(diagnostics["max_active_units_per_job"], 1)
+        self.assertEqual(diagnostics["max_active_units_per_user"], 1)
+        self.assertEqual(diagnostics["max_active_jobs_per_user"], 1)
         self.assertEqual(events[-1].event_type, "work_unit_completed")
 
     def test_retryable_failure_records_attempt_and_releases_claim(self):

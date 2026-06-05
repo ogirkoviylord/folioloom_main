@@ -4,6 +4,7 @@ from typing import get_type_hints
 
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_ORDERING,
     SCHEDULER_FAIR_QUEUE_POLICY,
     ProviderSlot,
     ProviderSlotLease,
@@ -15,6 +16,7 @@ from translator_service.scheduler import (
     SchedulerRepository,
     SchedulerWorkUnitStatus,
     WorkUnitFailureKind,
+    build_scheduler_queue_policy_diagnostics,
     calculate_retry_decision,
 )
 
@@ -165,6 +167,27 @@ class SchedulerContractTest(unittest.TestCase):
             SCHEDULER_FAIR_QUEUE_POLICY,
             "least_active_user_job_v1",
         )
+        self.assertIn("active_user_units_asc", SCHEDULER_FAIR_QUEUE_ORDERING)
+
+    def test_fair_queue_policy_diagnostics_are_metadata_only(self):
+        diagnostics = build_scheduler_queue_policy_diagnostics(
+            active_user_units_before_claim=2,
+            active_user_jobs_before_claim=1,
+            active_job_units_before_claim=0,
+            max_active_units_per_job=3,
+            max_active_units_per_user=4,
+            max_active_jobs_per_user=2,
+            priority_aging_seconds=1800,
+        )
+
+        self.assertEqual(diagnostics["active_user_units_before_claim"], 2)
+        self.assertEqual(diagnostics["active_user_jobs_before_claim"], 1)
+        self.assertEqual(diagnostics["active_job_units_before_claim"], 0)
+        self.assertEqual(diagnostics["max_active_units_per_job"], 3)
+        self.assertEqual(diagnostics["max_active_units_per_user"], 4)
+        self.assertEqual(diagnostics["max_active_jobs_per_user"], 2)
+        self.assertEqual(diagnostics["priority_aging_seconds"], 1800)
+        self.assertEqual(diagnostics["ordering"], list(SCHEDULER_FAIR_QUEUE_ORDERING))
 
     def test_sqlite_store_exposes_scheduler_repository_methods(self):
         self.assertTrue(callable(SQLiteTranslationJobStore.claim_next_scheduled_work_unit))
