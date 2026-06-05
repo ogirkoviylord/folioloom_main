@@ -4,7 +4,8 @@ import random
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,6 +19,7 @@ from translator_service.provider_throttle import (
     ProviderThrottleConfig,
     ProviderThrottleSnapshot,
 )
+from translator_service.scheduler import ProviderSlotInventoryItem
 from translator_service.translation_context import (
     TranslationContextMemory,
     translate_with_context,
@@ -92,6 +94,7 @@ class DeepSeekChannelSnapshot:
 class _DeepSeekChannel:
     config: DeepSeekChannelConfig
     client: _PooledClient
+    slot_channel_id: str
     active_requests: int = 0
     cooldown_until: float = 0.0
     total_started_requests: int = 0
@@ -202,6 +205,7 @@ class DeepSeekKeyPoolTranslator:
         self._cooldown_jitter_random = cooldown_jitter_random or random.random
         self._condition = threading.Condition()
         self._last_usage = threading.local()
+        self._provider_slot_channel_id = threading.local()
         self._channels = [
             _DeepSeekChannel(
                 config=channel,
@@ -214,8 +218,9 @@ class DeepSeekKeyPoolTranslator:
                     retry_attempts=retry_attempts,
                     retry_delay_seconds=retry_delay_seconds,
                 ),
+                slot_channel_id=f"deepseek-channel-{index + 1}",
             )
-            for channel in channels
+            for index, channel in enumerate(channels)
         ]
 
     @property
@@ -233,6 +238,31 @@ class DeepSeekKeyPoolTranslator:
                 now=self._clock(),
                 max_capacity=self._configured_capacity(),
             )
+
+    def provider_slot_inventory(self) -> list[ProviderSlotInventoryItem]:
+        with self._condition:
+            return [
+                ProviderSlotInventoryItem(
+                    provider_id="deepseek",
+                    channel_id=channel.slot_channel_id,
+                    max_parallel_requests=channel.capacity,
+                    capacity_source="deepseek_key_pool",
+                )
+                for channel in self._channels
+            ]
+
+    @contextmanager
+    def provider_slot_channel_lease(self, channel_id: str) -> Iterator[None]:
+        previous = getattr(self._provider_slot_channel_id, "value", None)
+        had_previous = hasattr(self._provider_slot_channel_id, "value")
+        self._provider_slot_channel_id.value = channel_id
+        try:
+            yield
+        finally:
+            if had_previous:
+                self._provider_slot_channel_id.value = previous
+            else:
+                del self._provider_slot_channel_id.value
 
     def available_parallel_slots(self) -> int:
         with self._condition:
@@ -258,8 +288,11 @@ class DeepSeekKeyPoolTranslator:
     ) -> str:
         attempted_labels: set[str] = set()
         last_rate_error: DeepSeekApiError | None = None
+        attempt_limit = (
+            1 if self._leased_provider_slot_channel_id() else len(self._channels)
+        )
 
-        while len(attempted_labels) < len(self._channels):
+        while len(attempted_labels) < attempt_limit:
             channel = self._acquire_channel(exclude_labels=attempted_labels)
             attempted_labels.add(channel.label)
             started_at = self._clock()
@@ -298,12 +331,22 @@ class DeepSeekKeyPoolTranslator:
 
     def _acquire_channel(self, *, exclude_labels: set[str]) -> _DeepSeekChannel:
         with self._condition:
+            leased_channel_id = self._leased_provider_slot_channel_id()
+            if leased_channel_id is not None and all(
+                channel.slot_channel_id != leased_channel_id
+                for channel in self._channels
+            ):
+                raise DeepSeekApiError("DeepSeek key pool has no leased channel")
             while True:
                 now = self._clock()
                 candidates = [
                     channel
                     for channel in self._channels
                     if channel.label not in exclude_labels
+                    and (
+                        leased_channel_id is None
+                        or channel.slot_channel_id == leased_channel_id
+                    )
                     and channel.cooldown_until <= now
                     and channel.active_requests < channel.capacity
                 ]
@@ -327,6 +370,7 @@ class DeepSeekKeyPoolTranslator:
                 wait_for = _seconds_until_next_channel(
                     self._channels,
                     exclude_labels=exclude_labels,
+                    leased_channel_id=leased_channel_id,
                     now=now,
                 )
                 self._condition.wait(timeout=wait_for)
@@ -441,6 +485,9 @@ class DeepSeekKeyPoolTranslator:
     def _configured_capacity(self) -> int:
         return max(1, sum(channel.capacity for channel in self._channels))
 
+    def _leased_provider_slot_channel_id(self) -> str | None:
+        return getattr(self._provider_slot_channel_id, "value", None)
+
 
 def _build_client(
     *,
@@ -468,12 +515,17 @@ def _seconds_until_next_channel(
     channels: list[_DeepSeekChannel],
     *,
     exclude_labels: set[str],
+    leased_channel_id: str | None = None,
     now: float,
 ) -> float:
     cooldowns = [
         channel.cooldown_until - now
         for channel in channels
         if channel.label not in exclude_labels and channel.cooldown_until > now
+        and (
+            leased_channel_id is None
+            or channel.slot_channel_id == leased_channel_id
+        )
     ]
     if cooldowns:
         return max(0.01, min(cooldowns))

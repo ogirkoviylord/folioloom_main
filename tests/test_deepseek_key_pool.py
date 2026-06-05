@@ -76,6 +76,93 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertIsNone(snapshot[0].last_error)
         self.assertNotIn("secret-key-a", repr(snapshot[0]))
 
+    def test_provider_slot_inventory_exposes_safe_logical_channels(self):
+        factory = RecordingClientFactory({"secret-key-a": ["ok"], "secret-key-b": ["ok"]})
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(
+                    api_key="secret-key-a",
+                    label="primary",
+                    max_parallel_requests=2,
+                ),
+                DeepSeekChannelConfig(
+                    api_key="secret-key-b",
+                    label="backup",
+                    max_parallel_requests=1,
+                ),
+            ],
+            client_factory=factory,
+        )
+
+        inventory = pool.provider_slot_inventory()
+
+        self.assertEqual(
+            [(item.provider_id, item.channel_id, item.max_parallel_requests) for item in inventory],
+            [
+                ("deepseek", "deepseek-channel-1", 2),
+                ("deepseek", "deepseek-channel-2", 1),
+            ],
+        )
+        inventory_repr = repr(inventory)
+        self.assertNotIn("secret-key-a", inventory_repr)
+        self.assertNotIn("secret-key-b", inventory_repr)
+        self.assertNotIn("primary", inventory_repr)
+        self.assertNotIn("backup", inventory_repr)
+
+    def test_provider_slot_channel_lease_binds_translation_to_safe_channel_id(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": ["from-a"],
+                "key-b": ["from-b"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a", weight=1),
+                DeepSeekChannelConfig(api_key="key-b", label="b", weight=10),
+            ],
+            client_factory=factory,
+        )
+
+        with pool.provider_slot_channel_lease("deepseek-channel-1"):
+            result = pool.translate(
+                text="source",
+                source_language="en",
+                target_language="uk",
+            )
+
+        self.assertEqual(result, "from-a")
+        self.assertEqual(factory.calls, [("key-a", "source")])
+
+    def test_provider_slot_channel_lease_does_not_fail_over_to_other_channel(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 429: rate limit")
+                ],
+                "key-b": ["should-not-run"],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+
+        with self.assertRaisesRegex(DeepSeekApiError, "HTTP 429"):
+            with pool.provider_slot_channel_lease("deepseek-channel-1"):
+                pool.translate(
+                    text="source",
+                    source_language="en",
+                    target_language="uk",
+                )
+
+        self.assertEqual(factory.calls, [("key-a", "source")])
+
     def test_snapshot_tracks_successful_request_counters(self):
         factory = RecordingClientFactory({"key-a": ["ok"]})
         pool = DeepSeekKeyPoolTranslator(
