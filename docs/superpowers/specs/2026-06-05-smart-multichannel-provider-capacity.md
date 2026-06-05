@@ -819,6 +819,19 @@ Issue #305 implementation boundary:
   deployment/runtime changes, fairness changes, user-facing UX, Gate B claims
   or release-readiness claims in this slice.
 
+Issue #306 validation boundary:
+
+- validate scaling with local/fake-provider tests only;
+- cover representative `8 keys * 2 logical slots`, lower account/model caps,
+  adaptive throttle pressure, provider-failure categories, lease
+  expiry/recovery and fairness diagnostics without real provider keys;
+- recommended operational default remains conservative capacity until owner
+  approves exact runtime/provider/load-test changes;
+- real runtime scaling approval is `TBD`;
+- do not read or edit real `.env*`, change provider keys/caps, run real
+  provider-backed load tests, deploy, operate runtime data, claim Gate B/free
+  beta readiness or claim production readiness in this slice.
+
 ## Risks And Approval Gates
 
 Relevant risks:
