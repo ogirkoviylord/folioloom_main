@@ -37,6 +37,12 @@ class WorkUnitFailureKind(StrEnum):
     ASSEMBLY_MAPPING_FAILED = "assembly_mapping_failed"
 
 
+class ProviderSlotLeaseStatus(StrEnum):
+    ACTIVE = "active"
+    RELEASED = "released"
+    EXPIRED = "expired"
+
+
 @dataclass(frozen=True)
 class SchedulerLimits:
     max_active_units_per_job: int = 1
@@ -56,6 +62,35 @@ class SchedulerClaim:
     lease_until: datetime
     attempt_number: int
     source_object_key: str | None
+
+
+@dataclass(frozen=True)
+class ProviderSlot:
+    provider_id: str
+    channel_id: str
+    slot_index: int
+    capacity_source: str | None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ProviderSlotLease:
+    lease_id: str
+    lease_token: str
+    provider_id: str
+    channel_id: str
+    slot_index: int
+    job_id: str
+    work_unit_id: str
+    worker_id: str
+    work_unit_claim_token: str
+    status: ProviderSlotLeaseStatus
+    acquired_at: datetime
+    lease_until: datetime
+    released_at: datetime | None
+    release_reason: str | None
 
 
 @dataclass(frozen=True)
