@@ -76,6 +76,14 @@ class ProviderSlot:
 
 
 @dataclass(frozen=True)
+class ProviderSlotInventoryItem:
+    provider_id: str
+    channel_id: str
+    max_parallel_requests: int
+    capacity_source: str | None = None
+
+
+@dataclass(frozen=True)
 class ProviderSlotLease:
     lease_id: str
     lease_token: str

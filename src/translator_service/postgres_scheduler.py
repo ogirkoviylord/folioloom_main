@@ -719,6 +719,50 @@ class PostgresSchedulerStore:
                 )
         return self._require_work_unit(work_unit_id)
 
+    def defer_claimed_work_unit_for_provider_capacity(
+        self,
+        *,
+        work_unit_id: str,
+        claim_token: str,
+    ) -> PersistentWorkUnit | None:
+        now = _now()
+        with self.connection.transaction():
+            deferred_row = self.connection.execute(
+                """
+                UPDATE work_units
+                SET status = 'pending',
+                    worker_id = NULL,
+                    claim_token = NULL,
+                    lease_until = NULL,
+                    attempt_count = GREATEST(0, attempt_count - 1),
+                    started_at = CASE
+                        WHEN attempt_count <= 1 THEN NULL
+                        ELSE started_at
+                    END,
+                    available_at = %(now)s,
+                    updated_at = %(now)s
+                WHERE id = %(work_unit_id)s
+                  AND claim_token = %(claim_token)s
+                  AND status = 'translating'
+                RETURNING *
+                """,
+                {
+                    "work_unit_id": work_unit_id,
+                    "claim_token": claim_token,
+                    "now": now,
+                },
+            ).fetchone()
+            if deferred_row is None:
+                return None
+            self._record_scheduler_event(
+                job_id=deferred_row["job_id"],
+                work_unit_id=work_unit_id,
+                event_type="work_unit_provider_capacity_deferred",
+                payload={"reason": "provider_slot_unavailable"},
+                now=now,
+            )
+        return self._require_work_unit(work_unit_id)
+
     def attach_job_output(
         self,
         job_id: str,
@@ -1288,6 +1332,17 @@ class PostgresSchedulerStore:
                     updated_at = %(now)s
                 WHERE status = 'active'
                   AND lease_until <= %(now)s
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM work_units wu
+                      WHERE wu.id = provider_slot_leases.work_unit_id
+                        AND wu.claim_token = (
+                            provider_slot_leases.work_unit_claim_token
+                        )
+                        AND wu.status = 'translating'
+                        AND wu.lease_until IS NOT NULL
+                        AND wu.lease_until > %(now)s
+                  )
                 RETURNING id
                 """,
                 {"now": now},

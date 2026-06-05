@@ -4,6 +4,7 @@ import re
 import time
 from collections.abc import Callable, Container
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -32,9 +33,12 @@ from translator_service.provider_failure_diagnostics import (
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.scheduler import (
+    ProviderSlotInventoryItem,
+    ProviderSlotLease,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
+    utc_now,
 )
 from translator_service.translation_context import (
     TranslationContextMemory,
@@ -86,6 +90,12 @@ class ProviderUsage:
 class _WorkUnitTranslationResult:
     translated_text: str
     usage: ProviderUsage
+
+
+@dataclass(frozen=True)
+class _ProviderSlotLeaseAttempt:
+    required: bool
+    lease: ProviderSlotLease | None
 
 
 @dataclass(frozen=True)
@@ -425,6 +435,161 @@ def run_next_stored_text_work_unit(
     )
 
 
+def refresh_scheduled_provider_slot_inventory(
+    *,
+    store: object,
+    translator: PersistentWorkUnitTranslator,
+) -> None:
+    recover_expired = getattr(store, "recover_expired_provider_slot_leases", None)
+    if callable(recover_expired):
+        recover_expired(now=utc_now())
+
+    upsert_inventory = getattr(store, "upsert_provider_slot_inventory", None)
+    if not callable(upsert_inventory):
+        return
+
+    for item in _translator_provider_slot_inventory(translator):
+        upsert_inventory(
+            provider_id=item.provider_id,
+            channel_id=item.channel_id,
+            max_parallel_requests=item.max_parallel_requests,
+            capacity_source=item.capacity_source,
+        )
+
+
+def _translator_provider_slot_inventory(
+    translator: PersistentWorkUnitTranslator,
+) -> list[ProviderSlotInventoryItem]:
+    inventory = getattr(translator, "provider_slot_inventory", None)
+    if not callable(inventory):
+        return []
+    return list(inventory())
+
+
+def _acquire_provider_slot_lease_for_claim(
+    *,
+    store: object,
+    translator: PersistentWorkUnitTranslator,
+    claim: SchedulerClaim,
+    lease_seconds: int,
+) -> _ProviderSlotLeaseAttempt:
+    acquire = getattr(store, "acquire_provider_slot_lease", None)
+    release = getattr(store, "release_provider_slot_lease", None)
+    if not callable(acquire) or not callable(release):
+        return _ProviderSlotLeaseAttempt(required=False, lease=None)
+
+    provider_id = _translator_provider_id(translator)
+    if provider_id is None:
+        return _ProviderSlotLeaseAttempt(required=True, lease=None)
+
+    lease = acquire(
+        provider_id=provider_id,
+        job_id=claim.job_id,
+        work_unit_id=claim.work_unit_id,
+        worker_id=claim.worker_id,
+        work_unit_claim_token=claim.claim_token,
+        lease_seconds=lease_seconds,
+    )
+    return _ProviderSlotLeaseAttempt(required=True, lease=lease)
+
+
+def _translator_provider_id(translator: PersistentWorkUnitTranslator) -> str | None:
+    provider_id = getattr(translator, "provider_id", None)
+    if isinstance(provider_id, str) and provider_id:
+        return provider_id
+    provider_ids = {
+        item.provider_id for item in _translator_provider_slot_inventory(translator)
+    }
+    if len(provider_ids) == 1:
+        return next(iter(provider_ids))
+    return None
+
+
+def _defer_claimed_work_unit_for_provider_capacity(
+    *,
+    store: object,
+    claim: SchedulerClaim,
+) -> PersistentWorkUnit | None:
+    defer = getattr(store, "defer_claimed_work_unit_for_provider_capacity", None)
+    if not callable(defer):
+        return None
+    return defer(
+        work_unit_id=claim.work_unit_id,
+        claim_token=claim.claim_token,
+    )
+
+
+def _release_provider_slot_lease(
+    *,
+    store: object,
+    claim: SchedulerClaim,
+    provider_slot_lease: ProviderSlotLease | None,
+    release_reason: str,
+) -> None:
+    if provider_slot_lease is None:
+        return
+    release = getattr(store, "release_provider_slot_lease", None)
+    if callable(release):
+        release(
+            lease_token=provider_slot_lease.lease_token,
+            work_unit_claim_token=claim.claim_token,
+            release_reason=release_reason,
+        )
+
+
+def _provider_slot_channel_context(
+    translator: PersistentWorkUnitTranslator,
+    provider_slot_lease: ProviderSlotLease | None,
+):
+    if provider_slot_lease is None:
+        return nullcontext()
+    channel_context = getattr(translator, "provider_slot_channel_lease", None)
+    if callable(channel_context):
+        return channel_context(provider_slot_lease.channel_id)
+    return nullcontext()
+
+
+def _provider_slot_failure_release_reason(
+    work_unit: PersistentWorkUnit | None,
+) -> str:
+    if work_unit is None:
+        return "released"
+    if work_unit.status is PersistentWorkUnitStatus.CANCELLED:
+        return "cancelled"
+    if work_unit.status in {
+        PersistentWorkUnitStatus.FAILED,
+        PersistentWorkUnitStatus.FAILED_TERMINAL,
+    }:
+        return "terminal_failure"
+    return "retryable_failure"
+
+
+def _provider_slot_stale_release_reason(
+    *,
+    store: object,
+    claim: SchedulerClaim,
+) -> str:
+    get_work_unit = getattr(store, "get_work_unit", None)
+    work_unit = get_work_unit(claim.work_unit_id) if callable(get_work_unit) else None
+    if work_unit is not None:
+        if work_unit.status in {
+            PersistentWorkUnitStatus.TRANSLATED,
+            PersistentWorkUnitStatus.CACHED,
+        }:
+            return "completed"
+        if work_unit.status is PersistentWorkUnitStatus.CANCELLED:
+            return "cancelled"
+
+    get_job = getattr(store, "get_job", None)
+    job = get_job(claim.job_id) if callable(get_job) else None
+    if job is not None and job.status in {
+        PersistentTranslationJobStatus.CANCEL_REQUESTED,
+        PersistentTranslationJobStatus.CANCELLED,
+    }:
+        return "cancelled"
+    return "released"
+
+
 def run_next_scheduled_stored_text_work_unit(
     *,
     store: SQLiteTranslationJobStore,
@@ -441,6 +606,8 @@ def run_next_scheduled_stored_text_work_unit(
     require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
+    refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
+
     claim = store.claim_next_scheduled_work_unit(
         worker_id=worker_id,
         lease_seconds=lease_seconds,
@@ -452,8 +619,6 @@ def run_next_scheduled_stored_text_work_unit(
     work_unit = store.get_work_unit(claim.work_unit_id)
     if work_unit is None:
         raise ValueError(f"Claimed work unit does not exist: {claim.work_unit_id}")
-    if work_unit_started_callback is not None:
-        work_unit_started_callback(work_unit)
 
     try:
         source_text = load_scheduled_work_unit_text(
@@ -486,61 +651,92 @@ def run_next_scheduled_stored_text_work_unit(
             retry_max_delay_seconds=retry_max_delay_seconds,
         )
 
-    try:
-        job_context = _job_translation_context(store, claim.job_id)
-        translation_result = translate_claimed_scheduled_stored_text_work_unit(
-            work_unit=work_unit,
-            source_text=source_text,
-            translator=translator,
-            job_context=job_context,
-        )
-    except Exception as error:
-        provider_failure_diagnostic = _provider_failure_diagnostic_for_error(
-            error,
-            translator=translator,
-        )
-        logger.error(
-            "Scheduled worker failed safely: job_id=%s work_unit_id=%s error=%s",
-            claim.job_id,
-            claim.work_unit_id,
-            _safe_provider_failure_error_message(provider_failure_diagnostic),
-        )
-        return _fail_claimed_work_unit_or_ignore_stale(
-            store=store,
-            claim=claim,
-            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
-            error_message=_safe_provider_failure_error_message(
-                provider_failure_diagnostic
-            ),
-            retry_base_delay_seconds=retry_base_delay_seconds,
-            retry_max_delay_seconds=retry_max_delay_seconds,
-            provider_failure_diagnostic=provider_failure_diagnostic,
-        )
+    lease_attempt = _acquire_provider_slot_lease_for_claim(
+        store=store,
+        translator=translator,
+        claim=claim,
+        lease_seconds=lease_seconds,
+    )
+    if lease_attempt.required and lease_attempt.lease is None:
+        _defer_claimed_work_unit_for_provider_capacity(store=store, claim=claim)
+        return None
 
+    if work_unit_started_callback is not None:
+        work_unit_started_callback(work_unit)
+
+    release_reason = "released"
     try:
-        completed = store.complete_claimed_work_unit(
-            work_unit_id=claim.work_unit_id,
-            claim_token=claim.claim_token,
-            translated_text=translation_result.translated_text,
-            prompt_tokens=translation_result.usage.prompt_tokens,
-            completion_tokens=translation_result.usage.completion_tokens,
-            cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
-            cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
-        )
-        if _is_successful_completed_work_unit(completed):
-            if usage_completed_callback is not None:
-                usage_completed_callback(completed)
-        return completed
-    except ValueError as error:
-        if _is_stale_work_unit_claim(error):
-            logger.warning(
-                "Ignoring stale scheduled work-unit completion: "
-                "job_id=%s work_unit_id=%s",
+        try:
+            job_context = _job_translation_context(store, claim.job_id)
+            translation_result = translate_claimed_scheduled_stored_text_work_unit(
+                work_unit=work_unit,
+                source_text=source_text,
+                translator=translator,
+                job_context=job_context,
+                provider_slot_lease=lease_attempt.lease,
+            )
+        except Exception as error:
+            release_reason = "retryable_failure"
+            provider_failure_diagnostic = _provider_failure_diagnostic_for_error(
+                error,
+                translator=translator,
+            )
+            logger.error(
+                "Scheduled worker failed safely: job_id=%s work_unit_id=%s error=%s",
                 claim.job_id,
                 claim.work_unit_id,
+                _safe_provider_failure_error_message(provider_failure_diagnostic),
             )
-            return None
-        raise
+            failed = _fail_claimed_work_unit_or_ignore_stale(
+                store=store,
+                claim=claim,
+                failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+                error_message=_safe_provider_failure_error_message(
+                    provider_failure_diagnostic
+                ),
+                retry_base_delay_seconds=retry_base_delay_seconds,
+                retry_max_delay_seconds=retry_max_delay_seconds,
+                provider_failure_diagnostic=provider_failure_diagnostic,
+            )
+            release_reason = _provider_slot_failure_release_reason(failed)
+            return failed
+
+        try:
+            completed = store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                translated_text=translation_result.translated_text,
+                prompt_tokens=translation_result.usage.prompt_tokens,
+                completion_tokens=translation_result.usage.completion_tokens,
+                cache_hit_tokens=translation_result.usage.prompt_cache_hit_tokens,
+                cache_miss_tokens=translation_result.usage.prompt_cache_miss_tokens,
+            )
+            release_reason = "completed"
+            if _is_successful_completed_work_unit(completed):
+                if usage_completed_callback is not None:
+                    usage_completed_callback(completed)
+            return completed
+        except ValueError as error:
+            if _is_stale_work_unit_claim(error):
+                logger.warning(
+                    "Ignoring stale scheduled work-unit completion: "
+                    "job_id=%s work_unit_id=%s",
+                    claim.job_id,
+                    claim.work_unit_id,
+                )
+                release_reason = _provider_slot_stale_release_reason(
+                    store=store,
+                    claim=claim,
+                )
+                return None
+            raise
+    finally:
+        _release_provider_slot_lease(
+            store=store,
+            claim=claim,
+            provider_slot_lease=lease_attempt.lease,
+            release_reason=release_reason,
+        )
 
 
 def translate_claimed_scheduled_stored_text_work_unit(
@@ -549,13 +745,15 @@ def translate_claimed_scheduled_stored_text_work_unit(
     source_text: str,
     translator: PersistentWorkUnitTranslator,
     job_context: TranslationContextMemory | None = None,
+    provider_slot_lease: ProviderSlotLease | None = None,
 ) -> _WorkUnitTranslationResult:
-    return _translate_work_unit_text(
-        work_unit=work_unit,
-        source_text=source_text,
-        translator=translator,
-        job_context=job_context,
-    )
+    with _provider_slot_channel_context(translator, provider_slot_lease):
+        return _translate_work_unit_text(
+            work_unit=work_unit,
+            source_text=source_text,
+            translator=translator,
+            job_context=job_context,
+        )
 
 
 def load_scheduled_work_unit_text(

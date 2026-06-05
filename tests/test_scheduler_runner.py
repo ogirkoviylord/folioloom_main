@@ -3,7 +3,9 @@ import threading
 import time
 import unittest
 from base64 import urlsafe_b64encode
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -24,7 +26,12 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
-from translator_service.scheduler import SchedulerLimits
+from translator_service.scheduler import (
+    ProviderSlotInventoryItem,
+    ProviderSlotLease,
+    ProviderSlotLeaseStatus,
+    SchedulerLimits,
+)
 from translator_service.scheduler_runner import assemble_due_jobs, run_scheduler_once
 from translator_service.translation_run_logs import (
     TranslationRunLogger,
@@ -1401,6 +1408,223 @@ class SchedulerRunnerTest(unittest.TestCase):
                 self.assertNotIn(unsafe_value, scheduler_events)
                 self.assertNotIn(unsafe_value, logs)
 
+    def test_run_once_skips_provider_call_when_provider_slot_lease_unavailable(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(
+                base_store,
+                acquire_available=False,
+            )
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = ProviderSlotAwareRunnerTranslator()
+            started_units = []
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                work_unit_started_callback=started_units.append,
+            )
+
+            [unit] = base_store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 0)
+            self.assertEqual(translator.calls, [])
+            self.assertEqual(started_units, [])
+            self.assertEqual(len(store.acquire_calls), 1)
+            self.assertEqual(len(store.defer_calls), 1)
+            self.assertEqual(store.release_calls, [])
+            self.assertEqual(unit.status.value, "pending")
+            self.assertEqual(unit.attempt_count, 0)
+            self.assertIsNone(unit.claim_token)
+            self.assertEqual(base_store.list_work_unit_attempts(unit.id), [])
+
+    def test_run_once_releases_provider_slot_lease_after_serial_success(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(base_store)
+            _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            translator = ProviderSlotAwareRunnerTranslator()
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+            )
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(translator.calls, ["First paragraph"])
+            self.assertEqual(translator.channel_contexts, ["deepseek-channel-1"])
+            self.assertEqual(
+                [call.release_reason for call in store.release_calls],
+                ["completed"],
+            )
+
+    def test_run_once_releases_provider_slot_lease_after_retryable_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(base_store)
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-failing",
+                file_id="file-failing",
+                source_text="Private source paragraph",
+            )
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=ProviderSlotAwareFailingRunnerTranslator(),
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    retry_base_delay_seconds=60,
+                    retry_max_delay_seconds=60,
+                )
+
+            [unit] = base_store.list_work_units(job.id)
+            attempts = base_store.list_work_unit_attempts(unit.id)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(unit.status.value, "failed_retryable")
+            self.assertEqual(unit.last_error, "provider failure: timeout")
+            self.assertEqual(attempts[0].error_code, "timeout")
+            self.assertEqual(
+                [call.release_reason for call in store.release_calls],
+                ["retryable_failure"],
+            )
+
+    def test_run_once_releases_provider_slot_lease_after_terminal_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(base_store)
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-failing",
+                file_id="file-failing",
+                source_text="Private source paragraph",
+            )
+            with base_store._connection:
+                base_store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (job.id,),
+                )
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=ProviderSlotAwareFailingRunnerTranslator(),
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    retry_base_delay_seconds=0,
+                    retry_max_delay_seconds=0,
+                )
+
+            [unit] = base_store.list_work_units(job.id)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(unit.status.value, "failed_terminal")
+            self.assertEqual(
+                [call.release_reason for call in store.release_calls],
+                ["terminal_failure"],
+            )
+
+    def test_run_once_releases_provider_slot_lease_after_cancelled_completion(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(base_store)
+            job = _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-cancel",
+                file_id="file-cancel",
+                source_text="First paragraph",
+            )
+            translator = ProviderSlotAwareCancellingRunnerTranslator(
+                store=base_store,
+                job_id=job.id,
+            )
+
+            with self.assertLogs("translator_service.worker", level="WARNING"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=translator,
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                )
+
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(
+                base_store.get_job(job.id).status,
+                PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertEqual(
+                [call.release_reason for call in store.release_calls],
+                ["cancelled"],
+            )
+
+    def test_run_once_recovers_expired_provider_slot_leases_before_claiming(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = ProviderSlotLeaseGuardedStore(base_store, expired_recovered=1)
+            _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=ProviderSlotAwareRunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+            )
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(store.recover_expired_calls, 1)
+            self.assertEqual(store.recovered_expired_total, 1)
+
     def test_assemble_due_jobs_reconciles_existing_final_output(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1547,6 +1771,229 @@ class RunnerTranslator:
         source_language: str,
         target_language: str,
     ) -> str:
+        return f"[{target_language}] {text}"
+
+
+@dataclass(frozen=True)
+class ProviderSlotReleaseCall:
+    lease_token: str
+    work_unit_claim_token: str
+    release_reason: str
+
+
+class ProviderSlotLeaseGuardedStore:
+    def __init__(
+        self,
+        store: SQLiteTranslationJobStore,
+        *,
+        acquire_available: bool = True,
+        expired_recovered: int = 0,
+    ) -> None:
+        self._store = store
+        self.acquire_available = acquire_available
+        self.expired_recovered = expired_recovered
+        self.recover_expired_calls = 0
+        self.recovered_expired_total = 0
+        self.inventory: list[ProviderSlotInventoryItem] = []
+        self.acquire_calls: list[dict[str, object]] = []
+        self.defer_calls: list[tuple[str, str]] = []
+        self.release_calls: list[ProviderSlotReleaseCall] = []
+        self._leases: dict[str, ProviderSlotLease] = {}
+
+    def __getattr__(self, name: str):
+        return getattr(self._store, name)
+
+    def recover_expired_provider_slot_leases(self, *, now: datetime) -> int:
+        self.recover_expired_calls += 1
+        self.recovered_expired_total += self.expired_recovered
+        return self.expired_recovered
+
+    def upsert_provider_slot_inventory(
+        self,
+        *,
+        provider_id: str,
+        channel_id: str,
+        max_parallel_requests: int,
+        capacity_source: str | None = None,
+    ) -> list[ProviderSlotInventoryItem]:
+        item = ProviderSlotInventoryItem(
+            provider_id=provider_id,
+            channel_id=channel_id,
+            max_parallel_requests=max_parallel_requests,
+            capacity_source=capacity_source,
+        )
+        self.inventory.append(item)
+        return [item]
+
+    def acquire_provider_slot_lease(
+        self,
+        *,
+        provider_id: str,
+        job_id: str,
+        work_unit_id: str,
+        worker_id: str,
+        work_unit_claim_token: str,
+        lease_seconds: int,
+        channel_id: str | None = None,
+    ) -> ProviderSlotLease | None:
+        self.acquire_calls.append(
+            {
+                "provider_id": provider_id,
+                "job_id": job_id,
+                "work_unit_id": work_unit_id,
+                "worker_id": worker_id,
+                "work_unit_claim_token": work_unit_claim_token,
+                "lease_seconds": lease_seconds,
+                "channel_id": channel_id,
+            }
+        )
+        if not self.acquire_available:
+            return None
+        now = datetime.now(UTC)
+        lease_token = f"slot-token-{len(self._leases) + 1}"
+        lease = ProviderSlotLease(
+            lease_id=f"lease-{len(self._leases) + 1}",
+            lease_token=lease_token,
+            provider_id=provider_id,
+            channel_id=channel_id or "deepseek-channel-1",
+            slot_index=0,
+            job_id=job_id,
+            work_unit_id=work_unit_id,
+            worker_id=worker_id,
+            work_unit_claim_token=work_unit_claim_token,
+            status=ProviderSlotLeaseStatus.ACTIVE,
+            acquired_at=now,
+            lease_until=now + timedelta(seconds=max(1, lease_seconds)),
+            released_at=None,
+            release_reason=None,
+        )
+        self._leases[lease_token] = lease
+        return lease
+
+    def release_provider_slot_lease(
+        self,
+        *,
+        lease_token: str,
+        work_unit_claim_token: str,
+        release_reason: str = "released",
+    ) -> ProviderSlotLease | None:
+        lease = self._leases.get(lease_token)
+        if lease is None or lease.work_unit_claim_token != work_unit_claim_token:
+            return None
+        if lease.status is not ProviderSlotLeaseStatus.ACTIVE:
+            return lease
+        self.release_calls.append(
+            ProviderSlotReleaseCall(
+                lease_token=lease_token,
+                work_unit_claim_token=work_unit_claim_token,
+                release_reason=release_reason,
+            )
+        )
+        released = replace(
+            lease,
+            status=ProviderSlotLeaseStatus.RELEASED,
+            released_at=datetime.now(UTC),
+            release_reason=release_reason,
+        )
+        self._leases[lease_token] = released
+        return released
+
+    def defer_claimed_work_unit_for_provider_capacity(
+        self,
+        *,
+        work_unit_id: str,
+        claim_token: str,
+    ):
+        self.defer_calls.append((work_unit_id, claim_token))
+        with self._store._connection:
+            self._store._connection.execute(
+                """
+                UPDATE work_units
+                SET status = ?, worker_id = NULL, claim_token = NULL,
+                    lease_until = NULL, attempt_count = MAX(0, attempt_count - 1),
+                    started_at = NULL, updated_at = ?, available_at = ?
+                WHERE id = ? AND claim_token = ? AND status = ?
+                """,
+                (
+                    "pending",
+                    datetime.now(UTC).isoformat(),
+                    datetime.now(UTC).isoformat(),
+                    work_unit_id,
+                    claim_token,
+                    "translating",
+                ),
+            )
+        return self._store.get_work_unit(work_unit_id)
+
+
+class ProviderSlotAwareRunnerTranslator(RunnerTranslator):
+    provider_id = "deepseek"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+        self.channel_contexts: list[str] = []
+
+    def provider_slot_inventory(self) -> list[ProviderSlotInventoryItem]:
+        return [
+            ProviderSlotInventoryItem(
+                provider_id="deepseek",
+                channel_id="deepseek-channel-1",
+                max_parallel_requests=1,
+                capacity_source="test",
+            )
+        ]
+
+    @contextmanager
+    def provider_slot_channel_lease(self, channel_id: str):
+        self.channel_contexts.append(channel_id)
+        yield
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append(text)
+        return super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
+
+
+class ProviderSlotAwareFailingRunnerTranslator(ProviderSlotAwareRunnerTranslator):
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append(text)
+        raise RuntimeError(
+            "DeepSeek provider read timeout for Private source paragraph "
+            "with sk-private-provider-key at /var/private/source.txt"
+        )
+
+
+class ProviderSlotAwareCancellingRunnerTranslator(ProviderSlotAwareRunnerTranslator):
+    def __init__(self, *, store: SQLiteTranslationJobStore, job_id: str) -> None:
+        super().__init__()
+        self._store = store
+        self._job_id = job_id
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append(text)
+        self._store.cancel_job(self._job_id)
         return f"[{target_language}] {text}"
 
 
