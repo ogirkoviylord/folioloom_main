@@ -23,6 +23,7 @@ from translator_service.provider_failure_diagnostics import (
 from translator_service.scheduler import (
     ProviderCapacityCap,
     ProviderCapacityCapScope,
+    ProviderCapacitySlotDiagnosticStatus,
     ProviderSlotInventoryItem,
     ProviderSlotLeaseStatus,
     SchedulerLimits,
@@ -58,6 +59,7 @@ class PostgresSchedulerContractTest(unittest.TestCase):
             "release_provider_slot_lease",
             "recover_expired_provider_slot_leases",
             "list_provider_slot_leases",
+            "get_provider_capacity_diagnostics",
         ]
 
         for method_name in expected_methods:
@@ -461,6 +463,54 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual(sum(result is not None for result in results), 1)
         self.assertEqual(sum(result is None for result in results), 1)
 
+    def test_provider_capacity_diagnostics_show_cap_denied_free_slot(self):
+        _, first_claim = self._claim_txt_job(
+            order_id="order-1",
+            file_id="file-1",
+            user_id="telegram:42",
+            worker_id="worker-a",
+        )
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_shared",
+            max_parallel_requests=2,
+            capacity_source="admin",
+        )
+        cap = _provider_capacity_cap(
+            cap_id="deepseek-account-shared",
+            max_parallel_requests=1,
+            channel_ids=("chan_shared",),
+        )
+        self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            job_id=first_claim.job_id,
+            work_unit_id=first_claim.work_unit_id,
+            worker_id=first_claim.worker_id,
+            work_unit_claim_token=first_claim.claim_token,
+            lease_seconds=300,
+            capacity_caps=[cap],
+        )
+
+        diagnostic = self.store.get_provider_capacity_diagnostics(
+            provider_id="deepseek",
+            capacity_caps=[cap],
+        )
+
+        self.assertEqual(diagnostic.capacity_state, "cap_denied")
+        self.assertEqual(diagnostic.total_slots, 2)
+        self.assertEqual(diagnostic.active_leases, 1)
+        self.assertEqual(diagnostic.free_slots, 0)
+        self.assertEqual(diagnostic.cap_denied_slots, 1)
+        self.assertEqual(
+            [slot.status for slot in diagnostic.slots],
+            [
+                ProviderCapacitySlotDiagnosticStatus.LEASED,
+                ProviderCapacitySlotDiagnosticStatus.CAP_DENIED,
+            ],
+        )
+        self.assertEqual(diagnostic.caps[0].active_leases, 1)
+        self.assertTrue(diagnostic.caps[0].at_limit)
+
     def test_provider_slot_release_is_claim_scoped_and_idempotent(self):
         _, claim = self._claim_txt_job()
         self.store.upsert_provider_slot_inventory(
@@ -531,6 +581,36 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual([item.lease_token for item in active], [lease.lease_token])
         self.assertEqual(work_unit.status.value, "translating")
         self.assertEqual(work_unit.claim_token, claim.claim_token)
+
+    def test_provider_capacity_diagnostics_show_expired_active_lease(self):
+        _, claim = self._claim_txt_job()
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            max_parallel_requests=1,
+            capacity_source="admin",
+        )
+        lease = self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_abcdef123456",
+            job_id=claim.job_id,
+            work_unit_id=claim.work_unit_id,
+            worker_id=claim.worker_id,
+            work_unit_claim_token=claim.claim_token,
+            lease_seconds=1,
+        )
+
+        diagnostic = self.store.get_provider_capacity_diagnostics(
+            provider_id="deepseek",
+            now=lease.lease_until + timedelta(seconds=1),
+        )
+
+        self.assertEqual(diagnostic.capacity_state, "recovering_expired_leases")
+        self.assertEqual(diagnostic.expired_active_leases, 1)
+        self.assertEqual(
+            diagnostic.slots[0].status,
+            ProviderCapacitySlotDiagnosticStatus.EXPIRED_ACTIVE,
+        )
 
     def test_provider_slot_expiry_recovers_after_work_unit_lease_is_stale(self):
         _, claim = self._claim_txt_job()

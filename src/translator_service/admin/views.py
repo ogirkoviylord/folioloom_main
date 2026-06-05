@@ -64,6 +64,7 @@ from translator_service.admin.upload_safety import (
     UploadSafetyFilters,
     UploadSafetySummary,
 )
+from translator_service.scheduler import ProviderCapacityDiagnostics
 from translator_service.user_activity import UserActivityEvent, UserProfile
 
 _PRIMARY_NAV_ITEMS = (
@@ -680,6 +681,7 @@ def ai_providers_body(
     health_summaries: tuple[ProviderHealthSummary, ...] = (),
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+    provider_capacity_diagnostics: tuple[ProviderCapacityDiagnostics, ...] = (),
     balance_snapshot: ProviderBalanceSnapshot | None = None,
     balance_stale_seconds: int = 300,
     top_up_url: str = "https://platform.deepseek.com/usage",
@@ -687,6 +689,10 @@ def ai_providers_body(
     health_by_provider = {health.provider_id: health for health in health_summaries}
     runtime_by_provider = {status.provider_id: status for status in runtime_statuses}
     reload_by_provider = {state.provider_id: state for state in runtime_reload_states}
+    capacity_by_provider = {
+        diagnostic.provider_id: diagnostic
+        for diagnostic in provider_capacity_diagnostics
+    }
     cards = "\n".join(
         _ai_provider_card(
             summary,
@@ -695,6 +701,7 @@ def ai_providers_body(
             health=health_by_provider.get(summary.integration_id),
             runtime=runtime_by_provider.get(summary.integration_id),
             reload_state=reload_by_provider.get(summary.integration_id),
+            provider_capacity=capacity_by_provider.get(summary.integration_id),
             balance_snapshot=balance_snapshot,
             balance_stale_seconds=balance_stale_seconds,
             top_up_url=top_up_url,
@@ -830,6 +837,7 @@ def _ai_provider_card(
     health: ProviderHealthSummary | None,
     runtime: AIProviderRuntimeStatus | None,
     reload_state: AIProviderRuntimeReloadRequest | None,
+    provider_capacity: ProviderCapacityDiagnostics | None,
     balance_snapshot: ProviderBalanceSnapshot | None,
     balance_stale_seconds: int,
     top_up_url: str,
@@ -858,6 +866,11 @@ def _ai_provider_card(
         runtime,
         reload_state,
         csrf_token,
+    )
+    capacity_panel = _provider_capacity_panel(
+        summary.integration_id,
+        provider_capacity,
+        runtime,
     )
     balance_panel = ""
     if summary.integration_id == "deepseek":
@@ -890,6 +903,7 @@ def _ai_provider_card(
       {incident_panel}
       {health_panel}
       {runtime_panel}
+      {capacity_panel}
       {balance_panel}
       {test_all_form}
       {manage_keys_link}
@@ -1417,6 +1431,207 @@ def _provider_processing_summary(runtime: AIProviderRuntimeStatus | None) -> str
           <div class="metric-grid">{items}</div>
         </div>
     """
+
+
+def _provider_capacity_panel(
+    provider_id: str,
+    diagnostic: ProviderCapacityDiagnostics | None,
+    runtime: AIProviderRuntimeStatus | None,
+) -> str:
+    throttle_label = _provider_throttle_input_label(runtime)
+    if diagnostic is None:
+        cards = (
+            (
+                "Durable capacity state",
+                "not reporting",
+                "PostgreSQL provider-slot lease diagnostics are not available.",
+            ),
+            (
+                "Logical slots",
+                "n/a",
+                "Provider capacity is durable only when PostgreSQL slots report.",
+            ),
+            (
+                "Throttle input",
+                throttle_label,
+                "Adaptive throttle and circuit state are inputs, not source of truth.",
+            ),
+            (
+                "Queue policy",
+                "not in scope",
+                "This panel explains provider capacity, not which job should run next.",
+            ),
+        )
+        slot_rows = '<p class="empty-state">No durable provider slots reported.</p>'
+        cap_rows = '<p class="empty-state">No capacity cap snapshot reported.</p>'
+    else:
+        cards = (
+            (
+                "Durable capacity state",
+                diagnostic.capacity_state.replace("_", " "),
+                "Computed from PostgreSQL provider slots and active leases.",
+            ),
+            (
+                "Logical slots",
+                (
+                    f"{diagnostic.active_leases} leased / "
+                    f"{diagnostic.free_slots} free / "
+                    f"{diagnostic.cap_denied_slots} cap denied"
+                ),
+                (
+                    f"{diagnostic.enabled_slots} enabled of "
+                    f"{diagnostic.total_slots} provider slots."
+                ),
+            ),
+            (
+                "Expired/recovered leases",
+                (
+                    f"{diagnostic.expired_active_leases} active expired / "
+                    f"{diagnostic.recovered_expired_leases} recovered"
+                ),
+                "Expired active leases may still be protected by a fresh work-unit claim.",
+            ),
+            (
+                "Throttle input",
+                throttle_label,
+                "Adaptive throttle and circuit state are inputs, not source of truth.",
+            ),
+            (
+                "Queue policy",
+                "not in scope",
+                "This panel explains provider capacity, not which job should run next.",
+            ),
+        )
+        slot_rows = _provider_capacity_slot_rows(diagnostic)
+        cap_rows = _provider_capacity_cap_rows(diagnostic)
+
+    items = "\n".join(
+        f"""
+          <div class="metric-card">
+            <span>{escape(label)}</span>
+            <strong>{escape(value)}</strong>
+            <small>{escape(detail)}</small>
+          </div>
+        """
+        for label, value, detail in cards
+    )
+    return f"""
+      <div class="provider-health">
+        <div>
+          <h4>Provider capacity leases</h4>
+          <span class="status">{escape(_safe_runtime_text(provider_id))}</span>
+        </div>
+        <p class="helper-text">
+          Read-only durable provider-slot diagnostics. This does not expose API
+          keys, provider payloads, prompts, source text, translations, stack
+          traces, or queue fairness decisions.
+        </p>
+        <div class="metric-grid">{items}</div>
+        <div class="key-table">{cap_rows}{slot_rows}</div>
+      </div>
+    """
+
+
+def _provider_capacity_slot_rows(
+    diagnostic: ProviderCapacityDiagnostics,
+    *,
+    limit: int = 32,
+) -> str:
+    if not diagnostic.slots:
+        return '<p class="empty-state">No provider slots reported.</p>'
+    visible_slots = diagnostic.slots[:limit]
+    rows = [
+        f"""
+          <div class="key-row compact-row">
+            <div>
+              <strong>
+                {escape(_safe_runtime_text(slot.channel_id))} / slot {slot.slot_index}
+              </strong>
+              <span>{escape(slot.status.value.replace("_", " "))}</span>
+              <span>
+                source {escape(_safe_runtime_text(slot.capacity_source))}
+              </span>
+            </div>
+            <span>{escape(_provider_capacity_slot_lease_label(slot))}</span>
+          </div>
+        """
+        for slot in visible_slots
+    ]
+    if len(diagnostic.slots) > limit:
+        rows.append(
+            f"""
+          <div class="key-row compact-row">
+            <strong>{len(diagnostic.slots) - limit} more slots</strong>
+            <span>Hidden from this compact read-only view.</span>
+          </div>
+        """
+        )
+    return "\n".join(rows)
+
+
+def _provider_capacity_cap_rows(diagnostic: ProviderCapacityDiagnostics) -> str:
+    if not diagnostic.caps:
+        return '<p class="empty-state">No active capacity caps reported.</p>'
+    return "\n".join(
+        f"""
+          <div class="key-row compact-row">
+            <div>
+              <strong>{escape(_safe_runtime_text(cap.cap_id))}</strong>
+              <span>{escape(cap.scope.value)} cap</span>
+              <span>{escape(_provider_capacity_cap_channel_label(cap.channel_ids))}</span>
+            </div>
+            <span>
+              active {cap.active_leases}/{cap.max_parallel_requests} ·
+              available {cap.available_capacity} ·
+              {"at limit" if cap.at_limit else "below limit"}
+            </span>
+          </div>
+        """
+        for cap in diagnostic.caps
+    )
+
+
+def _provider_capacity_slot_lease_label(slot) -> str:
+    if slot.leased_by_job_id is None:
+        if slot.status.value == "cap_denied":
+            return "free physical slot blocked by provider cap"
+        if slot.status.value == "free":
+            return "ready for the next provider call"
+        if slot.status.value == "disabled":
+            return "disabled inventory slot"
+        return "not leased"
+    age = _format_optional_seconds(slot.lease_age_seconds)
+    expires = _format_optional_seconds(slot.lease_expires_in_seconds)
+    job_id = _safe_runtime_text(slot.leased_by_job_id)
+    work_unit_id = _safe_runtime_text(slot.leased_by_work_unit_id)
+    worker_id = _safe_runtime_text(slot.leased_by_worker_id)
+    return (
+        f"job {job_id} · unit {work_unit_id} · "
+        f"worker {worker_id} · age {age} · expires {expires}"
+    )
+
+
+def _provider_capacity_cap_channel_label(channel_ids: tuple[str, ...]) -> str:
+    if not channel_ids:
+        return "all channels"
+    return "channels " + ", ".join(_safe_runtime_text(item) for item in channel_ids)
+
+
+def _provider_throttle_input_label(runtime: AIProviderRuntimeStatus | None) -> str:
+    if runtime is None:
+        return "not reporting"
+    state = runtime.provider_state
+    circuit = _safe_runtime_text(state.circuit_state)
+    adaptive = "on" if state.adaptive_enabled else "off"
+    if circuit not in {"closed", "healthy", "ok"} or state.available_slots <= 0:
+        prefix = "throttle denied"
+    else:
+        prefix = "available"
+    return (
+        f"{prefix}: {state.available_slots} slots, "
+        f"limit {state.current_limit}/{state.max_capacity}, "
+        f"adaptive {adaptive}, circuit {circuit}"
+    )
 
 
 def _runtime_channel_row(channel: AIProviderRuntimeChannel) -> str:
@@ -2369,6 +2584,7 @@ def live_body(
     *,
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     runtime_reload_states: tuple[AIProviderRuntimeReloadRequest, ...] = (),
+    provider_capacity_diagnostics: tuple[ProviderCapacityDiagnostics, ...] = (),
     beta_safety: BetaSafetyCostSummary | None = None,
 ) -> str:
     metrics = (
@@ -2444,6 +2660,23 @@ def live_body(
         for label, value, field, help_text in metrics
     )
     runtime_cards = _live_runtime_cards(runtime_statuses, runtime_reload_states)
+    deepseek_runtime = next(
+        (status for status in runtime_statuses if status.provider_id == "deepseek"),
+        None,
+    )
+    deepseek_capacity = next(
+        (
+            diagnostic
+            for diagnostic in provider_capacity_diagnostics
+            if diagnostic.provider_id == "deepseek"
+        ),
+        None,
+    )
+    capacity_panel = _provider_capacity_panel(
+        "deepseek",
+        deepseek_capacity,
+        deepseek_runtime,
+    )
     beta_warning = _beta_safety_live_warning(beta_safety)
     monitor_link = _action_link(
         "Open monitor",
@@ -2491,6 +2724,7 @@ def live_body(
       </p>
       <div class="metric-grid">{runtime_cards}</div>
     </section>
+    {capacity_panel}
     <section class="panel table-panel">
       <h3>Recent runs</h3>
       <p>

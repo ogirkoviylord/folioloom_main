@@ -44,7 +44,15 @@ from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
-from translator_service.scheduler import SchedulerLimits, WorkUnitFailureKind
+from translator_service.scheduler import (
+    ProviderCapacityCapDiagnostic,
+    ProviderCapacityCapScope,
+    ProviderCapacityDiagnostics,
+    ProviderCapacitySlotDiagnostic,
+    ProviderCapacitySlotDiagnosticStatus,
+    SchedulerLimits,
+    WorkUnitFailureKind,
+)
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -100,6 +108,61 @@ def _advanced_nav_tag(page_text: str) -> str:
 
 
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
+
+
+def _provider_capacity_diagnostic() -> ProviderCapacityDiagnostics:
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+    return ProviderCapacityDiagnostics(
+        provider_id="deepseek",
+        generated_at=now,
+        capacity_state="cap_denied",
+        total_slots=2,
+        enabled_slots=2,
+        disabled_slots=0,
+        active_leases=1,
+        free_slots=0,
+        cap_denied_slots=1,
+        expired_active_leases=0,
+        recovered_expired_leases=1,
+        released_leases=3,
+        slots=(
+            ProviderCapacitySlotDiagnostic(
+                provider_id="deepseek",
+                channel_id="deepseek-channel-1",
+                slot_index=0,
+                capacity_source="deepseek_key_pool",
+                enabled=True,
+                status=ProviderCapacitySlotDiagnosticStatus.LEASED,
+                leased_by_job_id="job-capacity",
+                leased_by_work_unit_id="unit-capacity",
+                leased_by_worker_id="worker-capacity",
+                acquired_at=now,
+                lease_until=now,
+                lease_age_seconds=20.0,
+                lease_expires_in_seconds=280.0,
+            ),
+            ProviderCapacitySlotDiagnostic(
+                provider_id="deepseek",
+                channel_id="Bearer sk-capacity-secret",
+                slot_index=1,
+                capacity_source="secret deepseek.api_keys.key-1",
+                enabled=True,
+                status=ProviderCapacitySlotDiagnosticStatus.CAP_DENIED,
+            ),
+        ),
+        caps=(
+            ProviderCapacityCapDiagnostic(
+                provider_id="deepseek",
+                cap_id="deepseek-account-runtime sk-capacity-secret",
+                scope=ProviderCapacityCapScope.ACCOUNT,
+                max_parallel_requests=1,
+                active_leases=1,
+                available_capacity=0,
+                at_limit=True,
+                channel_ids=("Bearer sk-capacity-secret",),
+            ),
+        ),
+    )
 
 
 class AdminRoutesTest(unittest.TestCase):
@@ -5508,6 +5571,87 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(event.target_id, "deepseek")
             self.assertEqual(event.outcome.value, "success")
             self.assertNotIn(".api_keys.", event.metadata_json)
+
+    def test_ai_provider_pages_and_api_show_safe_capacity_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            with SQLiteAIProviderRuntimeStore(db_path) as runtime:
+                runtime.record_status(
+                    provider_id="deepseek",
+                    source="worker",
+                    status="ok",
+                    reload_interval_seconds=30.0,
+                    active_channels=(
+                        AIProviderRuntimeChannel(
+                            label="main",
+                            weight=1,
+                            max_parallel_requests=2,
+                            active_requests=1,
+                        ),
+                    ),
+                    provider_state=AIProviderRuntimeProviderState(
+                        adaptive_enabled=True,
+                        current_limit=1,
+                        max_capacity=1,
+                        active_requests=1,
+                        available_slots=0,
+                        circuit_state="open",
+                    ),
+                    error=None,
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            with patch(
+                "translator_service.admin.routes._ai_provider_capacity_diagnostics",
+                return_value=(_provider_capacity_diagnostic(),),
+            ):
+                provider_page = client.get("/admin/ai-providers")
+                live_page = client.get("/admin/live")
+                runtime_api = client.get("/admin/api/ai-providers/runtime")
+
+            self.assertEqual(provider_page.status_code, 200)
+            self.assertEqual(live_page.status_code, 200)
+            self.assertEqual(runtime_api.status_code, 200)
+            self.assertIn("Provider capacity leases", provider_page.text)
+            self.assertIn("Provider capacity leases", live_page.text)
+            self.assertIn("cap denied", provider_page.text)
+            self.assertIn("throttle denied", provider_page.text)
+            self.assertIn("not which job should run next", provider_page.text)
+            self.assertIn("job job-capacity", provider_page.text)
+            self.assertIn("unit unit-capacity", provider_page.text)
+            payload = runtime_api.json()
+            capacity = payload["providers"][0]["provider_capacity"]
+            self.assertEqual(capacity["diagnostic_scope"], "provider_capacity_only")
+            self.assertEqual(capacity["queue_policy"], "not_in_scope")
+            self.assertEqual(capacity["status"], "cap_denied")
+            self.assertEqual(capacity["cap_denied_slots"], 1)
+            self.assertEqual(capacity["throttle_input"]["state"], "throttle_denied")
+            self.assertEqual(
+                [slot["status"] for slot in capacity["slots"]],
+                ["leased", "cap_denied"],
+            )
+            serialized = "\n".join(
+                [
+                    provider_page.text,
+                    live_page.text,
+                    json.dumps(payload, sort_keys=True),
+                ]
+            )
+            self.assertNotIn("sk-capacity-secret", serialized)
+            self.assertNotIn("Bearer", serialized)
+            self.assertNotIn(".api_keys.", serialized)
+            self.assertNotIn("lease-token-secret", serialized)
+            self.assertNotIn("claim-token-secret", serialized)
 
     def test_ai_provider_page_summarizes_healthy_runtime_read_only(self):
         with TemporaryDirectory() as temp_dir:

@@ -149,6 +149,12 @@ from translator_service.persistent_job_store import (
     open_persistent_job_store,
     sqlite_store_exists,
 )
+from translator_service.postgres_scheduler import PostgresSchedulerStore
+from translator_service.scheduler import (
+    ProviderCapacityCap,
+    ProviderCapacityCapScope,
+    ProviderCapacityDiagnostics,
+)
 from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
 )
@@ -267,6 +273,9 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 health_summaries=_ai_provider_health(settings),
                 runtime_statuses=_ai_provider_runtime_statuses(settings),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+                provider_capacity_diagnostics=_ai_provider_capacity_diagnostics(
+                    settings
+                ),
                 balance_snapshot=_deepseek_balance_snapshot(settings),
                 balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
                 top_up_url=settings.admin_deepseek_top_up_url,
@@ -626,6 +635,9 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 _live_snapshot(settings),
                 runtime_statuses=_ai_provider_runtime_statuses(settings),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
+                provider_capacity_diagnostics=_ai_provider_capacity_diagnostics(
+                    settings
+                ),
                 beta_safety=_beta_safety_cost_summary(settings),
             ),
         )
@@ -2099,6 +2111,13 @@ def _ai_provider_runtime_payloads(settings: Settings):
         state.provider_id: state
         for state in _ai_provider_runtime_reload_states(settings)
     }
+    capacity_diagnostics = {
+        diagnostic.provider_id: diagnostic
+        for diagnostic in _ai_provider_capacity_diagnostics(
+            settings,
+            runtime_statuses=tuple(statuses.values()),
+        )
+    }
     now = datetime.now(UTC)
     payloads = []
     for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions():
@@ -2109,6 +2128,7 @@ def _ai_provider_runtime_payloads(settings: Settings):
                 definition.integration_id,
                 status=status,
                 reload_state=reload_state,
+                provider_capacity=capacity_diagnostics.get(definition.integration_id),
                 now=now,
             )
         )
@@ -2120,6 +2140,7 @@ def _ai_provider_runtime_payload(
     *,
     status,
     reload_state,
+    provider_capacity: ProviderCapacityDiagnostics | None,
     now: datetime,
 ):
     if status is None:
@@ -2133,6 +2154,10 @@ def _ai_provider_runtime_payload(
             "active_channels": [],
             "provider_state": _ai_provider_runtime_provider_state_payload(
                 AIProviderRuntimeProviderState()
+            ),
+            "provider_capacity": _provider_capacity_payload(
+                provider_capacity,
+                status=None,
             ),
             "error": None,
             "reload_pending": bool(reload_state and reload_state.pending),
@@ -2165,6 +2190,10 @@ def _ai_provider_runtime_payload(
         ],
         "provider_state": _ai_provider_runtime_provider_state_payload(
             status.provider_state
+        ),
+        "provider_capacity": _provider_capacity_payload(
+            provider_capacity,
+            status=status,
         ),
         "error": _safe_runtime_error_text(status.error),
         "reload_pending": bool(reload_state and reload_state.pending),
@@ -2226,6 +2255,186 @@ def _ai_provider_runtime_channel_payload(channel):
         "last_latency_ms": channel.last_latency_ms,
         "error_kind": _safe_runtime_text(channel.error_kind),
         "last_error_excerpt": _safe_runtime_error_text(channel.last_error_excerpt),
+    }
+
+
+def _ai_provider_capacity_diagnostics(
+    settings: Settings,
+    *,
+    runtime_statuses: tuple[object, ...] | None = None,
+) -> tuple[ProviderCapacityDiagnostics, ...]:
+    if settings.scheduler_backend != "postgres":
+        return ()
+    statuses = (
+        runtime_statuses
+        if runtime_statuses is not None
+        else _ai_provider_runtime_statuses(settings)
+    )
+    status_by_provider = {
+        status.provider_id: status
+        for status in statuses
+        if getattr(status, "provider_id", None)
+    }
+    store = None
+    try:
+        store = PostgresSchedulerStore(settings.postgres_dsn)
+        diagnostics = []
+        for definition in DEFAULT_AI_PROVIDER_REGISTRY.list_definitions():
+            provider_id = definition.integration_id
+            diagnostics.append(
+                store.get_provider_capacity_diagnostics(
+                    provider_id=provider_id,
+                    capacity_caps=_provider_capacity_caps_from_runtime_status(
+                        status_by_provider.get(provider_id)
+                    ),
+                )
+            )
+        return tuple(diagnostics)
+    except Exception:
+        return ()
+    finally:
+        if store is not None:
+            store.close()
+
+
+def _provider_capacity_caps_from_runtime_status(
+    status: object | None,
+) -> list[ProviderCapacityCap]:
+    if status is None:
+        return []
+    provider_id = str(status.provider_id)
+    provider_state = status.provider_state
+    max_capacity = max(0, int(provider_state.max_capacity))
+    return [
+        ProviderCapacityCap(
+            provider_id=provider_id,
+            cap_id=f"{provider_id}-account-runtime",
+            scope=ProviderCapacityCapScope.ACCOUNT,
+            max_parallel_requests=max_capacity,
+        ),
+        ProviderCapacityCap(
+            provider_id=provider_id,
+            cap_id=f"{provider_id}-model-runtime",
+            scope=ProviderCapacityCapScope.MODEL,
+            max_parallel_requests=max_capacity,
+        ),
+    ]
+
+
+def _provider_capacity_payload(
+    diagnostic: ProviderCapacityDiagnostics | None,
+    *,
+    status,
+) -> dict[str, object]:
+    if diagnostic is None:
+        return {
+            "diagnostic_scope": "provider_capacity_only",
+            "status": "not_available",
+            "reason": "postgres_provider_slot_diagnostics_not_reporting",
+            "throttle_input": _provider_throttle_input_payload(status),
+            "queue_policy": "not_in_scope",
+        }
+    return {
+        "diagnostic_scope": diagnostic.diagnostic_scope,
+        "status": diagnostic.capacity_state,
+        "provider_id": _safe_runtime_text(diagnostic.provider_id),
+        "generated_at": diagnostic.generated_at.isoformat(),
+        "total_slots": diagnostic.total_slots,
+        "enabled_slots": diagnostic.enabled_slots,
+        "disabled_slots": diagnostic.disabled_slots,
+        "active_leases": diagnostic.active_leases,
+        "free_slots": diagnostic.free_slots,
+        "cap_denied_slots": diagnostic.cap_denied_slots,
+        "expired_active_leases": diagnostic.expired_active_leases,
+        "recovered_expired_leases": diagnostic.recovered_expired_leases,
+        "released_leases": diagnostic.released_leases,
+        "throttle_input": _provider_throttle_input_payload(status),
+        "queue_policy": "not_in_scope",
+        "caps": [
+            {
+                "cap_id": _safe_runtime_text(cap.cap_id),
+                "scope": cap.scope.value,
+                "max_parallel_requests": cap.max_parallel_requests,
+                "active_leases": cap.active_leases,
+                "available_capacity": cap.available_capacity,
+                "at_limit": cap.at_limit,
+                "channel_ids": [
+                    _safe_runtime_text(channel_id) for channel_id in cap.channel_ids
+                ],
+            }
+            for cap in diagnostic.caps
+        ],
+        "slots": [
+            {
+                "provider_id": _safe_runtime_text(slot.provider_id),
+                "channel_id": _safe_runtime_text(slot.channel_id),
+                "slot_index": slot.slot_index,
+                "capacity_source": (
+                    _safe_runtime_text(slot.capacity_source)
+                    if slot.capacity_source is not None
+                    else None
+                ),
+                "enabled": slot.enabled,
+                "status": slot.status.value,
+                "leased_by_job_id": (
+                    _safe_runtime_text(slot.leased_by_job_id)
+                    if slot.leased_by_job_id is not None
+                    else None
+                ),
+                "leased_by_work_unit_id": (
+                    _safe_runtime_text(slot.leased_by_work_unit_id)
+                    if slot.leased_by_work_unit_id is not None
+                    else None
+                ),
+                "leased_by_worker_id": (
+                    _safe_runtime_text(slot.leased_by_worker_id)
+                    if slot.leased_by_worker_id is not None
+                    else None
+                ),
+                "acquired_at": (
+                    slot.acquired_at.isoformat()
+                    if slot.acquired_at is not None
+                    else None
+                ),
+                "lease_until": (
+                    slot.lease_until.isoformat()
+                    if slot.lease_until is not None
+                    else None
+                ),
+                "lease_age_seconds": slot.lease_age_seconds,
+                "lease_expires_in_seconds": slot.lease_expires_in_seconds,
+            }
+            for slot in diagnostic.slots
+        ],
+    }
+
+
+def _provider_throttle_input_payload(status) -> dict[str, object]:
+    if status is None:
+        return {
+            "state": "not_reporting",
+            "adaptive_enabled": False,
+            "available_slots": None,
+            "active_requests": None,
+            "current_limit": None,
+            "max_capacity": None,
+            "circuit_state": "not_reporting",
+        }
+    provider_state = status.provider_state
+    circuit_state = _safe_runtime_text(provider_state.circuit_state) or "closed"
+    state = "available"
+    if circuit_state not in {"closed", "healthy", "ok"}:
+        state = "throttle_denied"
+    elif provider_state.available_slots <= 0:
+        state = "throttle_denied"
+    return {
+        "state": state,
+        "adaptive_enabled": provider_state.adaptive_enabled,
+        "available_slots": provider_state.available_slots,
+        "active_requests": provider_state.active_requests,
+        "current_limit": provider_state.current_limit,
+        "max_capacity": provider_state.max_capacity,
+        "circuit_state": circuit_state,
     }
 
 
