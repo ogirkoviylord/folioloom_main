@@ -33,12 +33,14 @@ from translator_service.persistent_jobs import (
 from translator_service.provider_failure_diagnostics import ProviderFailureDiagnostic
 from translator_service.scheduler import (
     ProviderCapacityCap,
+    ProviderCapacityDiagnostics,
     ProviderSlot,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
     SchedulerClaim,
     SchedulerLimits,
     WorkUnitFailureKind,
+    build_provider_capacity_diagnostics,
     calculate_retry_decision,
 )
 
@@ -1400,6 +1402,52 @@ class PostgresSchedulerStore:
             },
         ).fetchall()
         return [_provider_slot_lease_from_row(row) for row in rows]
+
+    def get_provider_capacity_diagnostics(
+        self,
+        *,
+        provider_id: str,
+        capacity_caps: list[ProviderCapacityCap] | None = None,
+        now: datetime | None = None,
+    ) -> ProviderCapacityDiagnostics:
+        current_time = now or _now()
+        slots = self.list_provider_slots(provider_id=provider_id)
+        active_rows = self.connection.execute(
+            """
+            SELECT *
+            FROM provider_slot_leases
+            WHERE provider_id = %(provider_id)s
+              AND status = 'active'
+            ORDER BY acquired_at, id
+            """,
+            {"provider_id": provider_id},
+        ).fetchall()
+        count_rows = self.connection.execute(
+            """
+            SELECT status, release_reason, COUNT(*) AS count
+            FROM provider_slot_leases
+            WHERE provider_id = %(provider_id)s
+            GROUP BY status, release_reason
+            """,
+            {"provider_id": provider_id},
+        ).fetchall()
+        released_count = sum(
+            int(row["count"]) for row in count_rows if row["status"] == "released"
+        )
+        recovered_count = sum(
+            int(row["count"])
+            for row in count_rows
+            if row["status"] == "expired" and row["release_reason"] == "lease_expired"
+        )
+        return build_provider_capacity_diagnostics(
+            provider_id=provider_id,
+            slots=slots,
+            leases=[_provider_slot_lease_from_row(row) for row in active_rows],
+            capacity_caps=capacity_caps or [],
+            now=current_time,
+            released_lease_count=released_count,
+            recovered_expired_lease_count=recovered_count,
+        )
 
     def _require_job(self, job_id: str) -> PersistentTranslationJob:
         job = self.get_job(job_id)
