@@ -6,16 +6,21 @@ from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.scheduler import (
     SCHEDULER_FAIR_QUEUE_ORDERING,
     SCHEDULER_FAIR_QUEUE_POLICY,
+    ProviderCapacityCap,
+    ProviderCapacityCapScope,
     ProviderSlot,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
     RetryDecision,
+    SchedulerBackpressureState,
     SchedulerClaim,
     SchedulerJobStatus,
     SchedulerLimits,
     SchedulerRepository,
     SchedulerWorkUnitStatus,
     WorkUnitFailureKind,
+    build_provider_capacity_diagnostics,
+    build_scheduler_backpressure_diagnostics,
     build_scheduler_queue_policy_diagnostics,
     calculate_retry_decision,
 )
@@ -189,10 +194,144 @@ class SchedulerContractTest(unittest.TestCase):
         self.assertEqual(diagnostics["priority_aging_seconds"], 1800)
         self.assertEqual(diagnostics["ordering"], list(SCHEDULER_FAIR_QUEUE_ORDERING))
 
+    def test_backpressure_diagnostics_return_idle_unknown_for_empty_queue(self):
+        diagnostics = build_scheduler_backpressure_diagnostics(
+            queue_depth_units=0,
+            eligible_waiting_units=0,
+            delayed_retry_units=0,
+            active_work_units=0,
+            retry_pressure_units=0,
+            expired_work_unit_leases=0,
+        )
+
+        self.assertEqual(diagnostics.backpressure_state, SchedulerBackpressureState.IDLE)
+        self.assertEqual(diagnostics.pressure_reasons, ("no_eligible_work",))
+        self.assertEqual(diagnostics.eta.state, "unknown")
+        self.assertEqual(diagnostics.eta.unknown_reason, "no_eligible_work")
+
+    def test_backpressure_diagnostics_report_pressure_without_user_data(self):
+        now = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+        capacity = build_provider_capacity_diagnostics(
+            provider_id="deepseek",
+            slots=(
+                ProviderSlot(
+                    provider_id="deepseek",
+                    channel_id="chan_a",
+                    slot_index=0,
+                    capacity_source="test",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                ProviderSlot(
+                    provider_id="deepseek",
+                    channel_id="chan_b",
+                    slot_index=0,
+                    capacity_source="test",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ),
+            leases=(
+                ProviderSlotLease(
+                    lease_id="lease-1",
+                    lease_token="lease-token-1",
+                    provider_id="deepseek",
+                    channel_id="chan_a",
+                    slot_index=0,
+                    job_id="job-1",
+                    work_unit_id="job-1:unit-1",
+                    worker_id="worker-a",
+                    work_unit_claim_token="claim-token",
+                    status=ProviderSlotLeaseStatus.ACTIVE,
+                    acquired_at=now - timedelta(seconds=10),
+                    lease_until=now + timedelta(seconds=300),
+                    released_at=None,
+                    release_reason=None,
+                ),
+            ),
+            capacity_caps=(
+                ProviderCapacityCap(
+                    provider_id="deepseek",
+                    cap_id="account",
+                    scope=ProviderCapacityCapScope.ACCOUNT,
+                    max_parallel_requests=1,
+                ),
+            ),
+            now=now,
+        )
+
+        diagnostics = build_scheduler_backpressure_diagnostics(
+            queue_depth_units=5,
+            eligible_waiting_units=3,
+            delayed_retry_units=2,
+            active_work_units=1,
+            retry_pressure_units=2,
+            expired_work_unit_leases=1,
+            provider_capacity=capacity,
+            throttle_available_slots=0,
+            throttle_circuit_state="open",
+            recent_completed_units=0,
+            now=now,
+        )
+
+        self.assertEqual(
+            diagnostics.backpressure_state,
+            SchedulerBackpressureState.RECOVERY_NEEDED,
+        )
+        self.assertIn("account_model_cap_pressure", diagnostics.pressure_reasons)
+        self.assertIn("adaptive_throttle_pressure", diagnostics.pressure_reasons)
+        self.assertIn("provider_failure_retry_pressure", diagnostics.pressure_reasons)
+        self.assertIn("lease_expiry_recovery", diagnostics.pressure_reasons)
+        self.assertEqual(diagnostics.provider_cap_denied_slots, 1)
+        self.assertEqual(diagnostics.throttle_circuit_state, "open")
+        self.assertEqual(diagnostics.eta.state, "unknown")
+
+    def test_backpressure_diagnostics_return_bounded_eta_from_throughput(self):
+        now = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+        capacity = build_provider_capacity_diagnostics(
+            provider_id="deepseek",
+            slots=(
+                ProviderSlot(
+                    provider_id="deepseek",
+                    channel_id="chan_a",
+                    slot_index=0,
+                    capacity_source="test",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ),
+            leases=(),
+            now=now,
+        )
+
+        diagnostics = build_scheduler_backpressure_diagnostics(
+            queue_depth_units=6,
+            eligible_waiting_units=6,
+            delayed_retry_units=0,
+            active_work_units=2,
+            retry_pressure_units=0,
+            expired_work_unit_leases=0,
+            provider_capacity=capacity,
+            recent_completed_units=4,
+            throughput_window_seconds=120,
+            now=now,
+        )
+
+        self.assertEqual(diagnostics.backpressure_state, SchedulerBackpressureState.READY)
+        self.assertEqual(diagnostics.eta.state, "bounded")
+        self.assertEqual(diagnostics.eta.estimated_seconds_lower_bound, 120)
+        self.assertEqual(diagnostics.eta.estimated_seconds_upper_bound, 480)
+
     def test_sqlite_store_exposes_scheduler_repository_methods(self):
         self.assertTrue(callable(SQLiteTranslationJobStore.claim_next_scheduled_work_unit))
         self.assertTrue(callable(SQLiteTranslationJobStore.complete_claimed_work_unit))
         self.assertTrue(callable(SQLiteTranslationJobStore.fail_claimed_work_unit))
+        self.assertTrue(
+            callable(SQLiteTranslationJobStore.get_scheduler_backpressure_diagnostics)
+        )
 
     def test_scheduler_repository_allows_opaque_completion_results(self):
         class DummySchedulerRepository:
