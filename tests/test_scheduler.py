@@ -4,6 +4,7 @@ from typing import get_type_hints
 
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.scheduler import (
+    SCHEDULER_FAIR_QUEUE_POLICY,
     ProviderSlot,
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
@@ -158,6 +159,12 @@ class SchedulerContractTest(unittest.TestCase):
         self.assertEqual(limits.max_active_units_global, 2)
         self.assertEqual(limits.max_attempts_per_unit, 3)
         self.assertEqual(limits.priority_aging_seconds, 1800)
+
+    def test_fair_queue_policy_id_is_stable_metadata(self):
+        self.assertEqual(
+            SCHEDULER_FAIR_QUEUE_POLICY,
+            "least_active_user_job_v1",
+        )
 
     def test_sqlite_store_exposes_scheduler_repository_methods(self):
         self.assertTrue(callable(SQLiteTranslationJobStore.claim_next_scheduled_work_unit))
