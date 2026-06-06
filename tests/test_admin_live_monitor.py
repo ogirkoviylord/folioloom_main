@@ -16,6 +16,9 @@ from translator_service.admin.provider_runtime import (
     AIProviderRuntimeProviderState,
     AIProviderRuntimeStatus,
 )
+from translator_service.admin.translation_progress import (
+    DurableTranslationProgressSnapshot,
+)
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -269,6 +272,53 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.recent_runs[0].progress_percent, 66.7)
         self.assertEqual(snapshot.recent_runs[0].total_tokens, 18)
         self.assertEqual(snapshot.recent_runs[0].run_dir, str(run_logger.run_dir))
+
+    def test_recent_runs_apply_durable_progress_snapshot(self):
+        with TemporaryDirectory() as temp_dir:
+            run_logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-durable-snapshot",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="durable.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=0,
+                ),
+            )
+            run_logger.record_event(
+                "job_queued",
+                {"job_id": "job-durable-snapshot", "fragment_count": 0},
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                progress_snapshots={
+                    "job-durable-snapshot": DurableTranslationProgressSnapshot(
+                        job_id="job-durable-snapshot",
+                        available=True,
+                        status="translating",
+                        state="running",
+                        completed_units=2,
+                        total_units=4,
+                        total_tokens=42,
+                        updated_at=datetime(2026, 5, 9, 12, 1, tzinfo=UTC),
+                    )
+                },
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                server=collect_local_server_health(
+                    disk_usage=_unavailable_disk_usage,
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(snapshot.recent_runs[0].status, "translating")
+        self.assertEqual(snapshot.recent_runs[0].fragment_count, 2)
+        self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 4)
+        self.assertEqual(snapshot.recent_runs[0].progress_percent, 50.0)
+        self.assertEqual(snapshot.recent_runs[0].total_tokens, 42)
 
     def test_recent_runs_prefers_active_durable_job_over_stale_cancelled_run_log(self):
         with TemporaryDirectory() as temp_dir:
