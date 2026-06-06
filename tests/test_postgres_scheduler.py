@@ -5,6 +5,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
@@ -70,6 +71,98 @@ class PostgresSchedulerContractTest(unittest.TestCase):
                 callable(getattr(PostgresSchedulerStore, method_name, None)),
                 method_name,
             )
+
+    def test_cancel_job_uses_claim_lock_and_durable_cancel_marker(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection()
+        store._require_job = lambda job_id: SimpleNamespace(id=job_id)
+
+        store.cancel_job("job-1")
+
+        executed_sql = "\n".join(store.connection.statements)
+        self.assertIn(
+            "pg_advisory_xact_lock",
+            executed_sql,
+        )
+        self.assertIn(
+            "translator_service.postgres_scheduler.claim",
+            str(store.connection.params),
+        )
+        self.assertIn(
+            "cancel_requested_at",
+            executed_sql,
+        )
+
+    def test_claim_final_job_update_cannot_revive_cancelled_job(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(
+            rows=[
+                {
+                    "job_id": "job-1",
+                    "id": "job-1:unit-1",
+                    "lease_until": datetime.now(UTC),
+                    "attempt_count": 1,
+                    "source_object_key": "intermediate/job-1/unit-1.txt",
+                    "queue_policy_active_user_units": 0,
+                    "queue_policy_active_user_jobs": 0,
+                    "queue_policy_active_job_units": 0,
+                }
+            ]
+        )
+
+        claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertIsNotNone(claim)
+        final_update_sql = store.connection.statements[1]
+
+        self.assertIn("status IN ('queued', 'translating')", final_update_sql)
+        self.assertIn("cancel_requested_at IS NULL", final_update_sql)
+
+    def test_resume_job_clears_durable_cancel_marker(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection()
+        store._require_job = lambda job_id: SimpleNamespace(
+            id=job_id,
+            status=PersistentTranslationJobStatus.CANCELLED,
+        )
+
+        store.resume_job("job-1")
+
+        executed_sql = "\n".join(store.connection.statements)
+        self.assertIn("cancel_requested_at = NULL", executed_sql)
+
+
+class _RecordingPostgresConnection:
+    def __init__(self, *, rows: list[dict] | None = None) -> None:
+        self.statements: list[str] = []
+        self.params: list[object] = []
+        self.rows = list(rows or [])
+
+    def transaction(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def execute(self, statement: str, params=None):
+        self.statements.append(statement)
+        self.params.append(params)
+        return _FakeCursor(self.rows.pop(0) if self.rows else None)
+
+
+class _FakeCursor:
+    def __init__(self, row=None) -> None:
+        self.row = row
+
+    def fetchone(self):
+        return self.row
 
 
 @unittest.skipUnless(POSTGRES_DSN, "TEST_POSTGRES_DSN is not set")

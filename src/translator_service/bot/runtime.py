@@ -1948,7 +1948,10 @@ def create_router(
             )
             return
         service.discard_pending_translation(message.from_user.id)
-        await message.answer(build_back_to_menu_message(interface_language))
+        await message.answer(
+            build_back_to_menu_message(interface_language),
+            reply_markup=_main_menu_keyboard(interface_language),
+        )
         await message.answer(
             get_main_menu_text(interface_language=interface_language),
             reply_markup=_main_menu_keyboard(interface_language),
@@ -3523,7 +3526,10 @@ async def _cancel_active_translation(
         return
 
     if service.discard_pending_translation(message.from_user.id):
-        await message.answer(build_back_to_menu_message(interface_language))
+        await message.answer(
+            build_back_to_menu_message(interface_language),
+            reply_markup=_main_menu_keyboard(interface_language),
+        )
         await message.answer(
             get_main_menu_text(interface_language=interface_language),
             reply_markup=_main_menu_keyboard(interface_language),
