@@ -1899,7 +1899,7 @@ def create_router(
         if result.cancelled:
             await callback.answer(build_cancel_requested_message(interface_language))
             if result.job is not None and callback.message is not None:
-                await _edit_callback_message(
+                await _edit_terminal_status_message(
                     callback.message,
                     build_translation_job_status_message(
                         result.job,
@@ -2544,6 +2544,54 @@ async def _edit_callback_message(message, text: str, reply_markup=None) -> None:
         await result
 
 
+async def _edit_terminal_status_message(message, text: str, reply_markup=None) -> None:
+    try:
+        await _edit_callback_message(message, text, reply_markup=reply_markup)
+        return
+    except Exception as error:
+        message_text = str(error)
+        if _is_message_not_modified_error(error):
+            logger.debug("Skipping unchanged terminal translation status edit")
+            return
+        handled_retry_after = _handle_progress_edit_retry_after(
+            error,
+            message_text,
+            progress_stats=None,
+        )
+        if not handled_retry_after:
+            logger.warning(
+                "Telegram refused terminal translation status edit: %s",
+                message_text,
+            )
+
+    await _send_terminal_status_fallback_message(
+        message,
+        text,
+        reply_markup=reply_markup,
+    )
+
+
+async def _send_terminal_status_fallback_message(
+    message,
+    text: str,
+    reply_markup=None,
+) -> None:
+    answer = getattr(message, "answer", None)
+    if not callable(answer):
+        return
+    try:
+        await answer(
+            text,
+            reply_markup=_inline_reply_markup_or_none(reply_markup),
+            parse_mode="HTML",
+        )
+    except Exception as error:
+        logger.warning(
+            "Telegram refused terminal translation status fallback message: %s",
+            error,
+        )
+
+
 async def _refresh_user_book_status_message(
     message,
     *,
@@ -2562,7 +2610,10 @@ async def _refresh_user_book_status_message(
         job_id=job_id,
     )
     if job is not None:
-        await _edit_callback_message(
+        edit_message = (
+            _edit_terminal_status_message if send_result else _edit_callback_message
+        )
+        await edit_message(
             message,
             build_translation_job_status_message(
                 job,
@@ -3176,7 +3227,7 @@ async def _run_confirm_pending_translation(
         prompt_cache_miss_tokens=progress_stats["cache_miss_tokens"],
         status=job.status.value,
     )
-    await _edit_callback_message(
+    await _edit_terminal_status_message(
         progress_message,
         build_translation_job_status_message(
             job,
@@ -3410,7 +3461,7 @@ async def _resume_user_book_translation(
         user_telegram_id=user_telegram_id,
         job_id=job.id,
     )
-    await _edit_callback_message(
+    await _edit_terminal_status_message(
         progress_message,
         build_translation_job_status_message(
             job,

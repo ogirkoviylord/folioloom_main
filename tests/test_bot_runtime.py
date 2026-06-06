@@ -121,6 +121,30 @@ class NotModifiedOnDuplicateEditableMessage(EditableMessage):
         return TelegramMethodLikeAwaitable(record)
 
 
+class TerminalEditFailingMessage(EditableMessage):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+        self.answers: list[tuple[str, object | None]] = []
+        self.answer_messages: list[EditableMessage] = []
+        self.documents: list[object] = []
+
+    def edit_text(self, text: str, reply_markup=None):
+        def fail() -> None:
+            raise self.error
+
+        return TelegramMethodLikeAwaitable(fail)
+
+    async def answer(self, text: str, reply_markup=None, **kwargs):
+        self.answers.append((text, reply_markup))
+        message = EditableMessage()
+        self.answer_messages.append(message)
+        return message
+
+    async def answer_document(self, document) -> None:
+        self.documents.append(document)
+
+
 class RecordingBot:
     def __init__(self) -> None:
         self.edits: list[tuple[str, int, int, object, str | None]] = []
@@ -183,6 +207,18 @@ class NotModifiedOnDuplicateRecordingMessage(RecordingMessage):
     async def answer(self, text: str, reply_markup=None, **kwargs):
         self.answers.append((text, reply_markup))
         message = NotModifiedOnDuplicateEditableMessage()
+        self.answer_messages.append(message)
+        return message
+
+
+class TerminalEditFailingRecordingMessage(RecordingMessage):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def answer(self, text: str, reply_markup=None, **kwargs):
+        self.answers.append((text, reply_markup))
+        message = TerminalEditFailingMessage(self.error)
         self.answer_messages.append(message)
         return message
 
@@ -350,9 +386,13 @@ class _CancelWithResultService:
         self.job = job
         self._automatic_result_delivered_keys: set[tuple[str, str | None]] = set()
         self._automatic_result_delivery_in_flight: set[tuple[str, str | None]] = set()
+        self.activity: list[dict[str, object]] = []
 
     def get_interface_language(self, user_telegram_id: int) -> str:
         return "en"
+
+    def record_user_activity(self, **kwargs) -> None:
+        self.activity.append(kwargs)
 
     def begin_automatic_result_delivery(self, job: TranslationJob) -> bool:
         key = (job.id, job.result_file_name)
@@ -428,6 +468,45 @@ class _StaleCancelBookService(_CancelWithResultService):
             "can_resume": self.status is TranslationJobStatus.PARTIAL,
             "can_cancel": False,
         }
+
+
+class _ReadyResumeResultService(_CancelWithResultService):
+    def __init__(self) -> None:
+        super().__init__(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.txt",
+                content=b"",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.READY,
+                document_kind=DocumentKind.TXT,
+                result_file_name="book.uk.txt",
+                result_content=b"translated",
+            )
+        )
+
+    def resume_user_book_translation(self, **kwargs) -> TranslationJob:
+        assert self.job is not None
+        return self.job
+
+    def get_user_book_detail(self, **kwargs):
+        return _ready_book_detail()
+
+
+def _ready_book_detail():
+    return {
+        "job_id": "job-1",
+        "file_name": "book.txt",
+        "document_kind": "txt",
+        "source_language": "en",
+        "target_language": "uk",
+        "status": "ready",
+        "has_result": True,
+        "can_resume": False,
+        "can_cancel": False,
+    }
 
 
 def _runtime_job(*, status: TranslationJobStatus) -> TranslationJob:
@@ -1610,6 +1689,67 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cancelled", message.answers[0][0].lower())
         self.assertEqual(len(message.documents), 1)
         self.assertEqual(message.documents[0].filename, "book.uk.partial.txt")
+
+    async def test_cancel_callback_sends_result_when_terminal_edit_fails(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        edit_errors = (
+            RuntimeError("Bad Request: message is not modified"),
+            RuntimeError("Bad Request: message can't be edited"),
+            FakeRetryAfter(
+                "Telegram server says - Flood control exceeded. Retry in 13 seconds."
+            ),
+        )
+        for edit_error in edit_errors:
+            with self.subTest(error=str(edit_error)):
+                job = TranslationJob(
+                    id="job-1",
+                    user_telegram_id=42,
+                    file_name="book.txt",
+                    content=b"",
+                    source_language="en",
+                    target_language="uk",
+                    status=TranslationJobStatus.PARTIAL,
+                    document_kind=DocumentKind.TXT,
+                    result_file_name="book.partial.txt",
+                    result_content=b"partial",
+                )
+                service = _CancelWithResultService(job)
+                router = create_router(
+                    service=service,
+                    translator=_RuntimeRecordingTranslator(),
+                    config=BotRuntimeConfig(),
+                )
+                callback = RecordingCallback(data="cancel_translation")
+                callback.message = TerminalEditFailingMessage(edit_error)
+
+                handler = self._router_callback_handler(router, "cancel_callback")
+                await handler(callback)
+
+                self.assertEqual(len(callback.message.documents), 1)
+                self.assertEqual(
+                    len(service._automatic_result_delivered_keys),
+                    1,
+                )
+
+    async def test_resume_translation_sends_result_when_terminal_edit_fails(self):
+        message = TerminalEditFailingRecordingMessage(
+            RuntimeError("Bad Request: message can't be edited")
+        )
+        service = _ReadyResumeResultService()
+
+        await _resume_user_book_translation(
+            message=message,
+            user_telegram_id=42,
+            job_id="job-1",
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            queued_poll_interval_seconds=0.01,
+        )
+
+        self.assertEqual(len(message.documents), 1)
+        self.assertEqual(len(message.answer_messages[0].answers), 1)
 
     async def test_cancel_result_delivery_is_idempotent_across_runtime_paths(self):
         message = RecordingMessage()
