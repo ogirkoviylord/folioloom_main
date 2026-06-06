@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -2999,6 +3000,7 @@ async def _run_confirm_pending_translation(
                         else None
                     ),
                 ),
+                progress_stats=progress_stats,
             )
 
     heartbeat_task = asyncio.create_task(
@@ -3274,6 +3276,7 @@ async def _resume_user_book_translation(
                     user_telegram_id=user_telegram_id,
                     job_id=job_id,
                 ),
+                progress_stats=progress_stats,
             )
 
     heartbeat_task = asyncio.create_task(
@@ -3601,6 +3604,7 @@ async def _run_translation_progress_heartbeat(
                     user_telegram_id=user_telegram_id,
                     job_id=current_job_id,
                 ),
+                progress_stats=progress_stats,
             )
 
 
@@ -3611,6 +3615,7 @@ def _schedule_message_edit(
     text: str,
     reply_markup=None,
     should_edit=None,
+    progress_stats: dict[str, object] | None = None,
 ):
     async def edit_message() -> None:
         if should_edit is not None and not should_edit():
@@ -3633,7 +3638,12 @@ def _schedule_message_edit(
             await result
 
     future = asyncio.run_coroutine_threadsafe(edit_message(), loop)
-    future.add_done_callback(_log_message_edit_error)
+    future.add_done_callback(
+        lambda completed: _log_message_edit_error(
+            completed,
+            progress_stats=progress_stats,
+        )
+    )
     return future
 
 
@@ -3643,6 +3653,12 @@ def _should_schedule_progress_edit(
     now: float,
     min_interval_seconds: float = TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS,
 ) -> bool:
+    retry_after_until = progress_stats.get("progress_edit_retry_after_until")
+    if retry_after_until is not None:
+        if now < float(retry_after_until):
+            return False
+        progress_stats.pop("progress_edit_retry_after_until", None)
+
     last_edit_scheduled_at = progress_stats.get("last_edit_scheduled_at")
     if last_edit_scheduled_at is not None:
         elapsed = now - float(last_edit_scheduled_at)
@@ -3653,13 +3669,21 @@ def _should_schedule_progress_edit(
     return True
 
 
-def _log_message_edit_error(future) -> None:
+def _log_message_edit_error(
+    future,
+    *,
+    progress_stats: dict[str, object] | None = None,
+) -> None:
     try:
         future.result()
     except Exception as error:
         message = str(error)
-        retry_after = getattr(error, "retry_after", None)
+        retry_after = _telegram_retry_after_seconds(error, message)
         if retry_after is not None or "retry after" in message.lower():
+            if retry_after is not None and progress_stats is not None:
+                progress_stats["progress_edit_retry_after_until"] = (
+                    time.monotonic() + retry_after
+                )
             logger.warning(
                 "Telegram flood control while editing progress message; "
                 "retry_after=%s message=%s",
@@ -3674,6 +3698,17 @@ def _log_message_edit_error(future) -> None:
             )
             return
         logger.exception("Failed to edit translation progress message")
+
+
+def _telegram_retry_after_seconds(error: Exception, message: str) -> float | None:
+    retry_after = getattr(error, "retry_after", None)
+    if isinstance(retry_after, (int, float)):
+        return max(0.0, float(retry_after))
+
+    match = re.search(r"retry\s+in\s+([0-9]+(?:\.[0-9]+)?)\s+seconds?", message, re.I)
+    if match is None:
+        return None
+    return max(0.0, float(match.group(1)))
 
 
 def _progress_counts(

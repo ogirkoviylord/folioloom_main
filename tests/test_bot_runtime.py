@@ -2514,6 +2514,31 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(progress_stats["last_edit_scheduled_at"], 15.0)
 
+    def test_progress_edit_scheduler_respects_retry_after_cooldown(self):
+        progress_stats = {
+            "last_edit_scheduled_at": 10.0,
+            "progress_edit_retry_after_until": 30.0,
+        }
+
+        self.assertFalse(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=20.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 10.0)
+        self.assertEqual(progress_stats["progress_edit_retry_after_until"], 30.0)
+        self.assertTrue(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=30.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 30.0)
+        self.assertNotIn("progress_edit_retry_after_until", progress_stats)
+
     def test_message_edit_error_logs_retry_after_without_traceback(self):
         class FakeRetryAfter(Exception):
             retry_after = 13
@@ -2530,6 +2555,27 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("flood control", logs.output[0].lower())
         self.assertIn("13", logs.output[0])
+
+    def test_message_edit_error_stores_retry_after_cooldown(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        class FakeFuture:
+            def result(self):
+                raise FakeRetryAfter(
+                    "Telegram server says - Flood control exceeded. "
+                    "Retry in 13 seconds."
+                )
+
+        progress_stats: dict[str, object] = {}
+
+        with (
+            patch("translator_service.bot.runtime.time.monotonic", return_value=20.0),
+            self.assertLogs("translator_service.bot.runtime", level="WARNING"),
+        ):
+            _log_message_edit_error(FakeFuture(), progress_stats=progress_stats)
+
+        self.assertEqual(progress_stats["progress_edit_retry_after_until"], 33.0)
 
     def test_cancel_inline_keyboard_uses_callback_data(self):
         keyboard = _cancel_inline_keyboard("en")
