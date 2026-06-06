@@ -6741,28 +6741,40 @@ def _filter_input(name: str, label: str, value: str | None) -> str:
 
 def _activity_row(event: UserActivityEvent, *, include_user: bool = True) -> str:
     created = _format_datetime(event.created_at)
-    target = " / ".join(
-        part for part in (event.target_type or "", event.target_id or "") if part
-    )
-    metadata = ", ".join(
-        f"{key}: {value}" for key, value in sorted(event.metadata.items())[:4]
-    )
+    target = _safe_support_target(event)
+    metadata = _safe_activity_metadata(event)
     user_cell = f"<td>{_user_link(event.actor_id)}</td>" if include_user else ""
     return f"""
     <tr>
-      <td>{escape(created)}</td>
+      <td data-label="Time">{escape(created)}</td>
       {user_cell}
-      <td>{escape(event.surface)}</td>
-      <td>
+      <td data-label="Surface">{escape(event.surface)}</td>
+      <td data-label="Event">
         <strong>{escape(event.event_type)}</strong>
         <span>{escape(event.action)}</span>
       </td>
-      <td>{_bounded_cell_text(target, kind="id")}</td>
-      <td>{_status_badge(event.outcome)}</td>
-      <td>{_bounded_cell_text(event.job_id or "", kind="id", tag="code", empty="")}</td>
-      <td>{_bounded_cell_text(metadata, kind="error")}</td>
+      <td data-label="Target">{_bounded_cell_text(target, kind="id")}</td>
+      <td data-label="Outcome">{_status_badge(event.outcome)}</td>
+      <td data-label="Job">
+        {_bounded_cell_text(event.job_id or "", kind="id", tag="code", empty="")}
+      </td>
+      <td data-label="Metadata">{_bounded_cell_text(metadata, kind="error")}</td>
     </tr>
     """
+
+
+def _safe_activity_metadata(event: UserActivityEvent) -> str:
+    details: list[str] = []
+    for key, value in sorted(event.metadata.items()):
+        if _has_unsafe_support_key(key):
+            continue
+        safe_value = _safe_support_text(value)
+        if not safe_value:
+            continue
+        details.append(f"{key}: {safe_value}")
+        if len(details) >= 4:
+            break
+    return ", ".join(details)
 
 
 def _user_row(user: UserProfile) -> str:
