@@ -12,6 +12,10 @@ from translator_service.admin.translation_logs import (
     TranslationRunSummary,
     list_translation_run_summaries,
 )
+from translator_service.admin.translation_progress import (
+    DurableTranslationProgressSnapshot,
+    overlay_translation_run_summaries,
+)
 
 _ACTIVE_STATUSES = {
     "active",
@@ -74,6 +78,7 @@ def build_live_monitor_snapshot(
     translation_run_log_root: str | Path,
     *,
     operations: OperationsOverview | None = None,
+    progress_snapshots: dict[str, DurableTranslationProgressSnapshot] | None = None,
     runtime_statuses: tuple[Any, ...] = (),
     now: datetime | None = None,
     recent_limit: int = 8,
@@ -114,6 +119,12 @@ def build_live_monitor_snapshot(
         operations=operations,
         logged_job_ids=active_run_job_ids,
         limit=max(1, int(recent_limit)),
+        now=current_time,
+    )
+    recent_runs = overlay_translation_run_summaries(
+        recent_runs,
+        operations=None,
+        progress_snapshots=progress_snapshots,
         now=current_time,
     )
     resource_usage = _resource_usage_from_runtime_statuses(runtime_statuses)

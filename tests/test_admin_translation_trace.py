@@ -14,6 +14,9 @@ from translator_service.admin.translation_logs import (
     TranslationWorkUnitDiagnostic,
     get_translation_run_details,
 )
+from translator_service.admin.translation_progress import (
+    DurableTranslationProgressSnapshot,
+)
 from translator_service.admin.translation_trace import build_translation_trace
 from translator_service.admin.views import translation_trace_body
 from translator_service.translation_run_logs import (
@@ -205,6 +208,45 @@ class AdminTranslationTraceTest(unittest.TestCase):
         self.assertEqual(trace.next_action.label, "Review advanced log")
         self.assertIn("Unknown", html)
         self.assertIn("Review advanced log", html)
+
+    def test_trace_job_facts_use_durable_progress_snapshot_without_operations(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-trace-progress",
+                    order_id="order-trace-progress",
+                    user_id="telegram:42",
+                    file_name="progress.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=0,
+                ),
+            )
+            logger.record_event("job_queued", {"fragment_count": 0})
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            self.assertIsNotNone(details)
+            assert details is not None
+
+            trace = build_translation_trace(
+                details,
+                progress_snapshot=DurableTranslationProgressSnapshot(
+                    job_id="job-trace-progress",
+                    available=True,
+                    status="translating",
+                    state="running",
+                    completed_units=2,
+                    total_units=4,
+                    failed_units=1,
+                    active_worker_ids=("worker-b",),
+                ),
+            )
+            html = translation_trace_body(trace)
+
+        self.assertIn("2/4", html)
+        self.assertIn("worker-b", html)
+        self.assertIn("Failed units", html)
 
     def test_trace_uses_persisted_provider_attempt_when_runtime_is_ok(self):
         with TemporaryDirectory() as temp_dir:
