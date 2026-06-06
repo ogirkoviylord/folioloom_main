@@ -1805,6 +1805,73 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([channel.max_parallel_requests for channel in snapshot], [4])
         self.assertEqual([channel.weight for channel in snapshot], [5])
 
+    def test_reloadable_deepseek_translator_exposes_provider_slot_contract(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "admin.sqlite3"
+            settings = Settings(
+                admin_db_path=str(db_path),
+                admin_secret_master_key=MASTER_KEY,
+                deepseek_model="deepseek-test",
+            )
+            with SQLiteEncryptedSecretStore(db_path, master_key=MASTER_KEY) as secrets:
+                with SQLiteAIProviderKeyStore(db_path) as keys:
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="stable",
+                        plaintext="admin-key-a",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=2,
+                        max_parallel_requests=2,
+                    )
+                    keys.add_key(
+                        provider_id="deepseek",
+                        label="overflow",
+                        plaintext="admin-key-b",
+                        actor_id="bootstrap-owner",
+                        secret_store=secrets,
+                        weight=1,
+                        max_parallel_requests=1,
+                    )
+
+            with patch(
+                "translator_service.bot.runtime.DeepSeekClient",
+                _RuntimeKeyEchoDeepSeekClient,
+            ):
+                translator = build_deepseek_translator(settings)
+                self.assertIsInstance(translator, ReloadableDeepSeekTranslator)
+
+                inventory = translator.provider_slot_inventory()
+                caps = translator.provider_capacity_caps()
+                with translator.provider_slot_channel_lease("deepseek-channel-2"):
+                    translated = translator.translate(
+                        text="Hello",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+        self.assertEqual(translator.provider_id, "deepseek")
+        self.assertEqual(
+            [
+                (item.provider_id, item.channel_id, item.max_parallel_requests)
+                for item in inventory
+            ],
+            [
+                ("deepseek", "deepseek-channel-1", 2),
+                ("deepseek", "deepseek-channel-2", 1),
+            ],
+        )
+        self.assertEqual(
+            [(cap.scope.value, cap.max_parallel_requests) for cap in caps],
+            [("account", 3), ("model", 3)],
+        )
+        self.assertEqual(translated, "admin-key-b:uk:Hello")
+        inventory_repr = repr(inventory)
+        self.assertNotIn("admin-key-a", inventory_repr)
+        self.assertNotIn("admin-key-b", inventory_repr)
+        self.assertNotIn("stable", inventory_repr)
+        self.assertNotIn("overflow", inventory_repr)
+
     def test_admin_deepseek_translator_honors_manual_reload_request(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "admin.sqlite3"
@@ -2649,7 +2716,52 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             elapsed_seconds=10,
         )
 
-        self.assertEqual(estimated_total, 235)
+        self.assertEqual(estimated_total, 300)
+
+    def test_polled_progress_estimate_lets_stored_baseline_remaining_decay(self):
+        progress = type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 1,
+                "total_fragments": 4,
+                "estimated_seconds": 300,
+            },
+        )()
+
+        first_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=10,
+        )
+        later_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=40,
+        )
+
+        self.assertEqual(first_total, 300)
+        self.assertEqual(later_total, 300)
+        self.assertEqual(first_total - 10, 290)
+        self.assertEqual(later_total - 40, 260)
+
+    def test_polled_progress_estimate_uses_observed_rate_when_slower_than_baseline(
+        self,
+    ):
+        progress = type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 1,
+                "total_fragments": 4,
+                "estimated_seconds": 300,
+            },
+        )()
+
+        estimated_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=100,
+        )
+
+        self.assertEqual(estimated_total, 400)
 
     def test_document_size_guard_uses_telegram_metadata_before_download(self):
         class Document:
