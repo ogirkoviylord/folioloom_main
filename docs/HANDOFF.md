@@ -480,6 +480,18 @@ Owner decisions recorded during issue #71:
   not evidence that prompt bodies are already stored or rendered. Implementers
   should use a separate scoped issue for prompt diagnostics and keep normal
   trace/evidence/archive/telemetry/API surfaces metadata-only/redacted.
+- 2026-06-06: Owner approved broad automatic raw provider diagnostics capture
+  for pre-release development after job
+  `job-9488146309f7434b9746580a6cc22d96` showed that safe metadata was
+  insufficient to inspect exactly what was sent to and returned by the provider.
+  The approved pre-release diagnostic intent is to retain the full analysis
+  context for crashes and translation bugs, including source work-unit text,
+  prompt bodies, provider user payloads, raw provider outputs, repair prompts,
+  output-contract validation details and related job/work-unit state. This is
+  owner/operator-only development diagnostics, not release-version telemetry or
+  support/legal/privacy policy. Secrets must still be excluded, and the decision
+  must be revisited before free beta/public release to define retention,
+  consent, redaction and deletion behavior.
 - 2026-06-02: Owner approved the issue #165 Book/Manuscript MVP contract
   direction: first MVP bar is structure preservation plus clean translation,
   with format-specific TXT/DOCX/EPUB expectations, zero provider commentary,
