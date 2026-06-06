@@ -301,6 +301,10 @@ class AdminOperationsTest(unittest.TestCase):
 
         html = operations_body(overview)
 
+        self.assertIn("Jobs / Queue Operations", html)
+        self.assertIn("Queue and worker state", html)
+        self.assertIn("Job queue", html)
+        self.assertIn("Worker context", html)
         self.assertIn("<th>State</th>", html)
         self.assertIn("<th>Job id</th>", html)
         self.assertIn("order-1", html)
