@@ -79,7 +79,7 @@ _PRIMARY_NAV_ITEMS = (
 )
 _ADVANCED_NAV_ITEMS = (
     ("logs", "/admin/logs", "Logs"),
-    ("reader", "/admin/internal-reader", "Reader"),
+    ("reader", "/admin/internal-reader", "Reader Explorer"),
     ("activity", "/admin/activity", "Activity"),
     ("operations", "/admin/operations/jobs", "Operations"),
     ("audit", "/admin/audit", "Audit"),
@@ -2233,6 +2233,8 @@ def _quality_row(row: QualitySampleScore) -> str:
 def internal_reader_body(
     *,
     source_options: tuple[tuple[str, str], ...],
+    runs: tuple[TranslationRunSummary, ...] = (),
+    selected_user_id: str | None = None,
     selected_source: str = "",
     mapping_path: str = "",
     source_format: str = "auto",
@@ -2262,22 +2264,30 @@ def internal_reader_body(
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Internal Reader</h3>
+        <h3>Reader Explorer</h3>
         <p>
-          Generate owner-only before/after reports for approved local
-          TXT/DOCX/EPUB fixtures.
+          Navigate from users to translation runs, then open the existing
+          owner-only Reader or Text Diagnostics for full pre-release context.
         </p>
       </div>
     </section>
     <section class="panel warning-panel">
-      <h3>Raw text visibility is enabled for this internal reader only.</h3>
+      <h3>Overview stays metadata-first.</h3>
       <p>
-        Reports may show source document text and translated output. Keep them
-        out of issues, PRs, safe log archives, screenshots and support notes
-        unless the owner explicitly approves that exact excerpt.
+        Full source, translation, prompt, and provider diagnostics may appear
+        only after opening a dedicated owner-only diagnostic view. Keep raw
+        excerpts out of issues, PRs, safe log archives, screenshots, release
+        evidence, legal/privacy copy and support notes unless the owner
+        explicitly approves that exact excerpt.
       </p>
     </section>
+    {_reader_explorer_overview(runs, selected_user_id=selected_user_id)}
     <section class="panel">
+      <h3>Local fixture reader</h3>
+      <p>
+        Generate owner-only before/after reports for approved local
+        TXT/DOCX/EPUB fixtures.
+      </p>
       <form class="reader-form" method="get" action="/admin/internal-reader/preview">
         {error_html}
         <label>
@@ -2327,6 +2337,172 @@ def internal_reader_body(
         {_action_button("Open reader", "view")}
       </form>
     </section>
+    """
+
+
+def _reader_explorer_overview(
+    runs: tuple[TranslationRunSummary, ...],
+    *,
+    selected_user_id: str | None,
+) -> str:
+    users = _reader_explorer_users(runs)
+    selected_runs = tuple(
+        row for row in runs if (row.user_id or "Unknown") == selected_user_id
+    )
+    if selected_user_id is None and users:
+        selected_user_id = users[0][0]
+        selected_runs = tuple(
+            row for row in runs if (row.user_id or "Unknown") == selected_user_id
+        )
+    user_rows = "\n".join(
+        _reader_explorer_user_row(
+            user_id,
+            count,
+            last_seen,
+            selected=user_id == selected_user_id,
+        )
+        for user_id, count, last_seen in users
+    )
+    if not user_rows:
+        user_rows = """
+        <tr>
+          <td colspan="4" class="empty-cell">No translation runs found.</td>
+        </tr>
+        """
+    run_rows = "\n".join(_reader_explorer_run_row(row) for row in selected_runs)
+    if not run_rows:
+        run_rows = """
+        <tr>
+          <td colspan="8" class="empty-cell">
+            Select a user with translation runs to open Reader diagnostics.
+          </td>
+        </tr>
+        """
+    selected_heading = selected_user_id or "No user selected"
+    return f"""
+    <section class="panel table-panel">
+      <h3>Users</h3>
+      <table class="log-table reader-explorer-users">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Runs</th>
+            <th>Last seen</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{user_rows}</tbody>
+      </table>
+    </section>
+    <section class="panel table-panel">
+      <h3>Runs for {escape(selected_heading)}</h3>
+      <table class="log-table reader-explorer-runs">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Status</th>
+            <th>Job</th>
+            <th>File</th>
+            <th>Direction</th>
+            <th>Fragments</th>
+            <th>Safe detail</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{run_rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _reader_explorer_users(
+    runs: tuple[TranslationRunSummary, ...],
+) -> tuple[tuple[str, int, datetime | None], ...]:
+    grouped: dict[str, tuple[int, datetime | None]] = {}
+    for run in runs:
+        user_id = run.user_id or "Unknown"
+        count, last_seen = grouped.get(user_id, (0, None))
+        candidate = run.last_event_at or run.started_at or run.finished_at
+        if last_seen is None or (candidate is not None and candidate > last_seen):
+            last_seen = candidate
+        grouped[user_id] = (count + 1, last_seen)
+    rows = tuple(
+        (user_id, count, last_seen)
+        for user_id, (count, last_seen) in grouped.items()
+    )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (row[2] or datetime.min.replace(tzinfo=UTC), row[0]),
+            reverse=True,
+        )
+    )
+
+
+def _reader_explorer_user_row(
+    user_id: str,
+    count: int,
+    last_seen: datetime | None,
+    *,
+    selected: bool,
+) -> str:
+    selected_badge = '<span class="status">selected</span>' if selected else ""
+    href = f"/admin/internal-reader?{urlencode({'user_id': user_id})}"
+    return f"""
+    <tr>
+      <td data-label="User">
+        <code>{escape(_safe_support_text(user_id) or "Unknown")}</code>
+        {selected_badge}
+      </td>
+      <td data-label="Runs">{count}</td>
+      <td data-label="Last seen">{escape(_format_datetime(last_seen))}</td>
+      <td data-label="Actions">
+        {_action_link("Select", href, "view", compact=True)}
+      </td>
+    </tr>
+    """
+
+
+def _reader_explorer_run_row(row: TranslationRunSummary) -> str:
+    run_id = Path(row.run_dir).name
+    direction = f"{row.source_language} -> {row.target_language}"
+    file_name = _safe_support_text(row.file_name) or "unknown"
+    document_kind = _safe_support_text(row.document_kind) or "unknown"
+    safe_detail = _support_translation_stage(row)
+    details_link = _action_link(
+        "Details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
+    reader_link = _action_link(
+        "Reader",
+        f"/admin/logs/{run_id}/reader",
+        "view",
+        compact=True,
+    )
+    diagnostics_link = _action_link(
+        "Text diagnostics",
+        f"/admin/logs/{run_id}/text-diagnostics",
+        "view",
+        compact=True,
+    )
+    return f"""
+    <tr>
+      <td data-label="Started">{escape(_format_datetime(row.started_at))}</td>
+      <td data-label="Status"><span class="status">{escape(row.status)}</span></td>
+      <td data-label="Job"><code>{escape(row.job_id)}</code></td>
+      <td data-label="File">
+        <strong>{escape(file_name)}</strong>
+        <span>{escape(document_kind)}</span>
+      </td>
+      <td data-label="Direction">{escape(direction)}</td>
+      <td data-label="Fragments">{escape(_progress_label(row))}</td>
+      <td data-label="Safe detail">{escape(safe_detail)}</td>
+      <td data-label="Actions">
+        <div class="job-actions">{details_link}{reader_link}{diagnostics_link}</div>
+      </td>
+    </tr>
     """
 
 

@@ -633,7 +633,13 @@ class AdminRoutesTest(unittest.TestCase):
         primary_nav = _nav_section(overview.text, "primary-nav")
         advanced_nav = _nav_section(overview.text, "advanced-nav")
         self.assertIn(">Advanced<", overview.text)
-        for label in ("Logs", "Reader", "Activity", "Operations", "Audit"):
+        for label in (
+            "Logs",
+            "Reader Explorer",
+            "Activity",
+            "Operations",
+            "Audit",
+        ):
             self.assertNotIn(f">{label}<", primary_nav)
             self.assertIn(f">{label}<", advanced_nav)
         for href in (
@@ -694,13 +700,16 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.headers["location"], "/admin/login")
         generator.assert_not_called()
 
-    def test_internal_reader_page_lists_sample_fixtures_under_advanced_nav(self):
+    def test_reader_explorer_page_lists_sample_fixtures_under_advanced_nav(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 
         page = self.client.get("/admin/internal-reader")
 
         self.assertEqual(page.status_code, 200)
-        self.assertIn("Internal Reader", page.text)
+        self.assertEqual(page.headers["cache-control"], "no-store")
+        self.assertIn("Reader Explorer", page.text)
+        self.assertIn("No translation runs found.", page.text)
+        self.assertIn("Local fixture reader", page.text)
         self.assertIn("test_samples/sample_book.en.txt", page.text)
         self.assertIn("test_samples/sample_book.en.docx", page.text)
         self.assertIn("test_samples/sample_book.en.epub", page.text)
@@ -709,6 +718,110 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(page.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(page.text))
+
+    def test_reader_explorer_lists_selected_user_runs_without_raw_text(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_root = root / "runs"
+            private_source = "PRIVATE READER EXPLORER RAW SOURCE"
+            private_translation = "PRIVATE READER EXPLORER RAW TRANSLATION"
+            private_mark = "PRIVATE READER EXPLORER REVIEW MARK"
+            long_file_name = "reader-explorer-" + ("long-name-" * 12) + ".txt"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-reader-explorer-selected",
+                    order_id="order-reader-explorer-selected",
+                    user_id="telegram:42",
+                    file_name=long_file_name,
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text=private_source,
+                    translated_text=private_translation,
+                    status="ready",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=11,
+                    completion_tokens=7,
+                    total_tokens=18,
+                )
+            )
+            logger.finish(status="ready", result_file_name="book.uk.txt")
+            (Path(logger.run_dir) / "reader_review_marks.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "marks": [
+                            {
+                                "sequence": 1,
+                                "mark": "needs_review",
+                                "source_text": private_mark,
+                                "translated_text": private_mark,
+                                "status": "ready",
+                                "source_block_ids": ["block-1"],
+                                "updated_at": "2026-06-06T00:00:00+00:00",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            other_logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-reader-explorer-other",
+                    order_id="order-reader-explorer-other",
+                    user_id="telegram:100",
+                    file_name="other-user-book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=1,
+                ),
+            )
+            other_logger.finish(status="ready")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            page = client.get(
+                "/admin/internal-reader",
+                params={"user_id": "telegram:42"},
+            )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.headers["cache-control"], "no-store")
+        self.assertIn("Reader Explorer", page.text)
+        self.assertIn("telegram:42", page.text)
+        self.assertIn("telegram:100", page.text)
+        self.assertIn("job-reader-explorer-selected", page.text)
+        self.assertIn(long_file_name, page.text)
+        self.assertIn("en -&gt; uk", page.text)
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}/reader", page.text)
+        self.assertIn(
+            f"/admin/logs/{logger.run_dir.name}/text-diagnostics",
+            page.text,
+        )
+        self.assertIn(f"/admin/logs/{logger.run_dir.name}", page.text)
+        self.assertNotIn("job-reader-explorer-other", page.text)
+        self.assertNotIn("other-user-book.txt", page.text)
+        self.assertNotIn(private_source, page.text)
+        self.assertNotIn(private_translation, page.text)
+        self.assertNotIn(private_mark, page.text)
+        self.assertNotIn("reader_review_marks", page.text)
 
     def test_internal_reader_preview_renders_txt_with_optional_mapping(self):
         with TemporaryDirectory() as temp_dir:
