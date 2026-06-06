@@ -910,7 +910,7 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("Translated paragraph from the document.", message)
         self.assertIn("/cancel", message)
 
-    def test_translation_progress_message_uses_elapsed_estimate_before_first_fragment(self):
+    def test_progress_message_keeps_zero_before_first_fragment(self):
         message = build_translation_progress_message(
             completed_fragments=0,
             total_fragments=10,
@@ -919,7 +919,20 @@ class BotMessagesTest(unittest.TestCase):
             elapsed_seconds=40,
         )
 
-        self.assertIn("[####------] 40%", message)
+        self.assertIn("[----------] 0%", message)
+        self.assertIn("Time left: ~1 min", message)
+
+    def test_progress_message_uses_actual_percent_not_eta_percent(self):
+        message = build_translation_progress_message(
+            completed_fragments=1,
+            total_fragments=10,
+            interface_language="en",
+            estimated_total_seconds=100,
+            elapsed_seconds=80,
+        )
+
+        self.assertIn("[#---------] 10%", message)
+        self.assertIn("Time left: ~20 sec", message)
 
     def test_translation_progress_message_escapes_expandable_quote_excerpt(self):
         message = build_translation_progress_message(
