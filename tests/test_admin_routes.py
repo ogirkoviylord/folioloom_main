@@ -2107,10 +2107,29 @@ class AdminRoutesTest(unittest.TestCase):
                 )
             )
             logger.finish(status="ready", result_file_name="book.ru.txt")
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(admin_db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.button.clicked",
+                        action="continue",
+                        target_type="button",
+                        target_id="continue api_key=sk-trace-activity-secret",
+                        outcome=ActivityOutcome.SUCCESS,
+                        job_id="job-logs-1",
+                        metadata={"source_text": "RAW TRACE ACTIVITY SOURCE"},
+                    )
+                )
             client = TestClient(
                 create_app(
                     settings=Settings(
                         translation_run_log_root=temp_dir,
+                        admin_db_path=str(admin_db_path),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
@@ -2144,6 +2163,9 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("job-logs-1", trace.text)
             self.assertIn("book.txt", trace.text)
             self.assertIn("Not failed", trace.text)
+            self.assertIn("activity: continue", trace.text)
+            self.assertIn("target=button", trace.text)
+            self.assertIn("target_id=continue [redacted]", trace.text)
             self.assertIn("Advanced log detail", trace.text)
             self.assertIn("Evidence packet copy/download is tracked", trace.text)
             self.assertNotIn("Chapter one", trace.text)
@@ -2151,6 +2173,8 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("processing-bearer-token", trace.text)
             self.assertNotIn("sk-processing-secret-value", trace.text)
             self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
+            self.assertNotIn("sk-trace-activity-secret", trace.text)
+            self.assertNotIn("RAW TRACE ACTIVITY SOURCE", trace.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
             self.assertIn("Progress", details.text)
@@ -4274,7 +4298,16 @@ class AdminRoutesTest(unittest.TestCase):
                         target_id="book.txt",
                         outcome=ActivityOutcome.SUCCESS,
                         job_id="job-activity-1",
-                        metadata={"result_file_name": "book.uk.txt"},
+                        metadata={
+                            "result_file_name": "book.uk.txt",
+                            "safe_long_note": "safe-note-" + ("x" * 180),
+                            "source_text": "RAW ACTIVITY SOURCE",
+                            "translated_text": "RAW ACTIVITY TRANSLATION",
+                            "prompt": "RAW ACTIVITY PROMPT",
+                            "api_key": "sk-activity-secret",
+                            "traceback": "Traceback (most recent call last)",
+                            "storage_path": "/var/private/activity.txt",
+                        },
                     )
                 )
                 activity_store.record_event(
@@ -4312,6 +4345,15 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Activity", activity_page.text)
             self.assertIn("translation.completed", activity_page.text)
             self.assertIn("job-activity-1", activity_page.text)
+            self.assertIn("data-label=\"Metadata\"", activity_page.text)
+            self.assertIn("admin-cell-error", activity_page.text)
+            self.assertIn("safe_long_note: safe-note-", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY SOURCE", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY TRANSLATION", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY PROMPT", activity_page.text)
+            self.assertNotIn("sk-activity-secret", activity_page.text)
+            self.assertNotIn("Traceback", activity_page.text)
+            self.assertNotIn("/var/private/activity.txt", activity_page.text)
             self.assertEqual(users_page.status_code, 200)
             self.assertIn("telegram:42", users_page.text)
             self.assertIn("limited", users_page.text)

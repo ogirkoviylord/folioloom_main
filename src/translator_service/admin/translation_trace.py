@@ -427,12 +427,15 @@ def _activity_detail(event: UserActivityEvent) -> str:
         f"outcome={event.outcome}",
         f"surface={event.surface}",
     ]
-    if event.target_type:
-        parts.append(f"target={event.target_type}")
-    if event.target_id:
-        parts.append(f"target_id={event.target_id}")
-    if event.job_id:
-        parts.append(f"job_id={event.job_id}")
+    target_type = _safe_text(event.target_type)
+    if target_type:
+        parts.append(f"target={target_type}")
+    target_id = _safe_text(event.target_id)
+    if target_id:
+        parts.append(f"target_id={target_id}")
+    job_id = _safe_text(event.job_id)
+    if job_id:
+        parts.append(f"job_id={job_id}")
     return ", ".join(parts)
 
 
