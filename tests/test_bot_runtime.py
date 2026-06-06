@@ -287,6 +287,24 @@ class _QueuedThenReadyService:
         }
 
 
+class _FreshQueuedThenReadyService(_QueuedThenReadyService):
+    def get_pending_upload(self, user_telegram_id: int):
+        return None
+
+    def get_pending(self, user_telegram_id: int):
+        return SimpleNamespace(
+            file_name="book.txt",
+            fragment_count=2,
+            estimated_seconds=None,
+            rights_confirmed=True,
+            translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            preview_accepted=True,
+        )
+
+    def confirm_pending_translation(self, **kwargs) -> TranslationJob:
+        return _runtime_job(status=TranslationJobStatus.QUEUED)
+
+
 class _QueuedTwiceThenReadyService(_QueuedThenReadyService):
     def get_user_book_translation_job(self, **kwargs):
         if self.progress_calls <= 1:
@@ -1299,6 +1317,39 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             message.answer_messages[0].edited_texts[-1],
         )
         self.assertEqual(service.progress_calls, 1)
+
+    async def test_confirm_deferred_translation_targets_cancel_after_job_exists(self):
+        message = RecordingMessage()
+        service = _FreshQueuedThenReadyService()
+
+        await _confirm_pending_translation(
+            message=message,
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+        )
+
+        self.assertEqual(
+            message.answer_messages[0].edited_reply_markups[0]
+            .inline_keyboard[0][0]
+            .callback_data,
+            "cancel_book:job-1",
+        )
+        callbacks_after_job_exists = [
+            markup.inline_keyboard[0][0].callback_data
+            for markup in message.answer_messages[0].edited_reply_markups
+            if markup is not None
+        ]
+        self.assertTrue(callbacks_after_job_exists)
+        self.assertTrue(
+            all(
+                callback_data == "cancel_book:job-1"
+                for callback_data in callbacks_after_job_exists
+            )
+        )
+        self.assertIn(
+            "Your translation is ready",
+            message.answer_messages[0].edited_texts[-1],
+        )
 
     async def test_resume_translation_ignores_duplicate_queued_message_edit(self):
         message = NotModifiedOnDuplicateRecordingMessage()
