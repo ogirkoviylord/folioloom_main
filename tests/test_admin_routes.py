@@ -1268,6 +1268,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Triage inbox", response.text)
         self.assertIn("integrations_missing", response.text)
         self.assertIn("/admin/integrations", response.text)
+        self.assertIn("action-list-header", response.text)
+        self.assertIn("triage-severity-badge", response.text)
         self.assertNotIn("pending actions will live here", response.text)
 
     def test_overview_links_failed_translation_to_trace_triage(self):
