@@ -3486,6 +3486,28 @@ async def _cancel_active_translation(
     service: BotTranslationService,
 ) -> None:
     interface_language = service.get_interface_language(message.from_user.id)
+    queue_summary = _get_user_queue_summary_safely(
+        service,
+        user_telegram_id=message.from_user.id,
+    )
+    if _queue_summary_total_active(queue_summary) > 1:
+        books = _queue_summary_items(queue_summary) or _list_user_books_safely(
+            service,
+            user_telegram_id=message.from_user.id,
+        )
+        await message.answer(
+            build_my_books_message(
+                books,
+                interface_language=interface_language,
+                queue_summary=queue_summary,
+            ),
+            reply_markup=_my_books_keyboard(
+                books,
+                interface_language=interface_language,
+            ),
+        )
+        return
+
     result = service.cancel_translation_with_result(message.from_user.id)
     if result.cancelled:
         if result.job is not None:
@@ -3508,7 +3530,89 @@ async def _cancel_active_translation(
         )
         return
 
+    latest_book = _latest_user_book_safely(
+        service,
+        user_telegram_id=message.from_user.id,
+    )
+    if latest_book is not None:
+        await message.answer(
+            build_my_book_detail_message(
+                latest_book,
+                interface_language=interface_language,
+            ),
+            reply_markup=_my_book_detail_keyboard(
+                latest_book,
+                interface_language=interface_language,
+            ),
+        )
+        return
+
     await message.answer(build_nothing_to_cancel_message(interface_language))
+
+
+def _get_user_queue_summary_safely(
+    service,
+    *,
+    user_telegram_id: int,
+):
+    get_user_queue_summary = getattr(service, "get_user_queue_summary", None)
+    if not callable(get_user_queue_summary):
+        return None
+    try:
+        return get_user_queue_summary(user_telegram_id=user_telegram_id, limit=5)
+    except Exception as error:
+        logger.warning("Unable to read user queue summary for text cancel: %s", error)
+        return None
+
+
+def _queue_summary_total_active(queue_summary) -> int:
+    if queue_summary is None:
+        return 0
+    if isinstance(queue_summary, dict):
+        value = queue_summary.get("total_active")
+    else:
+        value = getattr(queue_summary, "total_active", None)
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _queue_summary_items(queue_summary) -> list[object]:
+    if queue_summary is None:
+        return []
+    if isinstance(queue_summary, dict):
+        return list(queue_summary.get("items") or [])
+    return list(getattr(queue_summary, "items", ()) or [])
+
+
+def _list_user_books_safely(
+    service,
+    *,
+    user_telegram_id: int,
+    limit: int = 5,
+) -> list[object]:
+    list_user_books = getattr(service, "list_user_books", None)
+    if not callable(list_user_books):
+        return []
+    try:
+        return list(list_user_books(user_telegram_id=user_telegram_id, limit=limit))
+    except Exception as error:
+        logger.warning("Unable to read user books for text cancel: %s", error)
+        return []
+
+
+def _latest_user_book_safely(
+    service,
+    *,
+    user_telegram_id: int,
+):
+    books = _list_user_books_safely(
+        service,
+        user_telegram_id=user_telegram_id,
+        limit=1,
+    )
+    return books[0] if books else None
 
 
 async def _send_translation_result_document_once(
