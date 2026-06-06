@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from translator_service.admin.operations import OperationsOverview
+from translator_service.admin.operations import (
+    JOB_STATE_FAILED,
+    JOB_STATE_QUEUED,
+    JOB_STATE_RUNNING,
+    JOB_STATE_SUCCEEDED,
+    JOB_STATE_UNKNOWN,
+    OperationsOverview,
+    normalize_job_state,
+)
 from translator_service.admin.translation_logs import (
     TranslationRunDetails,
     TranslationRunSummary,
@@ -19,6 +28,122 @@ _ACTIVE_STATUSES = {
     "started",
     "translating",
 }
+
+
+@dataclass(frozen=True)
+class DurableTranslationProgressSnapshot:
+    job_id: str
+    available: bool = False
+    unavailable_reason: str | None = None
+    status: str = "unknown"
+    state: str = JOB_STATE_UNKNOWN
+    completed_units: int = 0
+    total_units: int = 0
+    failed_units: int = 0
+    active_units: int = 0
+    pending_units: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
+    total_tokens: int = 0
+    retry_count: int = 0
+    active_worker_ids: tuple[str, ...] = ()
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    progress_percent: float | None = None
+    eta_seconds: float | None = None
+
+
+def build_durable_translation_progress_snapshot(
+    job_id: str,
+    *,
+    store: Any | None,
+    now: datetime | None = None,
+) -> DurableTranslationProgressSnapshot:
+    safe_job_id = str(job_id or "")
+    if not safe_job_id:
+        return _unavailable_progress_snapshot("", "missing_job_id")
+    if store is None:
+        return _unavailable_progress_snapshot(safe_job_id, "store_unavailable")
+
+    try:
+        job = store.get_job(safe_job_id)
+    except Exception:
+        return _unavailable_progress_snapshot(safe_job_id, "store_error")
+    if job is None:
+        return _unavailable_progress_snapshot(safe_job_id, "job_not_found")
+
+    try:
+        units = tuple(store.list_work_units(safe_job_id))
+    except Exception:
+        return _unavailable_progress_snapshot(
+            safe_job_id,
+            "work_units_unavailable",
+        )
+
+    status = _status_text(_read_value(job, "status", "state"))
+    state = normalize_job_state(status)
+    unit_states = tuple(
+        normalize_job_state(_read_value(unit, "status")) for unit in units
+    )
+    completed_units = _count_unit_states(unit_states, JOB_STATE_SUCCEEDED)
+    failed_units = _count_unit_states(unit_states, JOB_STATE_FAILED)
+    active_units = _count_unit_states(unit_states, JOB_STATE_RUNNING)
+    pending_units = _count_unit_states(unit_states, JOB_STATE_QUEUED)
+    prompt_tokens = _sum_unit_field(units, "prompt_tokens")
+    completion_tokens = _sum_unit_field(units, "completion_tokens")
+    total_units = max(
+        _nonnegative_int(_read_value(job, "total_units", "unit_count")),
+        len(units),
+    )
+    started_at = (
+        _optional_datetime(_read_value(job, "started_at"))
+        or _first_datetime(tuple(_read_value(unit, "started_at") for unit in units))
+        or _optional_datetime(_read_value(job, "created_at"))
+    )
+    completed_at = _last_datetime(
+        (
+            _read_value(job, "completed_at"),
+            *(_read_value(unit, "completed_at") for unit in units),
+        )
+    )
+
+    return DurableTranslationProgressSnapshot(
+        job_id=safe_job_id,
+        available=True,
+        status=status,
+        state=state,
+        completed_units=completed_units,
+        total_units=total_units,
+        failed_units=failed_units,
+        active_units=active_units,
+        pending_units=pending_units,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cache_hit_tokens=_sum_unit_field(units, "cache_hit_tokens"),
+        cache_miss_tokens=_sum_unit_field(units, "cache_miss_tokens"),
+        total_tokens=prompt_tokens + completion_tokens,
+        retry_count=max(
+            _nonnegative_int(_read_value(job, "retry_count", "retries")),
+            _sum_unit_field(units, "retry_count"),
+        ),
+        active_worker_ids=_active_worker_ids(units, unit_states),
+        created_at=_optional_datetime(_read_value(job, "created_at")),
+        updated_at=_optional_datetime(_read_value(job, "updated_at")),
+        started_at=started_at,
+        completed_at=completed_at,
+        progress_percent=_progress_percent(completed_units, total_units),
+        eta_seconds=_eta_seconds(
+            status=state,
+            completed=completed_units,
+            total=total_units,
+            started_at=started_at,
+            now=now,
+        ),
+    )
 
 
 def overlay_translation_run_summaries(
@@ -72,7 +197,11 @@ def _overlay_summary(
         getattr(job, "raw_status", None) or getattr(job, "state", None)
     )
     displayed_completed = max(summary.fragment_count, completed_units)
-    displayed_total = max(summary.total_fragment_count, total_units, displayed_completed)
+    displayed_total = max(
+        summary.total_fragment_count,
+        total_units,
+        displayed_completed,
+    )
     return replace(
         summary,
         status=status if status != "unknown" else summary.status,
@@ -110,6 +239,88 @@ def _jobs_by_id(operations: OperationsOverview) -> dict[str, Any]:
     return {job.id: job for job in operations.jobs if getattr(job, "id", "")}
 
 
+def _unavailable_progress_snapshot(
+    job_id: str,
+    reason: str,
+) -> DurableTranslationProgressSnapshot:
+    return DurableTranslationProgressSnapshot(
+        job_id=job_id,
+        available=False,
+        unavailable_reason=reason,
+    )
+
+
+def _active_worker_ids(
+    units: tuple[Any, ...],
+    unit_states: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                worker_id
+                for unit, unit_state in zip(units, unit_states, strict=True)
+                if unit_state == JOB_STATE_RUNNING
+                for worker_id in (_optional_string(_read_value(unit, "worker_id")),)
+                if worker_id
+            }
+        )
+    )
+
+
+def _count_unit_states(unit_states: tuple[str, ...], state: str) -> int:
+    return sum(1 for unit_state in unit_states if unit_state == state)
+
+
+def _sum_unit_field(units: tuple[Any, ...], field_name: str) -> int:
+    return sum(_nonnegative_int(_read_value(unit, field_name)) for unit in units)
+
+
+def _read_value(row: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(row, Mapping) and name in row:
+            return row[name]
+        keys = getattr(row, "keys", None)
+        if keys is not None and name in keys():
+            return row[name]
+        if hasattr(row, name):
+            return getattr(row, name)
+    return None
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    return str(value)
+
+
+def _optional_datetime(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return None
+
+
+def _first_datetime(values: tuple[Any, ...]) -> datetime | None:
+    datetimes = tuple(
+        value
+        for value in (_optional_datetime(value) for value in values)
+        if value is not None
+    )
+    return min(datetimes) if datetimes else None
+
+
+def _last_datetime(values: tuple[Any, ...]) -> datetime | None:
+    datetimes = tuple(
+        value
+        for value in (_optional_datetime(value) for value in values)
+        if value is not None
+    )
+    return max(datetimes) if datetimes else None
+
+
 def _set_max(values: dict[str, Any], key: str, candidate: int) -> None:
     values[key] = max(_nonnegative_int(values.get(key, 0)), candidate)
 
@@ -144,6 +355,8 @@ def _eta_seconds(
 
 
 def _status_text(value: Any) -> str:
+    if value is None:
+        return "unknown"
     if hasattr(value, "value"):
         value = value.value
     return str(value).strip().lower() or "unknown"
