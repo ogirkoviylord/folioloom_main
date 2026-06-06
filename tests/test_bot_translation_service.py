@@ -36,6 +36,7 @@ from translator_service.bot_translation_service import (
     RightsConfirmationRequired,
     TranslationModeRequired,
     UserBookResult,
+    _translation_job_status_from_persistent_status,
     estimate_translation_seconds,
 )
 from translator_service.document_sandbox import (
@@ -67,11 +68,13 @@ from translator_service.persistent_jobs import (
     WorkUnitPlan,
 )
 from translator_service.pricing import PricingRules
+from translator_service.scheduler import SchedulerLimits
 from translator_service.security_telemetry import (
     SecurityCooldownActive,
     SecurityCooldownPolicy,
     SecurityThresholdPolicy,
 )
+from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
@@ -4025,6 +4028,219 @@ class BotTranslationServiceTest(unittest.TestCase):
                         detail.has_partial_result,
                         status is PersistentTranslationJobStatus.PARTIAL,
                     )
+
+    def test_persistent_cancel_requested_maps_to_runtime_cancel_requested(self):
+        self.assertEqual(
+            _translation_job_status_from_persistent_status(
+                PersistentTranslationJobStatus.CANCEL_REQUESTED
+            ),
+            TranslationJobStatus.CANCEL_REQUESTED,
+        )
+
+    def test_active_cancel_marks_persistent_job_cancel_requested(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"Original",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=source.object_key,
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=source.object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:0",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=source.object_key,
+                    )
+                ],
+            )
+            persistent_store.claim_next_work_unit(job.id, worker_id="worker-a")
+            token = CancellationToken()
+            service._set_active_translation(
+                user_telegram_id=42,
+                cancellation_token=token,
+                job_id=job.id,
+                total_fragments=1,
+            )
+
+            result = service.cancel_translation_with_result(42)
+
+            persisted = persistent_store.get_job(job.id)
+            self.assertTrue(result.cancelled)
+            self.assertTrue(token.is_cancelled)
+            self.assertEqual(
+                persisted.status,
+                PersistentTranslationJobStatus.CANCEL_REQUESTED,
+            )
+
+    def test_external_worker_cancel_marks_active_job_cancel_requested(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"Original",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=source.object_key,
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=source.object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:0",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=source.object_key,
+                    )
+                ],
+            )
+            claimed = persistent_store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+
+            result = service.cancel_translation_with_result(42)
+
+            persisted = persistent_store.get_job(job.id)
+            [work_unit] = persistent_store.list_work_units(job.id)
+            self.assertTrue(result.cancelled)
+            self.assertIsNotNone(result.job)
+            self.assertEqual(result.job.status, TranslationJobStatus.CANCEL_REQUESTED)
+            self.assertEqual(
+                persisted.status,
+                PersistentTranslationJobStatus.CANCEL_REQUESTED,
+            )
+            self.assertEqual(work_unit.id, claimed.work_unit_id)
+            self.assertEqual(work_unit.status, PersistentWorkUnitStatus.TRANSLATING)
+
+    def test_cancel_user_book_marks_active_external_job_cancel_requested(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"Original",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=source.object_key,
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=source.object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:0",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=source.object_key,
+                    )
+                ],
+            )
+            claimed = persistent_store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+
+            cancelled = service.cancel_user_book(user_telegram_id=42, job_id=job.id)
+
+            persisted = persistent_store.get_job(job.id)
+            [work_unit] = persistent_store.list_work_units(job.id)
+            detail = service.get_user_book_detail(user_telegram_id=42, job_id=job.id)
+            self.assertTrue(cancelled)
+            self.assertEqual(
+                persisted.status,
+                PersistentTranslationJobStatus.CANCEL_REQUESTED,
+            )
+            self.assertEqual(work_unit.id, claimed.work_unit_id)
+            self.assertEqual(work_unit.status, PersistentWorkUnitStatus.TRANSLATING)
+            self.assertEqual(detail.status, "cancel_requested")
+            self.assertFalse(detail.has_partial_result)
+            self.assertTrue(detail.can_cancel)
 
     def test_user_book_detail_hides_resume_when_source_object_is_missing(self):
         with TemporaryDirectory() as temp_dir:

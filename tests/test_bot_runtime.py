@@ -111,6 +111,15 @@ class EditableMessage:
         return TelegramMethodLikeAwaitable(record)
 
 
+class DocumentRecordingEditableMessage(EditableMessage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.documents: list[object] = []
+
+    async def answer_document(self, document) -> None:
+        self.documents.append(document)
+
+
 class NotModifiedOnDuplicateEditableMessage(EditableMessage):
     def edit_text(self, text: str, reply_markup=None):
         def record() -> None:
@@ -469,6 +478,43 @@ class _StaleCancelBookService(_CancelWithResultService):
             in {TranslationJobStatus.READY, TranslationJobStatus.PARTIAL},
             "can_resume": self.status is TranslationJobStatus.PARTIAL,
             "can_cancel": False,
+        }
+
+
+class _CancelRequestedBookService(_CancelWithResultService):
+    def __init__(self) -> None:
+        super().__init__(
+            TranslationJob(
+                id="job-1",
+                user_telegram_id=42,
+                file_name="book.txt",
+                content=b"",
+                source_language="en",
+                target_language="uk",
+                status=TranslationJobStatus.CANCEL_REQUESTED,
+                document_kind=DocumentKind.TXT,
+            )
+        )
+        self.cancel_requests: list[str] = []
+
+    def cancel_user_book(self, *, user_telegram_id: int, job_id: str) -> bool:
+        self.cancel_requests.append(job_id)
+        return True
+
+    def get_user_book_translation_job(self, **kwargs):
+        return self.job
+
+    def get_user_book_detail(self, **kwargs):
+        return {
+            "job_id": "job-1",
+            "file_name": "book.txt",
+            "document_kind": "txt",
+            "source_language": "en",
+            "target_language": "uk",
+            "status": "cancel_requested",
+            "has_result": False,
+            "can_resume": False,
+            "can_cancel": True,
         }
 
 
@@ -1587,7 +1633,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(queued_edits)
         self.assertTrue(
-            all("Translation progress" not in text for text in queued_edits)
+            all("Translation progress" in text for text in queued_edits)
         )
         queued_cancel_markup = message.answer_messages[0].edited_reply_markups[0]
         self.assertEqual(
@@ -1651,6 +1697,34 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "Your translation is ready",
             message.answer_messages[0].edited_texts[-1],
         )
+
+    async def test_worker_progress_watch_queued_status_uses_heartbeat_message(self):
+        message = EditableMessage()
+        service = _QueuedTwiceThenReadyService()
+        progress_stats = {
+            "completed": 0,
+            "total": 2,
+            "estimated_total_seconds": None,
+            "last_translated_text": None,
+            "spinner_index": 0,
+            "heartbeat_pattern": "calm_dots",
+            "job_id": "job-1",
+            "last_edit_scheduled_at": 0.0,
+        }
+
+        await _watch_worker_translation_progress(
+            message=message,
+            service=service,
+            user_telegram_id=42,
+            job_id="job-1",
+            started_at=0,
+            progress_stats=progress_stats,
+            poll_interval_seconds=0.01,
+        )
+
+        self.assertTrue(message.edited_texts)
+        self.assertIn("Your translation is queued", message.edited_texts[0])
+        self.assertIn("Translation progress", message.edited_texts[0])
 
     async def test_worker_progress_watch_skips_edit_after_cancel_requested(self):
         message = EditableMessage()
@@ -1821,6 +1895,26 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     for button in row
                 ]
                 self.assertNotIn("cancel_book:job-1", callback_data)
+
+    async def test_cancel_book_callback_shows_cancel_requested_without_result(self):
+        service = _CancelRequestedBookService()
+        router = create_router(
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            config=BotRuntimeConfig(),
+        )
+        callback = RecordingCallback(data="cancel_book:job-1")
+        callback.message = DocumentRecordingEditableMessage()
+
+        handler = self._router_callback_handler(router, "cancel_book")
+        await handler(callback)
+
+        self.assertEqual(service.cancel_requests, ["job-1"])
+        self.assertEqual(callback.answers, [((), {})])
+        self.assertEqual(callback.message.documents, [])
+        self.assertEqual(len(callback.message.edited_texts), 1)
+        self.assertIn("Stopping translation", callback.message.edited_texts[0])
+        self.assertNotIn("Translation cancelled", callback.message.edited_texts[0])
 
     async def test_cancel_active_translation_sends_persistent_partial_result(self):
         message = RecordingMessage()
@@ -2997,7 +3091,11 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     return None
                 return _runtime_job(status=self.status)
 
-        for status in (TranslationJobStatus.QUEUED, TranslationJobStatus.TRANSLATING):
+        for status in (
+            TranslationJobStatus.QUEUED,
+            TranslationJobStatus.TRANSLATING,
+            TranslationJobStatus.CANCEL_REQUESTED,
+        ):
             with self.subTest(status=status.value):
                 self.assertTrue(
                     _translation_progress_edit_allowed(
@@ -3036,6 +3134,22 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 service=StatusService(TranslationJobStatus.READY),
                 user_telegram_id=42,
                 job_id=None,
+            )
+        )
+
+    def test_translation_progress_edit_allows_cancel_requested_while_cancelling(self):
+        class CancellingStatusService:
+            def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+                return True
+
+            def get_user_book_translation_job(self, **kwargs):
+                return _runtime_job(status=TranslationJobStatus.CANCEL_REQUESTED)
+
+        self.assertTrue(
+            _translation_progress_edit_allowed(
+                service=CancellingStatusService(),
+                user_telegram_id=42,
+                job_id="job-1",
             )
         )
 

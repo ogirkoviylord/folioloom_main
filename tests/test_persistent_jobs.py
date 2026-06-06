@@ -136,6 +136,18 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(first.status, PersistentWorkUnitStatus.TRANSLATING)
         self.assertEqual(second.status, PersistentWorkUnitStatus.TRANSLATING)
 
+    def test_request_cancel_job_stops_legacy_claims(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        store.request_cancel_job(job.id)
+
+        self.assertEqual(
+            store.get_job(job.id).status,
+            PersistentTranslationJobStatus.CANCELLED,
+        )
+        self.assertIsNone(store.claim_next_work_unit(job.id, worker_id="worker-a"))
+
     def test_scheduler_claim_sets_token_lease_and_attempt_count(self):
         from translator_service.scheduler import SchedulerLimits
 
@@ -883,6 +895,59 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         )
         self.assertEqual(events[0].job_id, job.id)
         self.assertEqual(events[0].work_unit_id, claim.work_unit_id)
+
+    def test_cancel_requested_job_waits_for_active_claims_then_cancels(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        store = self._memory_store()
+        job = _job_with_units(store)
+        limits = SchedulerLimits(
+            max_active_units_per_job=2,
+            max_active_units_per_user=2,
+        )
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+
+        store.request_cancel_job(job.id)
+        store.complete_claimed_work_unit(
+            work_unit_id=first.work_unit_id,
+            claim_token=first.claim_token,
+            translated_text="Перший абзац.",
+            prompt_tokens=10,
+            completion_tokens=5,
+            cache_hit_tokens=0,
+            cache_miss_tokens=10,
+        )
+        after_first = store.get_job(job.id)
+        store.complete_claimed_work_unit(
+            work_unit_id=second.work_unit_id,
+            claim_token=second.claim_token,
+            translated_text="Другий абзац.",
+            prompt_tokens=10,
+            completion_tokens=5,
+            cache_hit_tokens=0,
+            cache_miss_tokens=10,
+        )
+        after_second = store.get_job(job.id)
+
+        self.assertEqual(
+            after_first.status,
+            PersistentTranslationJobStatus.CANCEL_REQUESTED,
+        )
+        self.assertEqual(
+            after_second.status,
+            PersistentTranslationJobStatus.CANCELLED,
+        )
 
     def test_worker_heartbeat_is_upserted(self):
         store = self._memory_store()

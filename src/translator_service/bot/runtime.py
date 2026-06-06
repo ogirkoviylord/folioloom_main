@@ -2684,9 +2684,9 @@ def _translation_progress_edit_allowed(
     user_telegram_id: int,
     job_id: str | None = None,
 ) -> bool:
-    if service.is_translation_cancelling(user_telegram_id):
-        return False
     if not job_id:
+        if service.is_translation_cancelling(user_telegram_id):
+            return False
         return True
 
     current_job = service.get_user_book_translation_job(
@@ -2694,6 +2694,10 @@ def _translation_progress_edit_allowed(
         job_id=job_id,
     )
     if current_job is None:
+        return False
+    if current_job.status is TranslationJobStatus.CANCEL_REQUESTED:
+        return True
+    if service.is_translation_cancelling(user_telegram_id):
         return False
     return current_job.status in {
         TranslationJobStatus.QUEUED,
@@ -2756,6 +2760,7 @@ def _progress_message_for_current_user_language(
     last_translated_text: str | None,
     activity_indicator: str,
     activity_phrase_index: int,
+    status_text: str | None = None,
 ) -> str:
     interface_language = service.get_interface_language(user_telegram_id)
     return build_translation_progress_message(
@@ -2771,6 +2776,7 @@ def _progress_message_for_current_user_language(
         ),
         activity_indicator=activity_indicator,
         activity_phrase_index=activity_phrase_index,
+        status_text=status_text,
     )
 
 
@@ -3182,7 +3188,11 @@ async def _run_confirm_pending_translation(
         return
 
     progress_stats["job_id"] = job.id
-    if job.status in {TranslationJobStatus.QUEUED, TranslationJobStatus.TRANSLATING}:
+    if job.status in {
+        TranslationJobStatus.QUEUED,
+        TranslationJobStatus.TRANSLATING,
+        TranslationJobStatus.CANCEL_REQUESTED,
+    }:
         await _edit_progress_message_if_changed(
             progress_message,
             build_translation_job_status_message(
@@ -3425,6 +3435,7 @@ async def _resume_user_book_translation(
     if job is not None and job.status in {
         TranslationJobStatus.QUEUED,
         TranslationJobStatus.TRANSLATING,
+        TranslationJobStatus.CANCEL_REQUESTED,
     }:
         watched_job = await _watch_worker_translation_progress(
             message=progress_message,
@@ -3679,6 +3690,7 @@ async def _watch_worker_translation_progress(
     while current_job is not None and current_job.status in {
         TranslationJobStatus.QUEUED,
         TranslationJobStatus.TRANSLATING,
+        TranslationJobStatus.CANCEL_REQUESTED,
     }:
         progress = service.get_user_book_progress(
             user_telegram_id=user_telegram_id,
@@ -3699,12 +3711,30 @@ async def _watch_worker_translation_progress(
         )
         progress_stats["estimated_total_seconds"] = estimated_total_seconds
         progress_stats["spinner_index"] = int(progress_stats["spinner_index"]) + 1
-        if current_job.status is TranslationJobStatus.QUEUED:
-            progress_text = build_translation_job_status_message(
+        if current_job.status in {
+            TranslationJobStatus.QUEUED,
+            TranslationJobStatus.CANCEL_REQUESTED,
+        }:
+            status_text = build_translation_job_status_message(
                 current_job,
                 interface_language=interface_language,
             )
-            progress_stats["job_status_message"] = progress_text
+            progress_stats["job_status_message"] = status_text
+            progress_text = _progress_message_for_current_user_language(
+                service=service,
+                user_telegram_id=user_telegram_id,
+                completed_fragments=progress.completed_fragments,
+                total_fragments=progress.total_fragments,
+                estimated_total_seconds=estimated_total_seconds,
+                elapsed_seconds=elapsed_seconds,
+                last_translated_text=None,
+                activity_indicator=_next_heartbeat_frame(
+                    str(progress_stats["heartbeat_pattern"]),
+                    int(progress_stats["spinner_index"]) - 1,
+                ),
+                activity_phrase_index=int(progress_stats["spinner_index"]),
+                status_text=status_text,
+            )
         else:
             progress_stats["job_status_message"] = None
             progress_text = _progress_message_for_current_user_language(
@@ -3790,31 +3820,35 @@ async def _run_translation_progress_heartbeat(
                 / completed_fragments
                 * max(total_fragments, completed_fragments)
             )
-        if progress_stats.get("job_status") == TranslationJobStatus.QUEUED.value:
-            progress_text = str(progress_stats.get("job_status_message") or "")
-        else:
-            progress_text = _progress_message_for_current_user_language(
-                service=service,
-                user_telegram_id=user_telegram_id,
-                completed_fragments=completed_fragments,
-                total_fragments=total_fragments,
-                estimated_total_seconds=(
-                    int(estimated_total_seconds)
-                    if estimated_total_seconds is not None
-                    else None
-                ),
-                elapsed_seconds=elapsed_seconds,
-                last_translated_text=(
-                    str(progress_stats["last_translated_text"])
-                    if progress_stats["last_translated_text"]
-                    else None
-                ),
-                activity_indicator=_next_heartbeat_frame(
-                    str(progress_stats["heartbeat_pattern"]),
-                    int(progress_stats["spinner_index"]) - 1,
-                ),
-                activity_phrase_index=int(progress_stats["spinner_index"]),
-            )
+        status_text = None
+        if progress_stats.get("job_status") in {
+            TranslationJobStatus.QUEUED.value,
+            TranslationJobStatus.CANCEL_REQUESTED.value,
+        }:
+            status_text = str(progress_stats.get("job_status_message") or "")
+        progress_text = _progress_message_for_current_user_language(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            completed_fragments=completed_fragments,
+            total_fragments=total_fragments,
+            estimated_total_seconds=(
+                int(estimated_total_seconds)
+                if estimated_total_seconds is not None
+                else None
+            ),
+            elapsed_seconds=elapsed_seconds,
+            last_translated_text=(
+                str(progress_stats["last_translated_text"])
+                if progress_stats["last_translated_text"]
+                else None
+            ),
+            activity_indicator=_next_heartbeat_frame(
+                str(progress_stats["heartbeat_pattern"]),
+                int(progress_stats["spinner_index"]) - 1,
+            ),
+            activity_phrase_index=int(progress_stats["spinner_index"]),
+            status_text=status_text,
+        )
         if _should_schedule_progress_edit(progress_stats, now=now):
             job_id = progress_stats.get("job_id")
             current_job_id = str(job_id) if job_id else None
