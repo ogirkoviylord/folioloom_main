@@ -1446,6 +1446,29 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.list_user_books(user_telegram_id=42), [])
         self.assertEqual(len(message.answers), 2)
         self.assertIn("Returning to the Main menu", message.answers[0][0])
+        self.assertIsNotNone(message.answers[0][1])
+
+    async def test_back_text_attaches_main_menu_keyboard_to_first_reply(self):
+        service = build_translation_service(
+            BotRuntimeConfig(
+                persistent_jobs_db_path=":memory:",
+                user_settings_db_path=":memory:",
+            )
+        )
+        self.addCleanup(service.close)
+        router = create_router(
+            service=service,
+            translator=_RuntimeRecordingTranslator(),
+            config=BotRuntimeConfig(),
+        )
+        handler = self._router_message_handler(router, "back_text")
+        message = RecordingMessage()
+
+        await handler(message)
+
+        self.assertEqual(len(message.answers), 2)
+        self.assertIn("Returning to the Main menu", message.answers[0][0])
+        self.assertIsNotNone(message.answers[0][1])
 
     async def test_text_cancel_cancels_single_cancellable_persistent_job(self):
         message = RecordingMessage()
