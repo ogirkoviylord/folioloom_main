@@ -555,9 +555,15 @@ class AdminActionCenterTest(unittest.TestCase):
         )
 
         self.assertIn("Triage inbox", html)
+        self.assertIn("action-list-header", html)
         self.assertIn("Affected", html)
         self.assertIn("Why now", html)
         self.assertIn("Next step", html)
+        self.assertIn("triage-severity", html)
+        self.assertIn("triage-what", html)
+        self.assertIn("triage-affected", html)
+        self.assertIn("triage-reason", html)
+        self.assertIn("triage-action", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertIn("Use &lt;admin&gt; &amp; check", html)
         self.assertIn("&lt;job&gt;", html)
@@ -567,6 +573,56 @@ class AdminActionCenterTest(unittest.TestCase):
         self.assertIn('href="/admin/overview"', html)
         self.assertNotIn("<script>", html)
         self.assertNotIn("javascript:", html)
+
+    def test_overview_body_renders_all_stable_severity_badges(self):
+        html = overview_body(
+            ActionCenter(
+                items=(
+                    ActionItem(
+                        key="info-row",
+                        severity="info",
+                        title="Info item",
+                        detail="Metadata only.",
+                        href="/admin/live",
+                    ),
+                    ActionItem(
+                        key="watch-row",
+                        severity="watch",
+                        title="Watch item",
+                        detail="Metadata only.",
+                        href="/admin/live",
+                    ),
+                    ActionItem(
+                        key="investigate-row",
+                        severity="investigate",
+                        title="Investigate item",
+                        detail="Metadata only.",
+                        href="/admin/live",
+                    ),
+                    ActionItem(
+                        key="action-row",
+                        severity="action_needed",
+                        title="Action item",
+                        detail="Metadata only.",
+                        href="/admin/live",
+                    ),
+                    ActionItem(
+                        key="blocked-row",
+                        severity="blocked",
+                        title="Blocked item",
+                        detail="Metadata only.",
+                        href="/admin/live",
+                    ),
+                )
+            )
+        )
+
+        for label in ("Info", "Watch", "Investigate", "Action needed", "Blocked"):
+            with self.subTest(label=label):
+                self.assertIn(f'title="{label}"', html)
+        self.assertEqual(html.count("triage-severity-badge"), 5)
+        self.assertIn("What happened", html)
+        self.assertIn("Next action", html)
 
 
 def _connection_summary(

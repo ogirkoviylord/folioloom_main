@@ -81,7 +81,7 @@ _ADVANCED_NAV_ITEMS = (
     ("logs", "/admin/logs", "Logs"),
     ("reader", "/admin/internal-reader", "Reader Explorer"),
     ("activity", "/admin/activity", "Activity"),
-    ("operations", "/admin/operations/jobs", "Operations"),
+    ("operations", "/admin/operations/jobs", "Jobs / Queue"),
     ("audit", "/admin/audit", "Audit"),
     ("integrations", "/admin/integrations", "Integrations"),
     ("billing", "/admin/billing", "Billing"),
@@ -343,6 +343,31 @@ def _safe_class_tokens(value: str) -> list[str]:
     return tokens
 
 
+def _status_badge(label: str, *, extra_class: str = "") -> str:
+    classes = " ".join(["status", "admin-badge", *_safe_class_tokens(extra_class)])
+    safe_label = escape(label)
+    return f'<span class="{classes}" title="{safe_label}">{safe_label}</span>'
+
+
+def _bounded_cell_text(
+    value: str | None,
+    *,
+    kind: str,
+    tag: str = "span",
+    empty: str = "n/a",
+    title: bool = True,
+) -> str:
+    safe_tag = tag if tag in {"span", "strong", "code"} else "span"
+    text = value if value is not None and value != "" else empty
+    safe_text = escape(text)
+    safe_kind = escape(kind)
+    title_attr = f' title="{safe_text}"' if title else ""
+    return (
+        f'<{safe_tag} class="admin-cell-text admin-cell-{safe_kind}"'
+        f"{title_attr}>{safe_text}</{safe_tag}>"
+    )
+
+
 def section_body(title: str, copy: str) -> str:
     return f"""
     <section class="panel">
@@ -354,7 +379,16 @@ def section_body(title: str, copy: str) -> str:
 
 def overview_body(action_center: ActionCenter) -> str:
     if action_center.items:
-        rows = "\n".join(_action_item(item) for item in action_center.items)
+        rows = f"""
+        <div class="action-list-header" aria-hidden="true">
+          <span>Severity</span>
+          <span>What happened</span>
+          <span>Affected</span>
+          <span>Why now</span>
+          <span>Next action</span>
+        </div>
+        {"".join(_action_item(item) for item in action_center.items)}
+        """
     else:
         rows = """
         <div class="empty-state">
@@ -381,28 +415,39 @@ def _action_item(item: ActionItem) -> str:
     severity = _safe_action_severity(item.severity)
     href = _safe_action_href(item.href)
     next_action = item.next_action.strip() or "Open"
+    severity_badge = _status_badge(
+        _action_severity_label(severity),
+        extra_class="triage-severity-badge",
+    )
+    action_link = _action_link(
+        next_action,
+        href,
+        "view",
+        compact=True,
+        extra_class="action-next",
+    )
     return f"""
     <article
       class="action-item action-{escape(severity)}"
       data-action-key="{escape(item.key)}"
     >
-      <span class="status">{escape(_action_severity_label(severity))}</span>
-      <div class="action-copy">
+      <div class="triage-severity" data-label="Severity">
+        {severity_badge}
+      </div>
+      <div class="triage-what" data-label="What happened">
         <strong>{escape(item.title)}</strong>
         <small>{escape(item.detail)}</small>
-        <dl class="action-meta">
-          <div>
-            <dt>Affected</dt>
-            <dd>{escape(item.affected)}</dd>
-          </div>
-          <div>
-            <dt>Why now</dt>
-            <dd>{escape(item.reason)}</dd>
-          </div>
-        </dl>
       </div>
-      {_action_link(next_action, href, "view", compact=True, extra_class="action-next")}
-      <span class="sr-only">Next step</span>
+      <div class="triage-affected" data-label="Affected">
+        {escape(item.affected)}
+      </div>
+      <div class="triage-reason" data-label="Why now">
+        {escape(item.reason)}
+      </div>
+      <div class="triage-action" data-label="Next action">
+        {action_link}
+        <span class="sr-only">Next step</span>
+      </div>
     </article>
     """
 
@@ -2622,9 +2667,19 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
         for label, value in metrics
     )
     return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Jobs / Queue Operations</h3>
+        <p>
+          Queue and worker state for persistent translation jobs. Use this
+          Advanced view for job controls, trace links, worker context, and
+          disabled action reasons.
+        </p>
+      </div>
+    </section>
     <section class="metrics">{metric_cards}</section>
     <section class="panel table-panel">
-      <h3>Jobs</h3>
+      <h3>Job queue</h3>
       <table class="log-table operations-table">
         <thead>
           <tr>
@@ -2644,7 +2699,7 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
       </table>
     </section>
     <section class="panel">
-      <h3>Workers</h3>
+      <h3>Worker context</h3>
       <p>{len(overview.workers)} workers are currently visible to the admin console.</p>
     </section>
     """
@@ -2670,14 +2725,14 @@ def _operation_job_row(job, csrf_token: str) -> str:
     )
     return f"""
     <tr>
-      <td><span class="status">{escape(job.state)}</span></td>
-      <td><code>{escape(job.id)}</code></td>
-      <td>{escape(job.order_id or "n/a")}</td>
+      <td>{_status_badge(job.state)}</td>
+      <td>{_bounded_cell_text(job.id, kind="id", tag="code")}</td>
+      <td>{_bounded_cell_text(job.order_id, kind="id")}</td>
       <td>{_operation_job_times(job)}</td>
       <td>{escape(fragments)}</td>
       <td>{job.total_tokens}</td>
-      <td>{escape(_format_workers(job.active_worker_ids))}</td>
-      <td>{escape(job.error_excerpt or "")}</td>
+      <td>{_bounded_cell_text(_format_workers(job.active_worker_ids), kind="id")}</td>
+      <td>{_bounded_cell_text(job.error_excerpt or "", kind="error", empty="")}</td>
       <td>{logs}</td>
       <td>{_job_actions(job, csrf_token)}</td>
     </tr>
@@ -3141,9 +3196,9 @@ def _live_run_row(run: TranslationRunSummary) -> str:
     direction = f"{run.source_language} -> {run.target_language}"
     return f"""
     <tr>
-      <td><span class="status">{escape(run.status)}</span></td>
-      <td><code>{escape(run.job_id)}</code></td>
-      <td><strong>{escape(run.file_name)}</strong></td>
+      <td>{_status_badge(run.status)}</td>
+      <td>{_bounded_cell_text(run.job_id, kind="id", tag="code")}</td>
+      <td>{_bounded_cell_text(run.file_name, kind="filename", tag="strong")}</td>
       <td>{escape(direction)}</td>
       <td>{escape(_stage_label(run))}</td>
       <td>{_progress_mini(run)}</td>
@@ -3295,6 +3350,171 @@ def logs_body(
       </table>
     </section>
     """
+
+
+def translations_body(
+    logs: tuple[TranslationRunSummary, ...],
+    *,
+    operations: OperationsOverview | None = None,
+    csrf_token: str = "",
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 100,
+    form_action: str = "/admin/translations",
+) -> str:
+    jobs_by_id = {job.id: job for job in operations.jobs} if operations else {}
+    rows = "\n".join(
+        _translation_workflow_row(row, jobs_by_id.get(row.job_id), csrf_token)
+        for row in logs
+    )
+    if not rows:
+        rows = """
+        <tr>
+          <td colspan="10" class="empty-cell">No translation runs found.</td>
+        </tr>
+        """
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translations</h3>
+        <p>
+          Primary owner workflow for translation runs. Raw run logs remain in
+          Advanced Logs.
+        </p>
+      </div>
+    </section>
+    <section class="panel">
+      <form class="filter-form" method="get" action="{escape(form_action)}">
+        <label>
+          <span>Status</span>
+          <select name="status">
+            {_status_option("all", status, "All")}
+            {_status_option("running", status, "Running")}
+            {_status_option("ready", status, "Ready")}
+            {_status_option("failed", status, "Failed")}
+            {_status_option("cancelled", status, "Cancelled")}
+            {_status_option("partial", status, "Partial")}
+          </select>
+        </label>
+        <label>
+          <span>From</span>
+          <input name="date_from" type="date" value="{escape(date_from or "")}">
+        </label>
+        <label>
+          <span>To</span>
+          <input name="date_to" type="date" value="{escape(date_to or "")}">
+        </label>
+        {_action_button("Apply filters", "refresh")}
+      </form>
+    </section>
+    <section class="panel table-panel">
+      <table class="log-table translations-table">
+        <thead>
+          <tr>
+            <th>Started / updated</th>
+            <th>Status</th>
+            <th>User</th>
+            <th>File</th>
+            <th>Format</th>
+            <th>Direction</th>
+            <th>Fragments / tokens</th>
+            <th>Error</th>
+            <th>Primary action</th>
+            <th>Emergency</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _translation_workflow_row(
+    row: TranslationRunSummary,
+    job,
+    csrf_token: str,
+) -> str:
+    run_id = Path(row.run_dir).name
+    direction = f"{row.source_language} -> {row.target_language}"
+    updated = row.last_event_at or row.finished_at
+    updated_label = _format_datetime(updated) if updated else "n/a"
+    fragments_tokens = f"{_progress_label(row)} / {row.total_tokens}"
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    emergency = _translation_emergency_action(row, job, csrf_token)
+    return f"""
+    <tr>
+      <td>
+        <span>{escape(_format_datetime(row.started_at))}</span>
+        <span>Updated {escape(updated_label)}</span>
+      </td>
+      <td>{_status_badge(row.status)}</td>
+      <td>{_bounded_cell_text(row.user_id, kind="id")}</td>
+      <td>{_bounded_cell_text(row.file_name, kind="filename", tag="strong")}</td>
+      <td>{_format_badge(row.document_kind)}</td>
+      <td>{escape(direction)}</td>
+      <td>{escape(fragments_tokens)}</td>
+      <td>{_bounded_cell_text(_translation_safe_error(row), kind="error", empty="")}</td>
+      <td>{trace_link}</td>
+      <td>{emergency}</td>
+    </tr>
+    """
+
+
+def _format_badge(document_kind: str) -> str:
+    normalized = document_kind.strip().lower()
+    if normalized not in {"txt", "docx", "epub"}:
+        normalized = "unknown"
+    label = normalized.upper() if normalized != "unknown" else "Unknown"
+    return _status_badge(label, extra_class=f"format-badge format-badge-{normalized}")
+
+
+def _translation_safe_error(row: TranslationRunSummary) -> str:
+    if not row.error_message:
+        return ""
+    safe_error = _safe_support_text(row.error_message)
+    if safe_error:
+        return safe_error
+    return "error recorded; open trace"
+
+
+def _translation_emergency_action(
+    row: TranslationRunSummary,
+    job,
+    csrf_token: str,
+) -> str:
+    if job is not None and getattr(job, "cancellable", False):
+        confirm = (
+            "Cancel this translation to stop provider work and reduce token spend?"
+        )
+        return f"""
+        <form
+          class="job-actions"
+          method="post"
+          action="/admin/operations/jobs/{escape(row.job_id)}/cancel"
+          onsubmit="return confirm('{escape(confirm)}')"
+        >
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+          {_action_button("Cancel", "danger", compact=True)}
+        </form>
+        """
+    reason = (
+        "Existing Operations state is not cancellable."
+        if job is not None
+        else "Operations state is unavailable for this run."
+    )
+    return _action_button(
+        "No emergency action",
+        "view",
+        button_type="button",
+        disabled_reason=reason,
+        compact=True,
+    )
 
 
 def log_detail_body(details: TranslationRunDetails) -> str:
@@ -6530,14 +6750,16 @@ def _support_translation_row(row: TranslationRunSummary) -> str:
     return f"""
     <tr>
       <td data-label="Started">{escape(started)}</td>
-      <td data-label="Outcome"><span class="status">{escape(row.status)}</span></td>
-      <td data-label="Job"><code>{escape(row.job_id)}</code></td>
+      <td data-label="Outcome">{_status_badge(row.status)}</td>
+      <td data-label="Job">{_bounded_cell_text(row.job_id, kind="id", tag="code")}</td>
       <td data-label="File">
-        <strong>{escape(file_name)}</strong>
+        {_bounded_cell_text(file_name, kind="filename", tag="strong")}
         {result}
       </td>
       <td data-label="Choice">{escape(choice)}</td>
-      <td data-label="Stage / error">{escape(detail)}</td>
+      <td data-label="Stage / error">
+        {_bounded_cell_text(detail, kind="error", empty="")}
+      </td>
       <td data-label="Actions">
         <div class="job-actions">{trace_link}{details_link}</div>
       </td>
@@ -6574,10 +6796,12 @@ def _support_activity_row(event: UserActivityEvent) -> str:
         <strong>{escape(event.event_type)}</strong>
         <span>{escape(event.action)}</span>
       </td>
-      <td data-label="Target">{escape(target or "n/a")}</td>
-      <td data-label="Outcome"><span class="status">{escape(event.outcome)}</span></td>
-      <td data-label="Job"><code>{escape(event.job_id or "")}</code></td>
-      <td data-label="Safe detail">{escape(detail or "n/a")}</td>
+      <td data-label="Target">{_bounded_cell_text(target, kind="id")}</td>
+      <td data-label="Outcome">{_status_badge(event.outcome)}</td>
+      <td data-label="Job">
+        {_bounded_cell_text(event.job_id or "", kind="id", tag="code", empty="")}
+      </td>
+      <td data-label="Safe detail">{_bounded_cell_text(detail, kind="error")}</td>
     </tr>
     """
 
@@ -6888,28 +7112,40 @@ def _filter_input(name: str, label: str, value: str | None) -> str:
 
 def _activity_row(event: UserActivityEvent, *, include_user: bool = True) -> str:
     created = _format_datetime(event.created_at)
-    target = " / ".join(
-        part for part in (event.target_type or "", event.target_id or "") if part
-    )
-    metadata = ", ".join(
-        f"{key}: {value}" for key, value in sorted(event.metadata.items())[:4]
-    )
+    target = _safe_support_target(event)
+    metadata = _safe_activity_metadata(event)
     user_cell = f"<td>{_user_link(event.actor_id)}</td>" if include_user else ""
     return f"""
     <tr>
-      <td>{escape(created)}</td>
+      <td data-label="Time">{escape(created)}</td>
       {user_cell}
-      <td>{escape(event.surface)}</td>
-      <td>
+      <td data-label="Surface">{escape(event.surface)}</td>
+      <td data-label="Event">
         <strong>{escape(event.event_type)}</strong>
         <span>{escape(event.action)}</span>
       </td>
-      <td>{escape(target or "n/a")}</td>
-      <td><span class="status">{escape(event.outcome)}</span></td>
-      <td><code>{escape(event.job_id or "")}</code></td>
-      <td>{escape(metadata)}</td>
+      <td data-label="Target">{_bounded_cell_text(target, kind="id")}</td>
+      <td data-label="Outcome">{_status_badge(event.outcome)}</td>
+      <td data-label="Job">
+        {_bounded_cell_text(event.job_id or "", kind="id", tag="code", empty="")}
+      </td>
+      <td data-label="Metadata">{_bounded_cell_text(metadata, kind="error")}</td>
     </tr>
     """
+
+
+def _safe_activity_metadata(event: UserActivityEvent) -> str:
+    details: list[str] = []
+    for key, value in sorted(event.metadata.items()):
+        if _has_unsafe_support_key(key):
+            continue
+        safe_value = _safe_support_text(value)
+        if not safe_value:
+            continue
+        details.append(f"{key}: {safe_value}")
+        if len(details) >= 4:
+            break
+    return ", ".join(details)
 
 
 def _user_row(user: UserProfile) -> str:
@@ -7060,16 +7296,16 @@ def _log_row(row: TranslationRunSummary) -> str:
     return f"""
     <tr>
       <td>{escape(started)}</td>
-      <td><span class="status">{escape(row.status)}</span></td>
-      <td><code>{escape(row.job_id)}</code></td>
+      <td>{_status_badge(row.status)}</td>
+      <td>{_bounded_cell_text(row.job_id, kind="id", tag="code")}</td>
       <td>
-        <strong>{escape(row.file_name)}</strong>
+        {_bounded_cell_text(row.file_name, kind="filename", tag="strong")}
         <span>{escape(row.document_kind)}</span>
       </td>
       <td>{escape(direction)}</td>
       <td>{escape(_progress_label(row))}</td>
       <td>{row.total_tokens}</td>
-      <td>{escape(error)}</td>
+      <td>{_bounded_cell_text(error, kind="error", empty="")}</td>
       <td>
         {trace_link}
         {details_link}
@@ -8293,11 +8529,28 @@ header {
 .action-list .empty-state {
   padding: 20px;
 }
+.action-list-header,
 .action-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns:
+    minmax(112px, 0.65fr)
+    minmax(180px, 1.45fr)
+    minmax(150px, 1fr)
+    minmax(170px, 1.2fr)
+    minmax(120px, auto);
   gap: 14px;
-  align-items: center;
+  align-items: start;
+}
+.action-list-header {
+  padding: 10px 20px;
+  color: var(--muted);
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.action-item {
   padding: 16px 20px;
   color: inherit;
   border-bottom: 1px solid var(--line);
@@ -8306,37 +8559,30 @@ header {
 .action-item:hover {
   background: #fbfcfd;
 }
-.action-copy {
-  display: grid;
-  gap: 8px;
+.triage-severity,
+.triage-what,
+.triage-affected,
+.triage-reason,
+.triage-action {
   min-width: 0;
 }
-.action-copy strong {
+.triage-what {
+  display: grid;
+  gap: 8px;
+}
+.triage-what strong,
+.triage-affected,
+.triage-reason {
   overflow-wrap: anywhere;
 }
-.action-copy small,
-.action-meta dd {
+.triage-what small,
+.triage-affected,
+.triage-reason {
   color: var(--muted);
   line-height: 1.45;
 }
-.action-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0;
-}
-.action-meta div {
-  min-width: 0;
-}
-.action-meta dt {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-.action-meta dd {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
+.triage-severity-badge {
+  min-width: 104px;
 }
 .action-next {
   align-self: center;
@@ -8368,7 +8614,11 @@ header {
   border: 0;
 }
 .status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: fit-content;
+  min-width: 72px;
   max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -8377,7 +8627,29 @@ header {
   font-size: 0.8rem;
   font-weight: 700;
   line-height: 1.25;
-  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: nowrap;
+}
+.admin-badge { vertical-align: top; }
+.format-badge-txt {
+  color: #155e75;
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+.format-badge-docx {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.format-badge-epub {
+  color: #166534;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.format-badge-unknown {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 .environment-badge {
   width: max-content;
@@ -8470,8 +8742,8 @@ button.danger {
   font: inherit;
   font-weight: 750;
   line-height: 1.2;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
   cursor: pointer;
 }
 .action-control:hover {
@@ -8554,6 +8826,8 @@ button.danger {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .job-actions {
   display: flex;
@@ -8789,9 +9063,30 @@ button.danger {
   line-height: 1.4;
 }
 @media (max-width: 760px) {
-  .action-item,
-  .action-meta {
+  .action-list-header {
+    display: none;
+  }
+  .action-item {
     grid-template-columns: 1fr;
+  }
+  .triage-severity,
+  .triage-what,
+  .triage-affected,
+  .triage-reason,
+  .triage-action {
+    display: grid;
+    gap: 4px;
+  }
+  .triage-severity::before,
+  .triage-what::before,
+  .triage-affected::before,
+  .triage-reason::before,
+  .triage-action::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
   }
   .action-next {
     justify-self: start;
@@ -8850,6 +9145,9 @@ button.danger {
   padding: 10px 8px;
   text-align: left;
   vertical-align: top;
+  min-width: 0;
+  max-width: 34ch;
+  overflow-wrap: anywhere;
 }
 .support-table th,
 .support-table td {
@@ -8864,6 +9162,30 @@ button.danger {
   display: block;
   color: var(--muted);
   font-size: 0.85rem;
+}
+.log-table td .status,
+.log-table td .admin-badge {
+  display: inline-flex;
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+}
+.admin-cell-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+.admin-cell-filename,
+.admin-cell-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-cell-filename { max-width: 28ch; }
+.admin-cell-id { max-width: 20ch; }
+.admin-cell-error {
+  max-width: 36ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .log-table td .progress-mini span {
   color: var(--ink);

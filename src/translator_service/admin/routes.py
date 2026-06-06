@@ -124,6 +124,7 @@ from translator_service.admin.views import (
     translation_reader_body,
     translation_text_diagnostics_body,
     translation_trace_body,
+    translations_body,
     upload_safety_body,
     upload_safety_detail_body,
     user_detail_body,
@@ -671,9 +672,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Translations",
             active="translations",
-            body=lambda session: logs_body(
+            body=lambda session: translations_body(
                 _translation_run_summaries(settings, **filters),
-                title="Translations",
+                operations=_operations_overview(settings),
+                csrf_token=session.csrf_token,
                 form_action="/admin/translations",
                 **filters,
             ),
@@ -1018,7 +1020,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             request,
             session_manager=session_manager,
             environment=settings.environment,
-            title="Operations",
+            title="Jobs / Queue",
             active="operations",
             body=lambda session: operations_body(
                 _operations_overview(settings),
