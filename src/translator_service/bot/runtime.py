@@ -2566,7 +2566,10 @@ async def _edit_progress_message_if_changed(
     message,
     text: str,
     reply_markup=None,
+    should_edit=None,
 ) -> None:
+    if should_edit is not None and not should_edit():
+        return
     try:
         await _edit_callback_message(message, text, reply_markup=reply_markup)
     except Exception as error:
@@ -2578,6 +2581,47 @@ async def _edit_progress_message_if_changed(
 
 def _is_message_not_modified_error(error: Exception) -> bool:
     return "message is not modified" in str(error).lower()
+
+
+def _translation_progress_edit_allowed(
+    *,
+    service,
+    user_telegram_id: int,
+    job_id: str | None = None,
+) -> bool:
+    if service.is_translation_cancelling(user_telegram_id):
+        return False
+    if not job_id:
+        return True
+
+    current_job = service.get_user_book_translation_job(
+        user_telegram_id=user_telegram_id,
+        job_id=job_id,
+    )
+    if current_job is None:
+        return False
+    return current_job.status not in {
+        TranslationJobStatus.CANCELLED,
+        TranslationJobStatus.DELETED,
+    }
+
+
+def _translation_progress_edit_guard(
+    *,
+    service,
+    user_telegram_id: int,
+    job_id: str | None = None,
+    job_id_getter=None,
+):
+    def guard() -> bool:
+        current_job_id = job_id_getter() if job_id_getter is not None else job_id
+        return _translation_progress_edit_allowed(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            job_id=current_job_id,
+        )
+
+    return guard
 
 
 def _inline_reply_markup_or_none(reply_markup):
@@ -2946,6 +2990,15 @@ async def _run_confirm_pending_translation(
                 reply_markup=_cancel_inline_keyboard(
                     service.get_interface_language(message.from_user.id)
                 ),
+                should_edit=_translation_progress_edit_guard(
+                    service=service,
+                    user_telegram_id=message.from_user.id,
+                    job_id_getter=lambda: (
+                        str(progress_stats["job_id"])
+                        if progress_stats.get("job_id")
+                        else None
+                    ),
+                ),
             )
 
     heartbeat_task = asyncio.create_task(
@@ -3216,6 +3269,11 @@ async def _resume_user_book_translation(
                     service.get_interface_language(user_telegram_id),
                     job_id=job_id,
                 ),
+                should_edit=_translation_progress_edit_guard(
+                    service=service,
+                    user_telegram_id=user_telegram_id,
+                    job_id=job_id,
+                ),
             )
 
     heartbeat_task = asyncio.create_task(
@@ -3440,16 +3498,24 @@ async def _watch_worker_translation_progress(
                 ),
                 activity_phrase_index=int(progress_stats["spinner_index"]),
             )
-        await _edit_progress_message_if_changed(
-            message,
-            progress_text,
-            reply_markup=_cancel_inline_keyboard(
-                interface_language,
-                job_id=job_id,
-            ),
+        edit_allowed = _translation_progress_edit_guard(
+            service=service,
+            user_telegram_id=user_telegram_id,
+            job_id=job_id,
         )
+        if not edit_allowed():
+            await asyncio.sleep(max(0.1, poll_interval_seconds))
+        else:
+            await _edit_progress_message_if_changed(
+                message,
+                progress_text,
+                reply_markup=_cancel_inline_keyboard(
+                    interface_language,
+                    job_id=job_id,
+                ),
+                should_edit=edit_allowed,
+            )
 
-        await asyncio.sleep(max(0.1, poll_interval_seconds))
         current_job = service.get_user_book_translation_job(
             user_telegram_id=user_telegram_id,
             job_id=job_id,
@@ -3521,19 +3587,34 @@ async def _run_translation_progress_heartbeat(
             )
         if _should_schedule_progress_edit(progress_stats, now=now):
             job_id = progress_stats.get("job_id")
+            current_job_id = str(job_id) if job_id else None
             _schedule_message_edit(
                 loop=loop,
                 message=message,
                 text=progress_text,
                 reply_markup=_cancel_inline_keyboard(
                     service.get_interface_language(user_telegram_id),
-                    job_id=str(job_id) if job_id else None,
+                    job_id=current_job_id,
+                ),
+                should_edit=_translation_progress_edit_guard(
+                    service=service,
+                    user_telegram_id=user_telegram_id,
+                    job_id=current_job_id,
                 ),
             )
 
 
-def _schedule_message_edit(*, loop, message, text: str, reply_markup=None):
+def _schedule_message_edit(
+    *,
+    loop,
+    message,
+    text: str,
+    reply_markup=None,
+    should_edit=None,
+):
     async def edit_message() -> None:
+        if should_edit is not None and not should_edit():
+            return
         bot = getattr(message, "bot", None)
         chat = getattr(message, "chat", None)
         message_id = getattr(message, "message_id", None)
