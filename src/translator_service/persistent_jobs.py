@@ -410,6 +410,7 @@ class SQLiteTranslationJobStore:
         job = self._require_job(job_id)
         if job.status in {
             PersistentTranslationJobStatus.PAUSED,
+            PersistentTranslationJobStatus.CANCEL_REQUESTED,
             PersistentTranslationJobStatus.CANCELLED,
             PersistentTranslationJobStatus.FAILED,
             PersistentTranslationJobStatus.READY,
@@ -497,7 +498,13 @@ class SQLiteTranslationJobStore:
                     work_unit_id,
                 ),
             )
-            if self._job_has_no_unfinished_work(work_unit.job_id):
+            if (
+                not self._finalize_cancel_requested_job_if_idle(
+                    work_unit.job_id,
+                    now=now,
+                )
+                and self._job_has_no_unfinished_work(work_unit.job_id)
+            ):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -829,7 +836,13 @@ class SQLiteTranslationJobStore:
             if updated.rowcount != 1:
                 raise ValueError(f"Stale work-unit claim: {work_unit_id}")
             completed = self._require_work_unit(work_unit_id)
-            if self._job_has_no_unfinished_work(work_unit.job_id):
+            if (
+                not self._finalize_cancel_requested_job_if_idle(
+                    work_unit.job_id,
+                    now=now,
+                )
+                and self._job_has_no_unfinished_work(work_unit.job_id)
+            ):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -951,7 +964,13 @@ class SQLiteTranslationJobStore:
                 },
                 now=now,
             )
-            if decision.terminal_job_status is not None:
+            if (
+                not self._finalize_cancel_requested_job_if_idle(
+                    work_unit.job_id,
+                    now=now,
+                )
+                and decision.terminal_job_status is not None
+            ):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.INTERRUPTED,
@@ -1224,11 +1243,15 @@ class SQLiteTranslationJobStore:
                     work_unit_id,
                 ),
             )
-            self._update_job_status(
+            if not self._finalize_cancel_requested_job_if_idle(
                 work_unit.job_id,
-                PersistentTranslationJobStatus.INTERRUPTED,
                 now=now,
-            )
+            ):
+                self._update_job_status(
+                    work_unit.job_id,
+                    PersistentTranslationJobStatus.INTERRUPTED,
+                    now=now,
+                )
         return self._get_work_unit(work_unit_id)
 
     def cancel_job(self, job_id: str) -> PersistentTranslationJob:
@@ -1254,6 +1277,18 @@ class SQLiteTranslationJobStore:
                 PersistentTranslationJobStatus.CANCELLED,
                 now=now,
             )
+        return self._require_job(job_id)
+
+    def request_cancel_job(self, job_id: str) -> PersistentTranslationJob:
+        self._require_job(job_id)
+        now = _now()
+        with self._connection:
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.CANCEL_REQUESTED,
+                now=now,
+            )
+            self._finalize_cancel_requested_job_if_idle(job_id, now=now)
         return self._require_job(job_id)
 
     def pause_job(self, job_id: str) -> PersistentTranslationJob:
@@ -1539,6 +1574,34 @@ class SQLiteTranslationJobStore:
             ),
         ).fetchone()
         return row["count"] == 0
+
+    def _job_has_active_work(self, job_id: str) -> bool:
+        row = self._connection.execute(
+            """
+            SELECT COUNT(*) AS count FROM work_units
+            WHERE job_id = ? AND status = ?
+            """,
+            (job_id, PersistentWorkUnitStatus.TRANSLATING.value),
+        ).fetchone()
+        return row["count"] > 0
+
+    def _finalize_cancel_requested_job_if_idle(
+        self,
+        job_id: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        job = self._require_job(job_id)
+        if job.status is not PersistentTranslationJobStatus.CANCEL_REQUESTED:
+            return False
+        if self._job_has_active_work(job_id):
+            return True
+        self._update_job_status(
+            job_id,
+            PersistentTranslationJobStatus.CANCELLED,
+            now=now,
+        )
+        return True
 
     def _update_job_status(
         self,

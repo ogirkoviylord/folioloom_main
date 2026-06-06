@@ -2,10 +2,12 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Callable
 
-from translator_service.translation_jobs import TextTranslator
-from translator_service.translation_jobs import CancellationToken
-from translator_service.translation_jobs import TranslationProgress
 from translator_service.translation_cache import TranslationCache
+from translator_service.translation_jobs import (
+    CancellationToken,
+    TextTranslator,
+    TranslationProgress,
+)
 from translator_service.translation_runner import (
     TranslatedDocument,
     translate_docx_document,
@@ -23,6 +25,7 @@ class DocumentKind(StrEnum):
 class TranslationJobStatus(StrEnum):
     QUEUED = "queued"
     TRANSLATING = "translating"
+    CANCEL_REQUESTED = "cancel_requested"
     PAUSED = "paused"
     READY = "ready"
     PARTIAL = "partial"

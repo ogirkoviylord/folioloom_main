@@ -1808,6 +1808,7 @@ def build_translation_progress_message(
     last_translated_text: str | None = None,
     activity_indicator: str = "⠋",
     activity_phrase_index: int = 5,
+    status_text: str | None = None,
 ) -> str:
     messages = _messages(interface_language)
     safe_total = max(total_fragments, 1)
@@ -1830,8 +1831,10 @@ def build_translation_progress_message(
             f"<blockquote expandable>{html.escape(_shorten_progress_fragment(last_translated_text))}</blockquote>"
         )
     last_fragment_section = f"\n\n{last_fragment_line}" if last_fragment_line else ""
+    status_section = f"{html.escape(status_text)}\n\n" if status_text else ""
 
     return (
+        f"{status_section}"
         f"{messages['progress']}: [{bar}] "
         f"{percent}%"
         f"{elapsed_line}\n"
@@ -1913,6 +1916,9 @@ def build_translation_job_status_message(
 
     if job.status is TranslationJobStatus.TRANSLATING:
         return messages["translating"].format(file_name=job.file_name)
+
+    if job.status is TranslationJobStatus.CANCEL_REQUESTED:
+        return messages["cancel_requested"]
 
     if job.status is TranslationJobStatus.PAUSED:
         return messages.get(

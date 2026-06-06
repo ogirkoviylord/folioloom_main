@@ -46,6 +46,7 @@ class PostgresSchedulerContractTest(unittest.TestCase):
             "list_jobs_by_status",
             "list_jobs_for_user",
             "cancel_job",
+            "request_cancel_job",
             "resume_job",
             "delete_job",
             "mark_job_interrupted",
@@ -91,6 +92,45 @@ class PostgresSchedulerContractTest(unittest.TestCase):
         self.assertIn(
             "cancel_requested_at",
             executed_sql,
+        )
+
+    def test_request_cancel_job_uses_claim_lock_and_cancel_requested_status(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection()
+        store._require_job = lambda job_id: SimpleNamespace(
+            id=job_id,
+            status=PersistentTranslationJobStatus.CANCEL_REQUESTED,
+        )
+        store._job_has_active_work = lambda job_id: True
+
+        store.request_cancel_job("job-1")
+
+        executed_sql = "\n".join(store.connection.statements)
+        self.assertIn("pg_advisory_xact_lock", executed_sql)
+        self.assertIn("cancel_requested_at", executed_sql)
+        self.assertIn(
+            PersistentTranslationJobStatus.CANCEL_REQUESTED.value,
+            str(store.connection.params),
+        )
+
+    def test_cancel_requested_idle_job_is_finalized_as_cancelled(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection()
+        store._require_job = lambda job_id: SimpleNamespace(
+            id=job_id,
+            status=PersistentTranslationJobStatus.CANCEL_REQUESTED,
+        )
+        store._job_has_active_work = lambda job_id: False
+
+        finalized = store._finalize_cancel_requested_job_if_idle(
+            "job-1",
+            now=datetime.now(UTC),
+        )
+
+        self.assertTrue(finalized)
+        self.assertIn(
+            PersistentTranslationJobStatus.CANCELLED.value,
+            str(store.connection.params),
         )
 
     def test_claim_final_job_update_cannot_revive_cancelled_job(self):
