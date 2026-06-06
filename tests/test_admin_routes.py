@@ -484,6 +484,59 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('data-action-variant="danger"', danger)
         self.assertNotIn("compact-action", html)
 
+    def test_admin_log_rows_constrain_badges_actions_and_long_metadata(self):
+        from translator_service.admin.translation_logs import TranslationRunSummary
+        from translator_service.admin.views import logs_body
+
+        long_file_name = (
+            "very-long-authorized-translation-file-name-with-many-sections-"
+            "and-safe-metadata-only.epub"
+        )
+        long_job_id = "job-" + ("abcdef1234567890" * 3)
+        safe_error = "provider_other: safe summarized metadata only"
+
+        html = logs_body(
+            (
+                TranslationRunSummary(
+                    job_id=long_job_id,
+                    status="failed",
+                    started_at=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+                    finished_at=None,
+                    order_id="order-long",
+                    user_id="telegram:42",
+                    file_name=long_file_name,
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                    result_file_name=None,
+                    error_message=safe_error,
+                    fragment_count=2,
+                    total_fragment_count=5,
+                    progress_percent=40.0,
+                    eta_seconds=None,
+                    current_stage="failed",
+                    last_event_at=None,
+                    total_tokens=1234,
+                    elapsed_seconds=2.5,
+                    run_dir="/tmp/run-long-metadata",
+                ),
+            )
+        )
+
+        self.assertIn('class="status admin-badge"', html)
+        self.assertIn(f'title="{long_file_name}"', html)
+        self.assertIn("admin-cell-filename", html)
+        self.assertIn(f'title="{long_job_id}"', html)
+        self.assertIn("admin-cell-id", html)
+        self.assertIn(f'title="{safe_error}"', html)
+        self.assertIn("admin-cell-error", html)
+        self.assertIn(
+            'class="action-control action-control-view action-control-compact"',
+            html,
+        )
+        self.assertNotIn("traceback", html.lower())
+
     def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
