@@ -3146,6 +3146,171 @@ def logs_body(
     """
 
 
+def translations_body(
+    logs: tuple[TranslationRunSummary, ...],
+    *,
+    operations: OperationsOverview | None = None,
+    csrf_token: str = "",
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 100,
+    form_action: str = "/admin/translations",
+) -> str:
+    jobs_by_id = {job.id: job for job in operations.jobs} if operations else {}
+    rows = "\n".join(
+        _translation_workflow_row(row, jobs_by_id.get(row.job_id), csrf_token)
+        for row in logs
+    )
+    if not rows:
+        rows = """
+        <tr>
+          <td colspan="10" class="empty-cell">No translation runs found.</td>
+        </tr>
+        """
+    return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Translations</h3>
+        <p>
+          Primary owner workflow for translation runs. Raw run logs remain in
+          Advanced Logs.
+        </p>
+      </div>
+    </section>
+    <section class="panel">
+      <form class="filter-form" method="get" action="{escape(form_action)}">
+        <label>
+          <span>Status</span>
+          <select name="status">
+            {_status_option("all", status, "All")}
+            {_status_option("running", status, "Running")}
+            {_status_option("ready", status, "Ready")}
+            {_status_option("failed", status, "Failed")}
+            {_status_option("cancelled", status, "Cancelled")}
+            {_status_option("partial", status, "Partial")}
+          </select>
+        </label>
+        <label>
+          <span>From</span>
+          <input name="date_from" type="date" value="{escape(date_from or "")}">
+        </label>
+        <label>
+          <span>To</span>
+          <input name="date_to" type="date" value="{escape(date_to or "")}">
+        </label>
+        {_action_button("Apply filters", "refresh")}
+      </form>
+    </section>
+    <section class="panel table-panel">
+      <table class="log-table translations-table">
+        <thead>
+          <tr>
+            <th>Started / updated</th>
+            <th>Status</th>
+            <th>User</th>
+            <th>File</th>
+            <th>Format</th>
+            <th>Direction</th>
+            <th>Fragments / tokens</th>
+            <th>Error</th>
+            <th>Primary action</th>
+            <th>Emergency</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </section>
+    """
+
+
+def _translation_workflow_row(
+    row: TranslationRunSummary,
+    job,
+    csrf_token: str,
+) -> str:
+    run_id = Path(row.run_dir).name
+    direction = f"{row.source_language} -> {row.target_language}"
+    updated = row.last_event_at or row.finished_at
+    updated_label = _format_datetime(updated) if updated else "n/a"
+    fragments_tokens = f"{_progress_label(row)} / {row.total_tokens}"
+    trace_link = _action_link(
+        "Open trace",
+        trace_href_for_run_id(run_id),
+        "view",
+        compact=True,
+    )
+    emergency = _translation_emergency_action(row, job, csrf_token)
+    return f"""
+    <tr>
+      <td>
+        <span>{escape(_format_datetime(row.started_at))}</span>
+        <span>Updated {escape(updated_label)}</span>
+      </td>
+      <td>{_status_badge(row.status)}</td>
+      <td>{_bounded_cell_text(row.user_id, kind="id")}</td>
+      <td>{_bounded_cell_text(row.file_name, kind="filename", tag="strong")}</td>
+      <td>{_format_badge(row.document_kind)}</td>
+      <td>{escape(direction)}</td>
+      <td>{escape(fragments_tokens)}</td>
+      <td>{_bounded_cell_text(_translation_safe_error(row), kind="error", empty="")}</td>
+      <td>{trace_link}</td>
+      <td>{emergency}</td>
+    </tr>
+    """
+
+
+def _format_badge(document_kind: str) -> str:
+    normalized = document_kind.strip().lower()
+    if normalized not in {"txt", "docx", "epub"}:
+        normalized = "unknown"
+    label = normalized.upper() if normalized != "unknown" else "Unknown"
+    return _status_badge(label, extra_class=f"format-badge format-badge-{normalized}")
+
+
+def _translation_safe_error(row: TranslationRunSummary) -> str:
+    if not row.error_message:
+        return ""
+    safe_error = _safe_support_text(row.error_message)
+    if safe_error:
+        return safe_error
+    return "error recorded; open trace"
+
+
+def _translation_emergency_action(
+    row: TranslationRunSummary,
+    job,
+    csrf_token: str,
+) -> str:
+    if job is not None and getattr(job, "cancellable", False):
+        confirm = (
+            "Cancel this translation to stop provider work and reduce token spend?"
+        )
+        return f"""
+        <form
+          class="job-actions"
+          method="post"
+          action="/admin/operations/jobs/{escape(row.job_id)}/cancel"
+          onsubmit="return confirm('{escape(confirm)}')"
+        >
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+          {_action_button("Cancel", "danger", compact=True)}
+        </form>
+        """
+    reason = (
+        "Existing Operations state is not cancellable."
+        if job is not None
+        else "Operations state is unavailable for this run."
+    )
+    return _action_button(
+        "No emergency action",
+        "view",
+        button_type="button",
+        disabled_reason=reason,
+        compact=True,
+    )
+
+
 def log_detail_body(details: TranslationRunDetails) -> str:
     summary = details.summary
     run_id = Path(details.run_dir).name
@@ -8238,6 +8403,26 @@ header {
   white-space: nowrap;
 }
 .admin-badge { vertical-align: top; }
+.format-badge-txt {
+  color: #155e75;
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+.format-badge-docx {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.format-badge-epub {
+  color: #166534;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.format-badge-unknown {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
 .environment-badge {
   width: max-content;
   max-width: 100%;

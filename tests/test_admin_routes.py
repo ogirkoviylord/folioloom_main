@@ -537,6 +537,97 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertNotIn("traceback", html.lower())
 
+    def test_translations_body_renders_primary_workflow_and_emergency_cancel(self):
+        from translator_service.admin.translation_logs import TranslationRunSummary
+        from translator_service.admin.views import translations_body
+
+        long_file_name = (
+            "very-long-authorized-translation-file-name-with-many-sections-"
+            "and-safe-metadata-only.epub"
+        )
+        running = TranslationRunSummary(
+            job_id="job-running-translation",
+            status="running",
+            started_at=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+            finished_at=None,
+            order_id="order-running",
+            user_id="telegram:42",
+            file_name=long_file_name,
+            document_kind="epub",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name=None,
+            error_message=(
+                "Traceback with api_key=sk-translation-list-secret and raw path"
+            ),
+            fragment_count=2,
+            total_fragment_count=5,
+            progress_percent=40.0,
+            eta_seconds=None,
+            current_stage="translating",
+            last_event_at=datetime(2026, 6, 6, 12, 3, tzinfo=UTC),
+            total_tokens=1234,
+            elapsed_seconds=180.0,
+            run_dir="/tmp/run-running-translation",
+        )
+        ready = TranslationRunSummary(
+            job_id="job-ready-translation",
+            status="ready",
+            started_at=datetime(2026, 6, 6, 11, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 6, 6, 11, 5, tzinfo=UTC),
+            order_id="order-ready",
+            user_id="telegram:99",
+            file_name="ready.docx",
+            document_kind="docx",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name="ready-uk.docx",
+            error_message=None,
+            fragment_count=5,
+            total_fragment_count=5,
+            progress_percent=100.0,
+            eta_seconds=0.0,
+            current_stage="ready",
+            last_event_at=datetime(2026, 6, 6, 11, 5, tzinfo=UTC),
+            total_tokens=4321,
+            elapsed_seconds=300.0,
+            run_dir="/tmp/run-ready-translation",
+        )
+        operations = build_operations_overview(
+            jobs=[
+                {"id": running.job_id, "status": "translating"},
+                {"id": ready.job_id, "status": "ready"},
+            ],
+            job_log_hrefs={
+                running.job_id: "/admin/logs/run-running-translation",
+                ready.job_id: "/admin/logs/run-ready-translation",
+            },
+        )
+
+        html = translations_body((running, ready), operations=operations, csrf_token="csrf")
+
+        self.assertIn("<th>Format</th>", html)
+        self.assertIn("format-badge-epub", html)
+        self.assertIn("format-badge-docx", html)
+        self.assertIn(f'title="{long_file_name}"', html)
+        self.assertIn('href="/admin/translations/run-running-translation/trace"', html)
+        self.assertIn("Open trace", html)
+        self.assertIn(
+            'action="/admin/operations/jobs/job-running-translation/cancel"',
+            html,
+        )
+        self.assertIn("stop provider work and reduce token spend", html)
+        self.assertIn('name="csrf_token" value="csrf"', html)
+        self.assertIn("No emergency action", html)
+        self.assertIn("error recorded; open trace", html)
+        self.assertNotIn("sk-translation-list-secret", html)
+        self.assertNotIn("Traceback with", html)
+        self.assertNotIn("/admin/logs/run-running-translation", html)
+        self.assertNotIn(">Details<", html)
+        self.assertNotIn(">Reader<", html)
+
     def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
@@ -731,6 +822,11 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(logs.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(logs.text))
+        self.assertIn("<th>Primary action</th>", translations.text)
+        self.assertIn("<th>Emergency</th>", translations.text)
+        self.assertNotIn("<th>Actions</th>", translations.text)
+        self.assertIn("<th>Actions</th>", logs.text)
+        self.assertNotEqual(translations.text, logs.text)
 
     def test_internal_reader_page_requires_login_and_does_not_generate_report(self):
         with patch(
