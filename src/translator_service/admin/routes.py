@@ -91,6 +91,8 @@ from translator_service.admin.translation_logs import (
     save_reader_review_mark,
 )
 from translator_service.admin.translation_progress import (
+    build_durable_translation_progress_snapshot,
+    overlay_operations_overview_progress,
     overlay_translation_run_details,
     overlay_translation_run_summaries,
 )
@@ -897,6 +899,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
         trace = build_translation_trace(
             details,
             operations=_operations_overview(settings),
+            progress_snapshot=_translation_progress_snapshot(
+                settings,
+                details.summary.job_id,
+            ),
             activity_events=activity_events,
             runtime_statuses=_ai_provider_runtime_statuses(settings),
             balance_snapshot=_deepseek_balance_snapshot(settings),
@@ -2605,19 +2611,32 @@ def _live_snapshot(settings: Settings, *, operations=None):
     active_operations = (
         operations if operations is not None else _operations_overview(settings)
     )
+    progress_snapshots = _translation_progress_snapshots(
+        settings,
+        (job.id for job in active_operations.jobs),
+    )
     return build_live_monitor_snapshot(
         settings.translation_run_log_root,
         operations=active_operations,
+        progress_snapshots=progress_snapshots,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
     )
 
 
 def _operations_overview(settings: Settings):
-    return build_persistent_operations_overview(
+    overview = build_persistent_operations_overview(
         settings.persistent_jobs_db_path,
         settings.translation_run_log_root,
         scheduler_backend=settings.scheduler_backend,
         postgres_dsn=settings.postgres_dsn,
+    )
+    progress_snapshots = _translation_progress_snapshots(
+        settings,
+        (job.id for job in overview.jobs),
+    )
+    return overlay_operations_overview_progress(
+        overview,
+        progress_snapshots=progress_snapshots,
     )
 
 
@@ -2900,9 +2919,15 @@ def _translation_run_summaries(
         settings.translation_run_log_root,
         **{**filters, "now": current_time},
     )
+    progress_snapshots = _translation_progress_snapshots(
+        settings,
+        (summary.job_id for summary in summaries),
+        now=current_time,
+    )
     return overlay_translation_run_summaries(
         summaries,
         operations=_operations_overview(settings),
+        progress_snapshots=progress_snapshots,
         now=current_time,
     )
 
@@ -2917,9 +2942,18 @@ def _translation_run_details(
     )
     if details is None:
         return None
+    progress_snapshot = _translation_progress_snapshot(
+        settings,
+        details.summary.job_id,
+    )
     details = overlay_translation_run_details(
         details,
         operations=_operations_overview(settings),
+        progress_snapshots=(
+            {progress_snapshot.job_id: progress_snapshot}
+            if progress_snapshot is not None
+            else None
+        ),
     )
     details = replace(
         details,
@@ -2942,6 +2976,47 @@ def _translation_run_details(
     if diagnostic is None:
         return details
     return replace(details, work_unit_diagnostic=diagnostic)
+
+
+def _translation_progress_snapshot(
+    settings: Settings,
+    job_id: str,
+    *,
+    now: datetime | None = None,
+):
+    snapshots = _translation_progress_snapshots(settings, (job_id,), now=now)
+    return snapshots.get(job_id)
+
+
+def _translation_progress_snapshots(
+    settings: Settings,
+    job_ids,
+    *,
+    now: datetime | None = None,
+):
+    safe_job_ids = tuple(sorted({str(job_id) for job_id in job_ids if job_id}))
+    if not safe_job_ids or not _persistent_job_store_readable(settings):
+        return {}
+    try:
+        store = open_persistent_job_store(settings)
+    except Exception:
+        return {}
+    try:
+        snapshots = {
+            job_id: build_durable_translation_progress_snapshot(
+                job_id,
+                store=store,
+                now=now,
+            )
+            for job_id in safe_job_ids
+        }
+    finally:
+        store.close()
+    return {
+        job_id: snapshot
+        for job_id, snapshot in snapshots.items()
+        if snapshot.available
+    }
 
 
 def _translation_work_unit_fragments(
