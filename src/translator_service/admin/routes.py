@@ -1015,7 +1015,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             request,
             session_manager=session_manager,
             environment=settings.environment,
-            title="Operations",
+            title="Jobs / Queue",
             active="operations",
             body=lambda session: operations_body(
                 _operations_overview(settings),
