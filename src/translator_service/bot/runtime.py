@@ -1394,50 +1394,31 @@ def create_router(
             user_telegram_id=callback.from_user.id,
             job_id=job_id,
         ):
-            await callback.answer(
-                build_nothing_to_cancel_message(interface_language),
-                show_alert=True,
+            refreshed = await _refresh_user_book_status_message(
+                callback.message,
+                service=service,
+                user_telegram_id=callback.from_user.id,
+                job_id=job_id,
+                interface_language=interface_language,
             )
+            if refreshed:
+                await callback.answer()
+            else:
+                await callback.answer(
+                    build_nothing_to_cancel_message(interface_language),
+                    show_alert=True,
+                )
             return
 
-        job = service.get_user_book_translation_job(
-            user_telegram_id=callback.from_user.id,
-            job_id=job_id,
-        )
-        book = service.get_user_book_detail(
-            user_telegram_id=callback.from_user.id,
-            job_id=job_id,
-        )
         await callback.answer()
-        if job is not None:
-            await _edit_callback_message(
-                callback.message,
-                build_translation_job_status_message(
-                    job,
-                    interface_language=interface_language,
-                ),
-                reply_markup=(
-                    _my_book_detail_keyboard(
-                        book,
-                        interface_language=interface_language,
-                    )
-                    if book is not None
-                    else None
-                ),
-            )
-            await _send_translation_result_document_once(callback.message, job, service)
-        elif book is not None:
-            await _edit_callback_message(
-                callback.message,
-                build_my_book_detail_message(
-                    book,
-                    interface_language=interface_language,
-                ),
-                reply_markup=_my_book_detail_keyboard(
-                    book,
-                    interface_language=interface_language,
-                ),
-            )
+        await _refresh_user_book_status_message(
+            callback.message,
+            service=service,
+            user_telegram_id=callback.from_user.id,
+            job_id=job_id,
+            interface_language=interface_language,
+            send_result=True,
+        )
 
     @router.callback_query(F.data.startswith("delete_book:"))
     async def delete_book(callback: CallbackQuery) -> None:
@@ -2561,6 +2542,57 @@ async def _edit_callback_message(message, text: str, reply_markup=None) -> None:
     )
     if inspect.isawaitable(result):
         await result
+
+
+async def _refresh_user_book_status_message(
+    message,
+    *,
+    service,
+    user_telegram_id: int,
+    job_id: str,
+    interface_language: str,
+    send_result: bool = False,
+) -> bool:
+    job = service.get_user_book_translation_job(
+        user_telegram_id=user_telegram_id,
+        job_id=job_id,
+    )
+    book = service.get_user_book_detail(
+        user_telegram_id=user_telegram_id,
+        job_id=job_id,
+    )
+    if job is not None:
+        await _edit_callback_message(
+            message,
+            build_translation_job_status_message(
+                job,
+                interface_language=interface_language,
+            ),
+            reply_markup=(
+                _my_book_detail_keyboard(
+                    book,
+                    interface_language=interface_language,
+                )
+                if book is not None
+                else None
+            ),
+        )
+        if send_result:
+            await _send_translation_result_document_once(message, job, service)
+        return True
+
+    if book is not None:
+        await _edit_callback_message(
+            message,
+            build_my_book_detail_message(book, interface_language=interface_language),
+            reply_markup=_my_book_detail_keyboard(
+                book,
+                interface_language=interface_language,
+            ),
+        )
+        return True
+
+    return False
 
 
 async def _edit_progress_message_if_changed(
