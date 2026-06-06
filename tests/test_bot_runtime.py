@@ -294,6 +294,13 @@ class _QueuedTwiceThenReadyService(_QueuedThenReadyService):
         return _runtime_job(status=TranslationJobStatus.READY)
 
 
+class _TranslatingTwiceThenReadyService(_QueuedThenReadyService):
+    def get_user_book_translation_job(self, **kwargs):
+        if self.progress_calls < 2:
+            return _runtime_job(status=TranslationJobStatus.TRANSLATING)
+        return _runtime_job(status=TranslationJobStatus.READY)
+
+
 class _CancellingBeforeProgressEditService(_QueuedThenReadyService):
     def __init__(self) -> None:
         super().__init__()
@@ -1339,6 +1346,64 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.edited_texts, [])
         self.assertIsNotNone(watched_job)
         self.assertEqual(watched_job.status, TranslationJobStatus.CANCELLED)
+
+    async def test_worker_progress_watch_respects_retry_after_cooldown(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        class RetryAfterEditableMessage(EditableMessage):
+            def __init__(self) -> None:
+                super().__init__()
+                self.edit_attempts = 0
+
+            def edit_text(self, text: str, reply_markup=None):
+                def record() -> None:
+                    self.edit_attempts += 1
+                    raise FakeRetryAfter(
+                        "Telegram server says - Flood control exceeded. "
+                        "Retry in 13 seconds."
+                    )
+
+                return TelegramMethodLikeAwaitable(record)
+
+        message = RetryAfterEditableMessage()
+        service = _TranslatingTwiceThenReadyService()
+        progress_stats = {
+            "completed": 0,
+            "total": 2,
+            "estimated_total_seconds": None,
+            "last_translated_text": None,
+            "spinner_index": 0,
+            "heartbeat_pattern": "calm_dots",
+            "job_id": "job-1",
+            "last_edit_scheduled_at": 0.0,
+        }
+        sleep_calls: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            await original_sleep(0)
+
+        with (
+            patch("translator_service.bot.runtime.asyncio.sleep", record_sleep),
+            self.assertLogs("translator_service.bot.runtime", level="WARNING"),
+        ):
+            watched_job = await _watch_worker_translation_progress(
+                message=message,
+                service=service,
+                user_telegram_id=42,
+                job_id="job-1",
+                started_at=0,
+                progress_stats=progress_stats,
+                poll_interval_seconds=0.01,
+            )
+
+        self.assertIsNotNone(watched_job)
+        self.assertEqual(watched_job.status, TranslationJobStatus.READY)
+        self.assertEqual(message.edit_attempts, 1)
+        self.assertEqual(sleep_calls, [0.1])
+        self.assertIn("progress_edit_retry_after_until", progress_stats)
 
     async def test_book_detail_callback_renders_persistent_progress(self):
         class BookDetailProgressService:

@@ -2568,14 +2568,22 @@ async def _edit_progress_message_if_changed(
     text: str,
     reply_markup=None,
     should_edit=None,
+    progress_stats: dict[str, object] | None = None,
 ) -> None:
     if should_edit is not None and not should_edit():
         return
     try:
         await _edit_callback_message(message, text, reply_markup=reply_markup)
     except Exception as error:
+        message_text = str(error)
         if _is_message_not_modified_error(error):
             logger.debug("Skipping unchanged translation progress message edit")
+            return
+        if _handle_progress_edit_retry_after(
+            error,
+            message_text,
+            progress_stats=progress_stats,
+        ):
             return
         raise
 
@@ -3472,7 +3480,8 @@ async def _watch_worker_translation_progress(
         progress_stats["job_status"] = current_job.status.value
         progress_stats["completed"] = progress.completed_fragments
         progress_stats["total"] = progress.total_fragments
-        elapsed_seconds = max(1, round(time.monotonic() - started_at))
+        now = time.monotonic()
+        elapsed_seconds = max(1, round(now - started_at))
         estimated_total_seconds = _polled_progress_estimated_total_seconds(
             progress,
             elapsed_seconds=elapsed_seconds,
@@ -3508,6 +3517,12 @@ async def _watch_worker_translation_progress(
         )
         if not edit_allowed():
             await asyncio.sleep(max(0.1, poll_interval_seconds))
+        elif not _should_schedule_worker_progress_edit(
+            progress_stats,
+            now=now,
+            min_interval_seconds=poll_interval_seconds,
+        ):
+            await asyncio.sleep(max(0.1, poll_interval_seconds))
         else:
             await _edit_progress_message_if_changed(
                 message,
@@ -3517,6 +3532,7 @@ async def _watch_worker_translation_progress(
                     job_id=job_id,
                 ),
                 should_edit=edit_allowed,
+                progress_stats=progress_stats,
             )
 
         current_job = service.get_user_book_translation_job(
@@ -3669,6 +3685,30 @@ def _should_schedule_progress_edit(
     return True
 
 
+def _should_schedule_worker_progress_edit(
+    progress_stats: dict[str, object],
+    *,
+    now: float,
+    min_interval_seconds: float,
+) -> bool:
+    if (
+        not progress_stats.get("worker_progress_edit_attempted")
+        and progress_stats.get("progress_edit_retry_after_until") is None
+    ):
+        progress_stats["worker_progress_edit_attempted"] = True
+        progress_stats["last_edit_scheduled_at"] = now
+        return True
+
+    should_edit = _should_schedule_progress_edit(
+        progress_stats,
+        now=now,
+        min_interval_seconds=min_interval_seconds,
+    )
+    if should_edit:
+        progress_stats["worker_progress_edit_attempted"] = True
+    return should_edit
+
+
 def _log_message_edit_error(
     future,
     *,
@@ -3678,18 +3718,11 @@ def _log_message_edit_error(
         future.result()
     except Exception as error:
         message = str(error)
-        retry_after = _telegram_retry_after_seconds(error, message)
-        if retry_after is not None or "retry after" in message.lower():
-            if retry_after is not None and progress_stats is not None:
-                progress_stats["progress_edit_retry_after_until"] = (
-                    time.monotonic() + retry_after
-                )
-            logger.warning(
-                "Telegram flood control while editing progress message; "
-                "retry_after=%s message=%s",
-                retry_after if retry_after is not None else "unknown",
-                message,
-            )
+        if _handle_progress_edit_retry_after(
+            error,
+            message,
+            progress_stats=progress_stats,
+        ):
             return
         if "message can't be edited" in message:
             logger.warning(
@@ -3698,6 +3731,28 @@ def _log_message_edit_error(
             )
             return
         logger.exception("Failed to edit translation progress message")
+
+
+def _handle_progress_edit_retry_after(
+    error: Exception,
+    message: str,
+    *,
+    progress_stats: dict[str, object] | None = None,
+) -> bool:
+    retry_after = _telegram_retry_after_seconds(error, message)
+    if retry_after is None and "retry after" not in message.lower():
+        return False
+    if retry_after is not None and progress_stats is not None:
+        progress_stats["progress_edit_retry_after_until"] = (
+            time.monotonic() + retry_after
+        )
+    logger.warning(
+        "Telegram flood control while editing progress message; "
+        "retry_after=%s message=%s",
+        retry_after if retry_after is not None else "unknown",
+        message,
+    )
+    return True
 
 
 def _telegram_retry_after_seconds(error: Exception, message: str) -> float | None:
