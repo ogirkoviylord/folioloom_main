@@ -3095,7 +3095,25 @@ async def _run_confirm_pending_translation(
         await message.answer(str(error))
         return
 
+    progress_stats["job_id"] = job.id
     if job.status in {TranslationJobStatus.QUEUED, TranslationJobStatus.TRANSLATING}:
+        await _edit_progress_message_if_changed(
+            progress_message,
+            build_translation_job_status_message(
+                job,
+                interface_language=service.get_interface_language(message.from_user.id),
+            ),
+            reply_markup=_cancel_inline_keyboard(
+                service.get_interface_language(message.from_user.id),
+                job_id=job.id,
+            ),
+            should_edit=_translation_progress_edit_guard(
+                service=service,
+                user_telegram_id=message.from_user.id,
+                job_id=job.id,
+            ),
+            progress_stats=progress_stats,
+        )
         watched_job = await _watch_worker_translation_progress(
             message=progress_message,
             service=service,
