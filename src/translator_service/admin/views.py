@@ -1047,11 +1047,7 @@ def _runtime_reload_label(
         return "No reload requested"
     if reload_state.pending:
         return "Waiting for runtime"
-    consumed = (
-        reload_state.consumed_at.isoformat(timespec="seconds")
-        if reload_state.consumed_at is not None
-        else "Unknown"
-    )
+    consumed = _format_datetime(reload_state.consumed_at)
     return f"Consumed at {consumed}"
 
 
@@ -1189,7 +1185,7 @@ def _provider_runtime_panel(
         source = runtime.source
         status = runtime.status
         interval = _format_seconds(runtime.reload_interval_seconds)
-        last_reload = runtime.last_reloaded_at.isoformat()
+        last_reload = _format_datetime(runtime.last_reloaded_at)
         freshness = _runtime_freshness(runtime)
         error = _safe_runtime_error_text(runtime.error)
         provider_state = _runtime_provider_state_row(runtime.provider_state)
@@ -1205,7 +1201,7 @@ def _provider_runtime_panel(
         reload_detail = (
             "Waiting for runtime"
             if reload_state.pending
-            else f"Consumed at {reload_state.consumed_at.isoformat()}"
+            else f"Consumed at {_format_datetime(reload_state.consumed_at)}"
         )
     return f"""
       <div class="provider-health">
@@ -1719,12 +1715,8 @@ def _provider_balance_panel(
         rows = "\n".join(_balance_metric_row(amount) for amount in snapshot.balances)
         if not rows:
             rows = '<p class="empty-state">No currency balances reported.</p>'
-        checked = snapshot.last_checked_at.isoformat(timespec="seconds")
-        success = (
-            snapshot.last_success_at.isoformat(timespec="seconds")
-            if snapshot.last_success_at is not None
-            else "n/a"
-        )
+        checked = _format_datetime(snapshot.last_checked_at)
+        success = _format_datetime(snapshot.last_success_at)
         error = _safe_runtime_text(snapshot.error_message)
     safe_top_up = _safe_external_href(top_up_url)
     return f"""
@@ -2377,7 +2369,7 @@ def _cost_unavailable_note(count: int) -> str:
 
 
 def _cost_run_row(run: CostRunSummary) -> str:
-    started = run.started_at.isoformat(timespec="seconds") if run.started_at else "n/a"
+    started = _format_datetime(run.started_at)
     return f"""
     <tr>
       <td>{escape(started)}</td>
@@ -2565,12 +2557,6 @@ def _job_action_form(
       {_action_button(label, variant, compact=True)}
     </form>
     """
-
-
-def _format_datetime(value) -> str:
-    if value is None:
-        return "n/a"
-    return value.isoformat(timespec="seconds")
 
 
 def _format_workers(worker_ids: tuple[str, ...]) -> str:
@@ -3283,6 +3269,21 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           if (minutes >= 60) return `${{Math.floor(minutes / 60)}}h ${{minutes % 60}}m`;
           return `${{minutes}}m`;
         }};
+        const formatTimestamp = (value) => {{
+          if (!value) return "n/a";
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) return String(value);
+          return new Intl.DateTimeFormat("en-GB", {{
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: "UTC",
+            timeZoneName: "short"
+          }}).format(date);
+        }};
         const progressLabel = (summary) => {{
           const done = summary.fragment_count ?? 0;
           const total = summary.total_fragment_count ?? 0;
@@ -3320,7 +3321,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
               <dt>Status</dt><dd>${{escapeHtml(diagnostic.status || "unknown")}}</dd>
               <dt>Attempts</dt><dd>${{escapeHtml(attempts)}}</dd>
               <dt>Blocks</dt><dd>${{escapeHtml(blocks)}}</dd>
-              <dt>Updated</dt><dd>${{escapeHtml(diagnostic.updated_at || "n/a")}}</dd>
+              <dt>Updated</dt><dd>${{escapeHtml(formatTimestamp(diagnostic.updated_at))}}</dd>
               <dt>Last error</dt>
               <dd>${{escapeHtml(diagnostic.last_error || "n/a")}}</dd>
             </dl>
@@ -3328,7 +3329,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         }};
         const eventRows = (events) => (events || []).map((event) => `
           <tr>
-            <td>${{escapeHtml(event.timestamp || "n/a")}}</td>
+            <td>${{escapeHtml(formatTimestamp(event.timestamp))}}</td>
             <td><strong>${{escapeHtml(event.event_type || "unknown")}}</strong></td>
             <td><code>${{escapeHtml(JSON.stringify(event.payload || {{}}))}}</code></td>
           </tr>
@@ -3382,7 +3383,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           setField("stage", summary.current_stage || summary.status || "unknown");
           setField("progress", progressLabel(summary));
           setField("eta", durationLabel(summary.eta_seconds));
-          setField("finished_at", summary.finished_at || "n/a");
+          setField("finished_at", formatTimestamp(summary.finished_at));
           setField("fragments", summary.fragment_count ?? 0);
           setField("tokens", summary.total_tokens ?? 0);
           setProgressBar(summary);
@@ -6274,8 +6275,8 @@ def user_detail_body(
         {_metric("Translation mode", translation_mode or "Unknown")}
         {_metric("Progress preview", _bool_label(user.progress_preview_enabled))}
         {_metric("Support reports", "Unknown")}
-        {_metric("First seen", user.first_seen_at.isoformat(timespec="seconds"))}
-        {_metric("Last seen", user.last_seen_at.isoformat(timespec="seconds"))}
+        {_metric("First seen", _format_datetime(user.first_seen_at))}
+        {_metric("Last seen", _format_datetime(user.last_seen_at))}
       </div>
     </section>
     <section class="panel table-panel">
@@ -6386,7 +6387,7 @@ def _support_activity_rows(events: tuple[UserActivityEvent, ...]) -> str:
 
 
 def _support_activity_row(event: UserActivityEvent) -> str:
-    created = event.created_at.isoformat(timespec="seconds")
+    created = _format_datetime(event.created_at)
     target = _safe_support_target(event)
     detail = _safe_support_event_detail(event)
     return f"""
@@ -6710,7 +6711,7 @@ def _filter_input(name: str, label: str, value: str | None) -> str:
 
 
 def _activity_row(event: UserActivityEvent, *, include_user: bool = True) -> str:
-    created = event.created_at.isoformat(timespec="seconds")
+    created = _format_datetime(event.created_at)
     target = " / ".join(
         part for part in (event.target_type or "", event.target_id or "") if part
     )
@@ -6744,7 +6745,7 @@ def _user_row(user: UserProfile) -> str:
       <td>{escape(user.last_target_language or "n/a")}</td>
       <td>{escape(_bool_label(user.progress_preview_enabled))}</td>
       <td><span class="status">{escape(user.security_state)}</span></td>
-      <td>{escape(user.last_seen_at.isoformat(timespec="seconds"))}</td>
+      <td>{escape(_format_datetime(user.last_seen_at))}</td>
     </tr>
     """
 
@@ -6858,7 +6859,7 @@ def _trace_link_group(links: tuple[TranslationTraceLink, ...]) -> str:
 
 
 def _log_row(row: TranslationRunSummary) -> str:
-    started = row.started_at.isoformat(timespec="seconds") if row.started_at else "n/a"
+    started = _format_datetime(row.started_at)
     direction = f"{row.source_language} -> {row.target_language}"
     error = row.error_message or ""
     run_id = Path(row.run_dir).name
@@ -6980,6 +6981,8 @@ def _detail_value(value: object) -> str:
 
 
 def _detail_value_html(value: object) -> str:
+    if isinstance(value, datetime):
+        return f'<span class="detail-value">{escape(_format_datetime(value))}</span>'
     structured = _structured_detail_value(value)
     if structured is not None:
         return f'<pre class="detail-json">{escape(structured)}</pre>'
@@ -7020,7 +7023,11 @@ def _compact_json(value: object) -> str:
 
 
 def _format_datetime(value: datetime | None) -> str:
-    return value.isoformat(timespec="seconds") if value is not None else "n/a"
+    if value is None:
+        return "n/a"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%d %b %Y, %H:%M UTC")
 
 
 def _status_option(value: str, selected: str | None, label: str) -> str:

@@ -316,6 +316,24 @@ class AdminOperationsTest(unittest.TestCase):
         self.assertNotIn("<script>", html)
         self.assertNotIn("sk-live", html)
 
+    def test_operations_body_renders_readable_timestamps(self):
+        overview = build_operations_overview(
+            jobs=[
+                {
+                    "id": "job-readable-time",
+                    "status": "queued",
+                    "created_at": _time(0),
+                    "updated_at": _time(5),
+                }
+            ]
+        )
+
+        html = operations_body(overview)
+
+        self.assertIn("Created 08 May 2026, 12:00 UTC", html)
+        self.assertIn("Updated 08 May 2026, 12:05 UTC", html)
+        self.assertNotIn("2026-05-08T12:00:00+00:00", html)
+
     def test_operations_body_rejects_unsafe_log_href(self):
         for unsafe_href in (
             "javascript:alert(1)",
