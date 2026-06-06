@@ -825,6 +825,30 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual(second.work_unit_id, f"{job.id}:unit-2")
         self.assertIsNone(third)
 
+    def test_single_user_job_can_claim_up_to_eight_units_when_capacity_is_free(self):
+        job = self._create_txt_job_with_units(unit_count=9)
+        limits = SchedulerLimits(
+            max_active_units_global=16,
+            max_active_units_per_job=8,
+            max_active_units_per_user=8,
+            max_active_jobs_per_user=1,
+        )
+
+        claims = [
+            self.store.claim_next_scheduled_work_unit(
+                worker_id=f"worker-{index}",
+                lease_seconds=300,
+                limits=limits,
+            )
+            for index in range(1, 10)
+        ]
+
+        self.assertEqual(
+            [claim.work_unit_id for claim in claims[:8]],
+            [f"{job.id}:unit-{sequence}" for sequence in range(1, 9)],
+        )
+        self.assertIsNone(claims[8])
+
     def test_global_limit_blocks_second_job_sequentially(self):
         first_job = self._create_txt_job_with_unit(order_id="order-1", file_id="file-1")
         self._create_txt_job_with_unit(order_id="order-2", file_id="file-2")

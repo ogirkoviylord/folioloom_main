@@ -2382,6 +2382,90 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("2/4", trace.text)
         self.assertIn("36", trace.text)
 
+    def test_translation_logs_overlay_resumed_job_over_stale_cancelled_run(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-resumed-after-cancel",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="resumed.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=4,
+                ),
+            )
+            logger.finish(status="cancelled", result_file_name="resumed.partial.epub")
+            operations = build_operations_overview(
+                jobs=[
+                    {
+                        "id": "job-resumed-after-cancel",
+                        "status": "translating",
+                        "file_name": "resumed.epub",
+                        "document_kind": "epub",
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "created_at": datetime(2026, 5, 31, 9, 0, tzinfo=UTC),
+                        "updated_at": datetime(2026, 5, 31, 9, 10, tzinfo=UTC),
+                    }
+                ],
+                work_units_by_job_id={
+                    "job-resumed-after-cancel": (
+                        {
+                            "status": "translated",
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                        },
+                        {
+                            "status": "translated",
+                            "prompt_tokens": 13,
+                            "completion_tokens": 5,
+                        },
+                        {"status": "translating"},
+                        {"status": "pending"},
+                    )
+                },
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=temp_dir,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            with patch(
+                "translator_service.admin.routes._operations_overview",
+                return_value=operations,
+            ):
+                page = client.get("/admin/logs")
+                api = client.get("/admin/api/logs")
+                details = client.get(f"/admin/logs/{logger.run_dir.name}")
+                trace = client.get(
+                    f"/admin/translations/{logger.run_dir.name}/trace"
+                )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("job-resumed-after-cancel", page.text)
+        self.assertIn(">2</td>", page.text)
+        self.assertIn(">36</td>", page.text)
+        self.assertEqual(api.status_code, 200)
+        self.assertEqual(api.json()["logs"][0]["status"], "translating")
+        self.assertEqual(api.json()["logs"][0]["fragment_count"], 2)
+        self.assertEqual(api.json()["logs"][0]["total_fragment_count"], 4)
+        self.assertEqual(api.json()["logs"][0]["progress_percent"], 50.0)
+        self.assertEqual(details.status_code, 200)
+        self.assertIn("2/4", details.text)
+        self.assertIn("50.0%", details.text)
+        self.assertEqual(trace.status_code, 200)
+        self.assertIn("translating", trace.text)
+        self.assertIn("2/4", trace.text)
+
     def test_translation_log_details_show_failed_work_unit_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
