@@ -2609,9 +2609,9 @@ def _translation_progress_edit_allowed(
     )
     if current_job is None:
         return False
-    return current_job.status not in {
-        TranslationJobStatus.CANCELLED,
-        TranslationJobStatus.DELETED,
+    return current_job.status in {
+        TranslationJobStatus.QUEUED,
+        TranslationJobStatus.TRANSLATING,
     }
 
 
