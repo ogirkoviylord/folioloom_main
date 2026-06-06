@@ -81,7 +81,7 @@ _ADVANCED_NAV_ITEMS = (
     ("logs", "/admin/logs", "Logs"),
     ("reader", "/admin/internal-reader", "Reader"),
     ("activity", "/admin/activity", "Activity"),
-    ("operations", "/admin/operations/jobs", "Operations"),
+    ("operations", "/admin/operations/jobs", "Jobs / Queue"),
     ("audit", "/admin/audit", "Audit"),
     ("integrations", "/admin/integrations", "Integrations"),
     ("billing", "/admin/billing", "Billing"),
@@ -2491,9 +2491,19 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
         for label, value in metrics
     )
     return f"""
+    <section class="toolbar-panel">
+      <div>
+        <h3>Jobs / Queue Operations</h3>
+        <p>
+          Queue and worker state for persistent translation jobs. Use this
+          Advanced view for job controls, trace links, worker context, and
+          disabled action reasons.
+        </p>
+      </div>
+    </section>
     <section class="metrics">{metric_cards}</section>
     <section class="panel table-panel">
-      <h3>Jobs</h3>
+      <h3>Job queue</h3>
       <table class="log-table operations-table">
         <thead>
           <tr>
@@ -2513,7 +2523,7 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
       </table>
     </section>
     <section class="panel">
-      <h3>Workers</h3>
+      <h3>Worker context</h3>
       <p>{len(overview.workers)} workers are currently visible to the admin console.</p>
     </section>
     """
