@@ -55,6 +55,7 @@ from translator_service.bot.runtime import (
     _send_user_book_result,
     _settings_keyboard,
     _should_schedule_progress_edit,
+    _translation_progress_edit_allowed,
     _UserActionInFlightGuard,
     _watch_worker_translation_progress,
     bot_runtime_config_from_settings,
@@ -1408,7 +1409,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_resume_translation_sends_progress_message_for_queued_job(self):
         message = RecordingMessage()
-        service = _QueuedThenReadyService()
+        service = _QueuedTwiceThenReadyService()
 
         await _resume_user_book_translation(
             message=message,
@@ -1439,7 +1440,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "Your translation is ready",
             message.answer_messages[0].edited_texts[-1],
         )
-        self.assertEqual(service.progress_calls, 1)
+        self.assertGreaterEqual(service.progress_calls, 1)
 
     async def test_confirm_deferred_translation_targets_cancel_after_job_exists(self):
         message = RecordingMessage()
@@ -2824,6 +2825,61 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wrap_future(future)
         self.assertEqual(message.edited_texts, [])
+
+    def test_translation_progress_edit_allows_only_active_durable_jobs(self):
+        class StatusService:
+            def __init__(self, status: TranslationJobStatus | None) -> None:
+                self.status = status
+
+            def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+                return False
+
+            def get_user_book_translation_job(self, **kwargs):
+                if self.status is None:
+                    return None
+                return _runtime_job(status=self.status)
+
+        for status in (TranslationJobStatus.QUEUED, TranslationJobStatus.TRANSLATING):
+            with self.subTest(status=status.value):
+                self.assertTrue(
+                    _translation_progress_edit_allowed(
+                        service=StatusService(status),
+                        user_telegram_id=42,
+                        job_id="job-1",
+                    )
+                )
+
+        for status in (
+            TranslationJobStatus.PAUSED,
+            TranslationJobStatus.READY,
+            TranslationJobStatus.PARTIAL,
+            TranslationJobStatus.FAILED,
+            TranslationJobStatus.CANCELLED,
+            TranslationJobStatus.DELETED,
+        ):
+            with self.subTest(status=status.value):
+                self.assertFalse(
+                    _translation_progress_edit_allowed(
+                        service=StatusService(status),
+                        user_telegram_id=42,
+                        job_id="job-1",
+                    )
+                )
+
+        self.assertFalse(
+            _translation_progress_edit_allowed(
+                service=StatusService(None),
+                user_telegram_id=42,
+                job_id="job-1",
+            )
+        )
+        self.assertTrue(
+            _translation_progress_edit_allowed(
+                service=StatusService(TranslationJobStatus.READY),
+                user_telegram_id=42,
+                job_id=None,
+            )
+        )
 
     def test_progress_edit_scheduler_throttles_frequent_updates(self):
         progress_stats = {"last_edit_scheduled_at": 10.0}
