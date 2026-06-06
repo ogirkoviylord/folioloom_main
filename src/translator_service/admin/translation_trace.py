@@ -14,6 +14,9 @@ from translator_service.admin.translation_logs import (
     TranslationRunDetails,
     TranslationRunEvent,
 )
+from translator_service.admin.translation_progress import (
+    DurableTranslationProgressSnapshot,
+)
 from translator_service.user_activity import UserActivityEvent
 
 
@@ -68,6 +71,7 @@ def build_translation_trace(
     details: TranslationRunDetails,
     *,
     operations: OperationsOverview | None = None,
+    progress_snapshot: DurableTranslationProgressSnapshot | None = None,
     activity_events: tuple[UserActivityEvent, ...] = (),
     runtime_statuses: tuple[AIProviderRuntimeStatus, ...] = (),
     balance_snapshot: ProviderBalanceSnapshot | None = None,
@@ -89,10 +93,15 @@ def build_translation_trace(
         status=summary.status or "Unknown",
         failure_category=failure_category,
         safe_error_summary=safe_error_summary,
-        summary_facts=_summary_facts(details, run_id, failure_category, safe_error_summary),
+        summary_facts=_summary_facts(
+            details,
+            run_id,
+            failure_category,
+            safe_error_summary,
+        ),
         document_facts=_document_facts(details),
         choice_facts=_choice_facts(details),
-        job_facts=_job_facts(job),
+        job_facts=_job_facts(job, progress_snapshot=progress_snapshot),
         provider=provider,
         timeline=_timeline(details.events, activity_events),
         next_action=next_action,
@@ -165,7 +174,36 @@ def _choice_facts(details: TranslationRunDetails) -> tuple[TranslationTraceFact,
     )
 
 
-def _job_facts(job: Any | None) -> tuple[TranslationTraceFact, ...]:
+def _job_facts(
+    job: Any | None,
+    *,
+    progress_snapshot: DurableTranslationProgressSnapshot | None,
+) -> tuple[TranslationTraceFact, ...]:
+    if progress_snapshot is not None and progress_snapshot.available:
+        retryable = (
+            "yes"
+            if job is not None and bool(getattr(job, "retryable", False))
+            else "no"
+        )
+        return (
+            TranslationTraceFact("Job state", progress_snapshot.state or "Unknown"),
+            TranslationTraceFact(
+                "Work units",
+                (
+                    f"{progress_snapshot.completed_units}/"
+                    f"{progress_snapshot.total_units}"
+                ),
+            ),
+            TranslationTraceFact(
+                "Failed units",
+                str(progress_snapshot.failed_units),
+            ),
+            TranslationTraceFact("Retryable", retryable),
+            TranslationTraceFact(
+                "Active workers",
+                ", ".join(progress_snapshot.active_worker_ids) or "none",
+            ),
+        )
     if job is None:
         return (
             TranslationTraceFact("Job state", "Unknown"),
@@ -174,7 +212,10 @@ def _job_facts(job: Any | None) -> tuple[TranslationTraceFact, ...]:
             TranslationTraceFact("Active workers", "Unknown"),
         )
     return (
-        TranslationTraceFact("Job state", _string(getattr(job, "state", None)) or "Unknown"),
+        TranslationTraceFact(
+            "Job state",
+            _string(getattr(job, "state", None)) or "Unknown",
+        ),
         TranslationTraceFact(
             "Work units",
             f"{getattr(job, 'completed_units', 0)}/{getattr(job, 'total_units', 0)}",
@@ -257,7 +298,10 @@ def _provider_signal(
         safe_failure_categories=categories or ("none",),
         balance_status=(
             balance_snapshot.status
-            if balance_snapshot is not None and balance_snapshot.provider_id == "deepseek"
+            if (
+                balance_snapshot is not None
+                and balance_snapshot.provider_id == "deepseek"
+            )
             else "Unknown"
         ),
         has_incident_signal=has_incident_signal,
@@ -396,14 +440,33 @@ def _provider_failure_categories(
     runtime: AIProviderRuntimeStatus,
 ) -> tuple[str, ...]:
     counters = {
-        "rate_limit": sum(channel.total_rate_limit_failures for channel in runtime.active_channels),
-        "auth": sum(channel.total_auth_failures for channel in runtime.active_channels),
-        "billing": sum(channel.total_billing_failures for channel in runtime.active_channels),
-        "timeout": sum(channel.total_timeout_failures for channel in runtime.active_channels),
-        "unavailable": sum(channel.total_unavailable_failures for channel in runtime.active_channels),
-        "malformed": sum(channel.total_malformed_response_failures for channel in runtime.active_channels),
-        "unsafe_model_output": sum(channel.total_unsafe_model_output_failures for channel in runtime.active_channels),
-        "other_provider": sum(channel.total_other_provider_failures for channel in runtime.active_channels),
+        "rate_limit": sum(
+            channel.total_rate_limit_failures for channel in runtime.active_channels
+        ),
+        "auth": sum(
+            channel.total_auth_failures for channel in runtime.active_channels
+        ),
+        "billing": sum(
+            channel.total_billing_failures for channel in runtime.active_channels
+        ),
+        "timeout": sum(
+            channel.total_timeout_failures for channel in runtime.active_channels
+        ),
+        "unavailable": sum(
+            channel.total_unavailable_failures for channel in runtime.active_channels
+        ),
+        "malformed": sum(
+            channel.total_malformed_response_failures
+            for channel in runtime.active_channels
+        ),
+        "unsafe_model_output": sum(
+            channel.total_unsafe_model_output_failures
+            for channel in runtime.active_channels
+        ),
+        "other_provider": sum(
+            channel.total_other_provider_failures
+            for channel in runtime.active_channels
+        ),
     }
     return tuple(key for key, value in counters.items() if value > 0)
 
@@ -414,7 +477,10 @@ def _advanced_links(
     user_id: str | None,
 ) -> tuple[TranslationTraceLink, ...]:
     links = [
-        TranslationTraceLink("Advanced log detail", f"/admin/logs/{quote(run_id, safe='')}"),
+        TranslationTraceLink(
+            "Advanced log detail",
+            f"/admin/logs/{quote(run_id, safe='')}",
+        ),
         TranslationTraceLink("Operations", "/admin/operations/jobs"),
     ]
     if job_id:

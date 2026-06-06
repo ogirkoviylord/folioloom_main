@@ -150,13 +150,19 @@ def overlay_translation_run_summaries(
     summaries: tuple[TranslationRunSummary, ...],
     *,
     operations: OperationsOverview | None,
+    progress_snapshots: Mapping[str, DurableTranslationProgressSnapshot] | None = None,
     now: datetime | None = None,
 ) -> tuple[TranslationRunSummary, ...]:
-    if operations is None:
+    if operations is None and progress_snapshots is None:
         return summaries
-    jobs_by_id = _jobs_by_id(operations)
+    jobs_by_id = _jobs_by_id(operations) if operations is not None else {}
+    snapshots_by_id = progress_snapshots or {}
     return tuple(
-        _overlay_summary(summary, jobs_by_id.get(summary.job_id), now=now)
+        _overlay_summary_with_progress_snapshot(
+            _overlay_summary(summary, jobs_by_id.get(summary.job_id), now=now),
+            snapshots_by_id.get(summary.job_id),
+            now=now,
+        )
         for summary in summaries
     )
 
@@ -165,18 +171,41 @@ def overlay_translation_run_details(
     details: TranslationRunDetails,
     *,
     operations: OperationsOverview | None,
+    progress_snapshots: Mapping[str, DurableTranslationProgressSnapshot] | None = None,
     now: datetime | None = None,
 ) -> TranslationRunDetails:
-    if operations is None:
+    if operations is None and progress_snapshots is None:
         return details
-    job = _jobs_by_id(operations).get(details.summary.job_id)
-    if job is None:
+    job = _jobs_by_id(operations).get(details.summary.job_id) if operations else None
+    snapshot = (progress_snapshots or {}).get(details.summary.job_id)
+    if job is None and (snapshot is None or not snapshot.available):
         return details
     summary = _overlay_summary(details.summary, job, now=now)
-    totals = _overlay_totals(details.totals, job)
+    summary = _overlay_summary_with_progress_snapshot(summary, snapshot, now=now)
+    totals = _overlay_totals(details.totals, job) if job is not None else details.totals
+    totals = _overlay_totals_with_progress_snapshot(totals, snapshot)
     if summary == details.summary and totals == details.totals:
         return details
     return replace(details, summary=summary, totals=totals)
+
+
+def overlay_operations_overview_progress(
+    operations: OperationsOverview,
+    *,
+    progress_snapshots: Mapping[str, DurableTranslationProgressSnapshot] | None,
+) -> OperationsOverview:
+    if not progress_snapshots:
+        return operations
+    updated_jobs = tuple(
+        _overlay_operation_job_with_progress_snapshot(
+            job,
+            progress_snapshots.get(job.id),
+        )
+        for job in operations.jobs
+    )
+    if updated_jobs == operations.jobs:
+        return operations
+    return replace(operations, jobs=updated_jobs)
 
 
 def _overlay_summary(
@@ -224,6 +253,47 @@ def _overlay_summary(
     )
 
 
+def _overlay_summary_with_progress_snapshot(
+    summary: TranslationRunSummary,
+    snapshot: DurableTranslationProgressSnapshot | None,
+    *,
+    now: datetime | None,
+) -> TranslationRunSummary:
+    if snapshot is None or not snapshot.available:
+        return summary
+    if (
+        snapshot.completed_units <= 0
+        and snapshot.total_units <= 0
+        and snapshot.total_tokens <= 0
+    ):
+        return summary
+
+    displayed_completed = snapshot.completed_units
+    displayed_total = max(snapshot.total_units, displayed_completed)
+    status = snapshot.status if snapshot.status != "unknown" else summary.status
+    return replace(
+        summary,
+        status=status,
+        fragment_count=displayed_completed,
+        total_fragment_count=displayed_total,
+        progress_percent=_progress_percent(displayed_completed, displayed_total),
+        eta_seconds=(
+            snapshot.eta_seconds
+            if snapshot.eta_seconds is not None
+            else _eta_seconds(
+                status=snapshot.state,
+                completed=displayed_completed,
+                total=displayed_total,
+                started_at=snapshot.started_at or summary.started_at,
+                now=now,
+            )
+        ),
+        current_stage=status or summary.current_stage,
+        last_event_at=snapshot.updated_at or summary.last_event_at,
+        total_tokens=snapshot.total_tokens or summary.total_tokens,
+    )
+
+
 def _overlay_totals(totals: dict[str, Any], job: Any) -> dict[str, Any]:
     updated = dict(totals)
     prompt_tokens = _nonnegative_int(getattr(job, "prompt_tokens", 0))
@@ -233,6 +303,45 @@ def _overlay_totals(totals: dict[str, Any], job: Any) -> dict[str, Any]:
     _set_max(updated, "completion_tokens", completion_tokens)
     _set_max(updated, "total_tokens", total_tokens)
     return updated
+
+
+def _overlay_totals_with_progress_snapshot(
+    totals: dict[str, Any],
+    snapshot: DurableTranslationProgressSnapshot | None,
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.available:
+        return totals
+    updated = dict(totals)
+    _set_if_positive(updated, "prompt_tokens", snapshot.prompt_tokens)
+    _set_if_positive(updated, "completion_tokens", snapshot.completion_tokens)
+    _set_if_positive(updated, "total_tokens", snapshot.total_tokens)
+    _set_if_positive(updated, "prompt_cache_hit_tokens", snapshot.cache_hit_tokens)
+    _set_if_positive(updated, "prompt_cache_miss_tokens", snapshot.cache_miss_tokens)
+    return updated
+
+
+def _overlay_operation_job_with_progress_snapshot(
+    job: Any,
+    snapshot: DurableTranslationProgressSnapshot | None,
+) -> Any:
+    if snapshot is None or not snapshot.available:
+        return job
+    return replace(
+        job,
+        state=snapshot.state,
+        raw_status=snapshot.status,
+        updated_at=snapshot.updated_at or getattr(job, "updated_at", None),
+        started_at=snapshot.started_at or getattr(job, "started_at", None),
+        completed_at=snapshot.completed_at or getattr(job, "completed_at", None),
+        total_units=snapshot.total_units,
+        completed_units=snapshot.completed_units,
+        failed_units=snapshot.failed_units,
+        prompt_tokens=snapshot.prompt_tokens,
+        completion_tokens=snapshot.completion_tokens,
+        total_tokens=snapshot.total_tokens,
+        retry_count=snapshot.retry_count,
+        active_worker_ids=snapshot.active_worker_ids,
+    )
 
 
 def _jobs_by_id(operations: OperationsOverview) -> dict[str, Any]:
@@ -323,6 +432,11 @@ def _last_datetime(values: tuple[Any, ...]) -> datetime | None:
 
 def _set_max(values: dict[str, Any], key: str, candidate: int) -> None:
     values[key] = max(_nonnegative_int(values.get(key, 0)), candidate)
+
+
+def _set_if_positive(values: dict[str, Any], key: str, candidate: int) -> None:
+    if candidate > 0:
+        values[key] = candidate
 
 
 def _progress_percent(completed: int, total: int) -> float | None:

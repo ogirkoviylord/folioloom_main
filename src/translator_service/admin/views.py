@@ -6890,7 +6890,7 @@ def _log_row(row: TranslationRunSummary) -> str:
         <span>{escape(row.document_kind)}</span>
       </td>
       <td>{escape(direction)}</td>
-      <td>{row.fragment_count}</td>
+      <td>{escape(_progress_label(row))}</td>
       <td>{row.total_tokens}</td>
       <td>{escape(error)}</td>
       <td>

@@ -2353,7 +2353,7 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(page.status_code, 200)
         self.assertIn("job-scheduled-progress", page.text)
-        self.assertIn(">2</td>", page.text)
+        self.assertIn("2/4", page.text)
         self.assertIn(">36</td>", page.text)
         self.assertNotIn("source_text", page.text)
         self.assertEqual(api.status_code, 200)
@@ -2381,6 +2381,157 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(trace.status_code, 200)
         self.assertIn("2/4", trace.text)
         self.assertIn("36", trace.text)
+
+    def test_admin_surfaces_use_durable_progress_snapshot_for_stale_zero_run(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            admin_db = root / "admin.sqlite3"
+            job_db = root / "jobs.sqlite3"
+            run_root = root / "runs"
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-durable-progress",
+                    user_id="telegram:42",
+                    file_id="file-durable-progress",
+                    file_name="durable-progress.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    adapter_version="epub-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=sequence,
+                            source_block_ids=(f"block-{sequence}",),
+                            source_text_hash=f"hash-{sequence}",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="ru",
+                        )
+                        for sequence in range(1, 5)
+                    ],
+                )
+                first = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                store.complete_work_unit(
+                    first.id,
+                    translated_text="PRIVATE TRANSLATED ONE",
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    cache_hit_tokens=2,
+                    cache_miss_tokens=8,
+                )
+                second = store.claim_next_work_unit(job.id, worker_id="worker-a")
+                store.complete_work_unit(
+                    second.id,
+                    translated_text="PRIVATE TRANSLATED TWO",
+                    prompt_tokens=20,
+                    completion_tokens=7,
+                    cache_hit_tokens=3,
+                    cache_miss_tokens=17,
+                )
+                store.claim_next_work_unit(job.id, worker_id="worker-b")
+            finally:
+                store.close()
+
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    user_id=job.user_id,
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=0,
+                ),
+            )
+            logger.record_event("job_queued", {"job_id": job.id, "fragment_count": 0})
+
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=str(admin_db),
+                        persistent_jobs_db_path=str(job_db),
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            live = client.get("/admin/live")
+            live_api = client.get("/admin/api/live")
+            logs = client.get("/admin/logs")
+            logs_api = client.get("/admin/api/logs")
+            details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+            operations = client.get("/admin/operations/jobs")
+            operations_api = client.get("/admin/api/operations/overview")
+            trace = client.get(f"/admin/translations/{logger.run_dir.name}/trace")
+
+        for response in (
+            live,
+            live_api,
+            logs,
+            logs_api,
+            details,
+            details_api,
+            operations,
+            operations_api,
+            trace,
+        ):
+            self.assertEqual(response.status_code, 200)
+
+        self.assertIn("2/4", live.text)
+        self.assertIn("2/4", logs.text)
+        self.assertIn("2/4", details.text)
+        self.assertIn("2/4", operations.text)
+        self.assertIn("2/4", trace.text)
+        self.assertIn("worker-b", operations.text)
+        self.assertIn("worker-b", trace.text)
+        live_run = live_api.json()["recent_runs"][0]
+        self.assertEqual(live_run["job_id"], job.id)
+        self.assertEqual(live_run["fragment_count"], 2)
+        self.assertEqual(live_run["total_fragment_count"], 4)
+        self.assertEqual(live_run["progress_percent"], 50.0)
+        self.assertEqual(live_run["total_tokens"], 42)
+        log_row = logs_api.json()["logs"][0]
+        self.assertEqual(log_row["fragment_count"], 2)
+        self.assertEqual(log_row["total_fragment_count"], 4)
+        self.assertEqual(log_row["progress_percent"], 50.0)
+        self.assertEqual(log_row["total_tokens"], 42)
+        detail_summary = details_api.json()["details"]["summary"]
+        self.assertEqual(detail_summary["fragment_count"], 2)
+        self.assertEqual(detail_summary["total_fragment_count"], 4)
+        self.assertEqual(detail_summary["total_tokens"], 42)
+        operation_job = operations_api.json()["overview"]["jobs"][0]
+        self.assertEqual(operation_job["completed_units"], 2)
+        self.assertEqual(operation_job["total_units"], 4)
+        self.assertEqual(operation_job["total_tokens"], 42)
+        self.assertEqual(operation_job["active_worker_ids"], ["worker-b"])
+
+        serialized = "\n".join(
+            (
+                live.text,
+                logs.text,
+                details.text,
+                operations.text,
+                trace.text,
+                json.dumps(live_api.json(), sort_keys=True),
+                json.dumps(logs_api.json(), sort_keys=True),
+                json.dumps(details_api.json(), sort_keys=True),
+                json.dumps(operations_api.json(), sort_keys=True),
+            )
+        )
+        self.assertNotIn("PRIVATE TRANSLATED ONE", serialized)
+        self.assertNotIn("PRIVATE TRANSLATED TWO", serialized)
 
     def test_translation_logs_overlay_resumed_job_over_stale_cancelled_run(self):
         with TemporaryDirectory() as temp_dir:
@@ -2452,7 +2603,7 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(page.status_code, 200)
         self.assertIn("job-resumed-after-cancel", page.text)
-        self.assertIn(">2</td>", page.text)
+        self.assertIn("2/4", page.text)
         self.assertIn(">36</td>", page.text)
         self.assertEqual(api.status_code, 200)
         self.assertEqual(api.json()["logs"][0]["status"], "translating")
