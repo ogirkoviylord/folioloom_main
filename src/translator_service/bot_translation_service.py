@@ -2222,6 +2222,10 @@ class BotTranslationService:
         if not _can_cancel_persistent_job(job.status.value):
             return False
 
+        if self._persistent_job_has_active_units(job.id):
+            self._persistent_job_store.request_cancel_job(job.id)
+            return True
+
         cancelled_job = self._cancel_persistent_job_with_partial_if_available(
             job=job,
             user_telegram_id=user_telegram_id,
@@ -2411,6 +2415,16 @@ class BotTranslationService:
             job = self._cancel_latest_persistent_translation(user_telegram_id)
             return CancelTranslationResult(cancelled=job is not None, job=job)
 
+        if active.job_id is not None and self._persistent_job_store is not None:
+            try:
+                self._persistent_job_store.request_cancel_job(active.job_id)
+            except Exception as error:
+                logger.warning(
+                    "Unable to mark persistent translation cancel requested: "
+                    "job_id=%s error_type=%s",
+                    active.job_id,
+                    type(error).__name__,
+                )
         _print_translation_cancel_requested(snapshot)
         return CancelTranslationResult(cancelled=True)
 
@@ -2426,6 +2440,14 @@ class BotTranslationService:
             limit=10,
         ):
             if _can_cancel_persistent_job(job.status.value):
+                if self._persistent_job_has_active_units(job.id):
+                    requested_job = self._persistent_job_store.request_cancel_job(
+                        job.id
+                    )
+                    return self._translation_job_from_persistent_job(
+                        user_telegram_id=user_telegram_id,
+                        job=requested_job,
+                    )
                 cancelled_job = self._cancel_persistent_job_with_partial_if_available(
                     job=job,
                     user_telegram_id=user_telegram_id,
@@ -2445,6 +2467,19 @@ class BotTranslationService:
                 return cancelled_job
 
         return None
+
+    def _persistent_job_has_active_units(self, job_id: str) -> bool:
+        if self._persistent_job_store is None:
+            return False
+        now = datetime.now(UTC)
+        return any(
+            unit.status is PersistentWorkUnitStatus.TRANSLATING
+            and (
+                unit.claim_token is not None
+                and (unit.lease_until is None or unit.lease_until > now)
+            )
+            for unit in self._persistent_job_store.list_work_units(job_id)
+        )
 
     def _cancel_persistent_job_with_partial_if_available(
         self,
@@ -5030,10 +5065,11 @@ def _translation_job_status_from_persistent_status(
         return TranslationJobStatus.QUEUED
     if status is PersistentTranslationJobStatus.PAUSED:
         return TranslationJobStatus.PAUSED
+    if status is PersistentTranslationJobStatus.CANCEL_REQUESTED:
+        return TranslationJobStatus.CANCEL_REQUESTED
     if status in {
         PersistentTranslationJobStatus.TRANSLATING,
         PersistentTranslationJobStatus.ASSEMBLING,
-        PersistentTranslationJobStatus.CANCEL_REQUESTED,
     }:
         return TranslationJobStatus.TRANSLATING
     if status is PersistentTranslationJobStatus.READY:
