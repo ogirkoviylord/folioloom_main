@@ -379,7 +379,16 @@ def section_body(title: str, copy: str) -> str:
 
 def overview_body(action_center: ActionCenter) -> str:
     if action_center.items:
-        rows = "\n".join(_action_item(item) for item in action_center.items)
+        rows = f"""
+        <div class="action-list-header" aria-hidden="true">
+          <span>Severity</span>
+          <span>What happened</span>
+          <span>Affected</span>
+          <span>Why now</span>
+          <span>Next action</span>
+        </div>
+        {"".join(_action_item(item) for item in action_center.items)}
+        """
     else:
         rows = """
         <div class="empty-state">
@@ -406,28 +415,39 @@ def _action_item(item: ActionItem) -> str:
     severity = _safe_action_severity(item.severity)
     href = _safe_action_href(item.href)
     next_action = item.next_action.strip() or "Open"
+    severity_badge = _status_badge(
+        _action_severity_label(severity),
+        extra_class="triage-severity-badge",
+    )
+    action_link = _action_link(
+        next_action,
+        href,
+        "view",
+        compact=True,
+        extra_class="action-next",
+    )
     return f"""
     <article
       class="action-item action-{escape(severity)}"
       data-action-key="{escape(item.key)}"
     >
-      <span class="status">{escape(_action_severity_label(severity))}</span>
-      <div class="action-copy">
+      <div class="triage-severity" data-label="Severity">
+        {severity_badge}
+      </div>
+      <div class="triage-what" data-label="What happened">
         <strong>{escape(item.title)}</strong>
         <small>{escape(item.detail)}</small>
-        <dl class="action-meta">
-          <div>
-            <dt>Affected</dt>
-            <dd>{escape(item.affected)}</dd>
-          </div>
-          <div>
-            <dt>Why now</dt>
-            <dd>{escape(item.reason)}</dd>
-          </div>
-        </dl>
       </div>
-      {_action_link(next_action, href, "view", compact=True, extra_class="action-next")}
-      <span class="sr-only">Next step</span>
+      <div class="triage-affected" data-label="Affected">
+        {escape(item.affected)}
+      </div>
+      <div class="triage-reason" data-label="Why now">
+        {escape(item.reason)}
+      </div>
+      <div class="triage-action" data-label="Next action">
+        {action_link}
+        <span class="sr-only">Next step</span>
+      </div>
     </article>
     """
 
@@ -8146,11 +8166,28 @@ header {
 .action-list .empty-state {
   padding: 20px;
 }
+.action-list-header,
 .action-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns:
+    minmax(112px, 0.65fr)
+    minmax(180px, 1.45fr)
+    minmax(150px, 1fr)
+    minmax(170px, 1.2fr)
+    minmax(120px, auto);
   gap: 14px;
-  align-items: center;
+  align-items: start;
+}
+.action-list-header {
+  padding: 10px 20px;
+  color: var(--muted);
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.action-item {
   padding: 16px 20px;
   color: inherit;
   border-bottom: 1px solid var(--line);
@@ -8159,37 +8196,30 @@ header {
 .action-item:hover {
   background: #fbfcfd;
 }
-.action-copy {
-  display: grid;
-  gap: 8px;
+.triage-severity,
+.triage-what,
+.triage-affected,
+.triage-reason,
+.triage-action {
   min-width: 0;
 }
-.action-copy strong {
+.triage-what {
+  display: grid;
+  gap: 8px;
+}
+.triage-what strong,
+.triage-affected,
+.triage-reason {
   overflow-wrap: anywhere;
 }
-.action-copy small,
-.action-meta dd {
+.triage-what small,
+.triage-affected,
+.triage-reason {
   color: var(--muted);
   line-height: 1.45;
 }
-.action-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0;
-}
-.action-meta div {
-  min-width: 0;
-}
-.action-meta dt {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-.action-meta dd {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
+.triage-severity-badge {
+  min-width: 104px;
 }
 .action-next {
   align-self: center;
@@ -8650,9 +8680,30 @@ button.danger {
   line-height: 1.4;
 }
 @media (max-width: 760px) {
-  .action-item,
-  .action-meta {
+  .action-list-header {
+    display: none;
+  }
+  .action-item {
     grid-template-columns: 1fr;
+  }
+  .triage-severity,
+  .triage-what,
+  .triage-affected,
+  .triage-reason,
+  .triage-action {
+    display: grid;
+    gap: 4px;
+  }
+  .triage-severity::before,
+  .triage-what::before,
+  .triage-affected::before,
+  .triage-reason::before,
+  .triage-action::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
   }
   .action-next {
     justify-self: start;
