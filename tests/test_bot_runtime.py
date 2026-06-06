@@ -507,6 +507,46 @@ class _ReadyResumeResultService(_CancelWithResultService):
         }
 
 
+class _TextCancelStateService(_CancelWithResultService):
+    def __init__(
+        self,
+        *,
+        active_books: tuple[dict[str, object], ...] = (),
+        latest_books: tuple[dict[str, object], ...] = (),
+        cancel_result_job: TranslationJob | None = None,
+        cancel_result_cancelled: bool = False,
+    ) -> None:
+        super().__init__(cancel_result_job)
+        self.active_books = active_books
+        self.latest_books = latest_books
+        self.cancel_result_cancelled = cancel_result_cancelled
+        self.cancel_calls = 0
+        self.discard_calls = 0
+
+    def get_user_queue_summary(self, *, user_telegram_id: int, limit: int = 5):
+        queued = sum(1 for book in self.active_books if book.get("status") == "queued")
+        return SimpleNamespace(
+            total_active=len(self.active_books),
+            queued=queued,
+            translating=len(self.active_books) - queued,
+            items=self.active_books[:limit],
+        )
+
+    def list_user_books(self, *, user_telegram_id: int, limit: int = 5):
+        return list(self.latest_books[:limit])
+
+    def cancel_translation_with_result(self, user_telegram_id: int):
+        self.cancel_calls += 1
+        return SimpleNamespace(
+            cancelled=self.cancel_result_cancelled,
+            job=self.job,
+        )
+
+    def discard_pending_translation(self, user_telegram_id: int) -> bool:
+        self.discard_calls += 1
+        return False
+
+
 def _runtime_job(*, status: TranslationJobStatus) -> TranslationJob:
     return TranslationJob(
         id="job-1",
@@ -1406,6 +1446,101 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.list_user_books(user_telegram_id=42), [])
         self.assertEqual(len(message.answers), 2)
         self.assertIn("Returning to the Main menu", message.answers[0][0])
+
+    async def test_text_cancel_cancels_single_cancellable_persistent_job(self):
+        message = RecordingMessage()
+        job = TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=TranslationJobStatus.CANCELLED,
+            document_kind=DocumentKind.TXT,
+        )
+        service = _TextCancelStateService(
+            active_books=(
+                {
+                    "job_id": "job-1",
+                    "file_name": "book.txt",
+                    "status": "queued",
+                    "can_cancel": True,
+                    "has_result": False,
+                },
+            ),
+            cancel_result_job=job,
+            cancel_result_cancelled=True,
+        )
+
+        await _cancel_active_translation(message=message, service=service)
+
+        self.assertEqual(service.cancel_calls, 1)
+        self.assertEqual(service.discard_calls, 0)
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("Translation cancelled", message.answers[0][0])
+
+    async def test_text_cancel_does_not_guess_when_multiple_jobs_are_active(self):
+        message = RecordingMessage()
+        active_books = (
+            {
+                "job_id": "job-1",
+                "file_name": "first.txt",
+                "status": "queued",
+                "can_cancel": True,
+                "has_result": False,
+            },
+            {
+                "job_id": "job-2",
+                "file_name": "second.txt",
+                "status": "translating",
+                "can_cancel": True,
+                "has_result": False,
+            },
+        )
+        service = _TextCancelStateService(
+            active_books=active_books,
+            latest_books=active_books,
+        )
+
+        await _cancel_active_translation(message=message, service=service)
+
+        self.assertEqual(service.cancel_calls, 0)
+        self.assertEqual(service.discard_calls, 0)
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("My Books", message.answers[0][0])
+        keyboard_callbacks = [
+            button.callback_data
+            for row in message.answers[0][1].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("book_detail:job-1", keyboard_callbacks)
+        self.assertIn("book_detail:job-2", keyboard_callbacks)
+
+    async def test_text_cancel_after_terminal_job_shows_latest_book_state(self):
+        message = RecordingMessage()
+        service = _TextCancelStateService(
+            latest_books=(
+                {
+                    "job_id": "job-1",
+                    "file_name": "book.txt",
+                    "document_kind": "txt",
+                    "source_language": "en",
+                    "target_language": "uk",
+                    "status": "ready",
+                    "can_cancel": False,
+                    "has_result": True,
+                },
+            ),
+        )
+
+        await _cancel_active_translation(message=message, service=service)
+
+        self.assertEqual(service.cancel_calls, 1)
+        self.assertEqual(service.discard_calls, 1)
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("Book Details", message.answers[0][0])
+        self.assertNotIn("no active translation", message.answers[0][0])
 
     async def test_resume_translation_sends_progress_message_for_queued_job(self):
         message = RecordingMessage()
