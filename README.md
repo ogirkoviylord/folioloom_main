@@ -179,13 +179,15 @@ fallbacks; admin-managed keys are stored encrypted and only masked values are
 shown.
 
 Worker parallelism is beta-safe and capacity-bound. The server example uses
-`TRANSLATION_MAX_PARALLEL_UNITS=2`, but concurrency is layered:
+`TRANSLATION_MAX_PARALLEL_UNITS=8`, but concurrency is layered:
 `TRANSLATION_MAX_PARALLEL_UNITS` sets worker-side scheduled work-unit capacity,
 provider capacity caps active DeepSeek calls by env/admin key count times each
 key's `DEEPSEEK_MAX_PARALLEL_PER_KEY` or admin max-parallel setting, and
-scheduler fairness caps keep one job/user from monopolizing available slots.
+scheduler fairness caps let one user/job use up to 8 active work units when
+global and provider capacity are free.
 With one key at capacity 1, provider calls remain serial; with multiple free
-keys, separate documents can progress concurrently.
+keys, work units can progress concurrently, including units from the same large
+document within the scheduler caps.
 
 The AI Providers admin page reports DeepSeek runtime channel health without
 secrets or document text: active requests, per-key capacity, cooldown,

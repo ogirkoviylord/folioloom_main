@@ -270,6 +270,65 @@ class AdminLiveMonitorTest(unittest.TestCase):
         self.assertEqual(snapshot.recent_runs[0].total_tokens, 18)
         self.assertEqual(snapshot.recent_runs[0].run_dir, str(run_logger.run_dir))
 
+    def test_recent_runs_prefers_active_durable_job_over_stale_cancelled_run_log(self):
+        with TemporaryDirectory() as temp_dir:
+            stale = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-resumed-after-cancel",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="stale-upload.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=4,
+                ),
+            )
+            stale.finish(status="cancelled", result_file_name="old.partial.epub")
+            operations = build_operations_overview(
+                jobs=[
+                    {
+                        "id": "job-resumed-after-cancel",
+                        "status": "translating",
+                        "file_name": "stale-upload.epub",
+                        "document_kind": "epub",
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "created_at": datetime(2026, 5, 9, 11, 0, tzinfo=UTC),
+                        "updated_at": datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                    }
+                ],
+                work_units_by_job_id={
+                    "job-resumed-after-cancel": (
+                        {"status": "translated", "prompt_tokens": 11},
+                        {"status": "translated", "completion_tokens": 7},
+                        {"status": "translating"},
+                        {"status": "pending"},
+                    )
+                },
+            )
+
+            snapshot = build_live_monitor_snapshot(
+                temp_dir,
+                operations=operations,
+                now=datetime(2026, 5, 9, 12, 0, tzinfo=UTC),
+                server=collect_local_server_health(
+                    disk_usage=_unavailable_disk_usage,
+                    psutil_module=None,
+                ),
+            )
+
+        self.assertEqual(snapshot.active_translations, 1)
+        self.assertEqual([run.job_id for run in snapshot.recent_runs], [
+            "job-resumed-after-cancel"
+        ])
+        self.assertEqual(snapshot.recent_runs[0].status, "translating")
+        self.assertEqual(snapshot.recent_runs[0].fragment_count, 2)
+        self.assertEqual(snapshot.recent_runs[0].total_fragment_count, 4)
+        self.assertEqual(snapshot.recent_runs[0].progress_percent, 50.0)
+        self.assertIsNone(snapshot.recent_runs[0].result_file_name)
+
     def test_stale_running_run_log_is_excluded_when_durable_job_is_terminal(self):
         for terminal_status in ("ready", "cancelled", "failed", "deleted"):
             with self.subTest(terminal_status=terminal_status):
