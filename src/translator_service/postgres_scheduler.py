@@ -195,6 +195,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS provider_slot_leases_active_work_unit_idx
     WHERE status = 'active';
 """
 
+_CLAIM_ADVISORY_LOCK_KEY = "translator_service.postgres_scheduler.claim"
+
 
 def initialize_postgres_scheduler_schema(connection) -> None:
     with connection.transaction():
@@ -340,7 +342,7 @@ class PostgresSchedulerStore:
                 """
                 WITH claim_lock AS (
                     SELECT pg_advisory_xact_lock(
-                        hashtext('translator_service.postgres_scheduler.claim')
+                          hashtext(%(claim_lock_key)s)
                     )
                 ),
                 candidate AS (
@@ -529,6 +531,7 @@ class PostgresSchedulerStore:
                 {
                     "worker_id": worker_id,
                     "claim_token": claim_token,
+                    "claim_lock_key": _CLAIM_ADVISORY_LOCK_KEY,
                     "lease_seconds": max(1, lease_seconds),
                     "max_active_units_global": max_active_units_global,
                     "max_active_units_per_job": max_active_units_per_job,
@@ -544,6 +547,8 @@ class PostgresSchedulerStore:
                 UPDATE translation_jobs
                 SET status = 'translating', updated_at = now()
                 WHERE id = %(job_id)s
+                  AND status IN ('queued', 'translating')
+                  AND cancel_requested_at IS NULL
                 """,
                 {"job_id": updated["job_id"]},
             )
@@ -917,6 +922,12 @@ class PostgresSchedulerStore:
         with self.connection.transaction():
             self.connection.execute(
                 """
+                SELECT pg_advisory_xact_lock(hashtext(%(claim_lock_key)s))
+                """,
+                {"claim_lock_key": _CLAIM_ADVISORY_LOCK_KEY},
+            )
+            self.connection.execute(
+                """
                 UPDATE work_units
                 SET status = %(pending)s,
                     worker_id = NULL,
@@ -932,10 +943,19 @@ class PostgresSchedulerStore:
                     "now": now,
                 },
             )
-            self._update_job_status(
-                job_id,
-                PersistentTranslationJobStatus.CANCELLED,
-                now=now,
+            self.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET status = %(status)s,
+                    cancel_requested_at = COALESCE(cancel_requested_at, %(now)s),
+                    updated_at = %(now)s
+                WHERE id = %(job_id)s
+                """,
+                {
+                    "status": PersistentTranslationJobStatus.CANCELLED.value,
+                    "job_id": job_id,
+                    "now": now,
+                },
             )
         return self._require_job(job_id)
 
@@ -999,10 +1019,19 @@ class PostgresSchedulerStore:
                     "now": now,
                 },
             )
-            self._update_job_status(
-                job_id,
-                PersistentTranslationJobStatus.QUEUED,
-                now=now,
+            self.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET status = %(status)s,
+                    cancel_requested_at = NULL,
+                    updated_at = %(now)s
+                WHERE id = %(job_id)s
+                """,
+                {
+                    "status": PersistentTranslationJobStatus.QUEUED.value,
+                    "job_id": job_id,
+                    "now": now,
+                },
             )
         return self._require_job(job_id)
 
