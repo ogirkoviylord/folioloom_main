@@ -383,6 +383,53 @@ class _CancelWithResultService:
         )()
 
 
+class _StaleCancelBookService(_CancelWithResultService):
+    def __init__(self, *, status: TranslationJobStatus) -> None:
+        super().__init__(None)
+        self.status = status
+        self.activity: list[dict[str, object]] = []
+        self.cancel_requests: list[str] = []
+
+    def record_user_activity(self, **kwargs) -> None:
+        self.activity.append(kwargs)
+
+    def cancel_user_book(self, *, user_telegram_id: int, job_id: str) -> bool:
+        self.cancel_requests.append(job_id)
+        return False
+
+    def get_user_book_translation_job(self, **kwargs):
+        result_file_name = (
+            "book.uk.txt"
+            if self.status in {TranslationJobStatus.READY, TranslationJobStatus.PARTIAL}
+            else None
+        )
+        return TranslationJob(
+            id="job-1",
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"",
+            source_language="en",
+            target_language="uk",
+            status=self.status,
+            document_kind=DocumentKind.TXT,
+            result_file_name=result_file_name,
+        )
+
+    def get_user_book_detail(self, **kwargs):
+        return {
+            "job_id": "job-1",
+            "file_name": "book.txt",
+            "document_kind": "txt",
+            "source_language": "en",
+            "target_language": "uk",
+            "status": self.status.value,
+            "has_result": self.status
+            in {TranslationJobStatus.READY, TranslationJobStatus.PARTIAL},
+            "can_resume": self.status is TranslationJobStatus.PARTIAL,
+            "can_cancel": False,
+        }
+
+
 def _runtime_job(*, status: TranslationJobStatus) -> TranslationJob:
     return TranslationJob(
         id="job-1",
@@ -1508,6 +1555,37 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 for button in row
             ),
         )
+
+    async def test_stale_cancel_book_refreshes_terminal_job_state(self):
+        for status, expected_text in (
+            (TranslationJobStatus.CANCELLED, "Translation cancelled"),
+            (TranslationJobStatus.PARTIAL, "Partial result"),
+            (TranslationJobStatus.READY, "Your translation is ready"),
+        ):
+            with self.subTest(status=status.value):
+                service = _StaleCancelBookService(status=status)
+                router = create_router(
+                    service=service,
+                    translator=_RuntimeRecordingTranslator(),
+                    config=BotRuntimeConfig(),
+                )
+                callback = RecordingCallback(data="cancel_book:job-1")
+                callback.message = EditableMessage()
+
+                handler = self._router_callback_handler(router, "cancel_book")
+                await handler(callback)
+
+                self.assertEqual(service.cancel_requests, ["job-1"])
+                self.assertEqual(callback.answers, [((), {})])
+                self.assertEqual(len(callback.message.edited_texts), 1)
+                self.assertIn(expected_text, callback.message.edited_texts[0])
+                markup = callback.message.edited_reply_markups[0]
+                callback_data = [
+                    button.callback_data
+                    for row in markup.inline_keyboard
+                    for button in row
+                ]
+                self.assertNotIn("cancel_book:job-1", callback_data)
 
     async def test_cancel_active_translation_sends_persistent_partial_result(self):
         message = RecordingMessage()
