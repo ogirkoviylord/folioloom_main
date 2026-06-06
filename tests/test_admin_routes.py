@@ -484,6 +484,150 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn('data-action-variant="danger"', danger)
         self.assertNotIn("compact-action", html)
 
+    def test_admin_log_rows_constrain_badges_actions_and_long_metadata(self):
+        from translator_service.admin.translation_logs import TranslationRunSummary
+        from translator_service.admin.views import logs_body
+
+        long_file_name = (
+            "very-long-authorized-translation-file-name-with-many-sections-"
+            "and-safe-metadata-only.epub"
+        )
+        long_job_id = "job-" + ("abcdef1234567890" * 3)
+        safe_error = "provider_other: safe summarized metadata only"
+
+        html = logs_body(
+            (
+                TranslationRunSummary(
+                    job_id=long_job_id,
+                    status="failed",
+                    started_at=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+                    finished_at=None,
+                    order_id="order-long",
+                    user_id="telegram:42",
+                    file_name=long_file_name,
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    translator_model="deepseek",
+                    result_file_name=None,
+                    error_message=safe_error,
+                    fragment_count=2,
+                    total_fragment_count=5,
+                    progress_percent=40.0,
+                    eta_seconds=None,
+                    current_stage="failed",
+                    last_event_at=None,
+                    total_tokens=1234,
+                    elapsed_seconds=2.5,
+                    run_dir="/tmp/run-long-metadata",
+                ),
+            )
+        )
+
+        self.assertIn('class="status admin-badge"', html)
+        self.assertIn(f'title="{long_file_name}"', html)
+        self.assertIn("admin-cell-filename", html)
+        self.assertIn(f'title="{long_job_id}"', html)
+        self.assertIn("admin-cell-id", html)
+        self.assertIn(f'title="{safe_error}"', html)
+        self.assertIn("admin-cell-error", html)
+        self.assertIn(
+            'class="action-control action-control-view action-control-compact"',
+            html,
+        )
+        self.assertNotIn("traceback", html.lower())
+
+    def test_translations_body_renders_primary_workflow_and_emergency_cancel(self):
+        from translator_service.admin.translation_logs import TranslationRunSummary
+        from translator_service.admin.views import translations_body
+
+        long_file_name = (
+            "very-long-authorized-translation-file-name-with-many-sections-"
+            "and-safe-metadata-only.epub"
+        )
+        running = TranslationRunSummary(
+            job_id="job-running-translation",
+            status="running",
+            started_at=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+            finished_at=None,
+            order_id="order-running",
+            user_id="telegram:42",
+            file_name=long_file_name,
+            document_kind="epub",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name=None,
+            error_message=(
+                "Traceback with api_key=sk-translation-list-secret and raw path"
+            ),
+            fragment_count=2,
+            total_fragment_count=5,
+            progress_percent=40.0,
+            eta_seconds=None,
+            current_stage="translating",
+            last_event_at=datetime(2026, 6, 6, 12, 3, tzinfo=UTC),
+            total_tokens=1234,
+            elapsed_seconds=180.0,
+            run_dir="/tmp/run-running-translation",
+        )
+        ready = TranslationRunSummary(
+            job_id="job-ready-translation",
+            status="ready",
+            started_at=datetime(2026, 6, 6, 11, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 6, 6, 11, 5, tzinfo=UTC),
+            order_id="order-ready",
+            user_id="telegram:99",
+            file_name="ready.docx",
+            document_kind="docx",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name="ready-uk.docx",
+            error_message=None,
+            fragment_count=5,
+            total_fragment_count=5,
+            progress_percent=100.0,
+            eta_seconds=0.0,
+            current_stage="ready",
+            last_event_at=datetime(2026, 6, 6, 11, 5, tzinfo=UTC),
+            total_tokens=4321,
+            elapsed_seconds=300.0,
+            run_dir="/tmp/run-ready-translation",
+        )
+        operations = build_operations_overview(
+            jobs=[
+                {"id": running.job_id, "status": "translating"},
+                {"id": ready.job_id, "status": "ready"},
+            ],
+            job_log_hrefs={
+                running.job_id: "/admin/logs/run-running-translation",
+                ready.job_id: "/admin/logs/run-ready-translation",
+            },
+        )
+
+        html = translations_body((running, ready), operations=operations, csrf_token="csrf")
+
+        self.assertIn("<th>Format</th>", html)
+        self.assertIn("format-badge-epub", html)
+        self.assertIn("format-badge-docx", html)
+        self.assertIn(f'title="{long_file_name}"', html)
+        self.assertIn('href="/admin/translations/run-running-translation/trace"', html)
+        self.assertIn("Open trace", html)
+        self.assertIn(
+            'action="/admin/operations/jobs/job-running-translation/cancel"',
+            html,
+        )
+        self.assertIn("stop provider work and reduce token spend", html)
+        self.assertIn('name="csrf_token" value="csrf"', html)
+        self.assertIn("No emergency action", html)
+        self.assertIn("error recorded; open trace", html)
+        self.assertNotIn("sk-translation-list-secret", html)
+        self.assertNotIn("Traceback with", html)
+        self.assertNotIn("/admin/logs/run-running-translation", html)
+        self.assertNotIn(">Details<", html)
+        self.assertNotIn(">Reader<", html)
+
     def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
         with TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "admin.sqlite3")
@@ -637,7 +781,7 @@ class AdminRoutesTest(unittest.TestCase):
             "Logs",
             "Reader Explorer",
             "Activity",
-            "Operations",
+            "Jobs / Queue",
             "Audit",
         ):
             self.assertNotIn(f">{label}<", primary_nav)
@@ -660,6 +804,7 @@ class AdminRoutesTest(unittest.TestCase):
         primary_nav = _nav_section(page.text, "primary-nav")
         advanced_nav = _nav_section(page.text, "advanced-nav")
         self.assertIn("open", _advanced_nav_tag(page.text))
+        self.assertIn("Jobs / Queue", page.text)
         self.assertIn(
             'href="/admin/operations/jobs" class="active"',
             advanced_nav,
@@ -684,6 +829,11 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(logs.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(logs.text))
+        self.assertIn("<th>Primary action</th>", translations.text)
+        self.assertIn("<th>Emergency</th>", translations.text)
+        self.assertNotIn("<th>Actions</th>", translations.text)
+        self.assertIn("<th>Actions</th>", logs.text)
+        self.assertNotEqual(translations.text, logs.text)
 
     def test_internal_reader_page_requires_login_and_does_not_generate_report(self):
         with patch(
@@ -1232,6 +1382,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Triage inbox", response.text)
         self.assertIn("integrations_missing", response.text)
         self.assertIn("/admin/integrations", response.text)
+        self.assertIn("action-list-header", response.text)
+        self.assertIn("triage-severity-badge", response.text)
         self.assertNotIn("pending actions will live here", response.text)
 
     def test_overview_links_failed_translation_to_trace_triage(self):
@@ -1369,7 +1521,7 @@ class AdminRoutesTest(unittest.TestCase):
             ("/admin/live", "Live Monitor"),
             ("/admin/logs", "Logs"),
             ("/admin/settings", "Settings"),
-            ("/admin/operations/jobs", "Operations"),
+            ("/admin/operations/jobs", "Jobs / Queue"),
             ("/admin/security/events", "Security"),
             ("/admin/audit", "Audit"),
         ):
@@ -2068,10 +2220,29 @@ class AdminRoutesTest(unittest.TestCase):
                 )
             )
             logger.finish(status="ready", result_file_name="book.ru.txt")
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            with SQLiteUserActivityStore(admin_db_path) as activity_store:
+                activity_store.record_event(
+                    UserActivityEventInput(
+                        actor_type=ActivityActorType.USER,
+                        actor_id="telegram:42",
+                        channel="telegram",
+                        channel_user_id="42",
+                        surface=ActivitySurface.BOT,
+                        event_type="translation.button.clicked",
+                        action="continue",
+                        target_type="button",
+                        target_id="continue api_key=sk-trace-activity-secret",
+                        outcome=ActivityOutcome.SUCCESS,
+                        job_id="job-logs-1",
+                        metadata={"source_text": "RAW TRACE ACTIVITY SOURCE"},
+                    )
+                )
             client = TestClient(
                 create_app(
                     settings=Settings(
                         translation_run_log_root=temp_dir,
+                        admin_db_path=str(admin_db_path),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
@@ -2105,6 +2276,9 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("job-logs-1", trace.text)
             self.assertIn("book.txt", trace.text)
             self.assertIn("Not failed", trace.text)
+            self.assertIn("activity: continue", trace.text)
+            self.assertIn("target=button", trace.text)
+            self.assertIn("target_id=continue [redacted]", trace.text)
             self.assertIn("Advanced log detail", trace.text)
             self.assertIn("Evidence packet copy/download is tracked", trace.text)
             self.assertNotIn("Chapter one", trace.text)
@@ -2112,6 +2286,8 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("processing-bearer-token", trace.text)
             self.assertNotIn("sk-processing-secret-value", trace.text)
             self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
+            self.assertNotIn("sk-trace-activity-secret", trace.text)
+            self.assertNotIn("RAW TRACE ACTIVITY SOURCE", trace.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
             self.assertIn("Progress", details.text)
@@ -4235,7 +4411,16 @@ class AdminRoutesTest(unittest.TestCase):
                         target_id="book.txt",
                         outcome=ActivityOutcome.SUCCESS,
                         job_id="job-activity-1",
-                        metadata={"result_file_name": "book.uk.txt"},
+                        metadata={
+                            "result_file_name": "book.uk.txt",
+                            "safe_long_note": "safe-note-" + ("x" * 180),
+                            "source_text": "RAW ACTIVITY SOURCE",
+                            "translated_text": "RAW ACTIVITY TRANSLATION",
+                            "prompt": "RAW ACTIVITY PROMPT",
+                            "api_key": "sk-activity-secret",
+                            "traceback": "Traceback (most recent call last)",
+                            "storage_path": "/var/private/activity.txt",
+                        },
                     )
                 )
                 activity_store.record_event(
@@ -4273,6 +4458,15 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("Activity", activity_page.text)
             self.assertIn("translation.completed", activity_page.text)
             self.assertIn("job-activity-1", activity_page.text)
+            self.assertIn("data-label=\"Metadata\"", activity_page.text)
+            self.assertIn("admin-cell-error", activity_page.text)
+            self.assertIn("safe_long_note: safe-note-", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY SOURCE", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY TRANSLATION", activity_page.text)
+            self.assertNotIn("RAW ACTIVITY PROMPT", activity_page.text)
+            self.assertNotIn("sk-activity-secret", activity_page.text)
+            self.assertNotIn("Traceback", activity_page.text)
+            self.assertNotIn("/var/private/activity.txt", activity_page.text)
             self.assertEqual(users_page.status_code, 200)
             self.assertIn("telegram:42", users_page.text)
             self.assertIn("limited", users_page.text)
