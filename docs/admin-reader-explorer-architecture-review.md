@@ -218,6 +218,19 @@ future approved full-info diagnostic drilldown.
   or Text Diagnostics, update relevant docs only with owner approval and
   reviewer evidence.
 
+## Implementation Slice Contract
+
+The approved first implementation slice changes `/admin/internal-reader` into a
+metadata-first `Reader Explorer` entry in Advanced navigation while preserving
+the existing local fixture reader form on the same page.
+
+This slice may list safe user references and safe run metadata, then link to
+the existing `/admin/logs/{run_id}/reader` and
+`/admin/logs/{run_id}/text-diagnostics` owner-only diagnostic surfaces. It does
+not add a new raw-text route, JSON API, archive payload, telemetry path,
+schema/state change, runtime-data mutation, production dependency,
+public/user-facing reader, publisher/editor workspace or release-policy claim.
+
 ## Required Approval Gates
 
 The focused implementation described here has owner approval for pre-release

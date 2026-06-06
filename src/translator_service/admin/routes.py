@@ -347,14 +347,17 @@ def create_admin_router(settings: Settings) -> APIRouter:
     @router.get("/internal-reader", response_class=HTMLResponse)
     async def internal_reader(request: Request) -> Response:
         source_value = _internal_reader_requested_source(request)
+        selected_user_id = _query_text(request.query_params.get("user_id"), maximum=200)
         return _protected_page(
             request,
             session_manager=session_manager,
             environment=settings.environment,
-            title="Internal Reader",
+            title="Reader Explorer",
             active="reader",
             body=lambda session: internal_reader_body(
                 source_options=_internal_reader_source_options(),
+                runs=_reader_explorer_run_summaries(settings),
+                selected_user_id=selected_user_id or None,
                 selected_source=source_value,
                 mapping_path=request.query_params.get("mapping", ""),
                 source_format=request.query_params.get(
@@ -2930,6 +2933,12 @@ def _translation_run_summaries(
         progress_snapshots=progress_snapshots,
         now=current_time,
     )
+
+
+def _reader_explorer_run_summaries(
+    settings: Settings,
+) -> tuple[TranslationRunSummary, ...]:
+    return _translation_run_summaries(settings, limit=500)
 
 
 def _translation_run_details(
