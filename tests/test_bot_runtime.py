@@ -294,6 +294,13 @@ class _QueuedTwiceThenReadyService(_QueuedThenReadyService):
         return _runtime_job(status=TranslationJobStatus.READY)
 
 
+class _TranslatingTwiceThenReadyService(_QueuedThenReadyService):
+    def get_user_book_translation_job(self, **kwargs):
+        if self.progress_calls < 2:
+            return _runtime_job(status=TranslationJobStatus.TRANSLATING)
+        return _runtime_job(status=TranslationJobStatus.READY)
+
+
 class _CancellingBeforeProgressEditService(_QueuedThenReadyService):
     def __init__(self) -> None:
         super().__init__()
@@ -1339,6 +1346,64 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.edited_texts, [])
         self.assertIsNotNone(watched_job)
         self.assertEqual(watched_job.status, TranslationJobStatus.CANCELLED)
+
+    async def test_worker_progress_watch_respects_retry_after_cooldown(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        class RetryAfterEditableMessage(EditableMessage):
+            def __init__(self) -> None:
+                super().__init__()
+                self.edit_attempts = 0
+
+            def edit_text(self, text: str, reply_markup=None):
+                def record() -> None:
+                    self.edit_attempts += 1
+                    raise FakeRetryAfter(
+                        "Telegram server says - Flood control exceeded. "
+                        "Retry in 13 seconds."
+                    )
+
+                return TelegramMethodLikeAwaitable(record)
+
+        message = RetryAfterEditableMessage()
+        service = _TranslatingTwiceThenReadyService()
+        progress_stats = {
+            "completed": 0,
+            "total": 2,
+            "estimated_total_seconds": None,
+            "last_translated_text": None,
+            "spinner_index": 0,
+            "heartbeat_pattern": "calm_dots",
+            "job_id": "job-1",
+            "last_edit_scheduled_at": 0.0,
+        }
+        sleep_calls: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            await original_sleep(0)
+
+        with (
+            patch("translator_service.bot.runtime.asyncio.sleep", record_sleep),
+            self.assertLogs("translator_service.bot.runtime", level="WARNING"),
+        ):
+            watched_job = await _watch_worker_translation_progress(
+                message=message,
+                service=service,
+                user_telegram_id=42,
+                job_id="job-1",
+                started_at=0,
+                progress_stats=progress_stats,
+                poll_interval_seconds=0.01,
+            )
+
+        self.assertIsNotNone(watched_job)
+        self.assertEqual(watched_job.status, TranslationJobStatus.READY)
+        self.assertEqual(message.edit_attempts, 1)
+        self.assertEqual(sleep_calls, [0.1])
+        self.assertIn("progress_edit_retry_after_until", progress_stats)
 
     async def test_book_detail_callback_renders_persistent_progress(self):
         class BookDetailProgressService:
@@ -2514,6 +2579,31 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(progress_stats["last_edit_scheduled_at"], 15.0)
 
+    def test_progress_edit_scheduler_respects_retry_after_cooldown(self):
+        progress_stats = {
+            "last_edit_scheduled_at": 10.0,
+            "progress_edit_retry_after_until": 30.0,
+        }
+
+        self.assertFalse(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=20.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 10.0)
+        self.assertEqual(progress_stats["progress_edit_retry_after_until"], 30.0)
+        self.assertTrue(
+            _should_schedule_progress_edit(
+                progress_stats,
+                now=30.0,
+                min_interval_seconds=5.0,
+            )
+        )
+        self.assertEqual(progress_stats["last_edit_scheduled_at"], 30.0)
+        self.assertNotIn("progress_edit_retry_after_until", progress_stats)
+
     def test_message_edit_error_logs_retry_after_without_traceback(self):
         class FakeRetryAfter(Exception):
             retry_after = 13
@@ -2530,6 +2620,27 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("flood control", logs.output[0].lower())
         self.assertIn("13", logs.output[0])
+
+    def test_message_edit_error_stores_retry_after_cooldown(self):
+        class FakeRetryAfter(Exception):
+            retry_after = 13
+
+        class FakeFuture:
+            def result(self):
+                raise FakeRetryAfter(
+                    "Telegram server says - Flood control exceeded. "
+                    "Retry in 13 seconds."
+                )
+
+        progress_stats: dict[str, object] = {}
+
+        with (
+            patch("translator_service.bot.runtime.time.monotonic", return_value=20.0),
+            self.assertLogs("translator_service.bot.runtime", level="WARNING"),
+        ):
+            _log_message_edit_error(FakeFuture(), progress_stats=progress_stats)
+
+        self.assertEqual(progress_stats["progress_edit_retry_after_until"], 33.0)
 
     def test_cancel_inline_keyboard_uses_callback_data(self):
         keyboard = _cancel_inline_keyboard("en")
