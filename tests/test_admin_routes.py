@@ -777,7 +777,7 @@ class AdminRoutesTest(unittest.TestCase):
         primary_nav = _nav_section(overview.text, "primary-nav")
         advanced_nav = _nav_section(overview.text, "advanced-nav")
         self.assertIn(">Advanced<", overview.text)
-        for label in ("Logs", "Reader", "Activity", "Operations", "Audit"):
+        for label in ("Logs", "Reader", "Activity", "Jobs / Queue", "Audit"):
             self.assertNotIn(f">{label}<", primary_nav)
             self.assertIn(f">{label}<", advanced_nav)
         for href in (
@@ -798,6 +798,7 @@ class AdminRoutesTest(unittest.TestCase):
         primary_nav = _nav_section(page.text, "primary-nav")
         advanced_nav = _nav_section(page.text, "advanced-nav")
         self.assertIn("open", _advanced_nav_tag(page.text))
+        self.assertIn("Jobs / Queue", page.text)
         self.assertIn(
             'href="/admin/operations/jobs" class="active"',
             advanced_nav,
@@ -1407,7 +1408,7 @@ class AdminRoutesTest(unittest.TestCase):
             ("/admin/live", "Live Monitor"),
             ("/admin/logs", "Logs"),
             ("/admin/settings", "Settings"),
-            ("/admin/operations/jobs", "Operations"),
+            ("/admin/operations/jobs", "Jobs / Queue"),
             ("/admin/security/events", "Security"),
             ("/admin/audit", "Audit"),
         ):
