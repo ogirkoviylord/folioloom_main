@@ -635,7 +635,13 @@ class PostgresSchedulerStore:
             if completed_row is None:
                 raise ValueError(f"Stale work-unit claim: {work_unit_id}")
 
-            if self._job_has_no_unfinished_work(completed_row["job_id"]):
+            if (
+                not self._finalize_cancel_requested_job_if_idle(
+                    completed_row["job_id"],
+                    now=now,
+                )
+                and self._job_has_no_unfinished_work(completed_row["job_id"])
+            ):
                 job = self._require_job(completed_row["job_id"])
                 next_status = (
                     PersistentTranslationJobStatus.READY
@@ -768,7 +774,13 @@ class PostgresSchedulerStore:
                 },
                 now=now,
             )
-            if decision.terminal_job_status is not None:
+            if (
+                not self._finalize_cancel_requested_job_if_idle(
+                    work_unit.job_id,
+                    now=now,
+                )
+                and decision.terminal_job_status is not None
+            ):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.INTERRUPTED,
@@ -816,6 +828,10 @@ class PostgresSchedulerStore:
                 work_unit_id=work_unit_id,
                 event_type="work_unit_provider_capacity_deferred",
                 payload={"reason": "provider_slot_unavailable"},
+                now=now,
+            )
+            self._finalize_cancel_requested_job_if_idle(
+                deferred_row["job_id"],
                 now=now,
             )
         return self._require_work_unit(work_unit_id)
@@ -957,6 +973,33 @@ class PostgresSchedulerStore:
                     "now": now,
                 },
             )
+        return self._require_job(job_id)
+
+    def request_cancel_job(self, job_id: str) -> PersistentTranslationJob:
+        self._require_job(job_id)
+        now = _now()
+        with self.connection.transaction():
+            self.connection.execute(
+                """
+                SELECT pg_advisory_xact_lock(hashtext(%(claim_lock_key)s))
+                """,
+                {"claim_lock_key": _CLAIM_ADVISORY_LOCK_KEY},
+            )
+            self.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET status = %(status)s,
+                    cancel_requested_at = COALESCE(cancel_requested_at, %(now)s),
+                    updated_at = %(now)s
+                WHERE id = %(job_id)s
+                """,
+                {
+                    "status": PersistentTranslationJobStatus.CANCEL_REQUESTED.value,
+                    "job_id": job_id,
+                    "now": now,
+                },
+            )
+            self._finalize_cancel_requested_job_if_idle(job_id, now=now)
         return self._require_job(job_id)
 
     def pause_job(self, job_id: str) -> PersistentTranslationJob:
@@ -1670,6 +1713,39 @@ class PostgresSchedulerStore:
             },
         ).fetchone()
         return row["count"] == 0
+
+    def _job_has_active_work(self, job_id: str) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM work_units
+            WHERE job_id = %(job_id)s
+              AND status = %(translating)s
+            """,
+            {
+                "job_id": job_id,
+                "translating": PersistentWorkUnitStatus.TRANSLATING.value,
+            },
+        ).fetchone()
+        return row["count"] > 0
+
+    def _finalize_cancel_requested_job_if_idle(
+        self,
+        job_id: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        job = self._require_job(job_id)
+        if job.status is not PersistentTranslationJobStatus.CANCEL_REQUESTED:
+            return False
+        if self._job_has_active_work(job_id):
+            return True
+        self._update_job_status(
+            job_id,
+            PersistentTranslationJobStatus.CANCELLED,
+            now=now,
+        )
+        return True
 
     def _update_job_status(
         self,
