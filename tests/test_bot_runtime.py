@@ -56,6 +56,7 @@ from translator_service.bot.runtime import (
     _settings_keyboard,
     _should_schedule_progress_edit,
     _UserActionInFlightGuard,
+    _watch_worker_translation_progress,
     bot_runtime_config_from_settings,
     build_beta_safety_guard,
     build_deepseek_translator,
@@ -291,6 +292,32 @@ class _QueuedTwiceThenReadyService(_QueuedThenReadyService):
         if self.progress_calls <= 1:
             return _runtime_job(status=TranslationJobStatus.QUEUED)
         return _runtime_job(status=TranslationJobStatus.READY)
+
+
+class _CancellingBeforeProgressEditService(_QueuedThenReadyService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_requested = False
+
+    def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+        return self.cancel_requested
+
+    def get_user_book_progress(self, **kwargs):
+        self.progress_calls += 1
+        self.cancel_requested = True
+        return type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 0,
+                "total_fragments": 2,
+            },
+        )()
+
+    def get_user_book_translation_job(self, **kwargs):
+        if self.cancel_requested:
+            return _runtime_job(status=TranslationJobStatus.CANCELLED)
+        return _runtime_job(status=TranslationJobStatus.TRANSLATING)
 
 
 class _CancelWithResultService:
@@ -1284,6 +1311,34 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             "Your translation is ready",
             message.answer_messages[0].edited_texts[-1],
         )
+
+    async def test_worker_progress_watch_skips_edit_after_cancel_requested(self):
+        message = EditableMessage()
+        service = _CancellingBeforeProgressEditService()
+        progress_stats = {
+            "completed": 0,
+            "total": 2,
+            "estimated_total_seconds": None,
+            "last_translated_text": None,
+            "spinner_index": 0,
+            "heartbeat_pattern": "calm_dots",
+            "job_id": "job-1",
+        }
+
+        watched_job = await _watch_worker_translation_progress(
+            message=message,
+            service=service,
+            user_telegram_id=42,
+            job_id="job-1",
+            started_at=0,
+            progress_stats=progress_stats,
+            poll_interval_seconds=0.01,
+        )
+
+        self.assertTrue(service.cancel_requested)
+        self.assertEqual(message.edited_texts, [])
+        self.assertIsNotNone(watched_job)
+        self.assertEqual(watched_job.status, TranslationJobStatus.CANCELLED)
 
     async def test_book_detail_callback_renders_persistent_progress(self):
         class BookDetailProgressService:
@@ -2424,6 +2479,20 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wrap_future(future)
         self.assertEqual(message.bot.edits[0][4], "HTML")
+
+    async def test_scheduled_message_edit_skips_when_guard_fails(self):
+        message = EditableMessage()
+        loop = asyncio.get_running_loop()
+
+        future = _schedule_message_edit(
+            loop=loop,
+            message=message,
+            text="Stale progress",
+            should_edit=lambda: False,
+        )
+
+        await asyncio.wrap_future(future)
+        self.assertEqual(message.edited_texts, [])
 
     def test_progress_edit_scheduler_throttles_frequent_updates(self):
         progress_stats = {"last_edit_scheduled_at": 10.0}
