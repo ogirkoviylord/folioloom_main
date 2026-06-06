@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from translator_service.admin.beta_safety_settings import (
@@ -455,6 +456,8 @@ def build_deepseek_translator(settings: Settings) -> TextTranslator:
 
 
 class ReloadableDeepSeekTranslator:
+    provider_id = "deepseek"
+
     def __init__(
         self,
         *,
@@ -469,6 +472,7 @@ class ReloadableDeepSeekTranslator:
         )
         self._lock = threading.RLock()
         self._last_usage = threading.local()
+        self._provider_slot_channel_id = threading.local()
         self._signature: tuple[object, ...] | None = None
         self._translator: TextTranslator | None = None
         self._channels: list[DeepSeekChannelConfig] = []
@@ -518,11 +522,29 @@ class ReloadableDeepSeekTranslator:
     ) -> str:
         translator = self._current_translator()
         try:
-            translated = translator.translate(
-                text=text,
-                source_language=source_language,
-                target_language=target_language,
-            )
+            channel_id = getattr(self._provider_slot_channel_id, "value", None)
+            if channel_id is None:
+                translated = translator.translate(
+                    text=text,
+                    source_language=source_language,
+                    target_language=target_language,
+                )
+            else:
+                channel_context = getattr(
+                    translator,
+                    "provider_slot_channel_lease",
+                    None,
+                )
+                if not callable(channel_context):
+                    raise RuntimeError(
+                        "DeepSeek provider slot channel lease is not available"
+                    )
+                with channel_context(channel_id):
+                    translated = translator.translate(
+                        text=text,
+                        source_language=source_language,
+                        target_language=target_language,
+                    )
         finally:
             self._record_current_runtime_snapshot(translator)
         self._last_usage.value = getattr(translator, "last_usage", None)
@@ -534,6 +556,33 @@ class ReloadableDeepSeekTranslator:
         if available is None:
             return 1
         return max(0, int(available()))
+
+    def provider_slot_inventory(self):
+        translator = self._current_translator()
+        inventory = getattr(translator, "provider_slot_inventory", None)
+        if not callable(inventory):
+            return []
+        return list(inventory())
+
+    def provider_capacity_caps(self):
+        translator = self._current_translator()
+        capacity_caps = getattr(translator, "provider_capacity_caps", None)
+        if not callable(capacity_caps):
+            return []
+        return list(capacity_caps())
+
+    @contextmanager
+    def provider_slot_channel_lease(self, channel_id: str):
+        previous = getattr(self._provider_slot_channel_id, "value", None)
+        had_previous = hasattr(self._provider_slot_channel_id, "value")
+        self._provider_slot_channel_id.value = channel_id
+        try:
+            yield
+        finally:
+            if had_previous:
+                self._provider_slot_channel_id.value = previous
+            else:
+                del self._provider_slot_channel_id.value
 
     def _current_translator(self) -> TextTranslator:
         with self._lock:
@@ -3573,22 +3622,21 @@ def _polled_progress_estimated_total_seconds(
         return None
 
     baseline_seconds = getattr(progress, "estimated_seconds", None)
+    estimated_total_seconds = None
     if baseline_seconds is not None:
-        remaining_fragments = max(0, total_fragments - completed_fragments)
-        remaining_seconds = (
-            int(baseline_seconds)
-            * remaining_fragments
-            / max(1, total_fragments)
-        )
-        return max(elapsed_seconds, round(elapsed_seconds + remaining_seconds))
+        estimated_total_seconds = max(elapsed_seconds, int(baseline_seconds))
 
     if completed_fragments <= 0:
-        return None
-    return round(
+        return estimated_total_seconds
+
+    observed_total_seconds = round(
         elapsed_seconds
         / completed_fragments
         * max(total_fragments, completed_fragments)
     )
+    if estimated_total_seconds is not None:
+        return max(estimated_total_seconds, observed_total_seconds)
+    return observed_total_seconds
 
 
 def _include_progress_preview(
