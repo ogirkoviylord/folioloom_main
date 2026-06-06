@@ -27,6 +27,9 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.translation_run_log_root, "var/translation-runs")
         self.assertEqual(settings.translation_max_parallel_units, 1)
         self.assertFalse(settings.bot_defer_persistent_jobs_to_worker)
+        self.assertEqual(settings.scheduler_max_active_units_global, 16)
+        self.assertEqual(settings.scheduler_max_active_units_per_user, 8)
+        self.assertEqual(settings.scheduler_max_active_units_per_job, 8)
         self.assertEqual(settings.security_max_events_per_run, 20)
         self.assertEqual(settings.security_max_unsafe_model_outputs_per_run, 3)
         self.assertEqual(settings.security_max_repair_failures_per_run, 1)
@@ -218,10 +221,10 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.scheduler_poll_seconds, 2.0)
         self.assertEqual(settings.scheduler_retry_base_delay_seconds, 30)
         self.assertEqual(settings.scheduler_retry_max_delay_seconds, 600)
-        self.assertEqual(settings.scheduler_max_active_units_global, 2)
-        self.assertEqual(settings.scheduler_max_active_units_per_user, 1)
+        self.assertEqual(settings.scheduler_max_active_units_global, 16)
+        self.assertEqual(settings.scheduler_max_active_units_per_user, 8)
         self.assertEqual(settings.scheduler_max_active_jobs_per_user, 1)
-        self.assertEqual(settings.scheduler_max_active_units_per_job, 1)
+        self.assertEqual(settings.scheduler_max_active_units_per_job, 8)
         self.assertEqual(settings.scheduler_priority_aging_seconds, 1800)
 
     def test_scheduler_fairness_settings_can_be_configured_from_environment(self):

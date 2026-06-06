@@ -57,8 +57,12 @@ BETA_ALLOWLIST_TELEGRAM_IDS=
 DEEPSEEK_API_KEY=
 DEEPSEEK_API_KEYS=
 DEEPSEEK_MAX_PARALLEL_PER_KEY=1
-TRANSLATION_MAX_PARALLEL_UNITS=2
+TRANSLATION_MAX_PARALLEL_UNITS=8
 SCHEDULER_BACKEND=postgres
+SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL=16
+SCHEDULER_MAX_ACTIVE_UNITS_PER_USER=8
+SCHEDULER_MAX_ACTIVE_JOBS_PER_USER=1
+SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB=8
 POSTGRES_DB=translator
 POSTGRES_USER=translator
 POSTGRES_PASSWORD=change-this
@@ -118,10 +122,13 @@ sets, and adding one admin key does not disable existing env keys.
 capacity. Effective provider calls are also capped by DeepSeek channel capacity:
 env/admin key count times each key's `DEEPSEEK_MAX_PARALLEL_PER_KEY` or
 admin-configured max parallel value. Scheduler fairness caps are the final
-layer, keeping one job/user from monopolizing available worker/provider slots.
+layer, allowing one user/job to use up to 8 active work units when global and
+provider capacity are free while still leaving the global cap as the safety
+limit.
 For beta, keep `DEEPSEEK_MAX_PARALLEL_PER_KEY=1`; adding multiple healthy keys
-then lets separate documents progress concurrently without sending two active
-calls to the same key.
+then lets work units progress concurrently, including units from the same large
+document within the scheduler caps, without sending two active calls to the same
+key.
 
 The AI Providers admin page reports DeepSeek runtime channel health without
 secrets or document text: active requests, per-key capacity, cooldown,

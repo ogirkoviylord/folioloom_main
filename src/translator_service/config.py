@@ -268,13 +268,13 @@ class Settings:
     scheduler_max_active_units_global: int = field(
         default_factory=lambda: max(
             1,
-            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL", "2")),
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_GLOBAL", "16")),
         )
     )
     scheduler_max_active_units_per_user: int = field(
         default_factory=lambda: max(
             1,
-            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_USER", "1")),
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_USER", "8")),
         )
     )
     scheduler_max_active_jobs_per_user: int = field(
@@ -286,7 +286,7 @@ class Settings:
     scheduler_max_active_units_per_job: int = field(
         default_factory=lambda: max(
             1,
-            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB", "1")),
+            int(os.getenv("SCHEDULER_MAX_ACTIVE_UNITS_PER_JOB", "8")),
         )
     )
     scheduler_priority_aging_seconds: int = field(
