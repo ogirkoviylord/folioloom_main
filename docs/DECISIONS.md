@@ -1572,6 +1572,64 @@ Consequences:
 Human approval required to change:
 - yes; this affects the external provider output contract and safety boundary.
 
+### 2026-06-06 - Pre-release automatic raw provider diagnostics capture
+
+Status: Active for pre-release development only
+
+Decision:
+- During active pre-release bot development, FolioLoom may automatically
+  capture the full diagnostic context needed to debug provider/model failures
+  and translation-quality incidents, including source work-unit text, provider
+  prompt bodies, provider user payloads, raw provider outputs, repair prompts,
+  output-contract validation details, work-unit/job metadata and related
+  failure state.
+- The owner explicitly accepts this broader pre-release capture because the
+  current beta/dev usage is owner-driven, occasional friend testing is already
+  handled through direct before/after sharing with the owner, and safe
+  metadata-only logs have repeatedly left incidents under-diagnosed.
+- Captured raw diagnostics are for owner/operator analysis only. They must not
+  be treated as release-version telemetry, support artifacts, public logs,
+  safe archives, GitHub issue/PR content, legal/privacy copy, or production
+  analytics evidence.
+- The implementation should still avoid secrets: API keys, auth tokens,
+  passwords, real `.env*` contents, provider key plaintext, DSNs and equivalent
+  credentials must not be persisted or displayed as raw diagnostics.
+- Before any release or broader beta/public launch decision, this decision must
+  be revisited and either narrowed, replaced with an explicit release-version
+  consent/retention/redaction policy, or formally deferred by the owner in a
+  go/no-go note.
+
+Evidence:
+- Owner stated in the 2026-06-06 Codex thread that, while the bot is still being
+  developed, only the owner and occasionally friends use it, that friends
+  already share before/after fragments for analysis, and that preserving "all
+  possible information" is necessary because provider failures and translation
+  bugs are otherwise diagnosed blindly.
+- The immediate incident was job
+  `job-9488146309f7434b9746580a6cc22d96`, where durable state showed 49
+  translated work units and one terminal malformed provider-output failure, but
+  the exact raw provider output was unavailable because only safe metadata was
+  persisted.
+
+Consequences:
+- This is a deliberate pre-release exception to the normal metadata-only
+  diagnostic posture.
+- Future implementation should be split into a focused issue and reviewed as a
+  high-risk privacy/user-data/admin diagnostic change.
+- Reviewer must verify that raw diagnostics stay owner-only and SSH-tunneled or
+  equivalently protected, and that secrets are still excluded.
+- Scribe/Release Readiness must treat release-version raw capture, retention,
+  consent, deletion and legal/privacy wording as `TBD` until the required
+  pre-release review is completed.
+- This decision does not claim free-beta, paid-beta or public-production
+  readiness, does not change current retention/delete evidence, and does not
+  approve copying raw excerpts into docs/issues/PRs/support notes without exact
+  owner approval.
+
+Human approval required to change:
+- yes; this affects privacy, user-data handling, provider diagnostics,
+  retention/release policy and owner diagnostic boundaries.
+
 ### 2026-06-01 / 2026-06-02 - Permanent owner-only raw translation text and prompt diagnostics
 
 Status: Active

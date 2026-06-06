@@ -245,10 +245,11 @@ Acceptance criteria:
 
 ## 6. Phase 2 - Improve observability and admin/debugging
 
-Цель: дать owner/admin достаточно visibility для free closed beta without
-digging through raw logs or duplicate downloaded archives, while keeping
-secrets/prompts/keys redacted and raw document/translation text confined to the
-approved owner-only text diagnostics surface.
+Цель: дать owner/admin достаточно visibility для free closed beta. During
+pre-release development, owner-approved raw provider diagnostics may capture the
+full analysis context for translation/provider failures, but secrets must remain
+excluded and release-version behavior must be redesigned or re-approved before
+free beta/public release.
 
 Tasks:
 
@@ -260,6 +261,12 @@ Tasks:
   blind spots.
 - Улучшить safe error reasons: provider auth/billing/rate-limit/timeout,
   parser rejection, quota/cap/kill switch.
+- Add pre-release automatic raw provider diagnostics capture for owner-only
+  analysis of crashes and translation bugs: source work-unit text, prompt
+  bodies, provider user payloads, raw provider outputs, repair prompts,
+  output-contract validation details and related job/work-unit state. This must
+  stay out of release-version telemetry/support/legal/privacy claims until the
+  owner revisits retention, consent, redaction and deletion behavior.
 - Treat the first owner-approved Beta Operations Console redesign stack as
   implemented by PR #160 and closed through #145-#152. Follow-up admin work
   should be scoped separately, including raw prompt diagnostics, Alerts/Backups
@@ -274,15 +281,17 @@ Tasks:
 
 Acceptance criteria:
 
-- Owner может понять текущее состояние beta без просмотра raw runtime data.
+- Owner может понять текущее состояние beta; during development the owner may
+  inspect broad raw provider diagnostics, while release-version raw capture
+  remains gated by a required pre-release review.
 - Error reasons actionable и безопасны для пользователя/admin.
 - Owner can open one failed translation trace and see safe user/upload/job/run,
   provider/key and failure-category evidence without hunting through multiple
   log-like pages. Confirmed by the PR #160 admin redesign stack.
 - Backup/restore состояние видно через admin или documented owner report.
-- Любые новые debug surfaces проходят redaction review. Raw text access remains
-  limited to the approved owner-only text diagnostics surface unless the owner
-  records another decision.
+- Любые новые debug surfaces проходят redaction review. Pre-release raw capture
+  follows the 2026-06-06 owner decision; release-version raw capture remains
+  TBD until Release Readiness review.
 
 Later:
 
