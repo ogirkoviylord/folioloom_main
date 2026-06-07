@@ -297,6 +297,55 @@ def finish_running_translation_runs_for_job(
     return finished
 
 
+def append_provider_io_diagnostic_for_job(
+    root: str | Path | None,
+    *,
+    job_id: str,
+    record: dict[str, object],
+) -> int:
+    if root is None or not job_id:
+        return 0
+    root_path = Path(root)
+    if not root_path.exists():
+        return 0
+
+    matching: list[tuple[Path, dict]] = []
+    for run_json in root_path.glob("*/run.json"):
+        try:
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
+            continue
+        matching.append((run_json, snapshot))
+
+    running = [item for item in matching if item[1].get("status") == "running"]
+    targets = running or _latest_matching_run(matching)
+
+    appended = 0
+    for run_json, _snapshot in targets:
+        run_record = {
+            **record,
+            "job_id": job_id,
+            "run_id": run_json.parent.name,
+        }
+        with (run_json.parent / "provider_io_diagnostics.jsonl").open(
+            "a",
+            encoding="utf-8",
+        ) as diagnostics:
+            diagnostics.write(
+                json.dumps(run_record, ensure_ascii=False, sort_keys=True) + "\n"
+            )
+        appended += 1
+    return appended
+
+
+def _latest_matching_run(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
+    if not items:
+        return []
+    return [max(items, key=lambda item: item[0].parent.name)]
+
+
 def record_book_mode_audit_fragment_for_job(
     root: str | Path | None,
     *,

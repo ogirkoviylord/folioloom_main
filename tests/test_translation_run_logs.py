@@ -7,6 +7,7 @@ from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    append_provider_io_diagnostic_for_job,
     finish_running_translation_runs_for_job,
     record_book_mode_audit_fragment_for_job,
 )
@@ -85,6 +86,100 @@ class TranslationRunLoggerTest(unittest.TestCase):
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("job-1", summary)
             self.assertIn("deepseek-v4-flash", summary)
+
+    def test_appends_provider_io_diagnostics_to_running_matching_run(self):
+        with TemporaryDirectory() as temp_dir:
+            running = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-provider-io",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                ),
+            )
+            finished = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-provider-io",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="finished.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                ),
+            )
+            finished.finish(status="failed", error_message="done")
+
+            appended = append_provider_io_diagnostic_for_job(
+                temp_dir,
+                job_id="job-provider-io",
+                record={
+                    "schema_version": "provider-io-diagnostics-v1",
+                    "provider_id": "deepseek",
+                    "request_body": {
+                        "encoding": "utf-8",
+                        "text": '{"messages":[{"content":"RAW PROMPT"}]}',
+                    },
+                    "response_body": {
+                        "encoding": "utf-8",
+                        "text": '{"choices":[{"message":{"content":"RAW RESPONSE"}}]}',
+                    },
+                },
+            )
+
+            self.assertEqual(appended, 1)
+            provider_io_path = running.run_dir / "provider_io_diagnostics.jsonl"
+            self.assertTrue(provider_io_path.exists())
+            self.assertFalse(
+                (finished.run_dir / "provider_io_diagnostics.jsonl").exists()
+            )
+            record = json.loads(provider_io_path.read_text(encoding="utf-8"))
+            self.assertEqual(record["job_id"], "job-provider-io")
+            self.assertEqual(record["run_id"], running.run_dir.name)
+            self.assertIn("RAW PROMPT", record["request_body"]["text"])
+            self.assertIn("RAW RESPONSE", record["response_body"]["text"])
+
+    def test_appends_provider_io_diagnostics_to_latest_run_after_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-provider-io-late",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                ),
+            )
+            logger.finish(status="failed", error_message="terminal failure")
+
+            appended = append_provider_io_diagnostic_for_job(
+                temp_dir,
+                job_id="job-provider-io-late",
+                record={
+                    "schema_version": "provider-io-diagnostics-v1",
+                    "provider_id": "deepseek",
+                    "request_body": {"encoding": "utf-8", "text": "late request"},
+                    "response_body": {"encoding": "utf-8", "text": "late response"},
+                },
+            )
+
+            self.assertEqual(appended, 1)
+            record = json.loads(
+                (logger.run_dir / "provider_io_diagnostics.jsonl").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(record["run_id"], logger.run_dir.name)
+            self.assertEqual(record["request_body"]["text"], "late request")
+            self.assertEqual(record["response_body"]["text"], "late response")
 
     def test_book_mode_audit_records_metadata_counts_without_text(self):
         with TemporaryDirectory() as temp_dir:

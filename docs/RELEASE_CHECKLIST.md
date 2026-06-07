@@ -181,10 +181,10 @@ Checklist:
 - [ ] Privacy/legal text reviewed, if applicable. Current public legal/privacy
   readiness: TBD / not production-ready.
 - [ ] No unnecessary logging of sensitive data.
-- [ ] Logs/admin do not expose raw document text, prompts, translations or API
-  keys outside the approved owner-only diagnostic surfaces and full diagnostic
-  downloads; telemetry, normal admin pages, release artifacts and support
-  artifacts remain redacted.
+- [ ] Logs/admin do not expose raw document text, prompts, translations, raw
+  provider request/response bodies or API keys outside the approved owner-only
+  diagnostic surfaces and full diagnostic downloads; telemetry, normal admin
+  pages, release artifacts and support artifacts remain redacted.
 - [ ] Access controls reviewed, if applicable.
 - [ ] Destructive operations reviewed and approved by human owner.
 - [ ] Retention or user-data behavior changes have explicit human approval.
@@ -208,10 +208,12 @@ Checklist:
 - [ ] Rate limits / abuse controls reviewed, if applicable.
 - [ ] Cost caps, job limits and kill switch reviewed.
 - [ ] Dependency risks reviewed.
-- [ ] No raw document text, prompts, translations or API keys appear in logs,
-  telemetry, release artifacts or normal admin views. Approved owner-only
-  diagnostic surfaces and downloaded full diagnostic archives may show raw
-  source/translated work-unit text for incident debugging.
+- [ ] No raw document text, prompts, translations, raw provider
+  request/response bodies or API keys appear in telemetry, release artifacts or
+  normal admin views. Approved owner-only diagnostic surfaces and downloaded
+  full diagnostic archives may show raw source/translated work-unit text and
+  exact provider request/response bodies for incident debugging. Provider
+  `Authorization` headers and API keys must remain excluded.
 - [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
   Current Gate B status: checked by issue #73 local synthetic evidence.
 - [x] Local malware/AV scanning gate is confirmed before parsing or explicitly

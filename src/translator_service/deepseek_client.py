@@ -15,6 +15,7 @@ from translator_service.output_contracts import (
     TranslationBatchRejectionReason,
     normalize_provider_translation_batch_contract,
 )
+from translator_service.provider_io_diagnostics import record_provider_io_exchange
 from translator_service.security_telemetry import record_security_event
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_policy import (
@@ -132,9 +133,10 @@ class DeepSeekClient:
     def _send_with_retries(self, body: bytes) -> tuple[int, bytes]:
         last_error: DeepSeekApiError | None = None
         for attempt in range(1, self._retry_attempts + 1):
+            url = f"{self._base_url}/chat/completions"
             try:
                 status, response_body = self._transport(
-                    url=f"{self._base_url}/chat/completions",
+                    url=url,
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
@@ -143,14 +145,36 @@ class DeepSeekClient:
                     timeout_seconds=self._timeout_seconds,
                 )
             except URLError as error:
+                record_provider_io_exchange(
+                    provider_id="deepseek",
+                    url=url,
+                    request_body=body,
+                    transport_attempt=attempt,
+                    error=error,
+                )
                 if isinstance(error.reason, ssl.SSLCertVerificationError):
                     raise _request_error_from_url_error(error) from error
                 last_error = _request_error_from_url_error(error)
             except _TRANSIENT_NETWORK_ERRORS as error:
+                record_provider_io_exchange(
+                    provider_id="deepseek",
+                    url=url,
+                    request_body=body,
+                    transport_attempt=attempt,
+                    error=error,
+                )
                 last_error = DeepSeekApiError(
                     f"DeepSeek API request failed while reading response: {error}"
                 )
             else:
+                record_provider_io_exchange(
+                    provider_id="deepseek",
+                    url=url,
+                    request_body=body,
+                    http_status=status,
+                    response_body=response_body,
+                    transport_attempt=attempt,
+                )
                 if _is_retryable_http_status(status) and attempt < self._retry_attempts:
                     last_error = DeepSeekApiError(
                         f"DeepSeek API returned temporary HTTP {status}"
