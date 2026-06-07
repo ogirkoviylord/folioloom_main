@@ -130,6 +130,9 @@ Use repo-level skills when available:
 - Use `architecture-review` before risky changes, new integrations, new file formats, database changes, auth/security/privacy/payment changes, or cross-component contracts.
 - Use `implementation` for one approved, scoped issue.
 - Use `pr-review` for pull request or diff review.
+- Use `translation-quality-review` for translated document, book,
+  source/translation pair, or translation pipeline output quality review; this
+  is not a code PR review.
 - Use `docs-sync` after verified behavior, decision, risk, roadmap, or release-gate changes.
 - Use `release-readiness` before beta, public launch, deploy, rollback, or production-related decisions.
 
