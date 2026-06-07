@@ -14,6 +14,10 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   Skill Dispatch Contract.
 - `docs/AGENT_SKILL_ROUTING.md` - detailed reference for selecting agent roles,
   repo-level skills, supporting skills, approval evidence and routing state.
+- `.agents/skills/translation-quality-review/SKILL.md` - repo-level
+  Translation QA Agent skill for reviewing translated documents, books,
+  source/translation pairs and pipeline outputs. Use after applying the
+  Skill Dispatch Contract; it is not a code PR review skill.
 - `docs/restart/folioloom-restart-spec.md` - canonical restart-ТЗ.
 - `docs/restart/release-gates.md` - stage gates A-D.
 - `docs/restart/two-week-engineering-plan.md` - ближайший 2-week plan.
@@ -66,6 +70,10 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
 ## Active Quality / Profile Docs
 
 - `docs/superpowers/specs/translation-language-quality-methodology.md`
+- `docs/competitive/translation-competitor-reports.md` - cumulative
+  competitive QA evidence for book/document translation services. Use as
+  context for future quality-gate or positioning work; it is not a product
+  decision, release-readiness evidence or universal competitor benchmark.
 - `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md` -
   active owner-approved internal/dev design direction for a local before-after
   reader over TXT/DOCX/EPUB adapter blocks, with issue/PR status for the first
