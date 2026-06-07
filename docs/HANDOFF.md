@@ -98,6 +98,17 @@ remains Unknown until a PR/checks page is inspected. This does not mutate
 runtime data, change schema/state, deploy code, read secrets/env files, or
 claim broader Gate B/release readiness.
 
+Translation export privacy update on 2026-06-07: the owner approved changing
+downloaded translation-log archives into owner-only full diagnostic archives
+when persistent work-unit state is available. The archive may now include
+`raw_text_diagnostics.json` with raw source text, translated text, retry
+attempts and provider failure diagnostics. `run.json`, `effective_run.json` and
+`work_units.json` remain metadata-oriented snapshots so agents can distinguish
+the original lifecycle log, the effective scheduler snapshot and the raw
+diagnostic sidecar. This does not authorize copying raw excerpts into
+telemetry, JSON APIs, support notes, GitHub issues, PR descriptions or release
+artifacts.
+
 Issue #167 implementation slice on 2026-06-04: branch
 `codex/issue-167-book-manuscript-policy-profile` generalizes
 `book_manuscript` policy/profile context across persistent TXT, EPUB and DOCX
@@ -469,12 +480,13 @@ Owner decisions recorded during issue #71:
   retry/error state. PR #179 added a metadata-only work-unit snapshot to normal
   translation details, plus a dedicated SSH-tunneled admin-session page for
   stored source/translated work-unit text; after merge/deploy the owner accepted
-  this first interface as the ongoing direction. The normal details page and
-  downloadable diagnostics remain metadata-only/redacted. Local verification for
-  this slice is recorded in the task response. This does not expose raw text
-  through safe archives/telemetry/JSON APIs, authorize copying excerpts to
-  issues/PRs/support notes, relax public admin restrictions or change Gate B
-  release requirements.
+  this first interface as the ongoing direction. On 2026-06-07, the owner
+  expanded the approved diagnostic surface to downloaded owner-only full
+  diagnostic archives with `raw_text_diagnostics.json`; normal details,
+  telemetry and JSON APIs remain metadata-only/redacted. Local verification for
+  this slice is recorded in the task response. This does not authorize copying
+  excerpts to issues/PRs/support notes, relax public admin restrictions or
+  change Gate B release requirements.
 - 2026-06-02: Owner additionally approved viewing raw provider prompt bodies in
   a dedicated owner-only diagnostic surface. This is a decision-level approval,
   not evidence that prompt bodies are already stored or rendered. Implementers
@@ -689,11 +701,12 @@ Owner decisions recorded during issue #71:
   Reader at `/admin/logs/{run_id}/reader`. It is linked from logs, translation
   details and Text diagnostics, uses the same `run_id -> job_id` work-unit path
   as Text diagnostics, renders owner-only `no-store` HTML with synchronized
-  Original/Translation panes, and keeps details/API/download archives
-  metadata-only/redacted. Local verification passed `tests.test_admin_routes`,
+  Original/Translation panes. Details/API surfaces remain metadata-only/redacted;
+  downloaded owner-only full diagnostic archives may now include raw text via
+  `raw_text_diagnostics.json`. Local verification passed `tests.test_admin_routes`,
   focused reader/diagnostics tests, targeted ruff for touched Python files and
   `PYTHONPATH=src python3 -m compileall src`. This does not add public routes,
-  raw-text JSON APIs, archive raw text, arbitrary server-path browsing, runtime
+  raw-text JSON APIs, arbitrary server-path browsing, runtime
   `var/` browsing, auth/RBAC changes, dependencies, publisher workspace or
   release readiness.
 - 2026-06-02: Issue
@@ -721,8 +734,10 @@ Owner decisions recorded during issue #71:
   `PYTHONPATH=src python3 -m unittest tests.test_admin_routes`, targeted ruff
   for touched Python files and `PYTHONPATH=src python3 -m compileall src`. This
   does not search outside the loaded window, add public/user-facing access,
-  expose raw text through JSON/API/archive surfaces, add dependencies, access
-  live runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+  expose raw text through JSON/API surfaces, add dependencies, access live
+  runtime data, implement physical pages or claim full DOCX/EPUB fidelity.
+  Downloaded owner-only full diagnostic archives may now include raw text via
+  the approved `raw_text_diagnostics.json` sidecar.
 - 2026-06-02: Issue
   [#218](https://github.com/ogirkoviylord/folioloom_main/issues/218) starts the
   first focused layout/indent diagnostics slice on branch
