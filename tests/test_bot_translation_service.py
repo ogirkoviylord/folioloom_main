@@ -68,6 +68,7 @@ from translator_service.persistent_jobs import (
     WorkUnitPlan,
 )
 from translator_service.pricing import PricingRules
+from translator_service.provider_io_diagnostics import record_provider_io_exchange
 from translator_service.scheduler import SchedulerLimits
 from translator_service.security_telemetry import (
     SecurityCooldownActive,
@@ -142,6 +143,25 @@ class UsageRecordingTranslator(RecordingTranslator):
         )
         self.last_usage = TranslatorUsage(prompt_tokens=11, completion_tokens=7)
         return translated
+
+
+class ProviderIODiagnosticTranslator(UsageRecordingTranslator):
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
+        record_provider_io_exchange(
+            provider_id="deepseek",
+            url="https://api.deepseek.com/chat/completions",
+            request_body=b"request-body",
+            http_status=200,
+            response_body=b"response-body",
+            transport_attempt=1,
+        )
+        return super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
 
 
 class RecordingBetaSafetyGuard:
@@ -222,7 +242,9 @@ class CostCapRecordingBetaSafetyGuard(RecordingBetaSafetyGuard):
             return BetaSafetyDecision(
                 allowed=False,
                 reason_code="job_estimate_cap",
-                safe_message="This translation cannot start under the current beta limits.",
+                safe_message=(
+                    "This translation cannot start under the current beta limits."
+                ),
             )
         return self.can_start_new_work()
 
@@ -655,7 +677,10 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             upload_digest_prefix = upload.upload_safety_id.split(":")[2][:8]
             self.assertEqual(events[0].metadata["short_hash"], upload_digest_prefix)
-            self.assertNotIn("This is an English document", json.dumps(events[0].metadata))
+            self.assertNotIn(
+                "This is an English document",
+                json.dumps(events[0].metadata),
+            )
             self.assertNotIn("original/", json.dumps(events[0].metadata))
             self.assertEqual(service.get_pending_upload(42), upload)
 
@@ -4393,6 +4418,64 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "# [uk] Chapter\n\nKEY=value\n- [uk] First item\n[uk] Body text.\n",
             )
             self.assertEqual(guard.consumed, [job.id])
+
+    def test_persistent_confirmation_records_provider_io_without_scheduler_runner(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            self.addCleanup(persistent_store.close)
+            run_log_root = root / "translation-runs"
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=500,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First item\nBody text.\n",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=ProviderIODiagnosticTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            provider_io_paths = list(
+                run_log_root.glob("*/provider_io_diagnostics.jsonl")
+            )
+            self.assertEqual(len(provider_io_paths), 1)
+            records = [
+                json.loads(line)
+                for line in provider_io_paths[0]
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertGreaterEqual(len(records), 1)
+            self.assertEqual({record["job_id"] for record in records}, {job.id})
+            self.assertIn(1, {record["sequence"] for record in records})
+            self.assertEqual(
+                {record["request_body"]["text"] for record in records},
+                {"request-body"},
+            )
+            self.assertEqual(
+                {record["response_body"]["text"] for record in records},
+                {"response-body"},
+            )
 
     def test_persistent_confirmation_can_defer_work_to_external_worker(self):
         with TemporaryDirectory() as temp_dir:

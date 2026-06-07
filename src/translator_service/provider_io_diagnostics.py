@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 ProviderIODiagnosticSink = Callable[[dict[str, object]], None]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,7 +88,17 @@ def record_provider_io_exchange(
         "http_status": http_status,
         "error": _safe_error_payload(error) if error is not None else None,
     }
-    sink(record)
+    try:
+        sink(record)
+    except Exception as error:
+        logger.warning(
+            "Provider IO diagnostic sink failed: provider_id=%s job_id=%s "
+            "work_unit_id=%s error_type=%s",
+            provider_id,
+            context.job_id,
+            context.work_unit_id,
+            error.__class__.__name__,
+        )
 
 
 def _bytes_payload(value: bytes) -> dict[str, object]:

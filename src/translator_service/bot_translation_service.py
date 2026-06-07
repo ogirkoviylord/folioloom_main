@@ -134,6 +134,7 @@ from translator_service.user_activity import (
 )
 from translator_service.users import SQLiteUserSettingsRepository
 from translator_service.worker import (
+    _provider_io_diagnostic_sink,
     run_next_stored_text_work_unit,
     run_stored_text_job_parallel_until_idle,
 )
@@ -3420,6 +3421,10 @@ class BotTranslationService:
                 ),
                 usage_completed_callback=self._beta_safety_usage_completed_callback(),
                 allowed_source_object_keys=allowed_source_object_keys,
+                provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                    self._translation_run_log_root,
+                    job_id=plan.job.id,
+                ),
             )
             if completed_unit is None:
                 break
@@ -3683,6 +3688,10 @@ class BotTranslationService:
                 should_stop=lambda: cancellation_token.is_cancelled,
                 usage_completed_callback=self._beta_safety_usage_completed_callback(),
                 allowed_source_object_keys=allowed_source_object_keys,
+                provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                    self._translation_run_log_root,
+                    job_id=job_id,
+                ),
             )
         except SecurityThresholdExceeded as error:
             return self._fail_persistent_translation_after_security_threshold(
