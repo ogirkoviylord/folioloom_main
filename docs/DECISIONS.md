@@ -1565,6 +1565,13 @@ Decision:
   contract so the owner-only downloaded archive may include a full diagnostic
   sidecar with raw source text, translated text, retry attempts and provider
   failure diagnostics for the run.
+- On 2026-06-07, after diagnosing `job-d328a3e3a4ba48e9bc5d2ea342f8dfd8`,
+  the owner approved persisting exact DeepSeek provider request JSON bodies and
+  raw response bodies in the translation run logs so downloaded owner-only
+  archives can show exactly what was sent to and returned by the provider.
+  The approved run-scoped file is `provider_io_diagnostics.jsonl`; it may
+  contain full system/user prompt bodies, untrusted document batch text and raw
+  provider output, but must not store the `Authorization` header or API key.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model. Raw text remains allowed only inside dedicated owner/admin diagnostic
   surfaces, including the owner-only full diagnostic download sidecar, and must
@@ -1613,6 +1620,11 @@ Evidence:
 - Owner explicitly requested on 2026-06-07 that downloaded log archives contain
   all translation information, including raw translation text, so the owner does
   not need a terminal/SSH investigation to diagnose a failed translation.
+- Owner explicitly requested on 2026-06-07 that exact DeepSeek request and
+  response bodies be saved in translation logs and included when downloading
+  a run-log archive, after the previous diagnostics could identify
+  `malformed_response` / `unexpected_attribute` but could not show the exact
+  rejected provider payload.
 
 Reason:
 - The failed translation incident required comparing source work units,
@@ -1621,6 +1633,10 @@ Reason:
   itself.
 - Prompt bodies can be necessary to diagnose model behavior, repair prompts,
   output-contract failures and prompt-policy regressions.
+- Exact provider request/response bodies are necessary to diagnose output
+  contract failures such as `unexpected_attribute`, `broken_xml`,
+  `external_text` and repair-loop failures without requiring SSH access or
+  speculative reconstruction.
 - Keeping the owner-only raw text view in admin avoids repeated archive
   downloads and duplicate local book files during development and incident
   triage.
@@ -1635,11 +1651,16 @@ Consequences:
   docs unless a separate owner approval covers the exact excerpt or workflow.
   Owner-only full diagnostic archives may include raw work-unit source and
   translated text by design.
-- Implementing prompt viewing may require a separate scoped issue because full
-  prompt bodies are not confirmed to be persisted in current run metadata.
-  If implementation changes provider request logging, storage/runtime data,
-  database/state, auth/RBAC, JSON APIs, telemetry or dependencies, it needs the
-  matching approval gate and tests.
+- `provider_io_diagnostics.jsonl` is a sensitive run-scoped diagnostic artifact
+  and can contain prompt bodies, source batch text and raw provider output. It
+  belongs in owner-only translation run logs and downloaded full diagnostic
+  archives, not telemetry, normal admin/API views, GitHub issues, PR
+  descriptions, support notes or release artifacts. It must exclude provider
+  `Authorization` headers and API keys.
+- If implementation changes provider request logging beyond the run-scoped
+  owner-only archive, storage/runtime data, database/state, auth/RBAC, JSON
+  APIs, telemetry or dependencies, it needs the matching approval gate and
+  tests.
 - This decision does not relax public admin, release, legal/privacy, telemetry,
   support-artifact or Gate B requirements.
 

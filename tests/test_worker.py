@@ -20,9 +20,15 @@ from translator_service.persistent_planner import (
     create_persistent_docx_job_plan,
     create_persistent_epub_job_plan,
 )
+from translator_service.provider_io_diagnostics import record_provider_io_exchange
 from translator_service.translation_context import TranslationContextMemory
+from translator_service.translation_run_logs import (
+    TranslationRunLogger,
+    TranslationRunMetadata,
+)
 from translator_service.worker import (
     ProviderUsage,
+    _provider_io_diagnostic_sink,
     assemble_translated_text_result,
     effective_worker_parallel_units,
     open_scheduler_store,
@@ -686,6 +692,120 @@ class WorkerTest(unittest.TestCase):
             self.assertIsNone(completed.lease_until)
             self.assertEqual(completed.translated_text, "[uk] First paragraph")
 
+    def test_scheduled_worker_records_provider_io_diagnostics_in_run_log(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            run_logger = TranslationRunLogger.start(
+                root=Path(temp_dir) / "run-logs",
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            store = self._store()
+            _job_with_stored_unit(store, source.object_key)
+            translator = ProviderIODiagnosticTranslator()
+
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=Path(temp_dir) / "run-logs",
+            )
+
+            self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+            provider_io_path = run_logger.run_dir / "provider_io_diagnostics.jsonl"
+            self.assertTrue(provider_io_path.exists())
+            record = json.loads(provider_io_path.read_text(encoding="utf-8"))
+            self.assertEqual(record["job_id"], "job-1")
+            self.assertEqual(record["work_unit_id"], "job-1:unit-1")
+            self.assertEqual(record["sequence"], 1)
+            self.assertEqual(record["request_body"]["text"], "request-body")
+            self.assertEqual(record["response_body"]["text"], "response-body")
+
+    def test_in_process_parallel_worker_records_provider_io_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            first_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            second_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second paragraph",
+            )
+            run_logger = TranslationRunLogger.start(
+                root=root / "run-logs",
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            store = self._store()
+            job = _job_with_two_stored_units(
+                store,
+                first_source.object_key,
+                second_source.object_key,
+            )
+
+            summary = run_stored_text_job_parallel_until_idle(
+                store=store,
+                storage=storage,
+                job_id=job.id,
+                worker_id="worker",
+                translator=ProviderIODiagnosticTranslator(),
+                max_parallel_units=2,
+                provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                    root / "run-logs",
+                    job_id=job.id,
+                ),
+            )
+
+            self.assertEqual(summary.job_status, PersistentTranslationJobStatus.READY)
+            provider_io_path = run_logger.run_dir / "provider_io_diagnostics.jsonl"
+            records = [
+                json.loads(line)
+                for line in provider_io_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(
+                sorted(record["sequence"] for record in records),
+                [1, 2],
+            )
+            self.assertEqual(
+                {record["request_body"]["text"] for record in records},
+                {"request-body"},
+            )
+            self.assertEqual(
+                {record["response_body"]["text"] for record in records},
+                {"response-body"},
+            )
+
     def test_scheduled_worker_ignores_stale_claim_completion(self):
         from translator_service.scheduler import SchedulerLimits
 
@@ -851,18 +971,30 @@ class WorkerTest(unittest.TestCase):
             )
 
             attempts = store.list_work_unit_attempts(failed.id)
-            events = [json.loads(event.payload_json) for event in store.list_scheduler_events(job.id)]
+            events = [
+                json.loads(event.payload_json)
+                for event in store.list_scheduler_events(job.id)
+            ]
             events_text = json.dumps(events, sort_keys=True)
 
             self.assertEqual(attempts[0].error_code, "unavailable_5xx")
-            self.assertEqual(attempts[0].error_message, "provider failure: unavailable_5xx")
+            self.assertEqual(
+                attempts[0].error_message,
+                "provider failure: unavailable_5xx",
+            )
             self.assertEqual(
                 events[-1]["provider_failure"]["failure_category"],
                 "unavailable_5xx",
             )
-            self.assertEqual(events[-1]["provider_failure"]["http_status_bucket"], "5xx")
+            self.assertEqual(
+                events[-1]["provider_failure"]["http_status_bucket"],
+                "5xx",
+            )
             self.assertEqual(events[-1]["provider_failure"]["provider_id"], "deepseek")
-            self.assertIn("channel_fingerprint", events[-1]["provider_failure"]["channel"])
+            self.assertIn(
+                "channel_fingerprint",
+                events[-1]["provider_failure"]["channel"],
+            )
             self.assertNotIn("Private source paragraph", failed.last_error or "")
             self.assertNotIn("Private source paragraph", events_text)
             self.assertNotIn("sk-private-provider-key", events_text)
@@ -1540,6 +1672,29 @@ class RecordingTranslator:
         return f"[{target_language}] {text}"
 
 
+class ProviderIODiagnosticTranslator(RecordingTranslator):
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        record_provider_io_exchange(
+            provider_id="deepseek",
+            url="https://api.deepseek.example/chat/completions",
+            request_body=b"request-body",
+            http_status=200,
+            response_body=b"response-body",
+            transport_attempt=1,
+        )
+        return super().translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+        )
+
+
 class StaleCompletionTranslator(RecordingTranslator):
     def __init__(self, store: SQLiteTranslationJobStore, job_id: str) -> None:
         super().__init__()
@@ -1817,7 +1972,13 @@ class _DeepSeekErrorClient:
     def __init__(self, error: Exception) -> None:
         self._error = error
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
         raise self._error
 
 

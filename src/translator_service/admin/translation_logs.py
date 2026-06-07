@@ -268,7 +268,8 @@ def build_effective_translation_run_archive(
                 [
                     "# Translation Export",
                     "",
-                    "`run.json` is the sanitized lifecycle log captured during the run.",
+                    "`run.json` is the sanitized lifecycle log captured during",
+                    "the run.",
                     "`effective_run.json` is the authoritative export snapshot built",
                     "from the lifecycle log plus persistent scheduler/work-unit state.",
                     "`work_units.json` contains metadata-only work-unit status counts",
@@ -277,11 +278,15 @@ def build_effective_translation_run_archive(
                     "full diagnostic snapshot that intentionally contains raw",
                     "source text, translated text, retry attempts, and safe",
                     "provider failure metadata for the run.",
+                    "`provider_io_diagnostics.jsonl`, when present, is an",
+                    "owner-only provider IO diagnostic log that may contain exact",
+                    "provider request JSON bodies, prompt/source batch text, and",
+                    "raw provider response bodies.",
                     "",
-                    "This archive intentionally excludes raw provider prompts,",
-                    "raw provider responses, API keys, and internal request bodies.",
-                    "Treat archives with `raw_text_diagnostics.json` as sensitive",
-                    "user-document diagnostic data.",
+                    "This archive intentionally excludes provider Authorization",
+                    "headers and API keys.",
+                    "Treat archives with raw diagnostic files as sensitive",
+                    "user-document and provider-IO diagnostic data.",
                     "",
                 ]
             ),
@@ -445,7 +450,8 @@ def _render_effective_summary(
         f"- total_units: `{work_units['total_units']}`",
         f"- completed_units: `{work_units['completed_units']}`",
         f"- failed_units: `{work_units['failed_units']}`",
-        f"- counts_by_status: `{json.dumps(work_units['counts_by_status'], sort_keys=True)}`",
+        "- counts_by_status: "
+        f"`{json.dumps(work_units['counts_by_status'], sort_keys=True)}`",
     ]
     if diagnostic is not None:
         lines.extend(
