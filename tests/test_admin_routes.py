@@ -44,6 +44,10 @@ from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
+from translator_service.provider_failure_diagnostics import (
+    ProviderFailureCategory,
+    ProviderFailureDiagnostic,
+)
 from translator_service.scheduler import (
     ProviderCapacityCapDiagnostic,
     ProviderCapacityCapScope,
@@ -2364,7 +2368,15 @@ class AdminRoutesTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
             run_root = root / "runs"
+            storage = LocalObjectStorage(object_root)
+            failed_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-10.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Private source paragraph",
+            )
             store = SQLiteTranslationJobStore(job_db)
             try:
                 job = store.create_job(
@@ -2389,6 +2401,11 @@ class AdminRoutesTest(unittest.TestCase):
                             prompt_tier="plain",
                             source_language="auto",
                             target_language="ru",
+                            source_object_key=(
+                                failed_source.object_key
+                                if sequence == 10
+                                else None
+                            ),
                         )
                         for sequence in range(1, 187)
                     ],
@@ -2428,6 +2445,14 @@ class AdminRoutesTest(unittest.TestCase):
                         ),
                         retry_base_delay_seconds=0,
                         retry_max_delay_seconds=0,
+                        provider_failure_diagnostic=ProviderFailureDiagnostic(
+                            failure_category=ProviderFailureCategory.MALFORMED_RESPONSE,
+                            http_status_bucket=None,
+                            provider_id="deepseek",
+                            channel_fingerprint="chan_test123456",
+                            latency_ms=842.0,
+                            adaptive_circuit_snapshot={"circuit_state": "closed"},
+                        ),
                     )
             finally:
                 store.close()
@@ -2455,6 +2480,7 @@ class AdminRoutesTest(unittest.TestCase):
                     settings=Settings(
                         translation_run_log_root=str(run_root),
                         persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
@@ -2470,10 +2496,22 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("run.json", names)
             self.assertIn("effective_run.json", names)
             self.assertIn("work_units.json", names)
+            self.assertIn("raw_text_diagnostics.json", names)
             self.assertIn("README.md", names)
             raw_run = json.loads(archive.read("run.json"))
             effective = json.loads(archive.read("effective_run.json"))
             work_units = json.loads(archive.read("work_units.json"))
+            raw_text_diagnostics = json.loads(
+                archive.read("raw_text_diagnostics.json")
+            )
+            metadata_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in {
+                    "run.json",
+                    "effective_run.json",
+                    "work_units.json",
+                }
+            )
             archive_text = "\n".join(
                 archive.read(name).decode("utf-8", errors="ignore")
                 for name in names
@@ -2490,8 +2528,27 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(work_units["counts_by_status"]["pending"], 176)
         self.assertEqual(work_units["attention_unit"]["sequence"], 10)
         self.assertEqual(work_units["attention_unit"]["attempt_count"], 3)
-        self.assertNotIn("Private source paragraph", archive_text)
-        self.assertNotIn("Translated text hidden from archive", archive_text)
+        self.assertTrue(raw_text_diagnostics["contains_raw_text"])
+        self.assertEqual(raw_text_diagnostics["job_id"], job.id)
+        self.assertEqual(raw_text_diagnostics["total_rows"], 186)
+        attempt_rows = raw_text_diagnostics["attempts"]
+        provider_failure_rows = raw_text_diagnostics["provider_failure_events"]
+        self.assertEqual(
+            [row["attempt_number"] for row in attempt_rows if row["sequence"] == 10],
+            [1, 2, 3],
+        )
+        self.assertIn(
+            "failed_terminal",
+            {row["status"] for row in attempt_rows if row["sequence"] == 10},
+        )
+        self.assertTrue(
+            any(row["sequence"] == 10 for row in provider_failure_rows),
+        )
+        raw_rows_text = json.dumps(raw_text_diagnostics, ensure_ascii=False)
+        self.assertIn("Private source paragraph", raw_rows_text)
+        self.assertIn("Translated text hidden from archive", raw_rows_text)
+        self.assertNotIn("Private source paragraph", metadata_text)
+        self.assertNotIn("Translated text hidden from archive", metadata_text)
         self.assertNotIn("provider-secret", archive_text)
         self.assertNotIn("sk-provider-secret", archive_text)
 
@@ -4318,17 +4375,39 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("qa=unknown", reader_invalid_filter.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
+            raw_text_diagnostics = json.loads(
+                archive.read("raw_text_diagnostics.json")
+            )
+            metadata_archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in {
+                    "run.json",
+                    "effective_run.json",
+                    "work_units.json",
+                    "summary.md",
+                    "README.md",
+                }
+            )
             archive_text = "\n".join(
                 archive.read(name).decode("utf-8", errors="ignore")
                 for name in archive.namelist()
             )
-        self.assertNotIn("Private source paragraph", archive_text)
-        self.assertNotIn("Приватний перекладений абзац", archive_text)
-        self.assertNotIn("Paragraph waiting for translation", archive_text)
-        self.assertNotIn("very long translated expansion", archive_text)
-        self.assertNotIn("Source chars", archive_text)
-        self.assertNotIn("Source lines", archive_text)
-        self.assertNotIn("Paragraph/line break mismatch", archive_text)
+        raw_text_diagnostics_text = json.dumps(
+            raw_text_diagnostics,
+            ensure_ascii=False,
+        )
+        self.assertTrue(raw_text_diagnostics["contains_raw_text"])
+        self.assertIn("Private source paragraph", raw_text_diagnostics_text)
+        self.assertIn("Приватний перекладений абзац", raw_text_diagnostics_text)
+        self.assertIn("Paragraph waiting for translation", raw_text_diagnostics_text)
+        self.assertIn("very long translated expansion", raw_text_diagnostics_text)
+        self.assertNotIn("Private source paragraph", metadata_archive_text)
+        self.assertNotIn("Приватний перекладений абзац", metadata_archive_text)
+        self.assertNotIn("Paragraph waiting for translation", metadata_archive_text)
+        self.assertNotIn("very long translated expansion", metadata_archive_text)
+        self.assertNotIn("Source chars", metadata_archive_text)
+        self.assertNotIn("Source lines", metadata_archive_text)
+        self.assertNotIn("Paragraph/line break mismatch", metadata_archive_text)
         self.assertNotIn("reader-qa-issue-nav", archive_text)
         self.assertNotIn("reader-position-bar", archive_text)
         self.assertNotIn("data-reader-qa-step-controls", archive_text)
@@ -4383,13 +4462,13 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(download_after_mark.status_code, 200)
         with ZipFile(BytesIO(download_after_mark.content)) as archive:
             marked_archive_names = archive.namelist()
-            marked_archive_text = "\n".join(
-                archive.read(name).decode("utf-8", errors="ignore")
-                for name in marked_archive_names
+            marked_raw_text_diagnostics = json.loads(
+                archive.read("raw_text_diagnostics.json")
             )
         self.assertNotIn("reader_review_marks.json", marked_archive_names)
-        self.assertNotIn("Private source paragraph", marked_archive_text)
-        self.assertNotIn("Приватний перекладений абзац", marked_archive_text)
+        marked_raw_text = json.dumps(marked_raw_text_diagnostics, ensure_ascii=False)
+        self.assertIn("Private source paragraph", marked_raw_text)
+        self.assertIn("Приватний перекладений абзац", marked_raw_text)
         self.assertEqual(clear_mark.status_code, 200)
         self.assertEqual(clear_mark.json()["marks"], {})
         self.assertEqual(review_marks_after_clear["marks"], {})

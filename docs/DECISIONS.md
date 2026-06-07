@@ -1561,21 +1561,30 @@ Decision:
 - On 2026-06-02, the owner also approved viewing raw provider prompt bodies in
   a dedicated owner-only diagnostic surface when those prompt bodies are
   recorded or can be reconstructed safely.
+- On 2026-06-07, the owner approved changing the admin translation-log download
+  contract so the owner-only downloaded archive may include a full diagnostic
+  sidecar with raw source text, translated text, retry attempts and provider
+  failure diagnostics for the run.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
-  model and must not be added to safe log archives, telemetry, JSON APIs,
-  release artifacts, GitHub issues, PR descriptions or support notes.
+  model. Raw text remains allowed only inside dedicated owner/admin diagnostic
+  surfaces, including the owner-only full diagnostic download sidecar, and must
+  not be copied into telemetry, normal JSON APIs, release artifacts, GitHub
+  issues, PR descriptions or support notes without separate exact approval.
 - A read-only run-log Translation Reader may sit beside Text diagnostics for a
   specific translation run. It must resolve `run_id -> job_id`, reuse the same
   work-unit/source-object path as Text diagnostics, render server-side
-  `no-store` HTML and avoid raw-text JSON/API/archive outputs.
+  `no-store` HTML and avoid raw-text JSON/API outputs. Downloaded owner-only
+  full diagnostic archives may include raw text through
+  `raw_text_diagnostics.json`.
 - On 2026-06-02, the owner approved saving marked Reader review fragments so
   later diagnostics can inspect exactly what the owner flagged. The persisted
   record may include both original/source text and translated text for the
   marked work-unit sequence, plus mark/status/source-block metadata, but must
   remain a run-scoped owner-only raw diagnostic sidecar rather than a normal
   admin detail, API, archive, telemetry or support artifact.
-- Normal admin log details and downloadable diagnostics remain metadata-only and
-  redacted by default.
+- Normal admin log details, telemetry and JSON APIs remain metadata-only and
+  redacted by default. Downloaded owner-only full diagnostic archives are the
+  approved exception and may include raw source/translated text.
 - Removing this raw-text diagnostic path, hiding it from the owner, replacing it
   with a metadata-only workflow, or expanding raw-text access beyond the
   dedicated owner/admin diagnostic surface requires a follow-up owner decision.
@@ -1586,11 +1595,12 @@ Evidence:
   not contain enough information to diagnose the failed EPUB translation.
 - Local implementation adds a dedicated admin-only text diagnostics page and a
   regression test proving raw text stays out of the normal details page and
-  safe archive download.
+  the then-safe archive download.
 - Branch `codex/internal-reader-v2` adds the run-log Translation Reader route
   and regression coverage for auth, `no-store` HTML, escaping, reader
-  navigation, missing-store behavior and no raw text in details/API/archive
-  surfaces.
+  navigation, missing-store behavior and no raw text in details/API surfaces;
+  the archive download contract was later changed on 2026-06-07 to add the
+  owner-only `raw_text_diagnostics.json` sidecar.
 - In the 2026-06-02 Reader-marking thread, the owner explicitly stated that
   marked fragments need to be saved for later log review and clarified that both
   files/text sides, original/source and translation, must be saved for marked
@@ -1600,6 +1610,9 @@ Evidence:
   owner should have ongoing access to raw translation texts for diagnostics.
   clarifying that raw source text and translations were already approved for
   owner diagnostics.
+- Owner explicitly requested on 2026-06-07 that downloaded log archives contain
+  all translation information, including raw translation text, so the owner does
+  not need a terminal/SSH investigation to diagnose a failed translation.
 
 Reason:
 - The failed translation incident required comparing source work units,
@@ -1618,16 +1631,17 @@ Consequences:
   bodies as sensitive data and avoid copying excerpts into logs, docs, issues
   or chat unless the owner approves that exact excerpt.
 - Persisted Reader review marks are sensitive raw diagnostic artifacts. They
-  must stay out of safe archives, normal admin details, JSON APIs, telemetry,
-  PRs/issues and docs unless a separate owner approval covers the exact excerpt
-  or workflow.
+  must stay out of normal admin details, JSON APIs, telemetry, PRs/issues and
+  docs unless a separate owner approval covers the exact excerpt or workflow.
+  Owner-only full diagnostic archives may include raw work-unit source and
+  translated text by design.
 - Implementing prompt viewing may require a separate scoped issue because full
   prompt bodies are not confirmed to be persisted in current run metadata.
   If implementation changes provider request logging, storage/runtime data,
-  database/state, auth/RBAC, JSON APIs, telemetry, archives or dependencies,
-  it needs the matching approval gate and tests.
+  database/state, auth/RBAC, JSON APIs, telemetry or dependencies, it needs the
+  matching approval gate and tests.
 - This decision does not relax public admin, release, legal/privacy, telemetry,
-  archive-redaction or Gate B requirements.
+  support-artifact or Gate B requirements.
 
 Human approval required to change:
 - yes; this affects privacy, admin diagnostics and user-data handling.

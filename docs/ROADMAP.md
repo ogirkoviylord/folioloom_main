@@ -55,9 +55,9 @@ evidence, а не создание документов с нуля.
   external provider behavior.
 - Не ослаблять guardrails: rights confirmation, beta allowlist, cost caps, kill
   switch, SSH-tunnel-only admin, secret/prompt/key redaction and approved
-  raw-text handling. Dedicated owner-only text diagnostics is the accepted
-  exception; safe archives, telemetry, normal admin pages and support artifacts
-  remain metadata-only/redacted.
+  raw-text handling. Dedicated owner-only text diagnostics and downloaded full
+  diagnostic archives are accepted exceptions; telemetry, normal admin pages,
+  APIs and support artifacts remain metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.
 
 ## 4. Phase 0 - Documentation and agent readiness
@@ -203,8 +203,9 @@ Acceptance criteria:
 - Accepted jobs не теряются при worker/bot restart по release evidence.
 - Provider failures дают safe user messaging и diagnosable metadata.
 - Logs/admin do not expose raw document text, prompts, translations or keys
-  outside the approved owner-only text diagnostics surface; safe archives,
-  telemetry, normal details and support artifacts remain redacted/metadata-only.
+  outside the approved owner-only diagnostics surfaces and full diagnostic
+  downloads; telemetry, normal details, APIs and support artifacts remain
+  redacted/metadata-only.
 
 Обязательные тесты:
 
@@ -351,8 +352,8 @@ Acceptance criteria:
 - Пользователь видит безопасные, понятные сообщения без stack traces/provider
   internals/raw text.
 - Owner/admin видит operational state без раскрытия secrets; raw
-  source/translated text is available through the approved owner-only text
-  diagnostics surface for incident debugging.
+  source/translated text is available through approved owner-only diagnostics
+  and full diagnostic downloads for incident debugging.
 - UX polish не добавляет payments, public signup, new formats или public admin.
 
 ## 9. Phase 5 - Release readiness
@@ -770,8 +771,8 @@ Acceptance criteria:
   narrow owner-approved persistence slice on branch
   `codex/issue-268-reader-persisted-marks`: save marked Reader work-unit
   excerpts, including both original/source and translated text, in a run-scoped
-  owner-only raw diagnostic sidecar while keeping normal details, APIs and safe
-  archives redacted.
+  owner-only raw diagnostic sidecar while keeping normal details and APIs
+  redacted. Downloaded owner-only full diagnostic archives may include raw text.
   Owner direction on 2026-06-02: stop this Reader ergonomics push after #266.
   Owner later approved only the #268 marked-fragment persistence slice.
   Deferred/unfinished ideas remain cross-page completion, block notes/comments,
