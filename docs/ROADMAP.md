@@ -56,7 +56,10 @@ evidence, а не создание документов с нуля.
 - Не ослаблять guardrails: rights confirmation, beta allowlist, cost caps, kill
   switch, SSH-tunnel-only admin, secret/prompt/key redaction and approved
   raw-text handling. Dedicated owner-only text diagnostics and downloaded full
-  diagnostic archives are accepted exceptions; telemetry, normal admin pages,
+  diagnostic archives are accepted exceptions. Downloaded full diagnostic
+  archives may also include run-scoped `provider_io_diagnostics.jsonl` with
+  exact provider request/response bodies for incident debugging, excluding
+  provider `Authorization` headers and API keys. Telemetry, normal admin pages,
   APIs and support artifacts remain metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.
 

@@ -6,6 +6,7 @@ from collections.abc import Callable, Container
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from translator_service.file_storage import (
@@ -30,6 +31,10 @@ from translator_service.provider_failure_diagnostics import (
     build_provider_failure_diagnostic,
     provider_diagnostic_is_actionable,
 )
+from translator_service.provider_io_diagnostics import (
+    ProviderIODiagnosticSink,
+    capture_provider_io,
+)
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
 from translator_service.scheduler import (
@@ -52,6 +57,9 @@ from translator_service.translation_context import (
     update_translation_context_memory,
 )
 from translator_service.translation_postprocess import clean_inline_formatting_artifacts
+from translator_service.translation_run_logs import (
+    append_provider_io_diagnostic_for_job,
+)
 from translator_service.translation_runner import (
     _clean_translated_text,
     _format_translation_batch,
@@ -617,6 +625,7 @@ def run_next_scheduled_stored_text_work_unit(
     retry_max_delay_seconds: int = 600,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    translation_run_log_root: str | Path | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     encoding: str = "utf-8",
@@ -689,6 +698,10 @@ def run_next_scheduled_stored_text_work_unit(
                 translator=translator,
                 job_context=job_context,
                 provider_slot_lease=lease_attempt.lease,
+                provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                    translation_run_log_root,
+                    job_id=claim.job_id,
+                ),
             )
         except Exception as error:
             release_reason = "retryable_failure"
@@ -761,14 +774,39 @@ def translate_claimed_scheduled_stored_text_work_unit(
     translator: PersistentWorkUnitTranslator,
     job_context: TranslationContextMemory | None = None,
     provider_slot_lease: ProviderSlotLease | None = None,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
 ) -> _WorkUnitTranslationResult:
     with _provider_slot_channel_context(translator, provider_slot_lease):
-        return _translate_work_unit_text(
-            work_unit=work_unit,
-            source_text=source_text,
-            translator=translator,
-            job_context=job_context,
+        with capture_provider_io(
+            provider_io_diagnostic_sink,
+            job_id=work_unit.job_id,
+            work_unit_id=work_unit.id,
+            sequence=work_unit.sequence,
+        ):
+            return _translate_work_unit_text(
+                work_unit=work_unit,
+                source_text=source_text,
+                translator=translator,
+                job_context=job_context,
+            )
+
+
+def _provider_io_diagnostic_sink(
+    translation_run_log_root: str | Path | None,
+    *,
+    job_id: str,
+) -> ProviderIODiagnosticSink | None:
+    if translation_run_log_root is None or not job_id:
+        return None
+
+    def append(record: dict[str, object]) -> None:
+        append_provider_io_diagnostic_for_job(
+            translation_run_log_root,
+            job_id=job_id,
+            record=record,
         )
+
+    return append
 
 
 def load_scheduled_work_unit_text(
@@ -784,7 +822,6 @@ def load_scheduled_work_unit_text(
         allowed_source_object_keys=allowed_source_object_keys,
         encoding=encoding,
     )
-
 
 def _fail_claimed_work_unit_or_ignore_stale(
     *,

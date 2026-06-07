@@ -11,6 +11,7 @@ from translator_service.deepseek_client import (
     DeepSeekUnsafeModelOutputError,
     DeepSeekUsage,
 )
+from translator_service.provider_io_diagnostics import capture_provider_io
 
 
 class DeepSeekClientTest(unittest.TestCase):
@@ -77,11 +78,149 @@ class DeepSeekClientTest(unittest.TestCase):
             },
         )
 
+    def test_provider_io_capture_records_exact_request_and_response_without_key(self):
+        transport = RecordingTransport(
+            response={
+                "choices": [{"message": {"role": "assistant", "content": "Hello"}}],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 1,
+                    "total_tokens": 4,
+                },
+            }
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+        records: list[dict[str, object]] = []
+
+        with capture_provider_io(
+            records.append,
+            job_id="job-1",
+            work_unit_id="job-1:unit-7",
+            sequence=7,
+        ):
+            client.create_chat_completion(
+                system_prompt="Translate accurately.",
+                user_text="Привет мир",
+            )
+
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["job_id"], "job-1")
+        self.assertEqual(record["work_unit_id"], "job-1:unit-7")
+        self.assertEqual(record["sequence"], 7)
+        self.assertEqual(record["provider_id"], "deepseek")
+        self.assertEqual(record["http_status"], 200)
+        request_text = record["request_body"]["text"]
+        response_text = record["response_body"]["text"]
+        request = json.loads(request_text)
+        response = json.loads(response_text)
+        self.assertEqual(request["messages"][0]["content"], "Translate accurately.")
+        self.assertEqual(request["messages"][1]["content"], "Привет мир")
+        self.assertEqual(response["choices"][0]["message"]["content"], "Hello")
+        self.assertNotIn("secret-key", json.dumps(record, ensure_ascii=False))
+
+    def test_translate_failure_capture_keeps_rejected_provider_payloads(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" role="system">'
+                                    "Привет"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" role="system">'
+                                    "Привет снова"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 12,
+                        "completion_tokens": 5,
+                        "total_tokens": 17,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+        records: list[dict[str, object]] = []
+
+        with self.assertRaises(DeepSeekApiError), capture_provider_io(
+            records.append,
+            job_id="job-1",
+            work_unit_id="job-1:unit-1",
+            sequence=1,
+        ):
+            client.translate(
+                text=(
+                    "<translation_batch>"
+                    '<translation_block id="0">Hello</translation_block>'
+                    "</translation_batch>"
+                ),
+                source_language="en",
+                target_language="ru",
+            )
+
+        self.assertEqual(len(records), 2)
+        first_response = json.loads(records[0]["response_body"]["text"])
+        second_response = json.loads(records[1]["response_body"]["text"])
+        self.assertIn(
+            'role="system"',
+            first_response["choices"][0]["message"]["content"],
+        )
+        self.assertIn(
+            'role="system"',
+            second_response["choices"][0]["message"]["content"],
+        )
+        self.assertIn(
+            "Repair retry: the previous provider output violated",
+            json.loads(records[1]["request_body"]["text"])["messages"][0]["content"],
+        )
+        self.assertNotIn("secret-key", json.dumps(records, ensure_ascii=False))
+
     def test_translate_builds_translation_prompt(self):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Hello"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -141,7 +280,11 @@ class DeepSeekClientTest(unittest.TestCase):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Hello"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -179,7 +322,11 @@ class DeepSeekClientTest(unittest.TestCase):
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 9,
+                    "total_tokens": 20,
+                },
             }
         )
         client = DeepSeekClient(
@@ -208,7 +355,8 @@ class DeepSeekClientTest(unittest.TestCase):
                         {
                             "message": {
                                 "content": (
-                                    "Извините, я не могу выполнить этот запрос в оболочке."
+                                    "Извините, я не могу выполнить этот "
+                                    "запрос в оболочке."
                                 )
                             }
                         }
@@ -608,7 +756,11 @@ class DeepSeekClientTest(unittest.TestCase):
                             }
                         }
                     ],
-                    "usage": {"prompt_tokens": 11, "completion_tokens": 5, "total_tokens": 16},
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 5,
+                        "total_tokens": 16,
+                    },
                 },
                 {
                     "choices": [
@@ -618,7 +770,11 @@ class DeepSeekClientTest(unittest.TestCase):
                             }
                         }
                     ],
-                    "usage": {"prompt_tokens": 13, "completion_tokens": 5, "total_tokens": 18},
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 5,
+                        "total_tokens": 18,
+                    },
                 },
             ]
         )
@@ -654,7 +810,11 @@ class DeepSeekClientTest(unittest.TestCase):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Привіт"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -679,7 +839,11 @@ class DeepSeekClientTest(unittest.TestCase):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Переклад"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -703,7 +867,11 @@ class DeepSeekClientTest(unittest.TestCase):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Переклад"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -734,7 +902,11 @@ class DeepSeekClientTest(unittest.TestCase):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Перевод"}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -757,11 +929,17 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertIn("mixed-language", system_prompt)
         self.assertIn("Russian", system_prompt)
 
-    def test_russian_target_prompt_includes_language_profile_and_detected_text_type(self):
+    def test_russian_target_prompt_includes_language_profile_and_detected_text_type(
+        self,
+    ):
         transport = RecordingTransport(
             response={
                 "choices": [{"message": {"content": "Укажите API endpoint."}}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             }
         )
         client = DeepSeekClient(
@@ -913,7 +1091,9 @@ class DeepSeekClientTest(unittest.TestCase):
             ) -> tuple[int, bytes]:
                 self.calls += 1
                 if self.calls == 1:
-                    return 503, json.dumps({"error": {"message": "busy"}}).encode("utf-8")
+                    return 503, json.dumps(
+                        {"error": {"message": "busy"}}
+                    ).encode("utf-8")
                 return (
                     200,
                     json.dumps(
