@@ -125,6 +125,50 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(response["choices"][0]["message"]["content"], "Hello")
         self.assertNotIn("secret-key", json.dumps(record, ensure_ascii=False))
 
+    def test_provider_io_sink_failure_does_not_fail_chat_completion(self):
+        transport = RecordingTransport(
+            response={
+                "choices": [{"message": {"role": "assistant", "content": "Hello"}}],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 1,
+                    "total_tokens": 4,
+                },
+            }
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        def fail_sink(_record: dict[str, object]) -> None:
+            raise OSError("diagnostic store unavailable")
+
+        with self.assertLogs(
+            "translator_service.provider_io_diagnostics",
+            level="WARNING",
+        ) as logs:
+            with capture_provider_io(
+                fail_sink,
+                job_id="job-1",
+                work_unit_id="job-1:unit-7",
+                sequence=7,
+            ):
+                result = client.create_chat_completion(
+                    system_prompt="Translate accurately.",
+                    user_text="Привет мир",
+                )
+
+        self.assertEqual(result.content, "Hello")
+        log_text = "\n".join(logs.output)
+        self.assertIn("Provider IO diagnostic sink failed", log_text)
+        self.assertIn("job-1:unit-7", log_text)
+        self.assertNotIn("Привет мир", log_text)
+        self.assertNotIn("secret-key", log_text)
+
     def test_translate_failure_capture_keeps_rejected_provider_payloads(self):
         transport = SequentialTransport(
             responses=[

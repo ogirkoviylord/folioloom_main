@@ -142,6 +142,7 @@ def run_next_persistent_work_unit(
     translator: PersistentWorkUnitTranslator,
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
 ) -> PersistentWorkUnit | None:
     work_unit = store.claim_next_work_unit(job_id, worker_id=worker_id)
     if work_unit is None:
@@ -152,11 +153,12 @@ def run_next_persistent_work_unit(
     try:
         job_context = _job_translation_context(store, job_id)
         source_text = source_loader(work_unit)
-        translation_result = _translate_work_unit_text(
+        translation_result = _translate_work_unit_text_with_provider_io(
             work_unit=work_unit,
             source_text=source_text,
             translator=translator,
             job_context=job_context,
+            provider_io_diagnostic_sink=provider_io_diagnostic_sink,
         )
     except Exception as error:
         logger.exception(
@@ -218,6 +220,7 @@ def run_stored_text_job_until_idle(
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     total_units = len(store.list_work_units(job_id))
@@ -234,6 +237,7 @@ def run_stored_text_job_until_idle(
             usage_completed_callback=usage_completed_callback,
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
+            provider_io_diagnostic_sink=provider_io_diagnostic_sink,
             encoding=encoding,
         )
         if completed is None:
@@ -274,6 +278,7 @@ def run_stored_text_job_parallel_until_idle(
     should_stop: Callable[[], bool] | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     if max_parallel_units <= 1:
@@ -288,6 +293,7 @@ def run_stored_text_job_parallel_until_idle(
             usage_completed_callback=usage_completed_callback,
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
+            provider_io_diagnostic_sink=provider_io_diagnostic_sink,
             encoding=encoding,
         )
 
@@ -326,6 +332,7 @@ def run_stored_text_job_parallel_until_idle(
                     job_context=job_context,
                     allowed_source_object_keys=allowed_source_object_keys,
                     require_upload_safety_policy=require_upload_safety_policy,
+                    provider_io_diagnostic_sink=provider_io_diagnostic_sink,
                     store=store,
                 )
                 active[future] = (claimed, time.monotonic())
@@ -425,6 +432,7 @@ def run_next_stored_text_work_unit(
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     return run_next_persistent_work_unit(
@@ -445,6 +453,7 @@ def run_next_stored_text_work_unit(
         translator=translator,
         work_unit_started_callback=work_unit_started_callback,
         usage_completed_callback=usage_completed_callback,
+        provider_io_diagnostic_sink=provider_io_diagnostic_sink,
     )
 
 
@@ -777,18 +786,13 @@ def translate_claimed_scheduled_stored_text_work_unit(
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
 ) -> _WorkUnitTranslationResult:
     with _provider_slot_channel_context(translator, provider_slot_lease):
-        with capture_provider_io(
-            provider_io_diagnostic_sink,
-            job_id=work_unit.job_id,
-            work_unit_id=work_unit.id,
-            sequence=work_unit.sequence,
-        ):
-            return _translate_work_unit_text(
-                work_unit=work_unit,
-                source_text=source_text,
-                translator=translator,
-                job_context=job_context,
-            )
+        return _translate_work_unit_text_with_provider_io(
+            work_unit=work_unit,
+            source_text=source_text,
+            translator=translator,
+            job_context=job_context,
+            provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+        )
 
 
 def _provider_io_diagnostic_sink(
@@ -898,6 +902,7 @@ def _translate_stored_text_work_unit(
     job_context: TranslationContextMemory | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
     store: SQLiteTranslationJobStore | None = None,
 ) -> _WorkUnitTranslationResult:
     source_text = _load_work_unit_text(
@@ -911,12 +916,35 @@ def _translate_stored_text_work_unit(
         ),
         encoding=encoding,
     )
-    return _translate_work_unit_text(
+    return _translate_work_unit_text_with_provider_io(
         work_unit=work_unit,
         source_text=source_text,
         translator=translator,
         job_context=job_context,
+        provider_io_diagnostic_sink=provider_io_diagnostic_sink,
     )
+
+
+def _translate_work_unit_text_with_provider_io(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    translator: PersistentWorkUnitTranslator,
+    job_context: TranslationContextMemory | None = None,
+    provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+) -> _WorkUnitTranslationResult:
+    with capture_provider_io(
+        provider_io_diagnostic_sink,
+        job_id=work_unit.job_id,
+        work_unit_id=work_unit.id,
+        sequence=work_unit.sequence,
+    ):
+        return _translate_work_unit_text(
+            work_unit=work_unit,
+            source_text=source_text,
+            translator=translator,
+            job_context=job_context,
+        )
 
 
 def assemble_translated_text_result(

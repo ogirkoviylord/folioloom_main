@@ -28,6 +28,7 @@ from translator_service.translation_run_logs import (
 )
 from translator_service.worker import (
     ProviderUsage,
+    _provider_io_diagnostic_sink,
     assemble_translated_text_result,
     effective_worker_parallel_units,
     open_scheduler_store,
@@ -737,6 +738,73 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(record["sequence"], 1)
             self.assertEqual(record["request_body"]["text"], "request-body")
             self.assertEqual(record["response_body"]["text"], "response-body")
+
+    def test_in_process_parallel_worker_records_provider_io_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            first_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            second_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second paragraph",
+            )
+            run_logger = TranslationRunLogger.start(
+                root=root / "run-logs",
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            store = self._store()
+            job = _job_with_two_stored_units(
+                store,
+                first_source.object_key,
+                second_source.object_key,
+            )
+
+            summary = run_stored_text_job_parallel_until_idle(
+                store=store,
+                storage=storage,
+                job_id=job.id,
+                worker_id="worker",
+                translator=ProviderIODiagnosticTranslator(),
+                max_parallel_units=2,
+                provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                    root / "run-logs",
+                    job_id=job.id,
+                ),
+            )
+
+            self.assertEqual(summary.job_status, PersistentTranslationJobStatus.READY)
+            provider_io_path = run_logger.run_dir / "provider_io_diagnostics.jsonl"
+            records = [
+                json.loads(line)
+                for line in provider_io_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(
+                sorted(record["sequence"] for record in records),
+                [1, 2],
+            )
+            self.assertEqual(
+                {record["request_body"]["text"] for record in records},
+                {"request-body"},
+            )
+            self.assertEqual(
+                {record["response_body"]["text"] for record in records},
+                {"response-body"},
+            )
 
     def test_scheduled_worker_ignores_stale_claim_completion(self):
         from translator_service.scheduler import SchedulerLimits
