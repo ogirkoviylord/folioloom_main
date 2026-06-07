@@ -932,6 +932,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             settings.translation_run_log_root,
             run_id,
             details=details,
+            raw_text_diagnostics=_translation_raw_text_diagnostics_payload(
+                settings,
+                details,
+            ),
         )
         if archive is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
@@ -3103,12 +3107,15 @@ def _translation_text_diagnostics(
     store = open_persistent_job_store(settings)
     storage = LocalObjectStorage(settings.object_storage_root)
     try:
-        units = store.list_work_units(job_id)
+        units = sorted(
+            store.list_work_units(job_id),
+            key=lambda unit: getattr(unit, "sequence", 0),
+        )
         selected = [
             unit
             for unit in units
             if unit.sequence >= start_sequence
-        ][:limit]
+        ][: max(0, limit)]
         rows = []
         for unit in selected:
             rows.append(
@@ -3125,6 +3132,145 @@ def _translation_text_diagnostics(
                         if unit.last_error
                         else None
                     ),
+                }
+            )
+        return tuple(rows)
+    finally:
+        store.close()
+
+
+def _translation_raw_text_diagnostics_payload(
+    settings: Settings,
+    details: TranslationRunDetails,
+) -> dict[str, object] | None:
+    job_id = details.summary.job_id
+    if not job_id:
+        return None
+    limit = max(
+        int(details.summary.total_fragment_count or 0),
+        len(details.fragments),
+        _translation_work_unit_count(settings, job_id=job_id),
+        1,
+    )
+    rows = _translation_text_diagnostics(
+        settings,
+        job_id=job_id,
+        start_sequence=1,
+        limit=limit,
+    )
+    if not rows:
+        return None
+    return {
+        "schema_version": "translation-raw-text-diagnostics-v1",
+        "contains_raw_text": True,
+        "diagnostic_scope": "owner_only_admin_download",
+        "source": "persistent_work_units",
+        "job_id": job_id,
+        "run_status": details.summary.status,
+        "total_rows": len(rows),
+        "rows": rows,
+        "attempts": _translation_attempt_diagnostic_rows(settings, job_id=job_id),
+        "provider_failure_events": _translation_provider_failure_event_rows(
+            settings,
+            job_id=job_id,
+        ),
+    }
+
+
+def _translation_work_unit_count(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> int:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return 0
+    store = open_persistent_job_store(settings)
+    try:
+        return len(store.list_work_units(job_id))
+    finally:
+        store.close()
+
+
+def _translation_attempt_diagnostic_rows(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> tuple[dict[str, object], ...]:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return ()
+    store = open_persistent_job_store(settings)
+    try:
+        units = sorted(
+            store.list_work_units(job_id),
+            key=lambda unit: getattr(unit, "sequence", 0),
+        )
+        rows = []
+        for unit in units:
+            for attempt in store.list_work_unit_attempts(getattr(unit, "id", "")):
+                rows.append(
+                    {
+                        "sequence": getattr(unit, "sequence", 0),
+                        "work_unit_id": getattr(unit, "id", ""),
+                        "attempt_number": getattr(attempt, "attempt_number", 0),
+                        "status": getattr(attempt, "status", "unknown"),
+                        "error_code": getattr(attempt, "error_code", None),
+                        "error_message": (
+                            _redact_sensitive_text(attempt.error_message)
+                            if getattr(attempt, "error_message", None)
+                            else None
+                        ),
+                        "retry_after_seconds": getattr(
+                            attempt,
+                            "retry_after_seconds",
+                            0,
+                        ),
+                        "prompt_tokens": getattr(attempt, "prompt_tokens", 0),
+                        "completion_tokens": getattr(
+                            attempt,
+                            "completion_tokens",
+                            0,
+                        ),
+                        "cache_hit_tokens": getattr(attempt, "cache_hit_tokens", 0),
+                        "cache_miss_tokens": getattr(
+                            attempt,
+                            "cache_miss_tokens",
+                            0,
+                        ),
+                        "started_at": getattr(attempt, "started_at", None),
+                        "finished_at": getattr(attempt, "finished_at", None),
+                    }
+                )
+        return tuple(rows)
+    finally:
+        store.close()
+
+
+def _translation_provider_failure_event_rows(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> tuple[dict[str, object], ...]:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return ()
+    store = open_persistent_job_store(settings)
+    try:
+        units_by_id = {
+            getattr(unit, "id", ""): getattr(unit, "sequence", 0)
+            for unit in store.list_work_units(job_id)
+        }
+        rows = []
+        for event in store.list_scheduler_events(job_id):
+            payload = _json_payload(getattr(event, "payload_json", ""))
+            if "provider_failure" not in payload:
+                continue
+            work_unit_id = getattr(event, "work_unit_id", None)
+            rows.append(
+                {
+                    "sequence": units_by_id.get(work_unit_id or "", 0),
+                    "work_unit_id": work_unit_id,
+                    "event_type": getattr(event, "event_type", "unknown"),
+                    "created_at": getattr(event, "created_at", None),
+                    "payload": payload,
                 }
             )
         return tuple(rows)
