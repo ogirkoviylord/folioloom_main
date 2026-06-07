@@ -333,6 +333,12 @@ class AdminTranslationLogsTest(unittest.TestCase):
         archive_text = _archive_text(effective_archive.content)
         self.assertIn("EXACT PROMPT", archive_text)
         self.assertIn("EXACT RESPONSE", archive_text)
+        self.assertIn(
+            "`provider_io_diagnostics.jsonl`, when present, is an",
+            archive_text,
+        )
+        self.assertIn("raw provider response bodies", archive_text)
+        self.assertIn("excludes provider Authorization", archive_text)
         from io import BytesIO
         from zipfile import ZipFile
 
