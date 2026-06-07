@@ -38,6 +38,7 @@ from translator_service.worker import (
     _is_stale_work_unit_claim,
     _job_translation_context,
     _provider_failure_diagnostic_for_error,
+    _provider_io_diagnostic_sink,
     _provider_slot_failure_release_reason,
     _provider_slot_stale_release_reason,
     _release_provider_slot_lease,
@@ -118,6 +119,7 @@ def run_scheduler_once(
                 retry_max_delay_seconds=retry_max_delay_seconds,
                 work_unit_started_callback=work_unit_started_callback,
                 usage_completed_callback=usage_completed_callback,
+                translation_run_log_root=translation_run_log_root,
                 allowed_source_object_keys=allowed_source_object_keys,
                 require_upload_safety_policy=require_upload_safety_policy,
             )
@@ -286,6 +288,10 @@ def _run_scheduled_parallel_once(
                     translator=translator,
                     job_context=_job_translation_context(store, claim.job_id),
                     provider_slot_lease=lease_attempt.lease,
+                    provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
+                        translation_run_log_root,
+                        job_id=claim.job_id,
+                    ),
                 )
                 active[future] = (claim, lease_attempt.lease)
 

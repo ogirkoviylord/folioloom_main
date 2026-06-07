@@ -283,6 +283,69 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertNotIn("Вот перевод", archive_text)
         self.assertNotIn("disease was serious", archive_text)
 
+    def test_effective_archive_includes_provider_io_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-provider-io-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="novel.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                ),
+            )
+            (logger.run_dir / "provider_io_diagnostics.jsonl").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "provider-io-diagnostics-v1",
+                        "diagnostic_scope": "owner_only_translation_run_archive",
+                        "provider_id": "deepseek",
+                        "request_body": {
+                            "encoding": "utf-8",
+                            "text": '{"messages":[{"content":"EXACT PROMPT"}]}',
+                        },
+                        "response_body": {
+                            "encoding": "utf-8",
+                            "text": (
+                                '{"choices":[{"message":'
+                                '{"content":"EXACT RESPONSE"}}]}'
+                            ),
+                        },
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        archive_text = _archive_text(effective_archive.content)
+        self.assertIn("EXACT PROMPT", archive_text)
+        self.assertIn("EXACT RESPONSE", archive_text)
+        self.assertIn(
+            "`provider_io_diagnostics.jsonl`, when present, is an",
+            archive_text,
+        )
+        self.assertIn("raw provider response bodies", archive_text)
+        self.assertIn("excludes provider Authorization", archive_text)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            self.assertIn("provider_io_diagnostics.jsonl", archive.namelist())
+
+
 def _archive_text(content: bytes) -> str:
     from io import BytesIO
     from zipfile import ZipFile

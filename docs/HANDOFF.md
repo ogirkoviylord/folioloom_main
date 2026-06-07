@@ -109,6 +109,18 @@ diagnostic sidecar. This does not authorize copying raw excerpts into
 telemetry, JSON APIs, support notes, GitHub issues, PR descriptions or release
 artifacts.
 
+Provider IO diagnostic update on 2026-06-07: after the latest
+`pg2641-images-3.epub` failure could only be narrowed to DeepSeek
+`malformed_response` / `unexpected_attribute` without the exact rejected body,
+the owner approved saving exact provider request/response bodies for each
+translation run. New run logs may include `provider_io_diagnostics.jsonl` with
+the exact DeepSeek request JSON body and raw response body for each captured
+transport exchange. This file is an owner-only raw diagnostic artifact included
+by downloaded full diagnostic archives; it may contain prompt bodies, source
+batch text and provider output, but must not contain the `Authorization` header
+or API key and must stay out of telemetry, normal admin/API views, support
+notes, GitHub issues, PR descriptions and release artifacts.
+
 Issue #167 implementation slice on 2026-06-04: branch
 `codex/issue-167-book-manuscript-policy-profile` generalizes
 `book_manuscript` policy/profile context across persistent TXT, EPUB and DOCX
@@ -489,9 +501,10 @@ Owner decisions recorded during issue #71:
   change Gate B release requirements.
 - 2026-06-02: Owner additionally approved viewing raw provider prompt bodies in
   a dedicated owner-only diagnostic surface. This is a decision-level approval,
-  not evidence that prompt bodies are already stored or rendered. Implementers
-  should use a separate scoped issue for prompt diagnostics and keep normal
-  trace/evidence/archive/telemetry/API surfaces metadata-only/redacted.
+  and the 2026-06-07 provider IO diagnostic update now persists exact provider
+  request/response bodies in `provider_io_diagnostics.jsonl` for translation
+  run archives. Keep normal trace/evidence/telemetry/API surfaces
+  metadata-only/redacted.
 - 2026-06-06: Owner approved broad automatic raw provider diagnostics capture
   for pre-release development after job
   `job-9488146309f7434b9746580a6cc22d96` showed that safe metadata was
