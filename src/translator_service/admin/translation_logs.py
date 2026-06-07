@@ -229,6 +229,7 @@ def build_effective_translation_run_archive(
     run_id: str,
     *,
     details: TranslationRunDetails,
+    raw_text_diagnostics: dict[str, Any] | None = None,
 ) -> TranslationRunArchive | None:
     run_dir = _resolve_run_dir(root, run_id)
     if run_dir is None:
@@ -252,6 +253,11 @@ def build_effective_translation_run_archive(
             "work_units.json",
             _json_dumps(work_units),
         )
+        if raw_text_diagnostics is not None:
+            archive.writestr(
+                "raw_text_diagnostics.json",
+                _json_dumps(raw_text_diagnostics),
+            )
         archive.writestr(
             "summary.md",
             _render_effective_summary(details, work_units=work_units),
@@ -267,9 +273,15 @@ def build_effective_translation_run_archive(
                     "from the lifecycle log plus persistent scheduler/work-unit state.",
                     "`work_units.json` contains metadata-only work-unit status counts",
                     "and the work unit needing attention when one is available.",
+                    "`raw_text_diagnostics.json`, when present, is an owner-only",
+                    "full diagnostic snapshot that intentionally contains raw",
+                    "source text, translated text, retry attempts, and safe",
+                    "provider failure metadata for the run.",
                     "",
-                    "This archive intentionally excludes raw source text, translated",
-                    "text, provider prompts, API keys, and provider internals.",
+                    "This archive intentionally excludes raw provider prompts,",
+                    "raw provider responses, API keys, and internal request bodies.",
+                    "Treat archives with `raw_text_diagnostics.json` as sensitive",
+                    "user-document diagnostic data.",
                     "",
                 ]
             ),
