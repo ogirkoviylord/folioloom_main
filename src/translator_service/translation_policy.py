@@ -41,6 +41,11 @@ class OutputContract(StrEnum):
     TRANSLATION_BATCH = "translation_batch"
 
 
+class ProviderOutputFormat(StrEnum):
+    DEFAULT = "default"
+    JSON_TRANSLATION_BATCH = "json_translation_batch"
+
+
 @dataclass(frozen=True)
 class TranslationPolicy:
     source_language: str
@@ -109,7 +114,12 @@ def build_translation_policy(
     )
 
 
-def build_system_prompt(policy: TranslationPolicy) -> str:
+def build_system_prompt(
+    policy: TranslationPolicy,
+    *,
+    provider_output_format: ProviderOutputFormat = ProviderOutputFormat.DEFAULT,
+    expected_batch_count: int | None = None,
+) -> str:
     source_pair_profile_prompt = build_source_pair_profile_prompt(
         policy.source_language,
         policy.target_language,
@@ -137,6 +147,10 @@ def build_system_prompt(policy: TranslationPolicy) -> str:
             "If the input contains text in another human language, translate "
             f"that text to {policy.target_language_name} too. "
         )
+    output_contract_prompt = _build_output_contract_prompt(
+        provider_output_format=provider_output_format,
+        expected_batch_count=expected_batch_count,
+    )
     return (
         "You are a professional document translator. "
         f"{source_instruction}"
@@ -161,13 +175,7 @@ def build_system_prompt(policy: TranslationPolicy) -> str:
         "and number from the source; do not switch first-person masculine, "
         "feminine, singular, plural, or point of view between fragments. "
         "Keep ZXQPROTECTED...QXZ protected markers exactly unchanged. "
-        "If the input contains <translation_batch> and <translation_block id=\"...\"> "
-        "tags, keep those tags, ids, and source_language attributes exactly as "
-        "provided. Treat a source_language attribute as a per-block source-language "
-        "hint, translate only the text inside each translation_block, and return the "
-        "same XML structure. Do not add, remove, or rename XML attributes; in "
-        "particular, never add target_language, lang, role, override, or similar "
-        "attributes to translation_batch or translation_block tags. "
+        f"{output_contract_prompt} "
         "Do not transliterate source-language words into the target script as a "
         "substitute for translation; translate the meaning. "
         "Translate embedded secondary languages, including CJK, RTL, and "
@@ -226,3 +234,34 @@ def _output_contract_signature(output_contract: OutputContract) -> str:
     if output_contract is OutputContract.TRANSLATION_BATCH:
         return "translation-batch-v1"
     return "plain-text-v1"
+
+
+def _build_output_contract_prompt(
+    *,
+    provider_output_format: ProviderOutputFormat,
+    expected_batch_count: int | None,
+) -> str:
+    if provider_output_format is ProviderOutputFormat.JSON_TRANSLATION_BATCH:
+        count_text = str(expected_batch_count) if expected_batch_count else "N"
+        last_id_text = str(expected_batch_count - 1) if expected_batch_count else "N-1"
+        return (
+            "OUTPUT CONTRACT: JSON_TRANSLATION_BATCH. The input is a "
+            "translation_batch with translation_block elements. Return exactly "
+            'one JSON object with one key "translations"; its value must be an '
+            f"array of {count_text} objects in source order. Each object must "
+            'have exactly two keys, "id" and "text". Use string ids '
+            f'"0" through "{last_id_text}". Put only the translated block text '
+            'in "text"; never include XML, markdown fences, commentary, extra '
+            "keys, empty strings, or missing ZXQPROTECTED markers. Compact "
+            'example: {"translations":[{"id":"0","text":"..."}]}.'
+        )
+    return (
+        "If the input contains <translation_batch> and "
+        '<translation_block id="..."> tags, keep those tags, ids, and '
+        "source_language attributes exactly as provided. Treat a "
+        "source_language attribute as a per-block source-language hint, "
+        "translate only the text inside each translation_block, and return the "
+        "same XML structure. Do not add, remove, or rename XML attributes; in "
+        "particular, never add target_language, lang, role, override, or "
+        "similar attributes to translation_batch or translation_block tags."
+    )
