@@ -14,6 +14,7 @@ class TranslationBatchRejectionReason(StrEnum):
     EXTERNAL_TEXT = "external_text"
     BROKEN_XML = "broken_xml"
     INVALID_JSON = "invalid_json"
+    EMPTY_CONTENT = "empty_content"
     WRONG_ROOT = "wrong_root"
     WRONG_JSON_SHAPE = "wrong_json_shape"
     BLOCK_COUNT_MISMATCH = "block_count_mismatch"
@@ -22,6 +23,7 @@ class TranslationBatchRejectionReason(StrEnum):
     UNEXPECTED_KEY = "unexpected_key"
     WRONG_BLOCK_ID = "wrong_block_id"
     EMPTY_TEXT = "empty_text"
+    TRUNCATED_OUTPUT = "truncated_output"
     MISSING_PROTECTED_MARKER = "missing_protected_marker"
     UNSAFE_MODEL_OUTPUT = "unsafe_model_output"
 
