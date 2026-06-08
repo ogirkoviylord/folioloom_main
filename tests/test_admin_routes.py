@@ -43,7 +43,10 @@ from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.output_contracts import format_translation_batch_contract
-from translator_service.persistent_jobs import SQLiteTranslationJobStore, WorkUnitPlan
+from translator_service.persistent_jobs import (
+    SQLiteTranslationJobStore,
+    WorkUnitPlan,
+)
 from translator_service.provider_failure_diagnostics import (
     ProviderFailureCategory,
     ProviderFailureDiagnostic,
@@ -2551,6 +2554,136 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Translated text hidden from archive", metadata_text)
         self.assertNotIn("provider-secret", archive_text)
         self.assertNotIn("sk-provider-secret", archive_text)
+
+    def test_translation_log_download_effective_run_uses_persistent_partial_result_name(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_root = root / "runs"
+            job_db = root / "jobs.sqlite3"
+            object_root = root / "objects"
+            storage = LocalObjectStorage(object_root)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.epub",
+                content_type="application/epub+zip",
+                content=b"synthetic source placeholder",
+            )
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="book.uk.partial.epub",
+                content_type="application/epub+zip",
+                content=b"synthetic partial placeholder",
+            )
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-partial-export",
+                    user_id="telegram:42",
+                    file_id="file-partial-export",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="epub-adapter-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                    source_object_key=original.object_key,
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("epub:OPS/chapter.xhtml:1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source.object_key,
+                        )
+                    ],
+                )
+                claim = store.claim_next_scheduled_work_unit(
+                    worker_id="worker-a",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(),
+                )
+                store.complete_claimed_work_unit(
+                    work_unit_id=claim.work_unit_id,
+                    claim_token=claim.claim_token,
+                    translated_text="Translated text hidden from metadata export",
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    cache_hit_tokens=0,
+                    cache_miss_tokens=10,
+                )
+                store.attach_job_output(
+                    job.id,
+                    partial_object_key=partial.object_key,
+                )
+                store.mark_job_assembled(job.id, partial=True)
+            finally:
+                store.close()
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    user_id=job.user_id,
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=1,
+                ),
+            )
+            logger.finish(
+                status="failed",
+                error_message="Translation failed in the background worker.",
+            )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        object_storage_root=str(object_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            raw_run = json.loads(archive.read("run.json"))
+            effective = json.loads(archive.read("effective_run.json"))
+            metadata_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in {
+                    "run.json",
+                    "effective_run.json",
+                    "work_units.json",
+                }
+            )
+
+        self.assertIsNone(raw_run["result_file_name"])
+        self.assertEqual(effective["summary"]["status"], "partial")
+        self.assertEqual(
+            effective["summary"]["result_file_name"],
+            "book.uk.partial.epub",
+        )
+        self.assertNotIn("Translated text hidden from metadata export", metadata_text)
 
     def test_translation_log_download_counts_ready_raw_fragments_completed(self):
         with TemporaryDirectory() as temp_dir:
