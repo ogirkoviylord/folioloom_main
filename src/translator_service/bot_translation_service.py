@@ -3563,6 +3563,7 @@ class BotTranslationService:
                     total_units=total_fragments,
                 ),
                 beta_safety_guard=self._beta_safety_guard,
+                translation_run_log_root=self._translation_run_log_root,
                 allowed_source_object_keys=allowed_source_object_keys,
             )
             try:
