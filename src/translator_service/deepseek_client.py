@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import socket
 import ssl
 import threading
@@ -13,12 +14,15 @@ from xml.etree import ElementTree
 from translator_service.model_output_safety import validate_model_output_safety
 from translator_service.output_contracts import (
     TranslationBatchRejectionReason,
+    TranslationBatchValidationResult,
+    json_translation_batch_to_xml_contract,
     normalize_provider_translation_batch_contract,
 )
 from translator_service.provider_io_diagnostics import record_provider_io_exchange
 from translator_service.security_telemetry import record_security_event
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_policy import (
+    ProviderOutputFormat,
     build_system_prompt,
     build_translation_policy,
 )
@@ -49,6 +53,13 @@ class DeepSeekUsage:
 class DeepSeekChatResult:
     content: str
     usage: DeepSeekUsage
+    finish_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _TranslationBatchContract:
+    expected_count: int
+    required_markers: tuple[tuple[str, ...], ...]
 
 
 class DeepSeekApiError(RuntimeError):
@@ -107,20 +118,22 @@ class DeepSeekClient:
         *,
         system_prompt: str,
         user_text: str,
+        response_format: dict[str, str] | None = None,
+        allow_empty_content: bool = False,
     ) -> DeepSeekChatResult:
-        body = json.dumps(
-            {
-                "model": self._model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_text},
-                ],
-                "stream": False,
-                "thinking": {"type": "disabled"},
-                "temperature": 0.2,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            "stream": False,
+            "thinking": {"type": "disabled"},
+            "temperature": 0.2,
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         status, response_body = self._send_with_retries(body)
         response = _parse_json_response(response_body)
 
@@ -128,7 +141,10 @@ class DeepSeekClient:
             message = _extract_error_message(response)
             raise DeepSeekApiError(f"DeepSeek API returned HTTP {status}: {message}")
 
-        return _parse_chat_result(response)
+        return _parse_chat_result(
+            response,
+            allow_empty_content=allow_empty_content,
+        )
 
     def _send_with_retries(self, body: bytes) -> tuple[int, bytes]:
         last_error: DeepSeekApiError | None = None
@@ -224,14 +240,106 @@ class DeepSeekClient:
             translation_context=translation_context,
         )
         try:
-            system_prompt = build_system_prompt(policy)
+            batch_contract = _translation_batch_contract(text)
+            use_json_batch = (
+                batch_contract is not None and batch_contract.expected_count > 1
+            )
+            response_format = (
+                {"type": "json_object"} if use_json_batch else None
+            )
+            system_prompt = build_system_prompt(
+                policy,
+                provider_output_format=(
+                    ProviderOutputFormat.JSON_TRANSLATION_BATCH
+                    if use_json_batch
+                    else ProviderOutputFormat.DEFAULT
+                ),
+                expected_batch_count=(
+                    batch_contract.expected_count if use_json_batch else None
+                ),
+            )
             provider_user_text = _wrap_untrusted_document_content(text)
             result = self.create_chat_completion(
                 system_prompt=system_prompt,
                 user_text=provider_user_text,
+                response_format=response_format,
+                allow_empty_content=use_json_batch,
             )
             total_usage = result.usage
-            batch_expected_count = _translation_batch_expected_count(text)
+            if use_json_batch and batch_contract is not None:
+                batch_validation = _validate_json_batch_chat_result(
+                    result,
+                    batch_contract=batch_contract,
+                )
+                if batch_validation.normalized_text is not None:
+                    self._last_usage.value = total_usage
+                    result = DeepSeekChatResult(
+                        content=batch_validation.normalized_text,
+                        usage=result.usage,
+                        finish_reason=result.finish_reason,
+                    )
+                    return result.content
+                if batch_validation.rejection_reason is not None:
+                    record_model_security_event(
+                        "translation_batch_rejected",
+                        reason=batch_validation.rejection_reason.value,
+                        expected_count=batch_contract.expected_count,
+                        output_chars=len(result.content),
+                    )
+                    record_model_security_event(
+                        "model_output_repair_retry",
+                        reason=batch_validation.rejection_reason.value,
+                        phase="repair",
+                        retry_attempt=1,
+                    )
+                    result = self.create_chat_completion(
+                        system_prompt=_build_repair_system_prompt(
+                            system_prompt,
+                            safety_reason=batch_validation.rejection_reason.value,
+                        ),
+                        user_text=provider_user_text,
+                        response_format=response_format,
+                        allow_empty_content=True,
+                    )
+                    total_usage = _add_usage(total_usage, result.usage)
+                    self._last_usage.value = total_usage
+                    batch_validation = _validate_json_batch_chat_result(
+                        result,
+                        batch_contract=batch_contract,
+                    )
+                    if batch_validation.normalized_text is not None:
+                        result = DeepSeekChatResult(
+                            content=batch_validation.normalized_text,
+                            usage=result.usage,
+                            finish_reason=result.finish_reason,
+                        )
+                        return result.content
+                    if batch_validation.rejection_reason is not None:
+                        record_model_security_event(
+                            "translation_batch_rejected",
+                            reason=batch_validation.rejection_reason.value,
+                            expected_count=batch_contract.expected_count,
+                            output_chars=len(result.content),
+                            phase="repair",
+                        )
+                        record_model_security_event(
+                            "model_output_repair_failed",
+                            reason=batch_validation.rejection_reason.value,
+                            phase="repair",
+                            retry_attempt=1,
+                        )
+                        if (
+                            batch_validation.rejection_reason
+                            == TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT
+                        ):
+                            raise DeepSeekUnsafeModelOutputError(
+                                batch_validation.rejection_reason.value
+                            )
+                        raise DeepSeekApiError(
+                            "DeepSeek produced invalid structured translation "
+                            "batch output after repair: "
+                            f"{batch_validation.rejection_reason.value}"
+                        )
             safety = validate_model_output_safety(result.content)
             if safety.reason is not None:
                 record_model_security_event(
@@ -271,16 +379,16 @@ class DeepSeekClient:
             self._last_usage.value = total_usage
             if safety.reason is not None:
                 raise DeepSeekUnsafeModelOutputError(safety.reason.value)
-            if batch_expected_count is not None:
+            if batch_contract is not None:
                 batch_validation = normalize_provider_translation_batch_contract(
                     result.content,
-                    expected_count=batch_expected_count,
+                    expected_count=batch_contract.expected_count,
                 )
                 if batch_validation.normalized_text is not None:
                     record_model_security_event(
                         "translation_batch_normalized",
                         reason=TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE.value,
-                        expected_count=batch_expected_count,
+                        expected_count=batch_contract.expected_count,
                         output_chars=len(result.content),
                     )
                     result = DeepSeekChatResult(
@@ -291,7 +399,7 @@ class DeepSeekClient:
                     record_model_security_event(
                         "translation_batch_rejected",
                         reason=batch_validation.rejection_reason.value,
-                        expected_count=batch_expected_count,
+                        expected_count=batch_contract.expected_count,
                         output_chars=len(result.content),
                     )
                     record_model_security_event(
@@ -311,7 +419,7 @@ class DeepSeekClient:
                     self._last_usage.value = total_usage
                     batch_validation = normalize_provider_translation_batch_contract(
                         result.content,
-                        expected_count=batch_expected_count,
+                        expected_count=batch_contract.expected_count,
                     )
                     if batch_validation.normalized_text is not None:
                         record_model_security_event(
@@ -319,7 +427,7 @@ class DeepSeekClient:
                             reason=(
                                 TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE.value
                             ),
-                            expected_count=batch_expected_count,
+                            expected_count=batch_contract.expected_count,
                             output_chars=len(result.content),
                             phase="repair",
                         )
@@ -331,7 +439,7 @@ class DeepSeekClient:
                         record_model_security_event(
                             "translation_batch_rejected",
                             reason=batch_validation.rejection_reason.value,
-                            expected_count=batch_expected_count,
+                            expected_count=batch_contract.expected_count,
                             output_chars=len(result.content),
                             phase="repair",
                         )
@@ -361,15 +469,22 @@ class DeepSeekClient:
                     self._security_event_queue.extend(events)
 
 
-def _parse_chat_result(response: dict) -> DeepSeekChatResult:
+def _parse_chat_result(
+    response: dict,
+    *,
+    allow_empty_content: bool = False,
+) -> DeepSeekChatResult:
     try:
-        content = response["choices"][0]["message"]["content"]
+        choice = response["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
         raise DeepSeekApiError(
             "DeepSeek response did not contain message content"
         ) from error
 
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(content, str):
+        raise DeepSeekApiError("DeepSeek response message content is not text")
+    if not allow_empty_content and not content.strip():
         raise DeepSeekApiError("DeepSeek response message content is empty")
 
     usage = response.get("usage") or {}
@@ -382,6 +497,7 @@ def _parse_chat_result(response: dict) -> DeepSeekChatResult:
             prompt_cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens", 0)),
             prompt_cache_miss_tokens=int(usage.get("prompt_cache_miss_tokens", 0)),
         ),
+        finish_reason=choice.get("finish_reason"),
     )
 
 
@@ -430,7 +546,40 @@ def _wrap_untrusted_document_content(text: str) -> str:
     )
 
 
-def _translation_batch_expected_count(text: str) -> int | None:
+def _validate_json_batch_chat_result(
+    result: DeepSeekChatResult,
+    *,
+    batch_contract: _TranslationBatchContract,
+) -> TranslationBatchValidationResult:
+    if _is_structured_output_truncated(result):
+        return _translation_batch_rejection(
+            TranslationBatchRejectionReason.TRUNCATED_OUTPUT
+        )
+    if not result.content.strip():
+        return _translation_batch_rejection(
+            TranslationBatchRejectionReason.EMPTY_CONTENT
+        )
+    return json_translation_batch_to_xml_contract(
+        result.content,
+        expected_count=batch_contract.expected_count,
+        required_markers=batch_contract.required_markers,
+    )
+
+
+def _translation_batch_rejection(
+    reason: TranslationBatchRejectionReason,
+) -> TranslationBatchValidationResult:
+    return TranslationBatchValidationResult(
+        translated_texts=None,
+        rejection_reason=reason,
+    )
+
+
+def _is_structured_output_truncated(result: DeepSeekChatResult) -> bool:
+    return result.finish_reason in {"length", "max_tokens"}
+
+
+def _translation_batch_contract(text: str) -> _TranslationBatchContract | None:
     stripped = text.strip()
     if not (
         stripped.startswith("<translation_batch")
@@ -443,10 +592,15 @@ def _translation_batch_expected_count(text: str) -> int | None:
         return None
     if _local_name(document.tag) != "translation_batch":
         return None
-    return sum(
-        1
-        for block in document
-        if _local_name(block.tag) == "translation_block"
+    blocks = [
+        block for block in document if _local_name(block.tag) == "translation_block"
+    ]
+    return _TranslationBatchContract(
+        expected_count=len(blocks),
+        required_markers=tuple(
+            tuple(_PROTECTED_MARKER_RE.findall("".join(block.itertext())))
+            for block in blocks
+        ),
     )
 
 
@@ -494,6 +648,7 @@ _TRANSIENT_NETWORK_ERRORS = (
     ssl.SSLError,
     OSError,
 )
+_PROTECTED_MARKER_RE = re.compile(r"ZXQPROTECTED\d+QXZ")
 
 
 def _is_retryable_http_status(status: int) -> bool:

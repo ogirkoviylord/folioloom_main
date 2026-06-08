@@ -17,6 +17,7 @@ from translator_service.translation_policy import (
     PROMPT_POLICY_VERSION,
     PROTECTION_POLICY_VERSION,
     OutputContract,
+    ProviderOutputFormat,
     build_system_prompt,
     build_translation_policy,
     translation_policy_signature,
@@ -85,14 +86,20 @@ class TranslationPolicyTest(unittest.TestCase):
 
     def test_ukrainian_target_profile_and_source_pair_guidance_in_system_prompt(self):
         policy = build_translation_policy(
-            text="Set the API endpoint and pass the placeholder token to the callback handler.",
+            text=(
+                "Set the API endpoint and pass the placeholder token to the "
+                "callback handler."
+            ),
             source_language="en",
             target_language="uk",
         )
 
         system_prompt = build_system_prompt(policy)
 
-        self.assertEqual(policy.target_language_policy, "target-profile:uk:ukrainian-v1")
+        self.assertEqual(
+            policy.target_language_policy,
+            "target-profile:uk:ukrainian-v1",
+        )
         self.assertEqual(policy.source_pair_policy, "source-pair:en-uk:v1")
         self.assertIn("English to Ukrainian source-pair profile", system_prompt)
         self.assertIn("Ukrainian target-language profile", system_prompt)
@@ -115,7 +122,10 @@ class TranslationPolicyTest(unittest.TestCase):
         system_prompt = build_system_prompt(policy)
 
         self.assertEqual(policy.russian_quality_track, RussianQualityTrack.LITERARY)
-        self.assertIn("russian-quality:literary-v1", translation_policy_signature(policy))
+        self.assertIn(
+            "russian-quality:literary-v1",
+            translation_policy_signature(policy),
+        )
         self.assertIn("Literary Russian quality track", system_prompt)
         self.assertIn("voice, rhythm, dialogue, imagery", system_prompt)
 
@@ -141,6 +151,32 @@ class TranslationPolicyTest(unittest.TestCase):
         self.assertIn("source_language", system_prompt)
         self.assertIn("Do not add", system_prompt)
         self.assertIn("target_language", system_prompt)
+
+    def test_json_batch_output_prompt_is_distinct_from_xml_contract(self):
+        policy = build_translation_policy(
+            text=(
+                '<translation_batch><translation_block id="0">'
+                "Hello"
+                '</translation_block><translation_block id="1">'
+                "World"
+                "</translation_block></translation_batch>"
+            ),
+            source_language="en",
+            target_language="uk",
+            prompt_tier=PromptTier.STRICT,
+        )
+
+        system_prompt = build_system_prompt(
+            policy,
+            provider_output_format=ProviderOutputFormat.JSON_TRANSLATION_BATCH,
+            expected_batch_count=2,
+        )
+
+        self.assertIn("OUTPUT CONTRACT: JSON_TRANSLATION_BATCH", system_prompt)
+        self.assertIn('"translations"', system_prompt)
+        self.assertIn('"0" through "1"', system_prompt)
+        self.assertIn("translation_batch with translation_block", system_prompt)
+        self.assertNotIn("return the same XML structure", system_prompt)
 
     def test_auto_source_prompt_translates_every_human_language(self):
         policy = build_translation_policy(
@@ -172,7 +208,11 @@ class TranslationPolicyTest(unittest.TestCase):
 
     def test_prompt_preserves_code_and_markdown_structure(self):
         policy = build_translation_policy(
-            text='# Python-style pseudo-code:\nfor chapter in book.chapters:\n    print(f"{chapter.id}")',
+            text=(
+                "# Python-style pseudo-code:\n"
+                "for chapter in book.chapters:\n"
+                '    print(f"{chapter.id}")'
+            ),
             source_language="en",
             target_language="ru",
             prompt_tier=PromptTier.PLAIN,
@@ -227,8 +267,14 @@ class TranslationPolicyTest(unittest.TestCase):
             entity_ledger=ledger,
         )
 
-        self.assertEqual(policy.entity_ledger_signature, entity_ledger_signature(ledger))
-        self.assertIn(policy.entity_ledger_signature, translation_policy_signature(policy))
+        self.assertEqual(
+            policy.entity_ledger_signature,
+            entity_ledger_signature(ledger),
+        )
+        self.assertIn(
+            policy.entity_ledger_signature,
+            translation_policy_signature(policy),
+        )
 
         system_prompt = build_system_prompt(policy)
 
@@ -240,7 +286,11 @@ class TranslationPolicyTest(unittest.TestCase):
         memory = TranslationContextMemory(
             style_summary="Maintain the established literary voice.",
             term_choices=(
-                TranslationContextChoice("callback handler", "обработчик callback", "term"),
+                TranslationContextChoice(
+                    "callback handler",
+                    "обработчик callback",
+                    "term",
+                ),
             ),
             entity_choices=(
                 TranslationContextChoice("Alice", "Алиса", "character_name"),
@@ -299,7 +349,10 @@ class TranslationPolicyTest(unittest.TestCase):
         self.assertIn("ZXQPROTECTED", system_prompt)
         self.assertIn("<translation_batch>", system_prompt)
         self.assertIn("Do not add, remove, or rename XML attributes", system_prompt)
-        self.assertIn("Return only the translated text without commentary", system_prompt)
+        self.assertIn(
+            "Return only the translated text without commentary",
+            system_prompt,
+        )
 
 
 if __name__ == "__main__":
