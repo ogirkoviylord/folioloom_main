@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-08
+Last updated: 2026-06-09
 
 ## 1. Текущее состояние проекта
 
@@ -120,6 +120,30 @@ skipped and failed one known local-artifact assertion in
 existing local `var/translation-runs` makes the page non-empty; runtime `var/`
 data was not modified. CI, server smoke, deploy, real-file matrix, beta
 runtime recovery, and full Gate B readiness remain Unknown.
+
+Issue #370-#373 provider-boundary update on 2026-06-09: PRs #374-#377 are
+merged. `docs/DECISIONS.md` records the approved JSON provider boundary
+direction, rollback path and non-goals. Runtime now validates provider-facing
+multi-block batch JSON with the strict
+`{"translations":[{"id":"0","text":"..."}]}` shape, exact count, ordered ids,
+no extra keys, non-empty text, protected-marker preservation and unsafe-output
+rejection before converting validated JSON back to the existing internal
+`translation_batch` representation. DeepSeek `response_format={"type":"json_object"}`
+is enabled only for multi-block translation batches; plain-text and single-unit
+requests remain unchanged. XML remains the internal/fallback/legacy path, with
+stricter batch prompt/repair wording and strict XML validation preserved. Local
+verification included targeted output-contract, prompt-security, DeepSeek-client
+and translation-policy tests, compileall, targeted ruff and `git diff --check`;
+a clean temporary full unittest run without local `var/` artifacts passed for
+the shared provider slice. Visible GitHub Actions `Python checks` for PRs
+#374-#377 were inspected as `SUCCESS`, but remain advisory per repo policy.
+This does not enable beta features, strict function calling, chat prefix
+completion, provider key/config changes, deployment changes, parallelism or
+cost-cap changes, scheduler/database/runtime state changes, auth/security/
+payment/legal/privacy changes, raw diagnostic copying, Gate B, beta readiness,
+production readiness or deploy readiness. Live provider reliability, style
+impact, token usage and retry impact remain `TBD` until owner-approved
+provider-backed measurement exists.
 
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
