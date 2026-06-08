@@ -4477,6 +4477,65 @@ class BotTranslationServiceTest(unittest.TestCase):
                 {"response-body"},
             )
 
+    def test_persistent_confirmation_records_provider_io_with_scheduler_runner(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            self.addCleanup(persistent_store.close)
+            run_log_root = root / "translation-runs"
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=500,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First item\nBody text.\n",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=ProviderIODiagnosticTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            provider_io_paths = list(
+                run_log_root.glob("*/provider_io_diagnostics.jsonl")
+            )
+            self.assertEqual(len(provider_io_paths), 1)
+            records = [
+                json.loads(line)
+                for line in provider_io_paths[0]
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertGreaterEqual(len(records), 1)
+            self.assertEqual({record["job_id"] for record in records}, {job.id})
+            self.assertIn(1, {record["sequence"] for record in records})
+            self.assertEqual(
+                {record["request_body"]["text"] for record in records},
+                {"request-body"},
+            )
+            self.assertEqual(
+                {record["response_body"]["text"] for record in records},
+                {"response-body"},
+            )
+
     def test_persistent_confirmation_can_defer_work_to_external_worker(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
