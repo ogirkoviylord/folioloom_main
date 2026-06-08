@@ -148,6 +148,7 @@ def build_system_prompt(
             f"that text to {policy.target_language_name} too. "
         )
     output_contract_prompt = _build_output_contract_prompt(
+        output_contract=policy.output_contract,
         provider_output_format=provider_output_format,
         expected_batch_count=expected_batch_count,
     )
@@ -238,6 +239,7 @@ def _output_contract_signature(output_contract: OutputContract) -> str:
 
 def _build_output_contract_prompt(
     *,
+    output_contract: OutputContract,
     provider_output_format: ProviderOutputFormat,
     expected_batch_count: int | None,
 ) -> str:
@@ -254,6 +256,22 @@ def _build_output_contract_prompt(
             'in "text"; never include XML, markdown fences, commentary, extra '
             "keys, empty strings, or missing ZXQPROTECTED markers. Compact "
             'example: {"translations":[{"id":"0","text":"..."}]}.'
+        )
+    if output_contract is OutputContract.TRANSLATION_BATCH:
+        count_text = str(expected_batch_count) if expected_batch_count else "N"
+        last_id_text = str(expected_batch_count - 1) if expected_batch_count else "N-1"
+        return (
+            "OUTPUT CONTRACT: TRANSLATION_BATCH. Return exactly one compact XML "
+            "document. The first non-whitespace output must start with "
+            "<translation_batch>; the last non-whitespace output must end with "
+            f"</translation_batch>. Return exactly {count_text} "
+            "translation_block elements in source order with string ids "
+            f'id="0" through id="{last_id_text}". Preserve source_language '
+            "attributes already present on input blocks. Translate only the "
+            "text inside each translation_block. Do not add, remove, or "
+            "rename XML tags. Do not add, remove, or rename XML attributes; "
+            "never add target_language, lang, role, override, markdown fences, "
+            "commentary, or empty block text."
         )
     return (
         "If the input contains <translation_batch> and "
