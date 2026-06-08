@@ -561,20 +561,22 @@ class PostgresSchedulerStore:
                     "claim_token": claim_token,
                     "lease_until": _to_db_time(updated["lease_until"]),
                     "queue_policy": SCHEDULER_FAIR_QUEUE_POLICY,
-                    "queue_policy_diagnostics": build_scheduler_queue_policy_diagnostics(
-                        active_user_units_before_claim=updated[
-                            "queue_policy_active_user_units"
-                        ],
-                        active_user_jobs_before_claim=updated[
-                            "queue_policy_active_user_jobs"
-                        ],
-                        active_job_units_before_claim=updated[
-                            "queue_policy_active_job_units"
-                        ],
-                        max_active_units_per_job=max_active_units_per_job,
-                        max_active_units_per_user=max_active_units_per_user,
-                        max_active_jobs_per_user=max_active_jobs_per_user,
-                        priority_aging_seconds=priority_aging_seconds,
+                    "queue_policy_diagnostics": (
+                        build_scheduler_queue_policy_diagnostics(
+                            active_user_units_before_claim=updated[
+                                "queue_policy_active_user_units"
+                            ],
+                            active_user_jobs_before_claim=updated[
+                                "queue_policy_active_user_jobs"
+                            ],
+                            active_job_units_before_claim=updated[
+                                "queue_policy_active_job_units"
+                            ],
+                            max_active_units_per_job=max_active_units_per_job,
+                            max_active_units_per_user=max_active_units_per_user,
+                            max_active_jobs_per_user=max_active_jobs_per_user,
+                            priority_aging_seconds=priority_aging_seconds,
+                        )
                     ),
                 },
                 now=_now(),
@@ -1048,7 +1050,8 @@ class PostgresSchedulerStore:
                   AND status IN (
                     %(translating)s,
                     %(failed)s,
-                    %(failed_retryable)s
+                    %(failed_retryable)s,
+                    %(failed_terminal)s
                   )
                 """,
                 {
@@ -1058,6 +1061,7 @@ class PostgresSchedulerStore:
                     "failed_retryable": (
                         PersistentWorkUnitStatus.FAILED_RETRYABLE.value
                     ),
+                    "failed_terminal": PersistentWorkUnitStatus.FAILED_TERMINAL.value,
                     "job_id": job_id,
                     "now": now,
                 },
@@ -1066,6 +1070,7 @@ class PostgresSchedulerStore:
                 """
                 UPDATE translation_jobs
                 SET status = %(status)s,
+                    partial_object_key = NULL,
                     cancel_requested_at = NULL,
                     updated_at = %(now)s
                 WHERE id = %(job_id)s

@@ -15,6 +15,8 @@ from translator_service.persistent_jobs import (
 from translator_service.scheduler import (
     SCHEDULER_FAIR_QUEUE_POLICY,
     SchedulerBackpressureState,
+    SchedulerLimits,
+    WorkUnitFailureKind,
 )
 
 
@@ -792,7 +794,10 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(attempts[0].error_code, "timeout")
         self.assertEqual(attempts[0].error_message, "provider failure: timeout")
         self.assertEqual(latest_payload["failure_kind"], "retryable_provider")
-        self.assertEqual(latest_payload["provider_failure"]["failure_category"], "timeout")
+        self.assertEqual(
+            latest_payload["provider_failure"]["failure_category"],
+            "timeout",
+        )
         self.assertEqual(latest_payload["provider_failure"]["provider_id"], "deepseek")
         self.assertEqual(latest_payload["provider_failure"]["latency_ms"], 842.0)
         self.assertEqual(latest_payload["terminal_reason"], None)
@@ -837,7 +842,10 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         latest_payload = json.loads(events[-1].payload_json)
 
         self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED_TERMINAL)
-        self.assertEqual(latest_payload["provider_failure"]["failure_category"], "rate_limited")
+        self.assertEqual(
+            latest_payload["provider_failure"]["failure_category"],
+            "rate_limited",
+        )
         self.assertEqual(latest_payload["terminal_reason"], "max_attempts_reached")
 
     def test_expired_lease_is_recovered_for_retry(self):
@@ -1097,6 +1105,60 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(resumed.status, PersistentTranslationJobStatus.QUEUED)
         self.assertEqual(retried.id, first.id)
         self.assertEqual(retried.status, PersistentWorkUnitStatus.TRANSLATING)
+
+    def test_resume_job_retries_terminal_failed_work_unit_after_partial_result(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+        with store._connection:
+            store._connection.execute(
+                "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                (job.id,),
+            )
+        first = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        store.complete_claimed_work_unit(
+            work_unit_id=first.work_unit_id,
+            claim_token=first.claim_token,
+            translated_text="Перший абзац.",
+            prompt_tokens=10,
+            completion_tokens=5,
+            cache_hit_tokens=0,
+            cache_miss_tokens=10,
+        )
+        terminal = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        store.fail_claimed_work_unit(
+            work_unit_id=terminal.work_unit_id,
+            claim_token=terminal.claim_token,
+            failure_kind=WorkUnitFailureKind.MALFORMED_PROVIDER_OUTPUT,
+            error_message="provider failure: malformed_response",
+            retry_base_delay_seconds=0,
+            retry_max_delay_seconds=0,
+        )
+        store.attach_job_output(
+            job.id,
+            partial_object_key="partial/job-1-book.partial.epub",
+        )
+        store.mark_job_assembled(job.id, partial=True)
+
+        resumed = store.resume_job(job.id)
+        retried = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertEqual(resumed.status, PersistentTranslationJobStatus.QUEUED)
+        self.assertIsNone(resumed.partial_object_key)
+        self.assertEqual(retried.work_unit_id, terminal.work_unit_id)
+        retried_unit = store.get_work_unit(retried.work_unit_id)
+        self.assertEqual(retried_unit.status, PersistentWorkUnitStatus.TRANSLATING)
 
     def test_usage_summary_sums_completed_work_units(self):
         store = self._memory_store()

@@ -764,20 +764,22 @@ class SQLiteTranslationJobStore:
                     "claim_token": claim_token,
                     "lease_until": _to_db_time(lease_until),
                     "queue_policy": SCHEDULER_FAIR_QUEUE_POLICY,
-                    "queue_policy_diagnostics": build_scheduler_queue_policy_diagnostics(
-                        active_user_units_before_claim=row[
-                            "queue_policy_active_user_units"
-                        ],
-                        active_user_jobs_before_claim=row[
-                            "queue_policy_active_user_jobs"
-                        ],
-                        active_job_units_before_claim=row[
-                            "queue_policy_active_job_units"
-                        ],
-                        max_active_units_per_job=max_active_units_per_job,
-                        max_active_units_per_user=max_active_units_per_user,
-                        max_active_jobs_per_user=max_active_jobs_per_user,
-                        priority_aging_seconds=priority_aging_seconds,
+                    "queue_policy_diagnostics": (
+                        build_scheduler_queue_policy_diagnostics(
+                            active_user_units_before_claim=row[
+                                "queue_policy_active_user_units"
+                            ],
+                            active_user_jobs_before_claim=row[
+                                "queue_policy_active_user_jobs"
+                            ],
+                            active_job_units_before_claim=row[
+                                "queue_policy_active_job_units"
+                            ],
+                            max_active_units_per_job=max_active_units_per_job,
+                            max_active_units_per_user=max_active_units_per_user,
+                            max_active_jobs_per_user=max_active_jobs_per_user,
+                            priority_aging_seconds=priority_aging_seconds,
+                        )
                     ),
                 },
                 now=now,
@@ -1328,7 +1330,7 @@ class SQLiteTranslationJobStore:
                 UPDATE work_units
                 SET status = ?, worker_id = NULL, claim_token = NULL,
                     lease_until = NULL, updated_at = ?
-                WHERE job_id = ? AND status IN (?, ?, ?)
+                WHERE job_id = ? AND status IN (?, ?, ?, ?)
                 """,
                 (
                     PersistentWorkUnitStatus.PENDING.value,
@@ -1337,7 +1339,16 @@ class SQLiteTranslationJobStore:
                     PersistentWorkUnitStatus.TRANSLATING.value,
                     PersistentWorkUnitStatus.FAILED.value,
                     PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
+                    PersistentWorkUnitStatus.FAILED_TERMINAL.value,
                 ),
+            )
+            self._connection.execute(
+                """
+                UPDATE translation_jobs
+                SET partial_object_key = NULL
+                WHERE id = ?
+                """,
+                (job_id,),
             )
             self._update_job_status(
                 job_id,

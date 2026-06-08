@@ -483,7 +483,15 @@ def assemble_due_jobs(
     translation_run_log_root: str | Path | None = None,
 ) -> int:
     assembled = 0
-    for job in store.list_jobs_by_status(PersistentTranslationJobStatus.ASSEMBLING):
+    for job in _jobs_due_for_assembly(store):
+        work_units = store.list_work_units(job.id)
+        if (
+            job.status == PersistentTranslationJobStatus.INTERRUPTED
+            and job.final_object_key is None
+            and job.partial_object_key is None
+            and not _has_available_translated_work_units(work_units)
+        ):
+            continue
         if job.final_object_key is not None:
             store.mark_job_assembled(job.id, partial=False)
             _finish_assembled_translation_run(
@@ -514,7 +522,7 @@ def assemble_due_jobs(
             )
             assembled += 1
             continue
-        partial = count_unassembled_work_units(store.list_work_units(job.id)) > 0
+        partial = _should_assemble_partial_result(work_units)
         result_name = _translated_file_name(
             job.file_name,
             job.target_language,
@@ -563,6 +571,34 @@ def assemble_due_jobs(
         )
         assembled += 1
     return assembled
+
+
+def _jobs_due_for_assembly(store: SQLiteTranslationJobStore):
+    yield from store.list_jobs_by_status(PersistentTranslationJobStatus.ASSEMBLING)
+    yield from store.list_jobs_by_status(PersistentTranslationJobStatus.INTERRUPTED)
+
+
+def _has_available_translated_work_units(
+    work_units: list[PersistentWorkUnit],
+) -> bool:
+    return any(_work_unit_can_be_assembled(work_unit) for work_unit in work_units)
+
+
+def _should_assemble_partial_result(work_units: list[PersistentWorkUnit]) -> bool:
+    return any(
+        not _work_unit_can_be_assembled(work_unit) for work_unit in work_units
+    ) or count_unassembled_work_units(work_units) > 0
+
+
+def _work_unit_can_be_assembled(work_unit: PersistentWorkUnit) -> bool:
+    return (
+        work_unit.status
+        in {
+            PersistentWorkUnitStatus.TRANSLATED,
+            PersistentWorkUnitStatus.CACHED,
+        }
+        and bool(work_unit.translated_text)
+    )
 
 
 def _finish_assembled_translation_run(
