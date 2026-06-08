@@ -145,6 +145,13 @@ def _validate_translation_batch_contract(
                 translated_texts=None,
                 rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_CHILD,
             )
+        if (
+            allow_provider_language_metadata
+            and "source" in block.attrib
+            and "source_language" not in block.attrib
+        ):
+            block.attrib["source_language"] = block.attrib.pop("source")
+            normalized = True
         if _unexpected_block_attributes(
             block.attrib,
             allow_provider_language_metadata=allow_provider_language_metadata,

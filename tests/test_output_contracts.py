@@ -142,6 +142,57 @@ class OutputContractsTest(unittest.TestCase):
             "</translation_batch>",
         )
 
+    def test_provider_normalization_repairs_source_language_alias(self):
+        result = normalize_provider_translation_batch_contract(
+            "<translation_batch>"
+            '<translation_block id="0" source="English">Привіт</translation_block>'
+            "</translation_batch>",
+            expected_count=1,
+        )
+
+        self.assertEqual(result.translated_texts, ("Привіт",))
+        self.assertIsNone(result.rejection_reason)
+        self.assertEqual(
+            result.normalized_text,
+            "<translation_batch>"
+            '<translation_block id="0" source_language="English">'
+            "Привіт"
+            "</translation_block>"
+            "</translation_batch>",
+        )
+
+    def test_strict_validator_rejects_source_language_alias(self):
+        result = validate_translation_batch_contract(
+            "<translation_batch>"
+            '<translation_block id="0" source="English">Привіт</translation_block>'
+            "</translation_batch>",
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertIsNone(result.normalized_text)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE,
+        )
+
+    def test_provider_normalization_rejects_ambiguous_source_alias(self):
+        result = normalize_provider_translation_batch_contract(
+            "<translation_batch>"
+            '<translation_block id="0" source_language="en" source="English">'
+            "Привіт"
+            "</translation_block>"
+            "</translation_batch>",
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertIsNone(result.normalized_text)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE,
+        )
+
     def test_provider_normalization_rejects_control_attributes(self):
         cases = [
             (
