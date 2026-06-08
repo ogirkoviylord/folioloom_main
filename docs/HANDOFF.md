@@ -80,6 +80,25 @@ focused redaction/admin/security tests, full unittest, compileall, targeted
 ruff and `scripts/predeploy_check.sh`. This does not prove real-file matrix,
 beta-server smoke, backup/restore or full Gate B readiness.
 
+Issue #81 implementation slice on 2026-06-08: branch
+`codex/issue-81-gate-b-restart-evidence` fixes interrupted persistent jobs
+with already translated work units but no assembled output. Scheduler assembly
+now also considers `interrupted` jobs that have available translated/cached
+fragments, builds a `.partial` result, marks the job `partial`, and releases
+the beta-safety reservation as `partial_assembly`. Interrupted jobs with no
+translated fragments are skipped so My Books does not expose a source-only
+partial download. Resume now returns terminal-failed work units to `pending` in
+both SQLite and Postgres stores, and clears the old partial pointer on explicit
+resume so a successful retry can assemble a final result instead of reusing the
+stale partial output. Local verification passed focused scheduler/persistence/
+Postgres regression tests, affected test files, targeted ruff, compile checks
+for touched files, and full unittest discover in a clean temporary copy without
+local `var/` runtime artifacts: 1366 tests `OK` with 31 skipped. The
+in-worktree full unittest discover is polluted by existing local
+`var/translation-runs` artifacts and fails one admin fixture-empty-state
+assertion; runtime `var/` data was not modified. CI, server smoke, deploy,
+bot/worker restart smoke on beta, and full Gate B readiness remain Unknown.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the

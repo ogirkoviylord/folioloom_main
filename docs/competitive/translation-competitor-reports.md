@@ -19,6 +19,274 @@ Rules for future entries:
 - If a future entry implies product scope, create a separate scoped issue or
   architecture review before implementation.
 
+## 2026-06-08 - BookTranslator.app Russian EPUB QA
+
+Status: competitive QA evidence, not a product decision and not release
+readiness evidence.
+
+### Summary
+
+This entry records a bounded comparison of a BookTranslator.app Russian EPUB
+target-only output against the original `Amerika` EPUB source.
+
+Verdict: **NEEDS REVIEW** for end-to-end EPUB translation quality.
+
+BookTranslator.app preserved the broad source EPUB structure: the translated
+file kept the same 11 XHTML spine documents and the same total extracted block
+count as the source. Many sampled Russian passages are readable. However, the
+output is not reader-ready because it contains at least one untranslated German
+paragraph, one duplicated/replaced final paragraph in chapter `Ein Asyl`, and
+visible name/heading consistency defects.
+
+### Scope
+
+Original file:
+
+- `/Users/yuriimedvediev/Downloads/Amerika - Franz Kafka - EPUB.epub`
+
+Translated file:
+
+- `/Users/yuriimedvediev/Downloads/Amerika - [Translated by BookTranslator.app].epub`
+
+Competitor context from owner-provided screenshot:
+
+- Provider: BookTranslator.app.
+- File format: EPUB.
+- Target language: Russian.
+- Displayed file size: `229KB`.
+- Displayed word count: `87 295 words`.
+- Displayed price: `$4.99`.
+- Displayed status: `Finished`.
+- Displayed created time: `Jun 7, 2026 at 10:21 PM`.
+- Displayed ended time: `Jun 8, 2026 at 2:07 AM`.
+- Displayed time spent: `37s`.
+- Owner observed a long queue wait before the short processing time.
+- UI offered `Download Target-Only` and `Download Bilingual`; only the
+  target-only file was reviewed in this entry.
+
+Public competitor facts checked on 2026-06-08:
+
+- BookTranslator.app pricing page describes a `Guest` pay-per-task flow
+  starting at `$1.99`, with guest tasks up to `300,000` words and guest
+  history auto-deleting after `7 days`:
+  <https://www.booktranslator.app/pricing>.
+- The same pricing page lists the `50,001 - 100,000` word guest price as
+  `$4.99`, matching this screenshot's displayed price for an `87 295` word
+  book.
+- BookTranslator.app marketing states that it offers target-language-only and
+  bilingual side-by-side output modes:
+  <https://www.booktranslator.app/blog/booktranslator-vs-google-translate>.
+- BookTranslator.app help/marketing pages describe broad file support,
+  including EPUB, PDF, DOCX, TXT, MOBI, Markdown, HTML, subtitle and structured
+  localization formats. This was not independently tested here.
+
+Review depth:
+
+- EPUB package/container inspection.
+- OPF/TOC/spine inspection.
+- ZIP integrity check.
+- Local EPUBCheck validation.
+- Full block-count parity scan using extracted XHTML text blocks.
+- Residual source-language scan.
+- Duplicate/omission scan for suspicious block-length and repeated-content
+  patterns.
+- Name/terminology variant scan.
+- Short sampled semantic and fluency review.
+- No full line-by-line literary edit.
+- No bilingual output review because the bilingual file was not supplied.
+
+### Confirmed Facts
+
+- Both source and BookTranslator.app output passed ZIP integrity checks with
+  `unzip -t`.
+- Source archive size was `229,047` bytes; BookTranslator.app output was
+  `957,182` bytes.
+- Both files had 11 XHTML text documents in the OPF spine.
+- Extracted block totals matched exactly: `1116` source blocks and `1116`
+  target blocks.
+- Extracted source text was about `550,107` chars; extracted target text was
+  about `490,881` chars.
+- Source OPF had `dc:language` set to `nl`, even though the book text is
+  German.
+- BookTranslator.app output changed `dc:language` to `ru`.
+- BookTranslator.app output kept the same OPF UUID as the source.
+- Source and translated files both failed local EPUBCheck with `110` errors.
+- The EPUBCheck failures were the same broad class in both files: duplicate
+  XHTML IDs and missing referenced `page.css`.
+- The translated output changed the TOC labels into Russian in many places, but
+  some TOC labels and body headings disagree.
+
+### Key Findings
+
+| Severity | Location | Problem | Evidence | Likely cause | Recommended action |
+| --- | --- | --- | --- | --- | --- |
+| Critical | `OEBPS/Text/TheVirtualLibrary002.xhtml`, block 57 | A whole paragraph remains in German inside the Russian output. | The translated block starts with `»Nun hat diese Brummer«...`. | Provider miss, failed block replacement or assembly fallback. | Reject as reader-ready; retranslate the block and add residual source-language detection. |
+| Critical | `OEBPS/Text/TheVirtualLibrary008.xhtml`, final block | The source final paragraph is omitted and replaced by a repeated translation of the previous long paragraph. | Source final paragraph begins `In solchen Gedanken...`; target repeats the student's `Непременно...` passage. | Block mapping, retry merge or assembly defect. | Rebuild/retranslate the affected chapter and verify source/target block identity at chapter endings. |
+| Major | Whole book | Character names and transliterations are inconsistent. | Variants found included `Росман`, `Россман`, `Росманн`, `Россманн`, plus `Робинсон` and `Робинзон`; typo `Дламарш` also appeared. | No glossary/name-normalization pass or weak cross-chapter memory. | Run a terminology/name pass and add glossary consistency checks before delivery. |
+| Major | TOC/body headings | Several TOC labels disagree with body headings. | Examples: TOC `Путь к Рамзесу` vs body `Дорога в Рамсес`; TOC `Природный театр Оклахомы` vs body `Das Naturtheater von Oklahoma`. | TOC and body headings appear translated independently or not reconciled. | Add heading/TOC consistency QA and normalize title policy. |
+| Major | EPUB package | The output remains EPUBCheck-invalid. | Local EPUBCheck reported `110` errors for the output. | Service preserves source package defects rather than repairing them. | Treat EPUBCheck as a delivery QA signal; decide whether to preserve, repair or report source-side EPUB defects. |
+| Minor | Metadata | Output updates language to `ru` but keeps the source UUID. | Same `urn:uuid:59c82721-9368-49a1-8920-02c8b37b6235` in source and output. | Shallow OPF metadata update. | Generate a new identifier for the translated derivative, or record an intentional metadata policy. |
+
+### Structure Metrics
+
+| Metric | Original EPUB | BookTranslator.app output | Result |
+| --- | ---: | ---: | --- |
+| Archive size | 229,047 bytes | 957,182 bytes | Output is about 4.2x larger. |
+| ZIP entries | 21 | 23 | Same content set plus directory entries. |
+| XHTML text docs | 11 | 11 | Broad spine shape preserved. |
+| Extracted text blocks | 1116 | 1116 | No broad block-count collapse. |
+| Extracted text chars | 550,107 | 490,881 | Plausible target/source volume. |
+| OPF language | `nl` | `ru` | Target language metadata updated. |
+| OPF UUID | same source UUID | same source UUID | Identifier was not regenerated. |
+| EPUBCheck | 110 errors | 110 errors | Source defects preserved, not repaired. |
+
+### Manual Sample Notes
+
+The sampled Russian prose is often understandable and tracks the German source
+meaning at the paragraph level. It is closer to a usable machine-translation
+draft than the incomplete BookBridge.world output recorded above.
+
+However, the critical defects are not stylistic: untranslated source text,
+duplicated/replaced content and name drift make the file unsafe to treat as a
+finished book translation. A human editor could polish many passages, but the
+pipeline first needs automated checks that catch missing, duplicated or
+untranslated blocks.
+
+### Translation Quality Assessment
+
+This section focuses on the quality of the Russian translation itself, separate
+from EPUB packaging and assembly defects.
+
+Verdict for translated passages that are actually present: **usable as a rough
+machine-translation draft, not reader-ready literary Russian**.
+
+Approximate qualitative rating from sampled source/target checks:
+
+- Meaning preservation in sampled non-broken blocks: about `6/10`.
+- Russian readability as a draft: about `6/10`.
+- Literary/editorial quality for a Kafka novel: about `4/10`.
+
+Confirmed from sampled passages:
+
+- Many paragraphs preserve the basic event sequence and factual meaning well
+  enough for rough comprehension.
+- The opening scene with Karl, the ship and the Statue of Liberty is broadly
+  correct at the meaning level.
+- Descriptive scenes such as the uncle's house, Pollunder's country house,
+  hotel/work scenes and the Oklahoma theatre poster are generally
+  understandable.
+- Dialogue is usually intelligible, but often reads like direct machine
+  translation rather than edited Russian prose.
+
+Quality limitations:
+
+- The Russian often sounds grammatical but not literary. It smooths Kafka's
+  tension and long syntactic pressure into a more generic explanatory style.
+- Some phrasing is awkward or unidiomatic, for example short sampled patterns
+  such as `смеясь ему`, `он, о ком так пеклись` and `заявляйтесь`.
+- Register is inconsistent: some passages are neutral literary Russian, while
+  others feel bureaucratic, over-literal or conversational in the wrong place.
+- The translation frequently preserves literal source order and phrasing where
+  a human literary translator would reshape the sentence.
+- Quotation style is inconsistent, mixing Russian and German-style marks in the
+  delivered text.
+- Character-name drift is a translation-quality problem as well as a QA
+  problem, because it weakens continuity across chapters.
+
+Interpretation:
+
+- The translation is not random or hallucinated in the ordinary passages
+  sampled. It often gives the reader a usable understanding of what happens.
+- It is not good enough to sell or present as a finished literary translation
+  without human review.
+- The main competitive weakness is not only prose quality. The bigger issue is
+  absence of quality gates that would stop delivery after untranslated,
+  duplicated or name-inconsistent output.
+
+Practical quality bar:
+
+- For private rough reading: **partially usable**, if the reader tolerates
+  machine prose and occasional serious defects.
+- For beta-quality book translation UX: **needs review**, because the product
+  should detect and report the defects automatically.
+- For reader-ready or publication-like output: **fail without human edit and
+  repair pass**.
+
+### Competitive Interpretation
+
+Confirmed:
+
+- BookTranslator.app has a polished consumer workflow: history, guest status,
+  pay-per-task pricing, target-only download and bilingual download.
+- For this sample, the displayed guest price of `$4.99` aligns with the
+  competitor's public pricing table for a 50,001-100,000 word task.
+- The service preserved broad EPUB structure much better than the
+  BookBridge.world sample.
+- The service did not repair source EPUBCheck defects.
+- The service did not consistently enforce clean target-language output or name
+  consistency.
+
+Assumptions:
+
+- The observed gap between created time and ended time likely represents queue
+  wait plus a short active processing run. The competitor's internal queue
+  accounting is Unknown.
+- The untranslated and duplicated blocks may come from provider output, retry
+  merging, chunk mapping or EPUB assembly. The exact internal cause is Unknown.
+
+Strategic implication:
+
+- BookTranslator.app is a serious product/UX competitor on price, breadth of
+  formats, target-only/bilingual output and low-friction guest checkout.
+- The quality gap FolioLoom can exploit is not merely "better prose"; it is
+  verifiable delivery quality: residual source-language checks, block
+  duplicate/omission checks, TOC/body heading consistency, terminology/name
+  normalization and honest queue-vs-processing time reporting.
+
+This is not a claim that FolioLoom is release-ready or generally better across
+all BookTranslator.app cases. It is evidence that this BookTranslator.app EPUB
+output needs review for a concrete German-to-Russian book case.
+
+### Suggested FolioLoom QA Gates
+
+These are follow-up candidates, not approved implementation scope:
+
+- Residual source-language detection per block.
+- Source/target block-count parity plus suspicious block-length ratio checks.
+- Adjacent duplicate/repeated translation detection.
+- Chapter-ending source/target boundary check.
+- TOC/body heading consistency check.
+- Character-name and place-name glossary consistency scan.
+- EPUB metadata policy check for `dc:language`, title and identifier.
+- Queue elapsed time and active processing time displayed separately.
+- Optional: competitor-style target-only and bilingual output comparison flow.
+
+### Tools / Commands Used
+
+- `unzip -t` for archive integrity.
+- `epubcheck` for local EPUB validation.
+- Ad hoc Python scripts using `zipfile`, `xml.etree.ElementTree` and
+  `html.parser.HTMLParser`.
+- Public web lookup of BookTranslator.app pricing and marketing/help pages.
+
+### Unknown / TBD
+
+- The bilingual BookTranslator.app output quality is Unknown.
+- The competitor's model, prompts, chunking, retry behavior and assembly
+  implementation are Unknown.
+- Whether the queue delay observed here is typical is Unknown.
+- Whether FolioLoom should implement each suggested QA gate requires separate
+  issue-level scope, acceptance criteria and verification plan.
+
+### Risks / Guardrails
+
+- Do not treat one competitor sample as universal evidence of competitor
+  quality.
+- Do not paste long raw book excerpts into issues, PRs, docs or support notes.
+- Do not treat this comparison as release readiness evidence for FolioLoom.
+- Do not expand FolioLoom product scope from this report without a separate
+  approved issue or architecture review.
+
 ## 2026-06-07 - Cross-Service Product Observations
 
 Status: owner-observed competitive notes, not independently reproduced by this
