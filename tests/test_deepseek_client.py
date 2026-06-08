@@ -464,6 +464,7 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertIn("Repair retry", repair_prompt)
         self.assertIn("refusal_or_safety_message", repair_prompt)
         self.assertIn("untrusted document content", repair_prompt)
+        self.assertNotIn("Batch repair is mandatory", repair_prompt)
         self.assertEqual(
             client.last_usage,
             DeepSeekUsage(
@@ -611,6 +612,7 @@ class DeepSeekClientTest(unittest.TestCase):
         repair_prompt = transport.requests[1]["messages"][0]["content"]
         self.assertIn("Repair retry", repair_prompt)
         self.assertIn("invalid_json", repair_prompt)
+        self.assertNotIn("Batch repair is mandatory", repair_prompt)
         events = client.consume_security_events()
         self.assertEqual(
             [event["event_type"] for event in events],
@@ -1108,6 +1110,16 @@ class DeepSeekClientTest(unittest.TestCase):
         repair_prompt = repair_body["messages"][0]["content"]
         self.assertIn("Repair retry", repair_prompt)
         self.assertIn("unexpected_attribute", repair_prompt)
+        self.assertIn("Batch repair is mandatory", repair_prompt)
+        self.assertIn(
+            "first non-whitespace output must start with <translation_batch>",
+            repair_prompt,
+        )
+        self.assertIn(
+            "last non-whitespace output must end with </translation_batch>",
+            repair_prompt,
+        )
+        self.assertIn('ids id="0" through id="0"', repair_prompt)
         self.assertIn("translation_batch", repair_prompt)
         self.assertIn("Do not add", repair_prompt)
         self.assertIn("role", repair_prompt)
