@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-04
+Last updated: 2026-06-08
 
 ## 1. Текущее состояние проекта
 
@@ -98,6 +98,28 @@ in-worktree full unittest discover is polluted by existing local
 `var/translation-runs` artifacts and fails one admin fixture-empty-state
 assertion; runtime `var/` data was not modified. CI, server smoke, deploy,
 bot/worker restart smoke on beta, and full Gate B readiness remain Unknown.
+
+Issue #365 implementation slice on 2026-06-08: branch
+`codex/issue-365-terminal-failure-partials` closes the remaining terminal
+work-unit failure partial-result visibility gap from issue #365. Scheduler
+assembly can now update a run log that was already safely marked `failed` by
+terminal work-unit failure into `partial` when a real partial object is
+assembled, while preserving the safe terminal failure error message and the
+existing failure event diagnostics. Admin effective translation-log downloads
+also resolve the partial/final result filename from persistent job output
+metadata when durable state has advanced beyond stale `run.json`. Regression
+coverage includes an EPUB terminal provider-failure scenario with an existing
+translated work unit, `.partial.epub` assembly, retained terminal failure
+diagnostics, preserved resume behavior through existing coverage, and
+metadata-only effective export result filename coverage. Local verification
+passed focused scheduler/admin/persistent-assembly/bot/run-log tests,
+`PYTHONPATH=src python3 -m compileall src`, targeted `ruff --select F,I`, and
+`git diff --check`. Full in-worktree unittest discover ran 1373 tests with 31
+skipped and failed one known local-artifact assertion in
+`test_reader_explorer_page_lists_sample_fixtures_under_advanced_nav` because
+existing local `var/translation-runs` makes the page non-empty; runtime `var/`
+data was not modified. CI, server smoke, deploy, real-file matrix, beta
+runtime recovery, and full Gate B readiness remain Unknown.
 
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots

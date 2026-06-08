@@ -19,6 +19,7 @@ from translator_service.beta_safety import (
 )
 from translator_service.bot.runtime import build_deepseek_translator
 from translator_service.config import Settings
+from translator_service.extractors import extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.persistent_jobs import (
@@ -26,6 +27,7 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
+from translator_service.persistent_planner import create_persistent_epub_job_plan
 from translator_service.scheduler import (
     ProviderCapacityCap,
     ProviderCapacityCapScope,
@@ -937,6 +939,107 @@ class SchedulerRunnerTest(unittest.TestCase):
                 storage.get_bytes(persisted_job.final_object_key).decode("utf-8"),
                 "[uk] First.\n\n[uk] Second.",
             )
+
+    def test_run_once_builds_epub_partial_after_terminal_failure_and_updates_run_log(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_job_plan(store=store, storage=storage)
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (plan.job.id,),
+                )
+            first_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-seed",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=first_claim.work_unit_id,
+                claim_token=first_claim.claim_token,
+                translated_text="Перший справжній абзац.",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=plan.job.id,
+                    order_id=plan.job.order_id,
+                    user_id=plan.job.user_id,
+                    file_name=plan.job.file_name,
+                    document_kind=plan.job.document_kind,
+                    source_language=plan.job.source_language,
+                    target_language=plan.job.target_language,
+                    total_fragment_count=len(plan.work_units),
+                ),
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=FailingRunnerTranslator(),
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    retry_base_delay_seconds=0,
+                    retry_max_delay_seconds=0,
+                    translation_run_log_root=run_log_root,
+                    beta_safety_guard=guard,
+                )
+
+            persisted_job = store.get_job(plan.job.id)
+            failed_units = [
+                unit
+                for unit in store.list_work_units(plan.job.id)
+                if unit.status.value == "failed_terminal"
+            ]
+            partial_key = persisted_job.partial_object_key
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            partial_text = extract_text_from_epub(storage.get_bytes(partial_key))
+
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.PARTIAL,
+            )
+            self.assertIsNone(persisted_job.final_object_key)
+            self.assertIsNotNone(partial_key)
+            self.assertEqual(
+                storage.get_metadata(partial_key).file_name,
+                "book.uk.partial.epub",
+            )
+            self.assertIn("Перший справжній абзац.", partial_text)
+            self.assertIn("Second real paragraph.", partial_text)
+            self.assertEqual(len(failed_units), 1)
+            self.assertEqual(snapshot["status"], "partial")
+            self.assertEqual(snapshot["result_file_name"], "book.uk.partial.epub")
+            self.assertEqual(
+                snapshot["error_message"],
+                "Translation failed in the background worker.",
+            )
+            self.assertIn("run_failed", events_jsonl)
+            self.assertIn("run_finished", events_jsonl)
+            self.assertEqual(
+                guard.released_jobs,
+                [
+                    (plan.job.id, "terminal_failure"),
+                    (plan.job.id, "partial_assembly"),
+                ],
+            )
+            self.assertEqual(guard.consumed_jobs, [])
 
     def test_assemble_due_jobs_skips_interrupted_job_without_translated_fragments(self):
         with TemporaryDirectory() as temp_dir:
@@ -2527,6 +2630,64 @@ def _create_single_unit_txt_job(
         ],
     )
     return job
+
+
+def _create_epub_job_plan(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+):
+    original = storage.put_bytes(
+        kind=StoredFileKind.ORIGINAL,
+        file_name="book.epub",
+        content_type="application/epub+zip",
+        content=_make_epub(
+            {
+                "OPS/front.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>Contents</h1>
+                    <p>Chapter 1</p>
+                  </body>
+                </html>
+                """,
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>Chapter 1</h1>
+                    <p>* * *</p>
+                    <p>First real paragraph.</p>
+                    <p>Second real paragraph.</p>
+                  </body>
+                </html>
+                """,
+            },
+        ),
+    )
+    return create_persistent_epub_job_plan(
+        store=store,
+        storage=storage,
+        order_id="order-epub",
+        user_id="telegram:42",
+        source_object_key=original.object_key,
+        file_name="book.epub",
+        source_language="en",
+        target_language="uk",
+        max_fragment_chars=30,
+    )
+
+
+def _make_epub(xhtml_items: dict[str, str]) -> bytes:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr("META-INF/container.xml", "<container />")
+        for file_name, content in xhtml_items.items():
+            epub.writestr(file_name, content)
+    return archive.getvalue()
 
 
 if __name__ == "__main__":
