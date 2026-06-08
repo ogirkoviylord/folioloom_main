@@ -2974,6 +2974,13 @@ def _translation_run_details(
         details,
         summary=replace(
             details.summary,
+            result_file_name=(
+                _translation_result_file_name(
+                    settings,
+                    job_id=details.summary.job_id,
+                )
+                or details.summary.result_file_name
+            ),
             error_message=_safe_work_unit_error_summary(details.summary.error_message),
         ),
     )
@@ -2991,6 +2998,36 @@ def _translation_run_details(
     if diagnostic is None:
         return details
     return replace(details, work_unit_diagnostic=diagnostic)
+
+
+def _translation_result_file_name(
+    settings: Settings,
+    *,
+    job_id: str,
+) -> str | None:
+    if not job_id or not _persistent_job_store_readable(settings):
+        return None
+    try:
+        store = open_persistent_job_store(settings)
+    except Exception:
+        return None
+    try:
+        job = store.get_job(job_id)
+    except Exception:
+        return None
+    finally:
+        store.close()
+    if job is None:
+        return None
+    object_key = job.final_object_key or job.partial_object_key
+    if not object_key:
+        return None
+    try:
+        return LocalObjectStorage(settings.object_storage_root).get_metadata(
+            object_key,
+        ).file_name
+    except (FileNotFoundError, OSError, ValueError):
+        return None
 
 
 def _translation_progress_snapshot(

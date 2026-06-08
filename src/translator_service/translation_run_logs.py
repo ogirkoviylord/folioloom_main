@@ -249,6 +249,8 @@ def finish_running_translation_runs_for_job(
     status: str = "cancelled",
     result_file_name: str | None = None,
     error_message: str | None = None,
+    current_statuses: tuple[str, ...] = ("running",),
+    preserve_existing_error_message: bool = False,
 ) -> int:
     root_path = Path(root)
     if not job_id or not root_path.exists():
@@ -262,7 +264,10 @@ def finish_running_translation_runs_for_job(
             continue
         if not isinstance(snapshot, dict):
             continue
-        if snapshot.get("job_id") != job_id or snapshot.get("status") != "running":
+        if (
+            snapshot.get("job_id") != job_id
+            or snapshot.get("status") not in current_statuses
+        ):
             continue
 
         snapshot["status"] = status
@@ -270,6 +275,11 @@ def finish_running_translation_runs_for_job(
         if result_file_name is not None:
             snapshot["result_file_name"] = result_file_name
         safe_error_message = _safe_error_message(error_message)
+        if preserve_existing_error_message and safe_error_message is None:
+            previous_error = snapshot.get("error_message")
+            safe_error_message = (
+                previous_error if isinstance(previous_error, str) else None
+            )
         snapshot["error_message"] = safe_error_message
         event_type = {
             "cancelled": "run_cancelled",

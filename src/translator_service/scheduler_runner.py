@@ -610,11 +610,14 @@ def _finish_assembled_translation_run(
 ) -> None:
     if root is None:
         return
+    current_statuses = ("running", "failed") if status == "partial" else ("running",)
     finish_running_translation_runs_for_job(
         root,
         job_id=job_id,
         status=status,
         result_file_name=result_file_name,
+        current_statuses=current_statuses,
+        preserve_existing_error_message=status == "partial",
     )
 
 
