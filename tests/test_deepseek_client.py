@@ -540,6 +540,69 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(events[0]["payload"]["expected_count"], 1)
         self.assertNotIn("text", events[0]["payload"])
 
+    def test_translate_normalizes_provider_source_language_alias_without_repair(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0" source="English">'
+                                    "Привет"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0" source_language="English">'
+                "Hello"
+                "</translation_block>"
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0" source_language="English">'
+            "Привет"
+            "</translation_block>"
+            "</translation_batch>",
+        )
+        self.assertEqual(len(transport.requests), 1)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            ["translation_batch_normalized"],
+        )
+        self.assertEqual(events[0]["payload"]["reason"], "unexpected_attribute")
+        self.assertEqual(events[0]["payload"]["expected_count"], 1)
+        self.assertNotIn("text", events[0]["payload"])
+
     def test_translate_repairs_invalid_translation_batch_contract(self):
         transport = SequentialTransport(
             responses=[
