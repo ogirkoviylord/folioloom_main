@@ -17,6 +17,63 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-09 - Architecture decision: JSON provider boundary for multi-block translation batches
+
+Status: Active
+
+Decision:
+- FolioLoom should proceed with a JSON provider boundary as the preferred
+  implementation direction for provider-facing multi-block translation batches.
+- The strict local contract is the JSON shape
+  `{"translations":[{"id":"0","text":"..."}]}` with exact count, ordered ids,
+  no extra keys, non-empty text, protected-marker preservation and unsafe-output
+  rejection before conversion back into the existing internal
+  `translation_batch` representation.
+- XML remains the existing internal representation and the fallback/legacy
+  provider path. Existing XML validation must stay strict.
+- Rollback direction: disable the JSON provider boundary and return multi-block
+  provider calls to the existing XML path while keeping the local validator and
+  XML adapter available as safe foundations.
+- Live provider reliability, style impact, token usage and retry impact remain
+  `TBD` until owner-approved provider-backed measurement exists.
+
+Evidence:
+- GitHub issue #370 asks for the final architecture decision before runtime
+  provider changes.
+- The owner approved this scoped #370/#371/#372/#373 work in the current Codex
+  thread on 2026-06-09, including the PR order, no-merge-until-reviewed policy
+  and guardrails against secrets, deployment, provider keys/config, cost caps,
+  scheduler/database/runtime state, raw diagnostics and release-readiness
+  claims.
+- GitHub issue #372 contains an owner approval comment for enabling DeepSeek
+  JSON Output only for multi-block batch translation requests.
+- GitHub issue #373 contains an owner approval comment for hardening the XML
+  batch prompt and repair prompt as a fallback/legacy path.
+
+Consequences:
+- Issue #371 should add the strict local JSON validator and XML adapter without
+  enabling provider JSON mode.
+- Issue #372 may enable DeepSeek `response_format={"type":"json_object"}` only
+  for multi-block translation batches after #371, keeping plain-text and
+  single-unit requests unchanged and converting validated JSON back into the
+  existing internal batch format.
+- Issue #373 may harden only the XML fallback prompt/repair path, without
+  weakening validators or adding adaptive splitting.
+- Security and diagnostic surfaces must remain metadata-only outside the
+  approved owner-only diagnostic boundaries. Raw source text, translated text,
+  prompt bodies, provider bodies and diagnostic archives must not be copied
+  into GitHub issues, PRs or docs.
+- This decision does not approve beta features, strict function calling, chat
+  prefix completion, provider key/config changes, deployment changes,
+  parallelism/cost-cap changes, scheduler/database/runtime state changes,
+  Gate B, free beta readiness, production readiness or live provider runs.
+
+Human approval required to change:
+- yes; changing provider-boundary behavior, fallback policy, validator
+  strictness, provider parameters, diagnostics boundaries, scheduler/runtime
+  state, keys/config, deployment, cost/parallelism controls or release claims
+  requires the matching explicit owner approval gate.
+
 ### 2026-06-05 - Architecture decision: keep simple fair queue policy until evidence requires DRR/WFQ
 
 Status: Proposed
