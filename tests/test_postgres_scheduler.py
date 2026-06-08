@@ -174,6 +174,9 @@ class PostgresSchedulerContractTest(unittest.TestCase):
 
         executed_sql = "\n".join(store.connection.statements)
         self.assertIn("cancel_requested_at = NULL", executed_sql)
+        self.assertIn("partial_object_key = NULL", executed_sql)
+        self.assertIn("%(failed_terminal)s", executed_sql)
+        self.assertIn("failed_terminal", str(store.connection.params))
 
 
 class _RecordingPostgresConnection:
@@ -1211,7 +1214,10 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         events = self.store.list_scheduler_events(job.id)
         claim_payload = json.loads(events[0].payload_json)
         self.assertEqual(completed.status.value, "translated")
-        self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.ASSEMBLING)
+        self.assertEqual(
+            persisted_job.status,
+            PersistentTranslationJobStatus.ASSEMBLING,
+        )
         self.assertEqual(
             claim_payload["queue_policy"],
             SCHEDULER_FAIR_QUEUE_POLICY,

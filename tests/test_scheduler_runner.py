@@ -33,6 +33,7 @@ from translator_service.scheduler import (
     ProviderSlotLease,
     ProviderSlotLeaseStatus,
     SchedulerLimits,
+    WorkUnitFailureKind,
 )
 from translator_service.scheduler_runner import assemble_due_jobs, run_scheduler_once
 from translator_service.translation_run_logs import (
@@ -786,6 +787,198 @@ class SchedulerRunnerTest(unittest.TestCase):
             )
             self.assertEqual(guard.consumed_jobs, [])
             self.assertEqual(guard.released_jobs, [(job.id, "partial_assembly")])
+
+    def test_assemble_due_jobs_builds_partial_after_terminal_work_unit_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="notes.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.\n\nSecond.",
+            )
+            first = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.",
+            )
+            second = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second.",
+            )
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=original.object_key,
+            )
+            store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:segment:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=first.object_key,
+                    ),
+                    WorkUnitPlan(
+                        sequence=2,
+                        source_block_ids=("txt:segment:3",),
+                        source_text_hash="hash-2",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=second.object_key,
+                    ),
+                ],
+            )
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (job.id,),
+                )
+            first_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=first_claim.work_unit_id,
+                claim_token=first_claim.claim_token,
+                translated_text="[uk] First.",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            failed_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.fail_claimed_work_unit(
+                work_unit_id=failed_claim.work_unit_id,
+                claim_token=failed_claim.claim_token,
+                failure_kind=WorkUnitFailureKind.MALFORMED_PROVIDER_OUTPUT,
+                error_message="provider failure: malformed_response",
+                retry_base_delay_seconds=0,
+                retry_max_delay_seconds=0,
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=guard,
+            )
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.PARTIAL,
+            )
+            self.assertIsNone(persisted_job.final_object_key)
+            self.assertIsNotNone(persisted_job.partial_object_key)
+            self.assertEqual(
+                storage.get_metadata(persisted_job.partial_object_key).file_name,
+                "notes.uk.partial.txt",
+            )
+            self.assertEqual(
+                storage.get_bytes(persisted_job.partial_object_key).decode("utf-8"),
+                "[uk] First.\n\nSecond.",
+            )
+            self.assertEqual(guard.consumed_jobs, [])
+            self.assertEqual(guard.released_jobs, [(job.id, "partial_assembly")])
+
+            resumed = store.resume_job(job.id)
+            retry_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-b",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=retry_claim.work_unit_id,
+                claim_token=retry_claim.claim_token,
+                translated_text="[uk] Second.",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            final_assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(resumed.status, PersistentTranslationJobStatus.QUEUED)
+            self.assertEqual(retry_claim.work_unit_id, failed_claim.work_unit_id)
+            self.assertEqual(final_assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertIsNotNone(persisted_job.final_object_key)
+            self.assertEqual(
+                storage.get_metadata(persisted_job.final_object_key).file_name,
+                "notes.uk.txt",
+            )
+            self.assertEqual(
+                storage.get_bytes(persisted_job.final_object_key).decode("utf-8"),
+                "[uk] First.\n\n[uk] Second.",
+            )
+
+    def test_assemble_due_jobs_skips_interrupted_job_without_translated_fragments(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="notes",
+                source_text="Only source text",
+            )
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (job.id,),
+                )
+            claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.fail_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                failure_kind=WorkUnitFailureKind.MALFORMED_PROVIDER_OUTPUT,
+                error_message="provider failure: malformed_response",
+                retry_base_delay_seconds=0,
+                retry_max_delay_seconds=0,
+            )
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 0)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.INTERRUPTED,
+            )
+            self.assertIsNone(persisted_job.final_object_key)
+            self.assertIsNone(persisted_job.partial_object_key)
 
     def test_assemble_due_jobs_preserves_txt_layout_from_original_source(self):
         with TemporaryDirectory() as temp_dir:
