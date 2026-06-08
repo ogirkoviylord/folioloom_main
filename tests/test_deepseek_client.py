@@ -286,6 +286,7 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertIn("professional document translator", system_prompt)
         self.assertIn("Russian", system_prompt)
         self.assertIn("English", system_prompt)
+        self.assertNotIn("response_format", transport.body)
 
     def test_last_usage_is_thread_local_for_parallel_translations(self):
         transport = BlockingUsageTransport(expected_requests=2)
@@ -481,6 +482,429 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(events[0]["payload"]["reason"], "refusal_or_safety_message")
         self.assertNotIn("text", events[0]["payload"])
 
+    def test_translate_uses_json_output_for_multiblock_batch(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0","text":"Привіт"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Hello</translation_block>'
+                '<translation_block id="1">World</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0">Привіт</translation_block>'
+            '<translation_block id="1">Світ</translation_block>'
+            "</translation_batch>",
+        )
+        self.assertEqual(
+            transport.requests[0]["response_format"],
+            {"type": "json_object"},
+        )
+        system_prompt = transport.requests[0]["messages"][0]["content"]
+        self.assertIn("JSON_TRANSLATION_BATCH", system_prompt)
+        self.assertIn('"translations"', system_prompt)
+        self.assertEqual(client.consume_security_events(), ())
+
+    def test_translate_repairs_invalid_json_batch_output(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {"message": {"content": "not json"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 2,
+                        "total_tokens": 13,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0","text":"Привіт"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 4,
+                        "total_tokens": 17,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Hello</translation_block>'
+                '<translation_block id="1">World</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0">Привіт</translation_block>'
+            '<translation_block id="1">Світ</translation_block>'
+            "</translation_batch>",
+        )
+        self.assertEqual(len(transport.requests), 2)
+        self.assertEqual(
+            transport.requests[0]["response_format"],
+            {"type": "json_object"},
+        )
+        self.assertEqual(
+            transport.requests[1]["response_format"],
+            {"type": "json_object"},
+        )
+        repair_prompt = transport.requests[1]["messages"][0]["content"]
+        self.assertIn("Repair retry", repair_prompt)
+        self.assertIn("invalid_json", repair_prompt)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            ["translation_batch_rejected", "model_output_repair_retry"],
+        )
+        self.assertEqual(events[0]["payload"]["reason"], "invalid_json")
+        self.assertNotIn("text", events[0]["payload"])
+
+    def test_translate_repairs_json_batch_missing_protected_marker(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0","text":"Маркер зник"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0",'
+                                    '"text":"ZXQPROTECTED0QXZ збережено"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 5,
+                        "total_tokens": 18,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Keep ZXQPROTECTED0QXZ</translation_block>'
+                '<translation_block id="1">World</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        self.assertIn("ZXQPROTECTED0QXZ", translated)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            ["translation_batch_rejected", "model_output_repair_retry"],
+        )
+        self.assertEqual(
+            events[0]["payload"]["reason"],
+            "missing_protected_marker",
+        )
+
+    def test_translate_repairs_json_batch_validator_failures(self):
+        cases = [
+            (
+                "wrong_block_id",
+                '{"translations":[{"id":"1","text":"Привіт"},'
+                '{"id":"0","text":"Світ"}]}',
+            ),
+            (
+                "block_count_mismatch",
+                '{"translations":[{"id":"0","text":"Привіт"}]}',
+            ),
+            (
+                "unsafe_model_output",
+                '{"translations":[{"id":"0",'
+                '"text":"Извините, я не могу выполнить этот запрос."},'
+                '{"id":"1","text":"Світ"}]}',
+            ),
+        ]
+
+        for expected_reason, bad_content in cases:
+            with self.subTest(expected_reason=expected_reason):
+                transport = SequentialTransport(
+                    responses=[
+                        {
+                            "choices": [
+                                {
+                                    "message": {"content": bad_content},
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": 11,
+                                "completion_tokens": 4,
+                                "total_tokens": 15,
+                            },
+                        },
+                        {
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": (
+                                            '{"translations":['
+                                            '{"id":"0","text":"Привіт"},'
+                                            '{"id":"1","text":"Світ"}]}'
+                                        )
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": 13,
+                                "completion_tokens": 4,
+                                "total_tokens": 17,
+                            },
+                        },
+                    ]
+                )
+                client = DeepSeekClient(
+                    api_key="secret-key",
+                    model="deepseek-v4-flash",
+                    base_url="https://api.deepseek.com",
+                    transport=transport,
+                    retry_attempts=1,
+                )
+
+                translated = client.translate(
+                    text=(
+                        "<translation_batch>"
+                        '<translation_block id="0">Hello</translation_block>'
+                        '<translation_block id="1">World</translation_block>'
+                        "</translation_batch>"
+                    ),
+                    source_language="en",
+                    target_language="uk",
+                )
+
+                self.assertIn(
+                    '<translation_block id="1">Світ</translation_block>',
+                    translated,
+                )
+                events = client.consume_security_events()
+                self.assertEqual(
+                    [event["event_type"] for event in events],
+                    ["translation_batch_rejected", "model_output_repair_retry"],
+                )
+                self.assertEqual(events[0]["payload"]["reason"], expected_reason)
+                self.assertNotIn("text", events[0]["payload"])
+
+    def test_translate_repairs_json_batch_length_finish_reason(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0","text":"Привіт"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"translations":[{"id":"0","text":"Привіт"},'
+                                    '{"id":"1","text":"Світ"}]}'
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 4,
+                        "total_tokens": 17,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Hello</translation_block>'
+                '<translation_block id="1">World</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="uk",
+        )
+
+        self.assertIn(
+            '<translation_block id="0">Привіт</translation_block>',
+            translated,
+        )
+        events = client.consume_security_events()
+        self.assertEqual(events[0]["payload"]["reason"], "truncated_output")
+
+    def test_translate_rejects_empty_json_batch_after_repair(self):
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {"message": {"content": ""}, "finish_reason": "stop"}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 0,
+                        "total_tokens": 11,
+                    },
+                },
+                {
+                    "choices": [
+                        {"message": {"content": ""}, "finish_reason": "stop"}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 0,
+                        "total_tokens": 13,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        with self.assertRaises(DeepSeekApiError) as error:
+            client.translate(
+                text=(
+                    "<translation_batch>"
+                    '<translation_block id="0">Hello</translation_block>'
+                    '<translation_block id="1">World</translation_block>'
+                    "</translation_batch>"
+                ),
+                source_language="en",
+                target_language="uk",
+            )
+
+        self.assertIn("structured translation batch", str(error.exception))
+        self.assertIn("empty_content", str(error.exception))
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            [
+                "translation_batch_rejected",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+            ],
+        )
+        self.assertEqual(events[-1]["payload"]["reason"], "empty_content")
+
     def test_translate_normalizes_language_metadata_attributes_without_repair(self):
         transport = SequentialTransport(
             responses=[
@@ -531,6 +955,7 @@ class DeepSeekClientTest(unittest.TestCase):
             "</translation_batch>",
         )
         self.assertEqual(len(transport.requests), 1)
+        self.assertNotIn("response_format", transport.requests[0])
         events = client.consume_security_events()
         self.assertEqual(
             [event["event_type"] for event in events],
@@ -594,6 +1019,7 @@ class DeepSeekClientTest(unittest.TestCase):
             "</translation_batch>",
         )
         self.assertEqual(len(transport.requests), 1)
+        self.assertNotIn("response_format", transport.requests[0])
         events = client.consume_security_events()
         self.assertEqual(
             [event["event_type"] for event in events],
