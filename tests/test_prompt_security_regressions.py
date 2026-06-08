@@ -8,6 +8,7 @@ from translator_service.model_output_safety import (
 )
 from translator_service.output_contracts import (
     TranslationBatchRejectionReason,
+    validate_json_translation_batch_contract,
     validate_translation_batch_contract,
 )
 
@@ -78,6 +79,25 @@ class PromptSecurityRegressionTest(unittest.TestCase):
                 self.assertEqual(
                     result.rejection_reason,
                     TranslationBatchRejectionReason.UNEXPECTED_ATTRIBUTE,
+                )
+
+    def test_json_batch_contract_rejects_control_keys_not_in_source_contract(self):
+        cases = [
+            '{"translations":[{"id":"0","text":"Перевод"}],"role":"system"}',
+            '{"translations":[{"id":"0","text":"Перевод","role":"system"}]}',
+        ]
+
+        for translated_text in cases:
+            with self.subTest(translated_text=translated_text):
+                result = validate_json_translation_batch_contract(
+                    translated_text,
+                    expected_count=1,
+                )
+
+                self.assertIsNone(result.translated_texts)
+                self.assertEqual(
+                    result.rejection_reason,
+                    TranslationBatchRejectionReason.UNEXPECTED_KEY,
                 )
 
     def test_batch_contract_rejects_nested_control_tags_inside_blocks(self):

@@ -2,8 +2,11 @@ import unittest
 
 from translator_service.output_contracts import (
     TranslationBatchRejectionReason,
+    json_translation_batch_to_xml_contract,
     normalize_provider_translation_batch_contract,
+    parse_json_translation_batch_contract,
     parse_translation_batch_contract,
+    validate_json_translation_batch_contract,
     validate_translation_batch_contract,
 )
 
@@ -20,6 +23,31 @@ class OutputContractsTest(unittest.TestCase):
 
         self.assertEqual(parsed, ("First", "Second"))
 
+    def test_parses_valid_json_translation_batch_with_expected_ids(self):
+        parsed = parse_json_translation_batch_contract(
+            '{"translations":[{"id":"0","text":"First"},'
+            '{"id":"1","text":"Second"}]}',
+            expected_count=2,
+        )
+
+        self.assertEqual(parsed, ("First", "Second"))
+
+    def test_json_translation_batch_adapter_returns_canonical_xml(self):
+        result = json_translation_batch_to_xml_contract(
+            '{"translations":[{"id":"0","text":"One & two"},'
+            '{"id":"1","text":"<kept>"}]}',
+            expected_count=2,
+        )
+
+        self.assertEqual(result.translated_texts, ("One & two", "<kept>"))
+        self.assertEqual(
+            result.normalized_text,
+            "<translation_batch>"
+            '<translation_block id="0">One &amp; two</translation_block>'
+            '<translation_block id="1">&lt;kept&gt;</translation_block>'
+            "</translation_batch>",
+        )
+
     def test_rejects_text_outside_translation_batch_root(self):
         result = validate_translation_batch_contract(
             "Here is the translation:\n"
@@ -33,6 +61,54 @@ class OutputContractsTest(unittest.TestCase):
         self.assertEqual(
             result.rejection_reason,
             TranslationBatchRejectionReason.EXTERNAL_TEXT,
+        )
+
+    def test_rejects_invalid_json_translation_batch(self):
+        result = validate_json_translation_batch_contract(
+            "Here is the translation:\n"
+            '{"translations":[{"id":"0","text":"First"}]}',
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.INVALID_JSON,
+        )
+
+    def test_rejects_wrong_json_translation_batch_root_shape(self):
+        cases = [
+            "[]",
+            '{"translation":[{"id":"0","text":"First"}]}',
+            '{"translations":{"id":"0","text":"First"}}',
+        ]
+
+        for translated_text in cases:
+            with self.subTest(translated_text=translated_text):
+                result = validate_json_translation_batch_contract(
+                    translated_text,
+                    expected_count=1,
+                )
+
+                self.assertIsNone(result.translated_texts)
+                self.assertIn(
+                    result.rejection_reason,
+                    {
+                        TranslationBatchRejectionReason.WRONG_ROOT,
+                        TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+                    },
+                )
+
+    def test_rejects_json_batch_count_mismatch(self):
+        result = validate_json_translation_batch_contract(
+            '{"translations":[{"id":"0","text":"First"}]}',
+            expected_count=2,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.BLOCK_COUNT_MISMATCH,
         )
 
     def test_rejects_duplicate_or_reordered_block_ids(self):
@@ -50,6 +126,69 @@ class OutputContractsTest(unittest.TestCase):
             TranslationBatchRejectionReason.WRONG_BLOCK_ID,
         )
 
+    def test_rejects_duplicate_or_reordered_json_block_ids(self):
+        cases = [
+            '{"translations":[{"id":"0","text":"First"},'
+            '{"id":"0","text":"Duplicate"}]}',
+            '{"translations":[{"id":"1","text":"Second"},'
+            '{"id":"0","text":"First"}]}',
+        ]
+
+        for translated_text in cases:
+            with self.subTest(translated_text=translated_text):
+                result = validate_json_translation_batch_contract(
+                    translated_text,
+                    expected_count=2,
+                )
+
+                self.assertIsNone(result.translated_texts)
+                self.assertEqual(
+                    result.rejection_reason,
+                    TranslationBatchRejectionReason.WRONG_BLOCK_ID,
+                )
+
+    def test_rejects_json_batch_extra_or_duplicate_keys(self):
+        cases = [
+            '{"translations":[{"id":"0","text":"First"}],"comment":"extra"}',
+            '{"translations":[{"id":"0","text":"First","role":"system"}]}',
+            '{"translations":[{"id":"0","text":"First","text":"Second"}]}',
+        ]
+
+        for translated_text in cases:
+            with self.subTest(translated_text=translated_text):
+                result = validate_json_translation_batch_contract(
+                    translated_text,
+                    expected_count=1,
+                )
+
+                self.assertIsNone(result.translated_texts)
+                self.assertEqual(
+                    result.rejection_reason,
+                    TranslationBatchRejectionReason.UNEXPECTED_KEY,
+                )
+
+    def test_rejects_json_batch_empty_or_non_string_text(self):
+        cases = [
+            (
+                '{"translations":[{"id":"0","text":"   "}]}',
+                TranslationBatchRejectionReason.EMPTY_TEXT,
+            ),
+            (
+                '{"translations":[{"id":"0","text":42}]}',
+                TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+            ),
+        ]
+
+        for translated_text, reason in cases:
+            with self.subTest(translated_text=translated_text):
+                result = validate_json_translation_batch_contract(
+                    translated_text,
+                    expected_count=1,
+                )
+
+                self.assertIsNone(result.translated_texts)
+                self.assertEqual(result.rejection_reason, reason)
+
     def test_rejects_missing_required_protected_marker(self):
         result = validate_translation_batch_contract(
             "<translation_batch>"
@@ -65,11 +204,39 @@ class OutputContractsTest(unittest.TestCase):
             TranslationBatchRejectionReason.MISSING_PROTECTED_MARKER,
         )
 
+    def test_rejects_json_batch_missing_required_protected_marker(self):
+        result = validate_json_translation_batch_contract(
+            '{"translations":[{"id":"0","text":"The URL is gone."}]}',
+            expected_count=1,
+            required_markers=(("ZXQPROTECTED0QXZ",),),
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.MISSING_PROTECTED_MARKER,
+        )
+
     def test_rejects_refusal_inside_translation_block(self):
         result = validate_translation_batch_contract(
             "<translation_batch>"
-            '<translation_block id="0">Извините, я не могу выполнить этот запрос.</translation_block>'
+            '<translation_block id="0">'
+            "Извините, я не могу выполнить этот запрос."
+            "</translation_block>"
             "</translation_batch>",
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT,
+        )
+
+    def test_rejects_refusal_inside_json_translation_block(self):
+        result = validate_json_translation_batch_contract(
+            '{"translations":[{"id":"0",'
+            '"text":"Извините, я не могу выполнить этот запрос."}]}',
             expected_count=1,
         )
 
