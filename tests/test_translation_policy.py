@@ -132,8 +132,10 @@ class TranslationPolicyTest(unittest.TestCase):
     def test_batch_text_uses_translation_batch_output_contract(self):
         policy = build_translation_policy(
             text=(
-                '<translation_batch><translation_block id="1">'
+                '<translation_batch><translation_block id="0">'
                 "Hello"
+                '</translation_block><translation_block id="1">'
+                "World"
                 "</translation_block></translation_batch>"
             ),
             source_language="en",
@@ -144,13 +146,31 @@ class TranslationPolicyTest(unittest.TestCase):
         self.assertEqual(policy.output_contract, OutputContract.TRANSLATION_BATCH)
         self.assertEqual(policy.output_contract_signature, "translation-batch-v1")
 
-        system_prompt = build_system_prompt(policy)
+        system_prompt = build_system_prompt(policy, expected_batch_count=2)
 
+        self.assertIn("OUTPUT CONTRACT: TRANSLATION_BATCH", system_prompt)
         self.assertIn("<translation_batch>", system_prompt)
         self.assertIn("translation_block", system_prompt)
+        self.assertIn("first non-whitespace output must start", system_prompt)
+        self.assertIn("last non-whitespace output must end", system_prompt)
+        self.assertIn('id="0" through id="1"', system_prompt)
         self.assertIn("source_language", system_prompt)
         self.assertIn("Do not add", system_prompt)
         self.assertIn("target_language", system_prompt)
+
+    def test_plain_text_prompt_does_not_add_batch_output_contract(self):
+        policy = build_translation_policy(
+            text="Translate this paragraph.",
+            source_language="en",
+            target_language="uk",
+            prompt_tier=PromptTier.PLAIN,
+        )
+
+        system_prompt = build_system_prompt(policy)
+
+        self.assertEqual(policy.output_contract, OutputContract.PLAIN_TEXT)
+        self.assertNotIn("OUTPUT CONTRACT: TRANSLATION_BATCH", system_prompt)
+        self.assertNotIn("first non-whitespace output must start", system_prompt)
 
     def test_json_batch_output_prompt_is_distinct_from_xml_contract(self):
         policy = build_translation_policy(
