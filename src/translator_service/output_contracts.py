@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -12,11 +13,15 @@ from translator_service.model_output_safety import validate_model_output_safety
 class TranslationBatchRejectionReason(StrEnum):
     EXTERNAL_TEXT = "external_text"
     BROKEN_XML = "broken_xml"
+    INVALID_JSON = "invalid_json"
     WRONG_ROOT = "wrong_root"
+    WRONG_JSON_SHAPE = "wrong_json_shape"
     BLOCK_COUNT_MISMATCH = "block_count_mismatch"
     UNEXPECTED_CHILD = "unexpected_child"
     UNEXPECTED_ATTRIBUTE = "unexpected_attribute"
+    UNEXPECTED_KEY = "unexpected_key"
     WRONG_BLOCK_ID = "wrong_block_id"
+    EMPTY_TEXT = "empty_text"
     MISSING_PROTECTED_MARKER = "missing_protected_marker"
     UNSAFE_MODEL_OUTPUT = "unsafe_model_output"
 
@@ -51,6 +56,137 @@ def format_translation_batch_contract(translated_texts: Sequence[str]) -> str:
         )
     lines.append("</translation_batch>")
     return "".join(lines)
+
+
+def parse_json_translation_batch_contract(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> tuple[str, ...] | None:
+    return validate_json_translation_batch_contract(
+        translated_text,
+        expected_count=expected_count,
+        required_markers=required_markers,
+    ).translated_texts
+
+
+def json_translation_batch_to_xml_contract(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> TranslationBatchValidationResult:
+    result = validate_json_translation_batch_contract(
+        translated_text,
+        expected_count=expected_count,
+        required_markers=required_markers,
+    )
+    if result.translated_texts is None:
+        return result
+    return TranslationBatchValidationResult(
+        translated_texts=result.translated_texts,
+        normalized_text=format_translation_batch_contract(result.translated_texts),
+    )
+
+
+def validate_json_translation_batch_contract(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> TranslationBatchValidationResult:
+    try:
+        document = json.loads(
+            translated_text,
+            object_pairs_hook=_json_object_without_duplicate_keys,
+        )
+    except _DuplicateJsonKeyError:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_KEY,
+        )
+    except json.JSONDecodeError:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.INVALID_JSON,
+        )
+
+    if not isinstance(document, dict):
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.WRONG_ROOT,
+        )
+    if "translations" not in document:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+        )
+    if set(document) - {"translations"}:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_KEY,
+        )
+    translations = document.get("translations")
+    if not isinstance(translations, list):
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+        )
+    if len(translations) != expected_count:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.BLOCK_COUNT_MISMATCH,
+        )
+
+    parsed: list[str] = []
+    for expected_index, item in enumerate(translations):
+        if not isinstance(item, dict):
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+            )
+        if set(item) - {"id", "text"}:
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_KEY,
+            )
+        if item.get("id") != str(expected_index):
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.WRONG_BLOCK_ID,
+            )
+
+        translated_block_text = item.get("text")
+        if not isinstance(translated_block_text, str):
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.WRONG_JSON_SHAPE,
+            )
+        translated_block_text = translated_block_text.strip()
+        if not translated_block_text:
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.EMPTY_TEXT,
+            )
+
+        safety = validate_model_output_safety(translated_block_text)
+        if safety.reason is not None:
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT,
+            )
+        if not _contains_required_markers(
+            translated_block_text,
+            required_markers=_markers_for_index(required_markers, expected_index),
+        ):
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.MISSING_PROTECTED_MARKER,
+            )
+        parsed.append(translated_block_text)
+
+    return TranslationBatchValidationResult(translated_texts=tuple(parsed))
 
 
 def validate_translation_batch_contract(
@@ -279,6 +415,21 @@ def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
+
+
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
+def _json_object_without_duplicate_keys(
+    pairs: Sequence[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError(key)
+        result[key] = value
+    return result
 
 
 _XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
