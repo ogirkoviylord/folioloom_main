@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -9,6 +9,43 @@ class ProtectedText:
     text: str
     replacements: dict[str, str]
 
+
+_UPPERCASE_TOKEN_PATTERN = re.compile(r"\b[A-Z][A-Z0-9_]{1,}(?:-[A-Z0-9]+)*\b")
+_ROMAN_NUMERAL_PATTERN = re.compile(
+    r"\b(?=[IVXLCDM]+\b)M{0,4}(?:CM|CD|D?C{0,3})"
+    r"(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\b"
+)
+_LITERARY_ALL_CAPS_WORDS = frozenset(
+    {
+        "BOOK",
+        "CHAPTER",
+        "EIGHT",
+        "EIGHTEEN",
+        "ELEVEN",
+        "FIFTEEN",
+        "FIVE",
+        "FOUR",
+        "FOURTEEN",
+        "NINE",
+        "NINETEEN",
+        "OF",
+        "ONE",
+        "PART",
+        "SEVEN",
+        "SEVENTEEN",
+        "SIX",
+        "SIXTEEN",
+        "TEN",
+        "THIRTEEN",
+        "THREE",
+        "TWELVE",
+        "TWENTY",
+        "TWO",
+        "TABLE",
+        "VOLUME",
+        "CONTENTS",
+    }
+)
 
 _PROTECTED_PATTERNS = [
     re.compile(r"\u00a0"),
@@ -33,7 +70,7 @@ _PROTECTED_PATTERNS = [
     re.compile(r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:'),
     re.compile(r':\s*"[A-Z][A-Za-z]*(?:[ -][A-Z][A-Za-z]*)*"'),
     re.compile(r"(?m)^[ \t]*[A-Za-z_][A-Za-z0-9_-]*\s*:"),
-    re.compile(r"\b[A-Z][A-Z0-9_]{1,}(?:-[A-Z0-9]+)*\b"),
+    _UPPERCASE_TOKEN_PATTERN,
     re.compile(r"\b[A-Z]{2,}_[A-Z0-9_]+\b"),
     re.compile(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b"),
     re.compile(r"\b(?=[A-Za-z0-9]*\d)(?:[A-Z][a-z]?\d*){2,}\b"),
@@ -57,8 +94,13 @@ def protect_text(
     text: str,
     *,
     extra_phrases: tuple[str, ...] = (),
+    literary_heading: bool = False,
 ) -> ProtectedText:
-    matches = _collect_non_overlapping_matches(text, extra_phrases=extra_phrases)
+    matches = _collect_non_overlapping_matches(
+        text,
+        extra_phrases=extra_phrases,
+        literary_heading=literary_heading,
+    )
     if not matches:
         return ProtectedText(text=text, replacements={})
 
@@ -87,6 +129,7 @@ def _collect_non_overlapping_matches(
     text: str,
     *,
     extra_phrases: tuple[str, ...],
+    literary_heading: bool,
 ) -> list[re.Match[str]]:
     candidates: list[re.Match[str]] = []
     for phrase in extra_phrases:
@@ -102,8 +145,21 @@ def _collect_non_overlapping_matches(
                 flags=re.IGNORECASE,
             )
         )
+    if literary_heading:
+        candidates.extend(
+            match
+            for match in _ROMAN_NUMERAL_PATTERN.finditer(text)
+            if match.group(0)
+        )
     for pattern in _PROTECTED_PATTERNS:
-        candidates.extend(pattern.finditer(text))
+        for match in pattern.finditer(text):
+            if (
+                literary_heading
+                and pattern is _UPPERCASE_TOKEN_PATTERN
+                and _is_literary_all_caps_word(match.group(0))
+            ):
+                continue
+            candidates.append(match)
 
     candidates.sort(key=lambda match: (match.start(), -(match.end() - match.start())))
     matches: list[re.Match[str]] = []
@@ -114,3 +170,7 @@ def _collect_non_overlapping_matches(
         matches.append(match)
         occupied_until = match.end()
     return matches
+
+
+def _is_literary_all_caps_word(text: str) -> bool:
+    return text in _LITERARY_ALL_CAPS_WORDS
