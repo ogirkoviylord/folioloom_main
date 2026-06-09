@@ -6,6 +6,7 @@ from translator_service.output_contracts import (
     normalize_provider_translation_batch_contract,
     parse_json_translation_batch_contract,
     parse_translation_batch_contract,
+    repair_json_translation_batch_control_chars,
     validate_json_translation_batch_contract,
     validate_translation_batch_contract,
 )
@@ -48,6 +49,48 @@ class OutputContractsTest(unittest.TestCase):
             "</translation_batch>",
         )
 
+    def test_repairs_literal_control_chars_inside_json_strings(self):
+        result = repair_json_translation_batch_control_chars(
+            '{"translations":[{"id":"0","text":"First line\nSecond line"},'
+            '{"id":"1","text":"Tab\tseparated"},'
+            '{"id":"2","text":"Carriage\rreturn"}]}',
+            expected_count=3,
+        )
+
+        self.assertEqual(
+            result.normalized_text,
+            "<translation_batch>"
+            '<translation_block id="0">First line\nSecond line</translation_block>'
+            '<translation_block id="1">Tab\tseparated</translation_block>'
+            '<translation_block id="2">Carriage\rreturn</translation_block>'
+            "</translation_batch>",
+        )
+
+    def test_control_char_repair_rejects_xml_invalid_control_chars(self):
+        result = repair_json_translation_batch_control_chars(
+            '{"translations":[{"id":"0","text":"Bad\x00control"}]}',
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.normalized_text)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.INVALID_JSON,
+        )
+
+    def test_control_char_repair_preserves_protected_marker_validation(self):
+        result = repair_json_translation_batch_control_chars(
+            '{"translations":[{"id":"0","text":"Marker moved\naway"}]}',
+            expected_count=1,
+            required_markers=(("ZXQPROTECTED0QXZ",),),
+        )
+
+        self.assertIsNone(result.normalized_text)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.MISSING_PROTECTED_MARKER,
+        )
+
     def test_rejects_text_outside_translation_batch_root(self):
         result = validate_translation_batch_contract(
             "Here is the translation:\n"
@@ -71,6 +114,19 @@ class OutputContractsTest(unittest.TestCase):
         )
 
         self.assertIsNone(result.translated_texts)
+        self.assertEqual(
+            result.rejection_reason,
+            TranslationBatchRejectionReason.INVALID_JSON,
+        )
+
+    def test_rejects_json_batch_with_escaped_xml_invalid_control_char(self):
+        result = validate_json_translation_batch_contract(
+            '{"translations":[{"id":"0","text":"Bad\\u0000control"}]}',
+            expected_count=1,
+        )
+
+        self.assertIsNone(result.translated_texts)
+        self.assertIsNone(result.normalized_text)
         self.assertEqual(
             result.rejection_reason,
             TranslationBatchRejectionReason.INVALID_JSON,
