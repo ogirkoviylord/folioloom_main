@@ -14,8 +14,12 @@ from translator_service.persistent_jobs import (
     WorkUnitPlan,
 )
 from translator_service.postgres_scheduler import (
+    _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL,
+    SCHEMA_SQL,
     PostgresSchedulerStore,
+    create_postgres_scheduler_claim_performance_indexes,
     initialize_postgres_scheduler_schema,
+    postgres_scheduler_claim_performance_index_statements,
 )
 from translator_service.provider_failure_diagnostics import (
     ProviderFailureCategory,
@@ -161,6 +165,37 @@ class PostgresSchedulerContractTest(unittest.TestCase):
 
         self.assertIn("status IN ('queued', 'translating')", final_update_sql)
         self.assertIn("cancel_requested_at IS NULL", final_update_sql)
+
+    def test_claim_query_precomputes_active_counts_once(self):
+        claim_sql = _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL
+
+        self.assertIn("active_work AS", claim_sql)
+        self.assertIn("active_by_user AS", claim_sql)
+        self.assertIn("active_global AS", claim_sql)
+        self.assertIn("JOIN LATERAL", claim_sql)
+        self.assertIn("first_waiting_work_units AS", claim_sql)
+        self.assertEqual(claim_sql.count("JOIN work_units active"), 1)
+        self.assertEqual(claim_sql.count("JOIN LATERAL"), 1)
+        self.assertNotIn("FROM work_units earlier", claim_sql)
+        self.assertNotIn("COUNT(DISTINCT active.job_id)", claim_sql)
+
+    def test_claim_performance_indexes_are_separate_from_startup_schema(self):
+        index_sql = "\n".join(
+            postgres_scheduler_claim_performance_index_statements(),
+        )
+
+        self.assertNotIn("translation_jobs_scheduler_claim_idx", SCHEMA_SQL)
+        self.assertNotIn("work_units_scheduler_waiting_order_idx", SCHEMA_SQL)
+        self.assertNotIn("work_units_scheduler_active_job_idx", SCHEMA_SQL)
+        self.assertIn("CREATE INDEX CONCURRENTLY IF NOT EXISTS", index_sql)
+        self.assertIn("translation_jobs_scheduler_claim_idx", index_sql)
+        self.assertIn("work_units_scheduler_waiting_order_idx", index_sql)
+        self.assertIn("work_units_scheduler_active_job_idx", index_sql)
+        self.assertIn(
+            "WHERE status IN ('pending', 'failed', 'failed_retryable')",
+            index_sql,
+        )
+        self.assertIn("WHERE status = 'translating'", index_sql)
 
     def test_resume_job_clears_durable_cancel_marker(self):
         store = object.__new__(PostgresSchedulerStore)
@@ -312,6 +347,205 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
             ],
         )
         return job
+
+    def _insert_large_claim_plan_fixture(self):
+        with self.store.connection.transaction():
+            self.store.connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language,
+                    adapter_version, prompt_version, pricing_snapshot_id,
+                    status, priority, created_at, updated_at
+                )
+                SELECT
+                    'hist-job-' || job_no::text,
+                    'order-hist-' || job_no::text,
+                    'telegram:hist-' || (job_no %% 50)::text,
+                    'file-hist-' || job_no::text,
+                    'notes.txt',
+                    'txt',
+                    'source-hist-' || job_no::text,
+                    'en',
+                    'uk',
+                    %(adapter_version)s,
+                    'plain-v1',
+                    'pricing-1',
+                    'ready',
+                    0,
+                    now() - (job_no || ' seconds')::interval,
+                    now()
+                FROM generate_series(1, 260) AS gs(job_no)
+                """,
+                {"adapter_version": TXT_ADAPTER_VERSION},
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language,
+                    adapter_version, prompt_version, pricing_snapshot_id,
+                    status, priority, created_at, updated_at
+                )
+                SELECT
+                    'archive-job-' || job_no::text,
+                    'order-archive-' || job_no::text,
+                    'telegram:archive-' || (job_no %% 200)::text,
+                    'file-archive-' || job_no::text,
+                    'notes.txt',
+                    'txt',
+                    'source-archive-' || job_no::text,
+                    'en',
+                    'uk',
+                    %(adapter_version)s,
+                    'plain-v1',
+                    'pricing-1',
+                    'ready',
+                    0,
+                    now() - (job_no || ' seconds')::interval,
+                    now()
+                FROM generate_series(1, 8000) AS gs(job_no)
+                """,
+                {"adapter_version": TXT_ADAPTER_VERSION},
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language,
+                    adapter_version, prompt_version, pricing_snapshot_id,
+                    status, priority, created_at, updated_at
+                )
+                SELECT
+                    'queued-job-' || job_no::text,
+                    'order-queued-' || job_no::text,
+                    'telegram:queued-' || (job_no %% 80)::text,
+                    'file-queued-' || job_no::text,
+                    'notes.txt',
+                    'txt',
+                    'source-queued-' || job_no::text,
+                    'en',
+                    'uk',
+                    %(adapter_version)s,
+                    'plain-v1',
+                    'pricing-1',
+                    'queued',
+                    job_no %% 3,
+                    now() - (job_no || ' minutes')::interval,
+                    now()
+                FROM generate_series(1, 120) AS gs(job_no)
+                """,
+                {"adapter_version": TXT_ADAPTER_VERSION},
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language,
+                    adapter_version, prompt_version, pricing_snapshot_id,
+                    status, priority, created_at, updated_at
+                )
+                SELECT
+                    'active-job-' || job_no::text,
+                    'order-active-' || job_no::text,
+                    'telegram:active-' || job_no::text,
+                    'file-active-' || job_no::text,
+                    'notes.txt',
+                    'txt',
+                    'source-active-' || job_no::text,
+                    'en',
+                    'uk',
+                    %(adapter_version)s,
+                    'plain-v1',
+                    'pricing-1',
+                    'translating',
+                    0,
+                    now() - (job_no || ' minutes')::interval,
+                    now()
+                FROM generate_series(1, 8) AS gs(job_no)
+                """,
+                {"adapter_version": TXT_ADAPTER_VERSION},
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO work_units (
+                    id, job_id, sequence, source_block_ids_json,
+                    source_object_key, source_text_hash, prompt_tier,
+                    source_language, target_language, status, translated_text,
+                    completed_at
+                )
+                SELECT
+                    'hist-job-' || job_no::text || ':unit-' || unit_no::text,
+                    'hist-job-' || job_no::text,
+                    unit_no,
+                    json_build_array('hist:' || unit_no::text)::text,
+                    'source-hist-' || job_no::text || '-' || unit_no::text,
+                    'hash-hist-' || job_no::text || '-' || unit_no::text,
+                    'plain',
+                    'en',
+                    'uk',
+                    'translated',
+                    '[uk] synthetic',
+                    now()
+                FROM generate_series(1, 260) AS jobs(job_no)
+                CROSS JOIN generate_series(1, 80) AS units(unit_no)
+                """
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO work_units (
+                    id, job_id, sequence, source_block_ids_json,
+                    source_object_key, source_text_hash, prompt_tier,
+                    source_language, target_language, status
+                )
+                SELECT
+                    'queued-job-' || job_no::text || ':unit-' || unit_no::text,
+                    'queued-job-' || job_no::text,
+                    unit_no,
+                    json_build_array('queued:' || unit_no::text)::text,
+                    'source-queued-' || job_no::text || '-' || unit_no::text,
+                    'hash-queued-' || job_no::text || '-' || unit_no::text,
+                    'plain',
+                    'en',
+                    'uk',
+                    'pending'
+                FROM generate_series(1, 120) AS jobs(job_no)
+                CROSS JOIN generate_series(1, 70) AS units(unit_no)
+                """
+            )
+            self.store.connection.execute(
+                """
+                INSERT INTO work_units (
+                    id, job_id, sequence, source_block_ids_json,
+                    source_object_key, source_text_hash, prompt_tier,
+                    source_language, target_language, status, worker_id,
+                    claim_token, lease_until, attempt_count, started_at
+                )
+                SELECT
+                    'active-job-' || job_no::text || ':unit-' || unit_no::text,
+                    'active-job-' || job_no::text,
+                    unit_no,
+                    json_build_array('active:' || unit_no::text)::text,
+                    'source-active-' || job_no::text || '-' || unit_no::text,
+                    'hash-active-' || job_no::text || '-' || unit_no::text,
+                    'plain',
+                    'en',
+                    'uk',
+                    CASE WHEN unit_no = 1 THEN 'translating' ELSE 'pending' END,
+                    CASE WHEN unit_no = 1 THEN 'worker-active' ELSE NULL END,
+                    CASE WHEN unit_no = 1 THEN 'claim-active' ELSE NULL END,
+                    CASE
+                      WHEN unit_no = 1 THEN now() + interval '5 minutes'
+                      ELSE NULL
+                    END,
+                    CASE WHEN unit_no = 1 THEN 1 ELSE 0 END,
+                    CASE WHEN unit_no = 1 THEN now() ELSE NULL END
+                FROM generate_series(1, 8) AS jobs(job_no)
+                CROSS JOIN generate_series(1, 50) AS units(unit_no)
+                """
+            )
+            self.store.connection.execute("ANALYZE translation_jobs")
+            self.store.connection.execute("ANALYZE work_units")
 
     def test_two_workers_do_not_claim_same_unit(self):
         self._create_txt_job_with_unit()
@@ -1119,6 +1353,131 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         self.assertEqual({second.job_id, third.job_id}, {small_a.id, small_b.id})
         self.assertNotIn(large_job.id, {second.job_id, third.job_id})
 
+    def test_claim_fair_queue_allows_same_user_rotation_when_caps_allow(self):
+        first_job = self._create_txt_job_with_units(
+            order_id="order-same-user-a",
+            file_id="file-same-user-a",
+            user_id="telegram:42",
+            unit_count=2,
+        )
+        second_job = self._create_txt_job_with_units(
+            order_id="order-same-user-b",
+            file_id="file-same-user-b",
+            user_id="telegram:42",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=2,
+            max_active_units_per_job=1,
+            max_active_units_per_user=2,
+            max_active_jobs_per_user=2,
+        )
+
+        first = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, first_job.id)
+        self.assertEqual(second.job_id, second_job.id)
+        second_events = self.store.list_scheduler_events(second_job.id)
+        second_payload = json.loads(second_events[-1].payload_json)
+        diagnostics = second_payload["queue_policy_diagnostics"]
+        self.assertEqual(diagnostics["active_user_units_before_claim"], 1)
+        self.assertEqual(diagnostics["active_user_jobs_before_claim"], 1)
+        self.assertEqual(diagnostics["active_job_units_before_claim"], 0)
+
+    def test_claim_user_job_cap_still_allows_more_units_from_active_job(self):
+        active_job = self._create_txt_job_with_units(
+            order_id="order-active-user-a",
+            file_id="file-active-user-a",
+            user_id="telegram:42",
+            unit_count=2,
+        )
+        blocked_job = self._create_txt_job_with_units(
+            order_id="order-active-user-b",
+            file_id="file-active-user-b",
+            user_id="telegram:42",
+            unit_count=1,
+        )
+        limits = SchedulerLimits(
+            max_active_units_global=2,
+            max_active_units_per_job=2,
+            max_active_units_per_user=2,
+            max_active_jobs_per_user=1,
+        )
+
+        first = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=limits,
+        )
+        second = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=limits,
+        )
+
+        self.assertEqual(first.job_id, active_job.id)
+        self.assertEqual(second.job_id, active_job.id)
+        self.assertEqual(second.work_unit_id, f"{active_job.id}:unit-2")
+        self.assertNotEqual(second.job_id, blocked_job.id)
+
+    def test_claim_query_plan_uses_scheduler_indexes_for_large_tables(self):
+        create_postgres_scheduler_claim_performance_indexes(
+            self.store.connection,
+            concurrently=False,
+        )
+        self._insert_large_claim_plan_fixture()
+
+        work_unit_count = self.store.connection.execute(
+            "SELECT COUNT(*) AS count FROM work_units"
+        ).fetchone()["count"]
+        self.assertGreaterEqual(work_unit_count, 29000)
+
+        with self.store.connection.transaction():
+            plan_row = self.store.connection.execute(
+                "EXPLAIN (FORMAT JSON) " + _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL,
+                {
+                    "worker_id": "worker-plan",
+                    "claim_token": "claim-plan",
+                    "claim_lock_key": "translator_service.postgres_scheduler.claim",
+                    "lease_seconds": 300,
+                    "max_active_units_global": 10,
+                    "max_active_units_per_job": 2,
+                    "max_active_units_per_user": 2,
+                    "max_active_jobs_per_user": 2,
+                    "priority_aging_seconds": 0,
+                },
+            ).fetchone()
+
+        plan = plan_row["QUERY PLAN"]
+        if isinstance(plan, str):
+            plan = json.loads(plan)
+        nodes = list(_flatten_plan_nodes(plan[0]["Plan"]))
+        work_unit_seq_scans = [
+            node
+            for node in nodes
+            if node.get("Node Type") == "Seq Scan"
+            and node.get("Relation Name") == "work_units"
+        ]
+        index_names = {
+            node.get("Index Name")
+            for node in nodes
+            if node.get("Index Name") is not None
+        }
+
+        self.assertEqual(work_unit_seq_scans, [])
+        self.assertIn("translation_jobs_scheduler_claim_idx", index_names)
+        self.assertIn("work_units_scheduler_waiting_order_idx", index_names)
+        self.assertIn("work_units_scheduler_active_job_idx", index_names)
+
     def test_claim_priority_aging_prevents_old_job_starvation(self):
         old_low_priority = self._create_txt_job_with_unit(
             order_id="order-old",
@@ -1454,6 +1813,12 @@ class PostgresSmokeTranslator:
             prompt_cache_miss_tokens=8,
         )
         return f"[{target_language}] {text}"
+
+
+def _flatten_plan_nodes(plan_node):
+    yield plan_node
+    for child in plan_node.get("Plans", []):
+        yield from _flatten_plan_nodes(child)
 
 
 def _provider_capacity_cap(

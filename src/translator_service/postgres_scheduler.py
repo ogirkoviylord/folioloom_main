@@ -197,6 +197,177 @@ CREATE UNIQUE INDEX IF NOT EXISTS provider_slot_leases_active_work_unit_idx
 
 _CLAIM_ADVISORY_LOCK_KEY = "translator_service.postgres_scheduler.claim"
 
+_CLAIM_PERFORMANCE_INDEX_STATEMENT_TEMPLATES = (
+    """
+    {create_index} IF NOT EXISTS translation_jobs_scheduler_claim_idx
+        ON translation_jobs(status, id, user_id, created_at, priority)
+        WHERE status IN ('queued', 'translating')
+          AND cancel_requested_at IS NULL
+    """,
+    """
+    {create_index} IF NOT EXISTS work_units_scheduler_waiting_order_idx
+        ON work_units(job_id, sequence, id)
+        WHERE status IN ('pending', 'failed', 'failed_retryable')
+    """,
+    """
+    {create_index} IF NOT EXISTS work_units_scheduler_active_job_idx
+        ON work_units(job_id, id)
+        WHERE status = 'translating'
+    """,
+)
+
+_CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL = """
+WITH claim_lock AS (
+    SELECT pg_advisory_xact_lock(
+          hashtext(%(claim_lock_key)s)
+    )
+),
+active_work AS (
+    SELECT
+      active.job_id,
+      active_tj.user_id,
+      COUNT(*)::integer AS active_job_units
+    FROM claim_lock
+    JOIN work_units active
+      ON active.status = 'translating'
+    JOIN translation_jobs active_tj
+      ON active_tj.id = active.job_id
+    GROUP BY active.job_id, active_tj.user_id
+),
+active_by_user AS (
+    SELECT
+      user_id,
+      COALESCE(SUM(active_job_units), 0)::integer AS active_user_units,
+      COUNT(*)::integer AS active_user_jobs
+    FROM active_work
+    GROUP BY user_id
+),
+active_global AS (
+    SELECT COALESCE(SUM(active_job_units), 0)::integer AS active_units
+    FROM active_work
+),
+active_jobs AS (
+    SELECT
+      tj.id,
+      tj.user_id,
+      tj.priority,
+      tj.created_at
+    FROM claim_lock
+    JOIN translation_jobs tj
+      ON tj.status IN ('queued', 'translating')
+     AND tj.cancel_requested_at IS NULL
+),
+first_waiting_work_units AS (
+    SELECT
+      active_jobs.id AS job_id,
+      active_jobs.user_id,
+      active_jobs.priority,
+      active_jobs.created_at,
+      first_wu.id AS work_unit_id
+    FROM active_jobs
+    JOIN LATERAL (
+        SELECT wu.id
+        FROM work_units wu
+        WHERE wu.job_id = active_jobs.id
+          AND wu.status IN ('pending', 'failed', 'failed_retryable')
+        ORDER BY wu.sequence ASC, wu.id ASC
+        LIMIT 1
+    ) first_wu ON TRUE
+),
+candidate AS (
+    SELECT
+      wu.*,
+      COALESCE(abu.active_user_units, 0)::integer
+        AS queue_policy_active_user_units,
+      COALESCE(abu.active_user_jobs, 0)::integer
+        AS queue_policy_active_user_jobs,
+      COALESCE(aw.active_job_units, 0)::integer
+        AS queue_policy_active_job_units,
+      active_global.active_units
+        AS queue_policy_active_global_units,
+      first_wu.priority AS queue_policy_job_priority,
+      first_wu.created_at AS queue_policy_job_created_at
+    FROM first_waiting_work_units first_wu
+    JOIN work_units wu
+      ON wu.id = first_wu.work_unit_id
+    LEFT JOIN active_work aw
+      ON aw.job_id = wu.job_id
+    LEFT JOIN active_by_user abu
+      ON abu.user_id = first_wu.user_id
+    CROSS JOIN active_global
+    WHERE wu.status IN ('pending', 'failed', 'failed_retryable')
+      AND wu.available_at <= now()
+      AND (wu.lease_until IS NULL OR wu.lease_until <= now())
+      AND active_global.active_units < %(max_active_units_global)s
+      AND COALESCE(aw.active_job_units, 0) < %(max_active_units_per_job)s
+      AND COALESCE(abu.active_user_units, 0) < %(max_active_units_per_user)s
+      AND (
+          COALESCE(abu.active_user_jobs, 0)
+          - CASE
+              WHEN COALESCE(aw.active_job_units, 0) > 0 THEN 1
+              ELSE 0
+            END
+      ) < %(max_active_jobs_per_user)s
+    ORDER BY
+      COALESCE(abu.active_user_units, 0) ASC,
+      COALESCE(abu.active_user_jobs, 0) ASC,
+      COALESCE(aw.active_job_units, 0) ASC,
+      CASE
+        WHEN %(priority_aging_seconds)s > 0 THEN
+          first_wu.priority + FLOOR(
+            EXTRACT(EPOCH FROM (now() - first_wu.created_at))
+            / GREATEST(%(priority_aging_seconds)s, 1)
+          )::integer
+        ELSE first_wu.priority
+      END DESC,
+      first_wu.priority DESC,
+      first_wu.created_at ASC,
+      first_wu.job_id ASC,
+      wu.sequence ASC,
+      wu.id ASC
+    FOR UPDATE OF wu SKIP LOCKED
+    LIMIT 1
+)
+UPDATE work_units
+SET status = 'translating',
+    worker_id = %(worker_id)s,
+    claim_token = %(claim_token)s,
+    lease_until = now() + (%(lease_seconds)s || ' seconds')::interval,
+    attempt_count = work_units.attempt_count + 1,
+    started_at = COALESCE(work_units.started_at, now()),
+    updated_at = now()
+FROM candidate
+WHERE work_units.id = candidate.id
+  AND work_units.status IN ('pending', 'failed', 'failed_retryable')
+  AND work_units.available_at <= now()
+  AND (
+      work_units.lease_until IS NULL
+      OR work_units.lease_until <= now()
+  )
+  AND candidate.queue_policy_active_global_units < %(max_active_units_global)s
+  AND candidate.queue_policy_active_job_units < %(max_active_units_per_job)s
+  AND candidate.queue_policy_active_user_units < %(max_active_units_per_user)s
+  AND (
+      candidate.queue_policy_active_user_jobs
+      - CASE
+          WHEN candidate.queue_policy_active_job_units > 0 THEN 1
+          ELSE 0
+        END
+  ) < %(max_active_jobs_per_user)s
+  AND EXISTS (
+      SELECT 1
+      FROM translation_jobs tj
+      WHERE tj.id = work_units.job_id
+        AND tj.status IN ('queued', 'translating')
+        AND tj.cancel_requested_at IS NULL
+  )
+RETURNING
+    work_units.*,
+    candidate.queue_policy_active_user_units,
+    candidate.queue_policy_active_user_jobs,
+    candidate.queue_policy_active_job_units
+"""
+
 
 def initialize_postgres_scheduler_schema(connection) -> None:
     with connection.transaction():
@@ -204,6 +375,34 @@ def initialize_postgres_scheduler_schema(connection) -> None:
             statement = statement.strip()
             if statement:
                 connection.execute(statement)
+
+
+def postgres_scheduler_claim_performance_index_statements(
+    *,
+    concurrently: bool = True,
+) -> tuple[str, ...]:
+    create_index = "CREATE INDEX CONCURRENTLY" if concurrently else "CREATE INDEX"
+    return tuple(
+        template.format(create_index=create_index).strip()
+        for template in _CLAIM_PERFORMANCE_INDEX_STATEMENT_TEMPLATES
+    )
+
+
+def create_postgres_scheduler_claim_performance_indexes(
+    connection,
+    *,
+    concurrently: bool = True,
+) -> None:
+    statements = postgres_scheduler_claim_performance_index_statements(
+        concurrently=concurrently,
+    )
+    if concurrently:
+        for statement in statements:
+            connection.execute(statement)
+        return
+    with connection.transaction():
+        for statement in statements:
+            connection.execute(statement)
 
 
 class PostgresSchedulerStore:
@@ -339,195 +538,7 @@ class PostgresSchedulerStore:
         with self.connection.transaction():
             claim_token = uuid4().hex
             updated = self.connection.execute(
-                """
-                WITH claim_lock AS (
-                    SELECT pg_advisory_xact_lock(
-                          hashtext(%(claim_lock_key)s)
-                    )
-                ),
-                candidate AS (
-                    SELECT
-                      wu.*,
-                      (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.status = 'translating'
-                      ) AS queue_policy_active_user_units,
-                      (
-                          SELECT COUNT(DISTINCT active.job_id)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.status = 'translating'
-                      ) AS queue_policy_active_user_jobs,
-                      (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          WHERE active.job_id = wu.job_id
-                            AND active.status = 'translating'
-                      ) AS queue_policy_active_job_units
-                    FROM work_units wu
-                    JOIN translation_jobs tj ON tj.id = wu.job_id
-                    CROSS JOIN claim_lock
-                    WHERE tj.status IN ('queued', 'translating')
-                      AND tj.cancel_requested_at IS NULL
-                      AND wu.status IN ('pending', 'failed', 'failed_retryable')
-                      AND wu.available_at <= now()
-                      AND (wu.lease_until IS NULL OR wu.lease_until <= now())
-                      AND (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          WHERE active.status = 'translating'
-                      ) < %(max_active_units_global)s
-                      AND (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          WHERE active.job_id = wu.job_id
-                            AND active.status = 'translating'
-                      ) < %(max_active_units_per_job)s
-                      AND (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.status = 'translating'
-                      ) < %(max_active_units_per_user)s
-                      AND (
-                          SELECT COUNT(DISTINCT active.job_id)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.job_id <> wu.job_id
-                            AND active.status = 'translating'
-                      ) < %(max_active_jobs_per_user)s
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM work_units earlier
-                          WHERE earlier.job_id = wu.job_id
-                            AND earlier.sequence < wu.sequence
-                            AND earlier.status IN (
-                                'pending',
-                                'failed',
-                                'failed_retryable'
-                            )
-                      )
-                    ORDER BY
-                      (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.status = 'translating'
-                      ) ASC,
-                      (
-                          SELECT COUNT(DISTINCT active.job_id)
-                          FROM work_units active
-                          JOIN translation_jobs active_tj
-                            ON active_tj.id = active.job_id
-                          WHERE active_tj.user_id = tj.user_id
-                            AND active.status = 'translating'
-                      ) ASC,
-                      (
-                          SELECT COUNT(*)
-                          FROM work_units active
-                          WHERE active.job_id = wu.job_id
-                            AND active.status = 'translating'
-                      ) ASC,
-                      CASE
-                        WHEN %(priority_aging_seconds)s > 0 THEN
-                          tj.priority + FLOOR(
-                            EXTRACT(EPOCH FROM (now() - tj.created_at))
-                            / GREATEST(%(priority_aging_seconds)s, 1)
-                          )::integer
-                        ELSE tj.priority
-                      END DESC,
-                      tj.priority DESC,
-                      tj.created_at ASC,
-                      tj.id ASC,
-                      wu.sequence ASC,
-                      wu.id ASC
-                    FOR UPDATE OF wu SKIP LOCKED
-                    LIMIT 1
-                )
-                UPDATE work_units
-                SET status = 'translating',
-                    worker_id = %(worker_id)s,
-                    claim_token = %(claim_token)s,
-                    lease_until = now() + (%(lease_seconds)s || ' seconds')::interval,
-                    attempt_count = work_units.attempt_count + 1,
-                    started_at = COALESCE(work_units.started_at, now()),
-                    updated_at = now()
-                FROM candidate
-                WHERE work_units.id = candidate.id
-                  AND work_units.status IN ('pending', 'failed', 'failed_retryable')
-                  AND work_units.available_at <= now()
-                  AND (
-                      work_units.lease_until IS NULL
-                      OR work_units.lease_until <= now()
-                  )
-                  AND (
-                      SELECT COUNT(*)
-                      FROM work_units active
-                      WHERE active.status = 'translating'
-                  ) < %(max_active_units_global)s
-                  AND (
-                      SELECT COUNT(*)
-                      FROM work_units active
-                      WHERE active.job_id = work_units.job_id
-                        AND active.status = 'translating'
-                  ) < %(max_active_units_per_job)s
-                  AND (
-                      SELECT COUNT(*)
-                      FROM work_units active
-                      JOIN translation_jobs active_tj
-                        ON active_tj.id = active.job_id
-                      JOIN translation_jobs candidate_tj
-                        ON candidate_tj.id = work_units.job_id
-                      WHERE active_tj.user_id = candidate_tj.user_id
-                        AND active.status = 'translating'
-                  ) < %(max_active_units_per_user)s
-                  AND (
-                      SELECT COUNT(DISTINCT active.job_id)
-                      FROM work_units active
-                      JOIN translation_jobs active_tj
-                        ON active_tj.id = active.job_id
-                      JOIN translation_jobs candidate_tj
-                        ON candidate_tj.id = work_units.job_id
-                      WHERE active_tj.user_id = candidate_tj.user_id
-                        AND active.job_id <> work_units.job_id
-                        AND active.status = 'translating'
-                  ) < %(max_active_jobs_per_user)s
-                  AND EXISTS (
-                      SELECT 1
-                      FROM translation_jobs tj
-                      WHERE tj.id = work_units.job_id
-                        AND tj.status IN ('queued', 'translating')
-                        AND tj.cancel_requested_at IS NULL
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM work_units earlier
-                      WHERE earlier.job_id = work_units.job_id
-                        AND earlier.sequence < work_units.sequence
-                        AND earlier.status IN (
-                            'pending',
-                            'failed',
-                            'failed_retryable'
-                        )
-                  )
-                RETURNING
-                    work_units.*,
-                    candidate.queue_policy_active_user_units,
-                    candidate.queue_policy_active_user_jobs,
-                    candidate.queue_policy_active_job_units
-                """,
+                _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL,
                 {
                     "worker_id": worker_id,
                     "claim_token": claim_token,
