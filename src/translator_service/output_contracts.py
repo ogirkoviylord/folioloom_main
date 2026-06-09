@@ -92,6 +92,25 @@ def json_translation_batch_to_xml_contract(
     )
 
 
+def repair_json_translation_batch_control_chars(
+    translated_text: str,
+    *,
+    expected_count: int,
+    required_markers: tuple[tuple[str, ...], ...] | None = None,
+) -> TranslationBatchValidationResult:
+    repaired = _escape_json_string_control_chars(translated_text)
+    if repaired == translated_text:
+        return TranslationBatchValidationResult(
+            translated_texts=None,
+            rejection_reason=TranslationBatchRejectionReason.INVALID_JSON,
+        )
+    return json_translation_batch_to_xml_contract(
+        repaired,
+        expected_count=expected_count,
+        required_markers=required_markers,
+    )
+
+
 def validate_json_translation_batch_contract(
     translated_text: str,
     *,
@@ -170,6 +189,11 @@ def validate_json_translation_batch_contract(
             return TranslationBatchValidationResult(
                 translated_texts=None,
                 rejection_reason=TranslationBatchRejectionReason.EMPTY_TEXT,
+            )
+        if _contains_xml_invalid_control_char(translated_block_text):
+            return TranslationBatchValidationResult(
+                translated_texts=None,
+                rejection_reason=TranslationBatchRejectionReason.INVALID_JSON,
             )
 
         safety = validate_model_output_safety(translated_block_text)
@@ -413,6 +437,10 @@ def _has_non_whitespace_text(text: str | None) -> bool:
     return bool(text and text.strip())
 
 
+def _contains_xml_invalid_control_char(text: str) -> bool:
+    return any(ord(char) < 0x20 and char not in "\t\n\r" for char in text)
+
+
 def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
@@ -421,6 +449,51 @@ def _local_name(tag: str) -> str:
 
 class _DuplicateJsonKeyError(ValueError):
     pass
+
+
+def _escape_json_string_control_chars(value: str) -> str:
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    changed = False
+
+    for char in value:
+        if in_string:
+            if escaped:
+                result.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                result.append(char)
+                escaped = True
+                continue
+            if char == '"':
+                result.append(char)
+                in_string = False
+                continue
+            if ord(char) < 0x20:
+                result.append(_json_control_char_escape(char))
+                changed = True
+                continue
+            result.append(char)
+            continue
+
+        result.append(char)
+        if char == '"':
+            in_string = True
+
+    return "".join(result) if changed else value
+
+
+def _json_control_char_escape(char: str) -> str:
+    escapes = {
+        "\b": "\\b",
+        "\f": "\\f",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\t": "\\t",
+    }
+    return escapes.get(char, f"\\u{ord(char):04x}")
 
 
 def _json_object_without_duplicate_keys(
