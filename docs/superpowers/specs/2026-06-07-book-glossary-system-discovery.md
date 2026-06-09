@@ -20,6 +20,44 @@ This note does not implement anything, create GitHub issues, add dependencies,
 change prompts, call providers, read runtime `var/` data, change storage,
 change admin access, change release gates or claim beta/production readiness.
 
+## Current Plan Snapshot
+
+Current preferred direction, pending a future approved discovery spike:
+
+- Build a universal, composable glossary core rather than a hardcoded
+  English-to-Russian glossary. The first practical language family should be
+  European source languages paired with Russian/Ukrainian targets, and
+  Russian/Ukrainian source languages paired back to selected European targets.
+- Assemble language behavior from source-language capabilities plus
+  target-language requirements. This avoids one bespoke language pack per pair
+  while still allowing language-specific adapters where evidence shows they
+  improve quality.
+- Use deterministic scanning first to collect candidates and evidence for
+  names, aliases, forms of address, titles, places, organizations, repeated
+  terms, official names, URLs, placeholders and code/API identifiers.
+- Use DeepSeek as a bounded JSON glossary editor/normalizer over candidate
+  evidence, not as an unconstrained whole-book extractor.
+- Validate every glossary entry against schema and evidence before use. Reject
+  unsupported aliases, hallucinated entities, invalid enum values and weak
+  gender decisions.
+- Treat grammatical gender as evidence-driven. Do not infer gender only from
+  name shape: names such as `Alex` or `Sasha` can be masculine, feminine,
+  common or unknown depending on the book. Weak cases should stay `unknown`
+  with review notes.
+- Inject only the compact relevant glossary subset into each work unit and run
+  post-translation QA for name/title/term drift, preserved identifiers and
+  Russian/Ukrainian gender-consistency warnings.
+- Keep local neural extractors such as `BookNLP`, `GLiNER`, `Stanza`,
+  `Natasha` or `Slovnet` as optional offline spike tools until CPU/RAM/time,
+  runtime compatibility, license and deployment impact are measured and
+  approved.
+- Keep very large books under time control with bounded evidence packets,
+  cache keys, token caps and diagnostics-first QA. Exact latency and cost
+  thresholds remain `TBD`.
+- Keep Korean, Chinese and Japanese as later optional language-pack research.
+  The architecture should not block future CJK support, but Asian-language
+  translation is not current scope.
+
 ## Repo Facts Confirmed
 
 - FolioLoom is currently a Telegram-first closed-beta foundation for
@@ -198,6 +236,108 @@ Default future architecture:
    Normal admin, telemetry, issues, PRs and support artifacts stay metadata-only
    unless the owner approves exact raw excerpts or diagnostic artifacts.
 
+## Provisional Plan
+
+Current preferred plan, pending a future owner-approved discovery spike:
+
+1. Use a server-side deterministic scanner as the first pass over the whole
+   book. It should collect candidates and evidence, not make final literary
+   decisions.
+2. Build bounded evidence packets for candidates such as characters, aliases,
+   titles, terms, URLs, code/API identifiers, honorifics and gender evidence.
+3. Send those evidence packets, not an unconstrained full-book prompt, to
+   DeepSeek JSON mode as a glossary editor/normalizer.
+4. Validate the returned JSON strictly against schema and evidence. Reject
+   hallucinated entries, aliases without evidence, invalid enum values and
+   unsupported gender decisions.
+5. Persist or expose glossary artifacts only after a separate owner-approved
+   architecture review covers storage, retention, raw-data boundaries and
+   owner-only visibility.
+6. During translation, inject only the compact relevant glossary subset for
+   each work unit.
+7. Run post-translation QA for name drift, title drift, preserved identifiers
+   and Russian/Ukrainian grammatical-gender agreement.
+
+This is the default direction because the scanner is deterministic and
+debuggable, while DeepSeek is better at literary normalization and translation
+strategy. Neither should be trusted alone.
+
+## Time-Control Notes
+
+Time optimization is not the current design priority, but future implementation
+must avoid making very large books dramatically slower. The glossary system
+should be designed so that quality improves without multiplying translation
+time for long works.
+
+Future implementation constraints:
+
+- do not send the whole book to DeepSeek as one unconstrained glossary prompt;
+- prefer local deterministic scanning over provider calls for first-pass
+  candidate/evidence collection;
+- send bounded evidence packets to DeepSeek instead of full raw document text
+  when possible;
+- cache glossary artifacts by document/evidence digest, source language, target
+  language, translation mode and glossary policy version;
+- never inject the full book glossary into every work unit;
+- inject only a compact relevant subset for each work unit;
+- set explicit token caps for glossary prompt sections;
+- keep preview fast by using no full glossary or only a small preview-range
+  glossary, with full glossary reserved for full translation;
+- start with diagnostics-only post-translation QA, and add automatic retries
+  only after measuring time and quality impact;
+- treat local neural extractors as offline/spike-only until their CPU/RAM/time
+  profile is measured and approved.
+
+For very large books, the target should be a bounded overhead rather than a
+second translation-length pass. Exact thresholds remain `TBD` until benchmarked
+on authorized fixtures.
+
+## Local Model Resource Risk
+
+Local neural extractors are optional spike tools, not the first production path.
+They may improve candidate recall, but they can also add RAM/CPU pressure,
+large dependency trees, model downloads and Python/runtime compatibility risk.
+
+Known resource signals from primary sources as of 2026-06-09:
+
+- `BookNLP` is the most relevant English book-scale tool. Its README reports
+  timing on a 99K-token sample book: small model about 2.4 minutes on a 10-core
+  server, big model about 5.2 minutes on a 10-core server, and about 2.1-2.2
+  minutes on a Titan RTX GPU. The README also says the big model is fit for
+  GPUs and multi-core computers, while the small model is more appropriate for
+  personal computers. Source: <https://github.com/booknlp/booknlp>.
+- `BookNLP` install docs currently show an example `conda` environment with
+  Python 3.7 and require `spacy` model setup. FolioLoom currently targets
+  Python 3.13, so compatibility is `Unknown` until tested in an isolated
+  environment.
+- `GLiNER` describes itself as optimized for CPUs and consumer hardware and
+  supports zero-shot NER-style extraction. Source:
+  <https://github.com/urchade/GLiNER>. It is still a neural dependency and
+  should be benchmarked before any production use.
+- `Slovnet` is comparatively lightweight for Russian: its README says the NER
+  system is around 60 times smaller than BERT SOTA, around 30 MB, works on CPU
+  at about 25 news articles/sec, and inference depends only on `Numpy`; listed
+  model tar files are 2-3 MB each. Source:
+  <https://github.com/natasha/slovnet>. It is trained/evaluated on news-style
+  data, so literary-book behavior remains `Unknown`.
+- `Stanza` installation resolves `PyTorch` dependencies and notes CUDA is
+  optional but highly recommended for source installs. Source:
+  <https://stanfordnlp.github.io/stanza/installation_usage.html>. Actual
+  memory/time depends on language, processors and model package; server fit is
+  `Unknown` until measured.
+
+Default resource policy for a future spike:
+
+- run local neural tools only offline or in an isolated discovery environment;
+- never run them in the main translation worker path until measured and
+  approved;
+- use concurrency `1`, small batches and explicit timeout/memory limits during
+  the spike;
+- prefer stdlib deterministic scanning plus DeepSeek evidence editing for the
+  first implementation candidate;
+- require a separate owner approval before adding any local neural extractor as
+  a production dependency or server runtime path.
+
 ## Suggested Glossary Schema
 
 Future glossary entries should be schema-validated. Suggested fields:
@@ -295,6 +435,10 @@ Suggested metrics:
 
 Recommended language tiers:
 
+- First implementation family: European source languages to Russian/Ukrainian
+  targets, and Russian/Ukrainian source languages back to selected European
+  targets. The system should still be assembled from source capabilities and
+  target requirements, not hardcoded as one language-pair package per pair.
 - English source: deterministic scanner plus optional `BookNLP` benchmark plus
   DeepSeek glossary editor.
 - Russian source: deterministic scanner plus optional `Natasha`/`Slovnet`
@@ -308,7 +452,9 @@ Recommended language tiers:
 
 Assumption: FolioLoom's first quality-sensitive target languages remain Russian
 and Ukrainian because current quality/profile foundations are strongest there.
-If the owner wants a different first target-language set, this is `TBD`.
+Owner direction on 2026-06-09 narrows the first practical glossary scope to
+European languages paired with Russian/Ukrainian in either direction. Exact
+language order, fixtures and acceptance thresholds remain `TBD`.
 
 Asian-language translation is not current scope. Korean, Chinese and Japanese
 support should be treated as future optional language packs, not as a reason to
