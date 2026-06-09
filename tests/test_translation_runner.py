@@ -1,13 +1,16 @@
+import re
 import unittest
 from io import BytesIO
 from pathlib import Path
-import re
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
-from translator_service.extractors import MAX_XML_DEPTH, TextExtractionError
-from translator_service.extractors import extract_text_from_docx
-from translator_service.extractors import extract_text_from_epub
+from translator_service.extractors import (
+    MAX_XML_DEPTH,
+    TextExtractionError,
+    extract_text_from_docx,
+    extract_text_from_epub,
+)
 from translator_service.translation_cache import MemoryTranslationCache
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_jobs import CancellationToken
@@ -17,7 +20,6 @@ from translator_service.translation_runner import (
     translate_epub_document,
     translate_txt_document,
 )
-
 
 TEST_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_samples"
 
@@ -1823,6 +1825,71 @@ class TranslationRunnerTest(unittest.TestCase):
             "[uk] Chapter One\n\n[uk] First paragraph.",
         )
 
+    def test_epub_literary_headings_reach_provider_without_all_caps_word_markers(self):
+        translator = RecordingTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>BOOK ONE: 1805</h1>
+                    <p>First paragraph.</p>
+                  </body>
+                </html>
+                """,
+                "OPS/nav.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml"
+                      xmlns:epub="http://www.idpf.org/2007/ops">
+                  <body>
+                    <nav epub:type="toc">
+                      <ol><li><a href="chapter.xhtml">CHAPTER I API_TOKEN</a></li></ol>
+                    </nav>
+                  </body>
+                </html>
+                """,
+            }
+        )
+
+        translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        provider_text = "\n".join(request[0] for request in translator.requests)
+        self.assertIn("BOOK ONE: 1805", provider_text)
+        self.assertNotRegex(
+            provider_text,
+            r"ZXQPROTECTED\d+QXZ ZXQPROTECTED\d+QXZ: 1805",
+        )
+        self.assertRegex(provider_text, r"CHAPTER ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("CHAPTER I API_TOKEN", provider_text)
+        self.assertNotIn("API_TOKEN</translation_block>", provider_text)
+
+    def test_epub_literary_metadata_and_ncx_headings_preserve_technical_acronyms(self):
+        translator = RecordingTranslator()
+        content = _make_epub_with_all_caps_metadata_and_ncx()
+
+        translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        provider_text = "\n".join(request[0] for request in translator.requests)
+        self.assertIn("BOOK TWO ZXQPROTECTED", provider_text)
+        self.assertNotIn("BOOK ZXQPROTECTED", provider_text)
+        self.assertRegex(provider_text, r"TABLE OF CONTENTS ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("TABLE OF CONTENTS API", provider_text)
+        self.assertRegex(provider_text, r"CHAPTER ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("CHAPTER IV XML", provider_text)
+        self.assertNotIn("API</translation_block>", provider_text)
+        self.assertNotIn("XML</translation_block>", provider_text)
+
     def test_translated_epub_updates_plain_xhtml_contents_page(self):
         translator = RecordingTranslator()
         content = _make_epub(
@@ -2224,6 +2291,62 @@ def _make_epub_with_metadata_and_toc() -> bytes:
             <html xmlns="http://www.w3.org/1999/xhtml">
               <head><title>Original Book Title</title></head>
               <body><h1>Chapter One</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+    return archive.getvalue()
+
+
+def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+              </rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>BOOK TWO API</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+              </manifest>
+              <spine toc="ncx"><itemref idref="chapter" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/toc.ncx",
+            """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>TABLE OF CONTENTS API</text></docTitle>
+              <navMap>
+                <navPoint id="chapter" playOrder="1">
+                  <navLabel><text>CHAPTER IV XML</text></navLabel>
+                  <content src="chapter.xhtml" />
+                </navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+        epub.writestr(
+            "OPS/chapter.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body><p>First paragraph.</p></body>
             </html>
             """,
         )

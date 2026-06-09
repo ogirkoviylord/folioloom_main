@@ -989,7 +989,10 @@ def _translate_work_unit_text(
     source_blocks = _source_blocks_for_work_unit(work_unit, source_text)
     context_memory = job_context or TranslationContextMemory()
     if len(source_blocks) <= 1:
-        protected_source = protect_text(source_text)
+        protected_source = _protect_work_unit_text(
+            text=source_text,
+            work_unit=work_unit,
+        )
         translated_text = translate_with_context(
             translator,
             text=protected_source.text,
@@ -1039,7 +1042,18 @@ def _translate_work_unit_text(
             usage=usage,
         )
 
-    protected_blocks = [protect_text(text) for text in source_blocks]
+    protected_blocks = [
+        _protect_work_unit_text(
+            text=text,
+            work_unit=work_unit,
+            source_block_id=source_block_id,
+        )
+        for text, source_block_id in zip(
+            source_blocks,
+            work_unit.source_block_ids,
+            strict=True,
+        )
+    ]
     source_language_hints = _source_language_hints(
         source_blocks,
         source_language=work_unit.source_language,
@@ -1063,6 +1077,7 @@ def _translate_work_unit_text(
     if parsed is None:
         parsed, fallback_usage = _translate_source_blocks_individually(
             source_blocks=source_blocks,
+            source_block_ids=work_unit.source_block_ids,
             translator=translator,
             source_language=work_unit.source_language,
             target_language=work_unit.target_language,
@@ -1124,9 +1139,65 @@ def _source_blocks_for_work_unit(
     return parts
 
 
+def _protect_work_unit_text(
+    *,
+    text: str,
+    work_unit: PersistentWorkUnit,
+    source_block_id: str | None = None,
+) -> ProtectedText:
+    return protect_text(
+        text,
+        literary_heading=_is_epub_literary_work_unit_text(
+            text=text,
+            source_block_id=source_block_id,
+            source_block_ids=work_unit.source_block_ids,
+        ),
+    )
+
+
+def _is_epub_literary_work_unit_text(
+    *,
+    text: str,
+    source_block_id: str | None = None,
+    source_block_ids: tuple[str, ...] = (),
+) -> bool:
+    block_ids = (source_block_id,) if source_block_id else source_block_ids
+    return any(_is_epub_literary_block_id(block_id) for block_id in block_ids) or (
+        any(block_id.startswith("epub:") for block_id in block_ids)
+        and _looks_like_epub_literary_heading_text(text)
+    )
+
+
+def _is_epub_literary_block_id(block_id: str) -> bool:
+    return (
+        block_id.startswith("epub:aux:ncx:")
+        or block_id.startswith("epub:aux:xhtml-title:")
+        or block_id.startswith("epub:aux:xhtml-navigation:")
+        or (
+            block_id.startswith("epub:aux:opf:")
+            and ":title:" in block_id
+        )
+    )
+
+
+def _looks_like_epub_literary_heading_text(text: str) -> bool:
+    stripped = " ".join(text.split())
+    if not stripped or len(stripped) > 100:
+        return False
+    return bool(
+        re.match(
+            r"^(book|chapter|part|volume|contents|table of contents)\b",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(r"[A-Z][A-Z\s:;,.!?'\-0-9]{1,}", stripped)
+    )
+
+
 def _translate_source_blocks_individually(
     *,
     source_blocks: list[str],
+    source_block_ids: tuple[str, ...] | None = None,
     translator: PersistentWorkUnitTranslator,
     source_language: str,
     target_language: str,
@@ -1135,8 +1206,19 @@ def _translate_source_blocks_individually(
     translated_blocks: list[str] = []
     total_usage = ProviderUsage()
     context_memory = translation_context or TranslationContextMemory()
-    for source_block in source_blocks:
-        protected_source = protect_text(source_block)
+    source_block_ids = source_block_ids or tuple("" for _ in source_blocks)
+    for source_block, source_block_id in zip(
+        source_blocks,
+        source_block_ids,
+        strict=True,
+    ):
+        protected_source = protect_text(
+            source_block,
+            literary_heading=_is_epub_literary_work_unit_text(
+                text=source_block,
+                source_block_id=source_block_id,
+            ),
+        )
         translated = translate_with_context(
             translator,
             text=protected_source.text,
