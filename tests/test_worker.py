@@ -392,6 +392,87 @@ class WorkerTest(unittest.TestCase):
             "</translation_batch>",
         )
 
+    def test_epub_navigation_work_unit_uses_literary_heading_protection(self):
+        store = self._store()
+        job = store.create_job(
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+            file_name="book.epub",
+            document_kind="epub",
+            source_language="en",
+            target_language="ru",
+            adapter_version="epub-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+        )
+        store.add_work_units(
+            job.id,
+            [
+                WorkUnitPlan(
+                    sequence=1,
+                    source_block_ids=(
+                        "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0",
+                    ),
+                    source_text_hash="hash-1",
+                    prompt_tier="plain",
+                    source_language="en",
+                    target_language="ru",
+                ),
+                WorkUnitPlan(
+                    sequence=2,
+                    source_block_ids=("epub:OPS/chapter.xhtml:0",),
+                    source_text_hash="hash-2",
+                    prompt_tier="plain",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            ],
+        )
+        translator = RecordingTranslator()
+
+        completed = run_next_persistent_work_unit(
+            store=store,
+            job_id=job.id,
+            worker_id="worker-a",
+            source_loader=lambda unit: {
+                ("epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0",): (
+                    "CHAPTER I API_TOKEN"
+                ),
+                ("epub:OPS/chapter.xhtml:0",): "BOOK ONE: 1805",
+            }[unit.source_block_ids],
+            translator=translator,
+        )
+        completed_body_heading = run_next_persistent_work_unit(
+            store=store,
+            job_id=job.id,
+            worker_id="worker-a",
+            source_loader=lambda unit: {
+                ("epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0",): (
+                    "CHAPTER I API_TOKEN"
+                ),
+                ("epub:OPS/chapter.xhtml:0",): "BOOK ONE: 1805",
+            }[unit.source_block_ids],
+            translator=translator,
+        )
+
+        provider_text = translator.calls[0][0]
+        body_heading_provider_text = translator.calls[1][0]
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertRegex(provider_text, r"CHAPTER ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("CHAPTER I API_TOKEN", provider_text)
+        self.assertNotIn("API_TOKEN", provider_text)
+        self.assertEqual(completed.translated_text, "[ru] CHAPTER I API_TOKEN")
+        self.assertEqual(
+            completed_body_heading.status,
+            PersistentWorkUnitStatus.TRANSLATED,
+        )
+        self.assertIn("BOOK ONE: 1805", body_heading_provider_text)
+        self.assertNotRegex(
+            body_heading_provider_text,
+            r"ZXQPROTECTED\d+QXZ ZXQPROTECTED\d+QXZ: 1805",
+        )
+
     def test_returns_none_when_no_pending_work_units_exist(self):
         store = self._store()
         job = _job_with_units(store)

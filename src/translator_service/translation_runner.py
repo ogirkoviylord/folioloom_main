@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from io import BytesIO
-from pathlib import PurePath, PurePosixPath
 import html
 import logging
 import re
 import time
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import PurePath, PurePosixPath
 from typing import Callable
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -27,9 +27,9 @@ from translator_service.protected_text import (
     protect_text,
     restore_protected_text,
 )
-from translator_service.security_telemetry import record_security_event
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
+from translator_service.security_telemetry import record_security_event
 from translator_service.structure_optimizer import (
     PromptTier,
     StructuredTextBlock,
@@ -37,22 +37,21 @@ from translator_service.structure_optimizer import (
     build_translation_units,
 )
 from translator_service.translation_cache import TranslationCache
-from translator_service.translation_jobs import (
-    CancellationToken,
-    FragmentTranslation,
-    TextTranslator,
-    TranslationProgress,
-    TranslationCancelled,
-    TranslationJobResult,
-    translate_text_fragments,
-)
 from translator_service.translation_context import (
     TranslationContextMemory,
     translate_with_context,
     update_translation_context_memory,
 )
+from translator_service.translation_jobs import (
+    CancellationToken,
+    FragmentTranslation,
+    TextTranslator,
+    TranslationCancelled,
+    TranslationJobResult,
+    TranslationProgress,
+    translate_text_fragments,
+)
 from translator_service.translation_postprocess import clean_inline_formatting_artifacts
-
 
 logger = logging.getLogger(__name__)
 
@@ -1379,6 +1378,10 @@ def _translate_epub_opf_metadata(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        literary_heading_flags=tuple(
+            _local_name(element.tag) == "title"
+            for element in translatable_elements
+        ),
     )
     for element, translated_text in zip(
         translatable_elements,
@@ -1415,6 +1418,7 @@ def _translate_epub_ncx_text(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        literary_heading_flags=tuple(True for _ in translatable_elements),
     )
     for element, translated_text in zip(
         translatable_elements,
@@ -1460,6 +1464,7 @@ def _translate_epub_xhtml_auxiliary_text(
         source_language=source_language,
         target_language=target_language,
         translator=translator,
+        literary_heading_flags=tuple(True for _ in elements),
     )
     for element, translated_text in zip(elements, translated_texts, strict=True):
         if _local_name(element.tag) == "title":
@@ -1475,11 +1480,16 @@ def _translate_epub_auxiliary_strings(
     source_language: str,
     target_language: str,
     translator: TextTranslator,
+    literary_heading_flags: tuple[bool, ...] | None = None,
 ) -> list[str]:
     if not texts:
         return []
 
-    protected_texts = [protect_text(text) for text in texts]
+    literary_heading_flags = literary_heading_flags or tuple(False for _ in texts)
+    protected_texts = [
+        protect_text(text, literary_heading=literary_heading)
+        for text, literary_heading in zip(texts, literary_heading_flags, strict=True)
+    ]
     translated_text = translate_with_context(
         translator,
         text=_format_translation_batch(
@@ -1504,6 +1514,7 @@ def _translate_epub_auxiliary_strings(
             translator=translator,
             source_language=source_language,
             target_language=target_language,
+            literary_heading_flags=literary_heading_flags,
         )
     translated_texts = _restore_protected_texts(parsed, protected_texts)
     return _retry_untranslated_source_residue_texts(
@@ -2605,7 +2616,7 @@ def _translate_epub_units(
                 )
             continue
 
-        protected_blocks = [protect_text(block.text) for block in unit.blocks]
+        protected_blocks = [_protect_epub_block_text(block) for block in unit.blocks]
         source_language_hints = _source_language_hints(
             [block.text for block in unit.blocks],
             source_language=source_language,
@@ -2679,6 +2690,7 @@ def _translate_marked_text_units(
 ) -> TranslationJobResult:
     translated_blocks: list[FragmentTranslation] = []
     total_units = len(units)
+    context_memory = TranslationContextMemory()
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
@@ -2939,6 +2951,20 @@ def _parse_epub_translation_unit(
     ]
 
 
+def _protect_epub_block_text(source_block: _EpubTextBlock) -> ProtectedText:
+    return protect_text(
+        source_block.text,
+        literary_heading=_is_epub_literary_protection_surface(source_block),
+    )
+
+
+def _is_epub_literary_protection_surface(source_block: _EpubTextBlock) -> bool:
+    return (
+        source_block.kind == TextBlockKind.HEADING
+        or source_block.role == _EPUB_BLOCK_ROLE_NAVIGATION
+    )
+
+
 def _parse_translation_batch(
     translated_text: str,
     *,
@@ -2988,7 +3014,7 @@ def _translate_epub_blocks_individually(
     translated_blocks: list[FragmentTranslation] = []
     context_memory = translation_context or TranslationContextMemory()
     for source_block in source_blocks:
-        protected_source = protect_text(source_block.text)
+        protected_source = _protect_epub_block_text(source_block)
         translated_text = restore_protected_text(
             translate_with_context(
                 translator,
@@ -3048,11 +3074,13 @@ def _translate_texts_individually(
     source_language: str,
     target_language: str,
     translation_context: TranslationContextMemory | None = None,
+    literary_heading_flags: tuple[bool, ...] | None = None,
 ) -> list[str]:
     translated_texts: list[str] = []
     context_memory = translation_context or TranslationContextMemory()
-    for text in texts:
-        protected_source = protect_text(text)
+    literary_heading_flags = literary_heading_flags or tuple(False for _ in texts)
+    for text, literary_heading in zip(texts, literary_heading_flags, strict=True):
+        protected_source = protect_text(text, literary_heading=literary_heading)
         translated_text = restore_protected_text(
             _clean_translated_text(
                 translate_with_context(

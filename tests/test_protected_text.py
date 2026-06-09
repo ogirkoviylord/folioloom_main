@@ -41,6 +41,45 @@ class ProtectedTextTest(unittest.TestCase):
         self.assertNotIn("Footnote", protected.replacements.values())
         self.assertNotIn("endnote", protected.replacements.values())
 
+    def test_literary_heading_context_keeps_words_translatable_but_markers_stable(self):
+        protected = protect_text("CHAPTER I API_TOKEN", literary_heading=True)
+
+        self.assertIn("CHAPTER ", protected.text)
+        self.assertNotIn("CHAPTER", protected.replacements.values())
+        self.assertIn("I", protected.replacements.values())
+        self.assertIn("API_TOKEN", protected.replacements.values())
+
+    def test_literary_heading_context_preserves_technical_acronyms(self):
+        protected = protect_text(
+            "BOOK IV API URL HTTP JSON XML",
+            literary_heading=True,
+        )
+
+        self.assertNotIn("", protected.replacements.values())
+        self.assertNotIn("BOOK", protected.replacements.values())
+        for token in ("IV", "API", "URL", "HTTP", "JSON", "XML"):
+            self.assertIn(token, protected.replacements.values())
+
+    def test_literary_heading_context_keeps_table_of_contents_translatable(self):
+        protected = protect_text("TABLE OF CONTENTS API", literary_heading=True)
+
+        self.assertIn("TABLE OF CONTENTS ", protected.text)
+        for word in ("TABLE", "OF", "CONTENTS"):
+            self.assertNotIn(word, protected.replacements.values())
+        self.assertIn("API", protected.replacements.values())
+
+    def test_literary_heading_context_never_creates_empty_replacements(self):
+        protected = protect_text("XML", literary_heading=True)
+
+        self.assertNotIn("", protected.replacements.values())
+        self.assertEqual(protected.replacements, {"ZXQPROTECTED0QXZ": "XML"})
+
+    def test_default_context_still_protects_all_caps_words(self):
+        protected = protect_text("BOOK ONE: 1805")
+
+        self.assertIn("BOOK", protected.replacements.values())
+        self.assertIn("ONE", protected.replacements.values())
+
 
 if __name__ == "__main__":
     unittest.main()
