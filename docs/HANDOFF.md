@@ -145,6 +145,25 @@ production readiness or deploy readiness. Live provider reliability, style
 impact, token usage and retry impact remain `TBD` until owner-approved
 provider-backed measurement exists.
 
+Provider JSON malformed-output repair update on 2026-06-09: branch
+`codex/json-batch-malformed-output-repair` adds a focused repair path for
+DeepSeek `JSON_TRANSLATION_BATCH` responses that return HTTP 200 but contain
+literal JSON control characters inside translated string values. The local
+repair escapes only raw control characters inside JSON strings, then re-runs
+the existing strict JSON batch validator for exact count, ordered ids, no extra
+keys, non-empty text, protected-marker preservation and unsafe-output
+rejection before converting to the existing internal `translation_batch` XML.
+If local repair is not applicable for `invalid_json`, the single provider
+repair retry now treats the malformed provider output as untrusted provider
+output and asks DeepSeek to repair JSON shape/escaping instead of translating
+the original source again. Safe security events remain metadata-only; raw
+provider output stays confined to the approved owner-only provider IO
+diagnostic boundary. Local verification passed focused DeepSeek-client and
+output-contract tests, compileall, targeted ruff and `git diff --check`.
+Full in-worktree unittest discover still fails the known local-artifact
+Reader Explorer empty-state assertion because existing `var/translation-runs`
+makes the admin page non-empty; runtime `var/` data was not modified.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the
