@@ -233,6 +233,7 @@ def translate_epub_document(
         content,
         blocks,
         translation.fragments,
+        target_language=target_language,
     )
     if not is_partial:
         translated_content = _translate_epub_auxiliary_content(
