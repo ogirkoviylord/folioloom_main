@@ -240,6 +240,29 @@ does not change scheduler/provider capacity, database/runtime state, provider
 retry/prompt behavior, partial assembly, raw diagnostics, deployment, Gate B or
 release readiness.
 
+Issue #393 EPUB RU localization cleanup update on 2026-06-11: PRs #398-#401
+close child issues #394-#397. EPUB assembly now updates existing OPF/NCX/XHTML
+`lang`/`xml:lang` attributes to the target language where the translated
+content is Russian, while preserving the existing OPF `dc:language` update.
+Russian EPUB text-node cleanup now localizes standard Gutenberg/front-matter
+labels `Title:`, `Author:`, `Illustrator:`, `Language:` and `Credits:` without
+rewriting the values after the colon; it also localizes the narrow
+`FOOTNOTES:` section label across body, XHTML navigation and NCX surfaces, and
+normalizes conservative straight double-quoted Russian dialogue to guillemets
+without touching attribute-like or code-like snippets. The broader #384
+`BOOK`/`CHAPTER` all-caps heading/protected-token work, cover image
+translation, glossary/name/entity consistency, provider config/caps, scheduler
+or database/runtime state, deployment, raw diagnostics, Gate B and release
+readiness remain out of scope. Local verification passed focused
+`tests.test_translation_postprocess`, `tests.test_format_adapters` and
+`tests.test_translation_runner`, compileall, targeted `ruff --select F,I`,
+`git diff --check`, and a combined synthetic EPUB probe for #393. Full
+in-worktree unittest discover ran 1434 tests with 34 skipped and failed only
+the known local-artifact Reader Explorer empty-state assertion because existing
+local `var/translation-runs` makes the page non-empty; runtime `var/` data was
+not modified. GitHub PR checks for #398-#401 were not reported by
+`gh pr checks` at review time, so CI status remains Unknown.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the
