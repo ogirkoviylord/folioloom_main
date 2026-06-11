@@ -53,6 +53,10 @@ _MASK_RES = (
     re.compile(r"```.*?```", flags=re.DOTALL),
     re.compile(r"`[^`\n]+`"),
     re.compile(r"https?://[^\s<>\]\)\"']+", flags=re.IGNORECASE),
+    re.compile(
+        r"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>\]\)\"']*)?",
+        flags=re.IGNORECASE,
+    ),
     re.compile(r"</?[A-Za-z][^<>\n]*?>"),
     re.compile(r"\$\{[^}\n]+\}"),
     re.compile(r"\{\{\s*[^{}\n]+\s*\}\}"),
