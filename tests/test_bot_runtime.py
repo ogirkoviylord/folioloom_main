@@ -3517,25 +3517,59 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_total - 10, 290)
         self.assertEqual(later_total - 40, 260)
 
-    def test_polled_progress_estimate_uses_observed_rate_when_slower_than_baseline(
-        self,
-    ):
+    def test_polled_progress_estimate_keeps_baseline_during_early_warmup(self):
         progress = type(
             "Progress",
             (),
             {
                 "completed_fragments": 1,
-                "total_fragments": 4,
-                "estimated_seconds": 300,
+                "total_fragments": 1000,
+                "estimated_seconds": 21600,
             },
         )()
 
         estimated_total = _polled_progress_estimated_total_seconds(
             progress,
-            elapsed_seconds=100,
+            elapsed_seconds=900,
         )
 
-        self.assertEqual(estimated_total, 400)
+        self.assertEqual(estimated_total, 21600)
+
+    def test_polled_progress_estimate_uses_observed_rate_after_warmup(self):
+        progress = type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 100,
+                "total_fragments": 1000,
+                "estimated_seconds": 21600,
+            },
+        )()
+
+        estimated_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=1000,
+        )
+
+        self.assertEqual(estimated_total, 10000)
+
+    def test_polled_progress_estimate_uses_observed_rate_at_high_progress(self):
+        progress = type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": 2413,
+                "total_fragments": 2437,
+                "estimated_seconds": 22860,
+            },
+        )()
+
+        estimated_total = _polled_progress_estimated_total_seconds(
+            progress,
+            elapsed_seconds=1680,
+        )
+
+        self.assertEqual(estimated_total, 1697)
 
     def test_document_size_guard_uses_telegram_metadata_before_download(self):
         class Document:

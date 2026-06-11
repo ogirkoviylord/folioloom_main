@@ -934,6 +934,19 @@ class BotMessagesTest(unittest.TestCase):
         self.assertIn("[#---------] 10%", message)
         self.assertIn("Time left: ~20 sec", message)
 
+    def test_progress_message_renders_short_remaining_time_at_high_progress(self):
+        message = build_translation_progress_message(
+            completed_fragments=2413,
+            total_fragments=2437,
+            interface_language="ru",
+            estimated_total_seconds=1697,
+            elapsed_seconds=1680,
+        )
+
+        self.assertIn("[#########-] 99%", message)
+        self.assertIn("Осталось: ~17 сек", message)
+        self.assertNotIn("Осталось: ~5 ч", message)
+
     def test_translation_progress_message_escapes_expandable_quote_excerpt(self):
         message = build_translation_progress_message(
             completed_fragments=1,
