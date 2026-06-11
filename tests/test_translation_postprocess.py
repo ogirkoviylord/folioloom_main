@@ -117,6 +117,37 @@ class TranslationPostprocessTest(unittest.TestCase):
             "FOOTNOTES:",
         )
 
+    def test_normalizes_straight_dialogue_quotes_for_russian(self):
+        cleaned = clean_inline_formatting_artifacts(
+            '"Да", сказал он. Потом она спросила: "Ну что?"',
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            cleaned,
+            "«Да», сказал он. Потом она спросила: «Ну что?»",
+        )
+
+    def test_keeps_straight_quotes_for_non_cyrillic_targets(self):
+        text = '"Да", said he.'
+
+        self.assertEqual(
+            clean_inline_formatting_artifacts(text, target_language="en"),
+            text,
+        )
+
+    def test_keeps_code_like_and_attribute_like_straight_quotes(self):
+        for text in (
+            'print("Да")',
+            'title="Да"',
+            '<span title="Да">текст</span>',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    clean_inline_formatting_artifacts(text, target_language="ru"),
+                    text,
+                )
+
     def test_normalizes_squashed_python_like_pseudocode(self):
         normalized = normalize_python_like_code_layout(
             (
