@@ -223,6 +223,23 @@ modified. This does not repair existing failed jobs, rerun provider work,
 change provider prompts/config, mutate scheduler/database/runtime state,
 deploy, run server smoke, close Gate B, or claim release readiness.
 
+Issue #367 ETA stabilization update on 2026-06-11: branch
+`codex/issue-367-stabilize-long-eta` keeps the fix narrowly scoped to
+Telegram progress ETA calculation/rendering. Worker-polled progress now keeps
+the static baseline during the earliest low-sample warm-up, then allows
+observed durable progress to replace the static baseline once enough fragments
+are complete, and also trusts observed progress at high completion so a 99%
+translation no longer shows hours remaining from the old static baseline.
+Regression coverage includes baseline decay, early warm-up, later observed
+throughput, and the 99%/short-remaining-time rendering case in Russian. Local
+verification passed focused bot runtime/message tests, compileall, targeted
+`ruff --select F,I`, and `git diff --check`. Full `ruff check` on the touched
+files still reports pre-existing E501 line-length debt in
+`tests/test_bot_messages.py`; those unrelated lines were not changed. This
+does not change scheduler/provider capacity, database/runtime state, provider
+retry/prompt behavior, partial assembly, raw diagnostics, deployment, Gate B or
+release readiness.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the
