@@ -113,6 +113,31 @@ def assemble_persistent_epub_result(
     partial: bool,
     document_sandbox=None,
 ) -> StoredFile:
+    content = assemble_persistent_epub_content(
+        store=store,
+        storage=storage,
+        job_id=job_id,
+        partial=partial,
+        document_sandbox=document_sandbox,
+    )
+    return store_persistent_epub_result(
+        store=store,
+        storage=storage,
+        job_id=job_id,
+        file_name=file_name,
+        partial=partial,
+        content=content,
+    )
+
+
+def assemble_persistent_epub_content(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    job_id: str,
+    partial: bool,
+    document_sandbox=None,
+) -> bytes:
     job = _require_job(store, job_id)
     source_content = storage.get_bytes(job.source_object_key)
     translated_units = _translated_units_from_work_units(store.list_work_units(job_id))
@@ -133,6 +158,18 @@ def assemble_persistent_epub_result(
             translated_units=assembly_units,
             target_language=None if partial else job.target_language,
         )
+    return content
+
+
+def store_persistent_epub_result(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    job_id: str,
+    file_name: str,
+    partial: bool,
+    content: bytes,
+) -> StoredFile:
     return _store_assembled_result(
         store=store,
         storage=storage,

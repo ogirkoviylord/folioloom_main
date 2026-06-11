@@ -17,6 +17,7 @@ from translator_service.format_adapters.epub import (
     assemble_epub_content_from_block_translations,
     epub_aux_block_id,
     epub_body_block_id,
+    extract_epub_book_mode_audit_chunks,
     plan_epub_translation,
 )
 from translator_service.format_adapters.txt import (
@@ -39,6 +40,7 @@ __all__ = [
     "docx_translation_mode_profile_signature",
     "epub_aux_block_id",
     "epub_body_block_id",
+    "extract_epub_book_mode_audit_chunks",
     "plan_docx_translation",
     "plan_epub_translation",
     "plan_txt_translation",

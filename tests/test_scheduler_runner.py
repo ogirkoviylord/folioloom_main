@@ -6,9 +6,11 @@ from base64 import urlsafe_b64encode
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from translator_service.admin.ai_provider_keys import SQLiteAIProviderKeyStore
 from translator_service.admin.secrets import SQLiteEncryptedSecretStore
@@ -18,16 +20,19 @@ from translator_service.beta_safety import (
     BetaSafetyDecision,
 )
 from translator_service.bot.runtime import build_deepseek_translator
+from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
 from translator_service.extractors import extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
+from translator_service.job_runner import InMemoryTranslationJobRepository
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     SQLiteTranslationJobStore,
     WorkUnitPlan,
 )
 from translator_service.persistent_planner import create_persistent_epub_job_plan
+from translator_service.pricing import PricingRules
 from translator_service.scheduler import (
     ProviderCapacityCap,
     ProviderCapacityCapScope,
@@ -1040,6 +1045,146 @@ class SchedulerRunnerTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(guard.consumed_jobs, [])
+
+    def test_assemble_due_jobs_blocks_final_book_mode_epub_navigation_residue(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=plan.job.id,
+                    order_id=plan.job.order_id,
+                    user_id=plan.job.user_id,
+                    file_name=plan.job.file_name,
+                    document_kind=plan.job.document_kind,
+                    source_language=plan.job.source_language,
+                    target_language=plan.job.target_language,
+                    total_fragment_count=len(plan.work_units),
+                    translation_policy=plan.job.translation_policy,
+                ),
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Chapter 1",
+                    "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
+                    "epub:aux:opf:OPS/content.opf:title:0": "Original Book Title",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Original Book Title",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "Chapter 1",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "Original Book Title"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "Book I",
+                },
+            )
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=guard,
+                translation_run_log_root=run_log_root,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=20,
+                max_fragment_chars=120,
+                file_storage=storage,
+                persistent_job_store=store,
+            )
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            artifact_text = "\n".join(
+                [
+                    (logger.run_dir / "run.json").read_text(encoding="utf-8"),
+                    events_jsonl,
+                    (logger.run_dir / "summary.md").read_text(encoding="utf-8"),
+                ]
+            )
+            gate = snapshot["book_mode_audit"]["final_surface_gate"]
+
+            self.assertEqual(assembled, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.FAILED,
+            )
+            self.assertIsNone(persisted_job.final_object_key)
+            self.assertIsNone(persisted_job.partial_object_key)
+            self.assertIsNone(
+                service.get_user_book_result(
+                    user_telegram_id=42,
+                    job_id=plan.job.id,
+                )
+            )
+            self.assertEqual(snapshot["status"], "failed")
+            self.assertEqual(
+                snapshot["error_message"],
+                "Final EPUB surface audit failed safely.",
+            )
+            self.assertEqual(gate["reason"], "english_navigation_heading_residue")
+            self.assertEqual(gate["phase"], "final_epub_surface_audit")
+            self.assertGreaterEqual(gate["blocking_findings"], 2)
+            self.assertIn("xhtml_navigation", gate["surface_categories"])
+            self.assertIn("toc_ncx", gate["surface_categories"])
+            self.assertIn("book_mode_audit_gate_failed", events_jsonl)
+            self.assertIn("run_failed", events_jsonl)
+            self.assertEqual(
+                guard.released_jobs,
+                [(plan.job.id, "final_epub_surface_audit_failed")],
+            )
+            self.assertEqual(guard.consumed_jobs, [])
+            self.assertNotIn("Original Book Title", artifact_text)
+            self.assertNotIn("Chapter 1", artifact_text)
+            self.assertNotIn("Book I", artifact_text)
+            self.assertNotIn("Переведенный абзац", artifact_text)
+
+    def test_assemble_due_jobs_keeps_clean_book_mode_epub_ready(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Глава 1",
+                    "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
+                    "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "Глава 1",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "Название книги"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "Книга I",
+                },
+            )
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(plan.job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertIsNotNone(persisted_job.final_object_key)
 
     def test_assemble_due_jobs_skips_interrupted_job_without_translated_fragments(self):
         with TemporaryDirectory() as temp_dir:
@@ -2677,16 +2822,145 @@ def _create_epub_job_plan(
     )
 
 
-def _make_epub(xhtml_items: dict[str, str]) -> bytes:
-    from io import BytesIO
-    from zipfile import ZipFile
+def _create_epub_surface_audit_job_plan(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    target_language: str,
+):
+    original = storage.put_bytes(
+        kind=StoredFileKind.ORIGINAL,
+        file_name="book.epub",
+        content_type="application/epub+zip",
+        content=_make_epub_with_surface_audit_content(),
+    )
+    return create_persistent_epub_job_plan(
+        store=store,
+        storage=storage,
+        order_id="order-epub-surface",
+        user_id="telegram:42",
+        source_object_key=original.object_key,
+        file_name="book.epub",
+        source_language="en",
+        target_language=target_language,
+        max_fragment_chars=120,
+        translation_mode="book_manuscript",
+    )
 
+
+def _complete_scheduled_units_by_block_id(
+    store: SQLiteTranslationJobStore,
+    job_id: str,
+    translated_by_block_id: dict[str, str],
+) -> None:
+    while claim := store.claim_next_scheduled_work_unit(
+        worker_id="worker-seed",
+        lease_seconds=300,
+        limits=SchedulerLimits(),
+    ):
+        work_unit = store.get_work_unit(claim.work_unit_id)
+        if work_unit.job_id != job_id:
+            raise AssertionError(f"Unexpected claimed job: {work_unit.job_id}")
+        translated_text = "\n\n".join(
+            translated_by_block_id[block_id]
+            for block_id in work_unit.source_block_ids
+        )
+        store.complete_claimed_work_unit(
+            work_unit_id=claim.work_unit_id,
+            claim_token=claim.claim_token,
+            translated_text=translated_text,
+            prompt_tokens=10,
+            completion_tokens=5,
+            cache_hit_tokens=0,
+            cache_miss_tokens=10,
+        )
+
+
+def _pricing_rules() -> PricingRules:
+    return PricingRules(
+        deepseek_input_usd_per_million_tokens=0.28,
+        expected_output_multiplier=1.2,
+        service_markup_multiplier=3.0,
+        minimum_price_usd=0.10,
+    )
+
+
+def _make_epub(xhtml_items: dict[str, str]) -> bytes:
     archive = BytesIO()
     with ZipFile(archive, "w") as epub:
         epub.writestr("mimetype", "application/epub+zip")
         epub.writestr("META-INF/container.xml", "<container />")
         for file_name, content in xhtml_items.items():
             epub.writestr(file_name, content)
+    return archive.getvalue()
+
+
+def _make_epub_with_surface_audit_content() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OPS/content.opf" /></rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Original Book Title</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="chapter" href="chapter.xhtml"
+                      media-type="application/xhtml+xml" />
+                <item id="nav" href="nav.xhtml"
+                      media-type="application/xhtml+xml" properties="nav" />
+                <item id="ncx" href="toc.ncx"
+                      media-type="application/x-dtbncx+xml" />
+              </manifest>
+              <spine toc="ncx"><itemref idref="chapter" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/toc.ncx",
+            """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>Original Book Title</text></docTitle>
+              <navMap>
+                <navPoint><navLabel><text>Chapter 1</text></navLabel></navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+        epub.writestr(
+            "OPS/chapter.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><title>Original Book Title</title></head>
+              <body><h1>Chapter 1</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+        epub.writestr(
+            "OPS/nav.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                  xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc">
+                  <ol><li><a href="chapter.xhtml">Book I</a></li></ol>
+                </nav>
+              </body>
+            </html>
+            """,
+        )
     return archive.getvalue()
 
 

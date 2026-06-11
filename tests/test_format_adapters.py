@@ -14,6 +14,7 @@ from translator_service.format_adapters import (
     assemble_epub_content_from_block_translations,
     epub_aux_block_id,
     epub_body_block_id,
+    extract_epub_book_mode_audit_chunks,
     plan_docx_translation,
     plan_epub_translation,
     plan_txt_translation,
@@ -224,6 +225,9 @@ class EpubFormatAdapterTest(unittest.TestCase):
 
     def test_exports_public_epub_assembly_helper(self):
         self.assertTrue(callable(assemble_epub_content_from_block_translations))
+
+    def test_exports_public_epub_book_mode_audit_chunk_helper(self):
+        self.assertTrue(callable(extract_epub_book_mode_audit_chunks))
 
     def test_exports_public_epub_block_id_helpers(self):
         self.assertEqual(
@@ -621,6 +625,57 @@ class EpubFormatAdapterTest(unittest.TestCase):
             extract_text_from_epub(content),
             "Содержание\n\nГлава 1\n\nЧасть I\n\nПервый настоящий абзац книги.",
         )
+
+    def test_extracts_epub_book_mode_audit_chunks_from_final_surface(self):
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml" lang="en"
+                      xml:lang="en">
+                  <head><title>Original Book Title</title></head>
+                  <body><h1>Chapter 1</h1><p>Переведенный абзац.</p></body>
+                </html>
+                """,
+                "OPS/nav.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml"
+                      xmlns:epub="http://www.idpf.org/2007/ops">
+                  <body>
+                    <nav epub:type="toc">
+                      <ol><li><a href="chapter.xhtml">Book I</a></li></ol>
+                    </nav>
+                  </body>
+                </html>
+                """,
+            },
+            opf_content="""
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Original Book Title</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+            </package>
+            """,
+            ncx_content="""
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <navMap>
+                <navPoint><navLabel><text>Chapter 1</text></navLabel></navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+
+        chunks = extract_epub_book_mode_audit_chunks(content)
+        by_surface = {
+            dict(chunk.metadata).get("surface"): chunk.translated_text
+            for chunk in chunks
+        }
+
+        self.assertEqual(by_surface["opf_title"], "Original Book Title")
+        self.assertEqual(by_surface["opf_language"], "en")
+        self.assertEqual(by_surface["toc_ncx"], "Chapter 1")
+        self.assertEqual(by_surface["xhtml_title"], "Original Book Title")
+        self.assertEqual(by_surface["xhtml_navigation"], "Book I")
+        self.assertEqual(by_surface["xhtml_body_heading"], "Chapter 1")
 
     def test_plans_epub_auxiliary_metadata_and_navigation_blocks(self):
         plan = plan_epub_translation(
