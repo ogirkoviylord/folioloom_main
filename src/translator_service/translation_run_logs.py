@@ -410,6 +410,57 @@ def record_book_mode_audit_fragment_for_job(
     return updated
 
 
+def record_book_mode_audit_gate_for_job(
+    root: str | Path | None,
+    *,
+    job_id: str,
+    gate: dict[str, object],
+) -> int:
+    if root is None or not job_id:
+        return 0
+    root_path = Path(root)
+    if not root_path.exists():
+        return 0
+
+    updated = 0
+    for run_json in root_path.glob("*/run.json"):
+        try:
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
+            continue
+        if snapshot.get("status") != "running":
+            continue
+        if not _is_book_mode_snapshot(snapshot):
+            continue
+
+        audit = snapshot.get("book_mode_audit")
+        if not isinstance(audit, dict):
+            audit = _empty_book_mode_audit_totals(
+                enabled=True,
+                target_language=_string_value(snapshot.get("target_language")),
+            )
+        audit["final_surface_gate"] = _safe_gate_payload(gate)
+        snapshot["book_mode_audit"] = audit
+        _append_run_event(
+            run_json.parent,
+            "book_mode_audit_gate_failed",
+            job_id=job_id,
+            payload=_safe_gate_payload(gate),
+        )
+        run_json.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (run_json.parent / "summary.md").write_text(
+            _render_summary(snapshot),
+            encoding="utf-8",
+        )
+        updated += 1
+    return updated
+
+
 def _append_run_event(
     run_dir: Path,
     event_type: str,
@@ -848,6 +899,23 @@ def _increment_counter(counter: dict[str, int], key: str) -> None:
 
 def _sorted_counter(counter: dict[str, int]) -> dict[str, int]:
     return {key: counter[key] for key in sorted(counter)}
+
+
+def _safe_gate_payload(gate: dict[str, object]) -> dict[str, object]:
+    safe: dict[str, object] = {}
+    for key, value in gate.items():
+        key_text = str(key)
+        if any(marker in key_text.lower() for marker in _SENSITIVE_PAYLOAD_KEY_MARKERS):
+            safe[key_text] = "[redacted]"
+        elif isinstance(value, dict):
+            safe[key_text] = _int_counter(value)
+        elif isinstance(value, (list, tuple)):
+            safe[key_text] = [str(item) for item in value]
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            safe[key_text] = value
+        else:
+            safe[key_text] = str(value)
+    return safe
 
 
 def _int_counter(value: dict) -> dict[str, int]:

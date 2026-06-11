@@ -10,6 +10,7 @@ from translator_service.translation_run_logs import (
     append_provider_io_diagnostic_for_job,
     finish_running_translation_runs_for_job,
     record_book_mode_audit_fragment_for_job,
+    record_book_mode_audit_gate_for_job,
 )
 
 
@@ -320,6 +321,66 @@ class TranslationRunLoggerTest(unittest.TestCase):
         self.assertNotIn("Provider internals", artifact_text)
         self.assertNotIn("sk-bookaudit-secret", artifact_text)
         self.assertNotIn("Traceback", artifact_text)
+
+    def test_records_book_mode_final_gate_metadata_without_text(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-final-gate",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {
+                            "translation_mode": "book_manuscript",
+                            "translation_mode_profile": "book-manuscript-v1",
+                        }
+                    ),
+                ),
+            )
+
+            updated = record_book_mode_audit_gate_for_job(
+                temp_dir,
+                job_id="job-final-gate",
+                gate={
+                    "schema_version": "book-mode-final-surface-gate-v1",
+                    "phase": "final_epub_surface_audit",
+                    "status": "failed",
+                    "reason": "english_navigation_heading_residue",
+                    "blocking_findings": 3,
+                    "total_findings": 4,
+                    "counts_by_code": {"english_navigation_heading_residue": 3},
+                    "counts_by_category": {"navigation_heading": 3},
+                    "counts_by_severity": {"warning": 3},
+                    "surface_categories": ["toc_ncx", "xhtml_navigation"],
+                    "source_text": "RAW SOURCE FINAL GATE SENTINEL",
+                    "translated_text": "RAW TRANSLATION FINAL GATE SENTINEL",
+                },
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            artifact_text = "\n".join(
+                [
+                    json.dumps(snapshot, ensure_ascii=False),
+                    events_jsonl,
+                    (logger.run_dir / "summary.md").read_text(encoding="utf-8"),
+                ]
+            )
+
+        gate = snapshot["book_mode_audit"]["final_surface_gate"]
+        self.assertEqual(updated, 1)
+        self.assertEqual(gate["reason"], "english_navigation_heading_residue")
+        self.assertEqual(gate["phase"], "final_epub_surface_audit")
+        self.assertEqual(gate["source_text"], "[redacted]")
+        self.assertEqual(gate["translated_text"], "[redacted]")
+        self.assertIn("book_mode_audit_gate_failed", events_jsonl)
+        self.assertNotIn("RAW SOURCE FINAL GATE SENTINEL", artifact_text)
+        self.assertNotIn("RAW TRANSLATION FINAL GATE SENTINEL", artifact_text)
 
     def test_records_security_events_as_counters_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:

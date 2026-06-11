@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
+from translator_service.book_mode_output_audit import BookModeAuditChunk
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     TextExtractionError,
@@ -93,6 +94,24 @@ def replace_epub_body_blocks(
     translated_fragments: list[FragmentTranslation],
 ) -> bytes:
     return _replace_epub_blocks(content, blocks, translated_fragments)
+
+
+def extract_epub_book_mode_audit_chunks(
+    content: bytes,
+) -> tuple[BookModeAuditChunk, ...]:
+    repaired = repair_epub_for_processing(content)
+    chunks: list[BookModeAuditChunk] = []
+    try:
+        with ZipFile(BytesIO(repaired.content)) as epub:
+            validate_archive_members(epub)
+            _collect_epub_opf_audit_chunks(epub=epub, chunks=chunks)
+            _collect_epub_ncx_audit_chunks(epub=epub, chunks=chunks)
+            _collect_epub_xhtml_audit_chunks(epub=epub, chunks=chunks)
+    except (BadZipFile, KeyError) as error:
+        raise TextExtractionError(
+            "EPUB file does not contain readable book text"
+        ) from error
+    return tuple(chunks)
 
 
 def plan_epub_translation(
@@ -1103,6 +1122,178 @@ def _collect_epub_xhtml_auxiliary_blocks(
                 )
             )
             validate_epub_text_block_count(len(blocks))
+
+
+def _collect_epub_opf_audit_chunks(
+    *,
+    epub: ZipFile,
+    chunks: list[BookModeAuditChunk],
+) -> None:
+    opf_path = _epub_package_path(epub)
+    if not opf_path:
+        return
+    document = parse_xml_document(
+        epub.read(opf_path),
+        parse_error_message="EPUB package XML is not readable",
+    )
+    counters = {"title": 0, "language": 0}
+    for element in document.iter():
+        local_name = _local_name(element.tag)
+        if local_name not in counters:
+            continue
+        text = _element_direct_text(element)
+        if not text:
+            continue
+        index = counters[local_name]
+        counters[local_name] += 1
+        metadata = _element_language_metadata(element)
+        if local_name == "language":
+            metadata += (("dc:language", text),)
+        chunks.append(
+            BookModeAuditChunk(
+                block_id=epub_aux_block_id(
+                    kind="surface-opf",
+                    file_name=opf_path,
+                    local_name=local_name,
+                    index=index,
+                ),
+                translated_text=text,
+                block_kind="title" if local_name == "title" else "metadata",
+                metadata=metadata + (("surface", f"opf_{local_name}"),),
+            )
+        )
+
+
+def _collect_epub_ncx_audit_chunks(
+    *,
+    epub: ZipFile,
+    chunks: list[BookModeAuditChunk],
+) -> None:
+    for item in epub.infolist():
+        file_name = item.filename
+        if not file_name.lower().endswith(".ncx"):
+            continue
+        document = parse_xml_document(
+            normalize_epub_xml_part_for_xml(epub.read(file_name)),
+            parse_error_message="EPUB NCX XML is not readable",
+        )
+        index = 0
+        for element in document.iter():
+            if _local_name(element.tag) != "text":
+                continue
+            text = _element_direct_text(element)
+            if not text:
+                continue
+            chunks.append(
+                BookModeAuditChunk(
+                    block_id=epub_aux_block_id(
+                        kind="surface-ncx",
+                        file_name=file_name,
+                        local_name="text",
+                        index=index,
+                    ),
+                    translated_text=text,
+                    block_kind="navigation",
+                    metadata=(("surface", "toc_ncx"),),
+                )
+            )
+            index += 1
+
+
+def _collect_epub_xhtml_audit_chunks(
+    *,
+    epub: ZipFile,
+    chunks: list[BookModeAuditChunk],
+) -> None:
+    for file_name in _epub_text_item_names(epub):
+        document = _read_epub_xhtml(epub.read(file_name))
+        parent_by_child_id = _parent_map(document)
+        is_navigation_document = _is_epub_navigation_document(
+            file_name=file_name,
+            document=document,
+            texts=_epub_text_element_texts(document),
+        )
+        title_index = 0
+        navigation_index_by_local_name: dict[str, int] = {}
+        heading_index = 0
+        seen_element_ids: set[int] = set()
+        document_language_metadata = _element_language_metadata(document)
+        for element in document.iter():
+            local_name = _local_name(element.tag)
+            if _is_xhtml_head_title(element, parent_by_child_id):
+                text = _element_direct_text(element)
+                if not text:
+                    continue
+                chunks.append(
+                    BookModeAuditChunk(
+                        block_id=epub_aux_block_id(
+                            kind="surface-xhtml-title",
+                            file_name=file_name,
+                            local_name=local_name,
+                            index=title_index,
+                        ),
+                        translated_text=text,
+                        block_kind="title",
+                        metadata=(
+                            document_language_metadata
+                            + _element_language_metadata(element)
+                            + (("surface", "xhtml_title"),)
+                        ),
+                    )
+                )
+                title_index += 1
+                continue
+
+            if _is_epub_navigation_auxiliary_element(
+                element,
+                parent_by_child_id,
+                is_navigation_document=is_navigation_document,
+            ):
+                text = _visible_text(element)
+                if not text or id(element) in seen_element_ids:
+                    continue
+                seen_element_ids.add(id(element))
+                index = navigation_index_by_local_name.get(local_name, 0)
+                navigation_index_by_local_name[local_name] = index + 1
+                chunks.append(
+                    BookModeAuditChunk(
+                        block_id=epub_aux_block_id(
+                            kind="surface-xhtml-navigation",
+                            file_name=file_name,
+                            local_name=local_name,
+                            index=index,
+                        ),
+                        translated_text=text,
+                        block_kind="navigation",
+                        metadata=(("surface", "xhtml_navigation"),),
+                    )
+                )
+                continue
+
+            if _is_epub_heading_element(element):
+                text = _visible_text(element)
+                if not text:
+                    continue
+                chunks.append(
+                    BookModeAuditChunk(
+                        block_id=epub_body_block_id(file_name, heading_index),
+                        translated_text=text,
+                        block_kind="heading",
+                        metadata=(("surface", "xhtml_body_heading"),),
+                    )
+                )
+                heading_index += 1
+
+
+def _element_language_metadata(
+    element: ElementTree.Element,
+) -> tuple[tuple[str, str], ...]:
+    metadata: list[tuple[str, str]] = []
+    for key in ("lang", f"{{{_XML_NAMESPACE}}}lang"):
+        value = element.attrib.get(key)
+        if value:
+            metadata.append(("xml:lang" if key.startswith("{") else key, value))
+    return tuple(metadata)
 
 
 def _is_xhtml_head_title(

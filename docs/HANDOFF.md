@@ -183,6 +183,27 @@ empty-state assertion because existing `var/translation-runs` makes the page
 non-empty; runtime `var/` data was not modified. CI, server smoke, deploy,
 provider-backed rerun of the EPUB, Gate B and release readiness remain Unknown.
 
+Issue #385 final EPUB surface audit update on 2026-06-11: branch
+`codex/385-epub-navigation-residue` adds a deterministic final-surface gate for
+book-mode EPUB jobs targeting Russian or Ukrainian. The scheduler assembles the
+final EPUB bytes for audit before exposing a `final_object_key`; only clean
+final EPUBs are stored and attached as ready output. The audit covers XHTML body
+headings, XHTML navigation/title, `toc.ncx` text and OPF title/language
+metadata. If at least two high-confidence English navigation/heading residue
+findings remain, the job is marked `failed` instead of clean `ready`, no final
+or partial result pointer is exposed for user download, the beta-safety
+reservation is released with `final_epub_surface_audit_failed`, and the run log
+records only metadata-only gate diagnostics: phase, reason, counts, severity
+and affected surface categories. Partial EPUB behavior remains unchanged, and
+clean book-mode EPUB assembly remains `ready`. Local verification passed the
+focused issue test set, compileall, targeted `ruff --select F,I`, and
+`git diff --check`; full in-worktree unittest discover still fails only the
+known local-artifact Reader Explorer empty-state assertion because existing
+`var/translation-runs` makes the page non-empty. This does not add repair
+retries, provider prompt/config changes, schema changes, deployment changes,
+runtime data operations, raw diagnostic expansion, Gate B readiness or release
+readiness.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the

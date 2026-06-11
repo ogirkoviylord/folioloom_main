@@ -83,6 +83,31 @@ class BookModeOutputAuditTest(unittest.TestCase):
             all(finding.category == "navigation_heading" for finding in result.findings)
         )
 
+    def test_reports_navigation_labels_with_numbers_for_cyrillic_target(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:0",
+                    translated_text="Chapter 1",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-ncx:OPS/toc.ncx:text:1",
+                    translated_text="Book I",
+                    block_kind="navigation",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            [
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+            ],
+        )
+
     def test_reports_provider_commentary_wrapper_without_raw_text(self):
         result = audit_book_mode_output(
             chunks=(

@@ -285,6 +285,15 @@ class SQLiteTranslationJobStore:
             )
         return self._require_job(job_id)
 
+    def mark_job_failed(self, job_id: str) -> PersistentTranslationJob:
+        with self._connection:
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.FAILED,
+                now=_now(),
+            )
+        return self._require_job(job_id)
+
     def get_job(self, job_id: str) -> PersistentTranslationJob | None:
         row = self._connection.execute(
             "SELECT * FROM translation_jobs WHERE id = ?",
