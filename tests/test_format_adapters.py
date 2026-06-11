@@ -666,6 +666,61 @@ class EpubFormatAdapterTest(unittest.TestCase):
             ),
         )
 
+    def test_assembles_epub_with_russian_footnotes_labels_across_surfaces(self):
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        source_content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><h1 id="footnotes">FOOTNOTES:</h1></body>
+                </html>
+                """,
+                "OPS/nav.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml"
+                      xmlns:epub="http://www.idpf.org/2007/ops">
+                  <body>
+                    <nav epub:type="toc">
+                      <ol>
+                        <li><a href="chapter.xhtml#footnotes">FOOTNOTES:</a></li>
+                      </ol>
+                    </nav>
+                  </body>
+                </html>
+                """,
+            },
+            ncx_content="""
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <navMap>
+                <navPoint>
+                  <navLabel><text>FOOTNOTES:</text></navLabel>
+                </navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+
+        content = assemble_epub_content_from_block_translations(
+            source_content=source_content,
+            target_language="ru",
+            translated_by_block_id={
+                "epub:OPS/chapter.xhtml:0": "FOOTNOTES:",
+                "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "FOOTNOTES:",
+                "epub:aux:ncx:OPS/toc.ncx:text:0": "FOOTNOTES:",
+            },
+        )
+
+        with ZipFile(BytesIO(content)) as epub:
+            chapter = epub.read("OPS/chapter.xhtml").decode()
+            nav = epub.read("OPS/nav.xhtml").decode()
+            toc = epub.read("OPS/toc.ncx").decode()
+
+        for surface in (chapter, nav, toc):
+            self.assertIn("Примечания:", surface)
+            self.assertNotIn("FOOTNOTES:", surface)
+        self.assertIn('href="chapter.xhtml#footnotes"', nav)
+
     def test_extracts_epub_book_mode_audit_chunks_from_final_surface(self):
         content = _make_epub(
             {

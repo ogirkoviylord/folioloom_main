@@ -20,6 +20,13 @@ _FRONT_MATTER_LABEL_RE = re.compile(
     r"(?P<label>Title|Author|Illustrator|Language|Credits)"
     r":(?P<spacing>\s*)"
 )
+_RUSSIAN_SECTION_LABELS = {
+    "footnotes": "Примечания",
+}
+_SECTION_LABEL_RE = re.compile(
+    r"(?m)^(?P<prefix>\s*)(?P<label>FOOTNOTES|Footnotes|footnotes)"
+    r":(?P<spacing>\s*)"
+)
 
 
 def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str:
@@ -29,7 +36,7 @@ def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str
 
     text = normalize_cyrillic_guillemet_orientation(text)
     if _language_root(target_language) == "ru":
-        text = localize_russian_front_matter_labels(text)
+        text = localize_russian_book_labels(text)
     cleaned = re.sub(
         rf"\s+(?:subscript|superscript)\s+[A-Za-z]?\d+[A-Za-z]?(?=[{_CYRILLIC_RE}])",
         " ",
@@ -43,12 +50,17 @@ def normalize_cyrillic_guillemet_orientation(text: str) -> str:
     return _GERMAN_ORIENTED_GUILLEMET_PAIR_RE.sub(r"\1«\2»", text)
 
 
-def localize_russian_front_matter_labels(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+def localize_russian_book_labels(text: str) -> str:
+    def replace_front_matter(match: re.Match[str]) -> str:
         label = _RUSSIAN_FRONT_MATTER_LABELS[match.group("label").lower()]
         return f"{match.group('prefix')}{label}:{match.group('spacing')}"
 
-    return _FRONT_MATTER_LABEL_RE.sub(replace, text)
+    def replace_section(match: re.Match[str]) -> str:
+        label = _RUSSIAN_SECTION_LABELS[match.group("label").lower()]
+        return f"{match.group('prefix')}{label}:{match.group('spacing')}"
+
+    text = _FRONT_MATTER_LABEL_RE.sub(replace_front_matter, text)
+    return _SECTION_LABEL_RE.sub(replace_section, text)
 
 
 def _language_root(language_code: str) -> str:

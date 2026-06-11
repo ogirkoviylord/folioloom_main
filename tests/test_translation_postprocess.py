@@ -101,6 +101,22 @@ class TranslationPostprocessTest(unittest.TestCase):
             text,
         )
 
+    def test_localizes_footnotes_section_label_for_russian(self):
+        self.assertEqual(
+            clean_inline_formatting_artifacts("FOOTNOTES:", target_language="ru"),
+            "Примечания:",
+        )
+        self.assertEqual(
+            clean_inline_formatting_artifacts("Footnotes: 1", target_language="ru"),
+            "Примечания: 1",
+        )
+
+    def test_keeps_footnotes_section_label_for_non_russian_targets(self):
+        self.assertEqual(
+            clean_inline_formatting_artifacts("FOOTNOTES:", target_language="uk"),
+            "FOOTNOTES:",
+        )
+
     def test_normalizes_squashed_python_like_pseudocode(self):
         normalized = normalize_python_like_code_layout(
             (
