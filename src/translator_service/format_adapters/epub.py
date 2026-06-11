@@ -31,6 +31,7 @@ from translator_service.structure_optimizer import (
     estimate_unit_input_tokens,
 )
 from translator_service.translation_jobs import FragmentTranslation
+from translator_service.translation_postprocess import clean_inline_formatting_artifacts
 
 EPUB_ADAPTER_VERSION = "epub-adapter-v1"
 _XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
@@ -92,8 +93,14 @@ def replace_epub_body_blocks(
     content: bytes,
     blocks: list[EpubTextBlock],
     translated_fragments: list[FragmentTranslation],
+    target_language: str | None = None,
 ) -> bytes:
-    return _replace_epub_blocks(content, blocks, translated_fragments)
+    return _replace_epub_blocks(
+        content,
+        blocks,
+        translated_fragments,
+        target_language=target_language,
+    )
 
 
 def extract_epub_book_mode_audit_chunks(
@@ -179,7 +186,12 @@ def assemble_epub_content_from_block_translations(
         )
         is not None
     ]
-    content = replace_epub_body_blocks(source_content, blocks, translated_fragments)
+    content = replace_epub_body_blocks(
+        source_content,
+        blocks,
+        translated_fragments,
+        target_language=target_language,
+    )
     if not (
         target_language
         or _has_auxiliary_translations(translated_by_block_id)
@@ -487,6 +499,7 @@ def _replace_epub_blocks(
     content: bytes,
     blocks: list[EpubTextBlock],
     translated_fragments: list[FragmentTranslation],
+    target_language: str | None,
 ) -> bytes:
     translated_by_block_index = {
         fragment.index: fragment.translated_text for fragment in translated_fragments
@@ -498,7 +511,10 @@ def _replace_epub_blocks(
             continue
         replacements_by_file.setdefault(block.file_name, {})[
             block.block_index
-        ] = translated_text
+        ] = _clean_epub_translated_text(
+            translated_text,
+            target_language=target_language,
+        )
 
     source = BytesIO(content)
     target = BytesIO()
@@ -859,7 +875,10 @@ def _replace_epub_opf_auxiliary_text(
             index=index,
         )
         if translated_text:
-            element.text = translated_text
+            element.text = _clean_epub_translated_text(
+                translated_text,
+                target_language=target_language,
+            )
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
 
 
@@ -888,7 +907,10 @@ def _replace_epub_ncx_auxiliary_text(
             index=index,
         )
         if translated_text:
-            element.text = translated_text
+            element.text = _clean_epub_translated_text(
+                translated_text,
+                target_language=target_language,
+            )
         index += 1
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
 
@@ -925,7 +947,10 @@ def _replace_epub_xhtml_auxiliary_text(
                 index=title_index,
             )
             if translated_text:
-                element.text = translated_text
+                element.text = _clean_epub_translated_text(
+                    translated_text,
+                    target_language=target_language,
+                )
             title_index += 1
             continue
 
@@ -949,7 +974,13 @@ def _replace_epub_xhtml_auxiliary_text(
             index=index,
         )
         if translated_text:
-            _replace_text_node_sequence(_epub_text_slots(element), translated_text)
+            _replace_text_node_sequence(
+                _epub_text_slots(element),
+                _clean_epub_translated_text(
+                    translated_text,
+                    target_language=target_language,
+                ),
+            )
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
 
 
@@ -974,6 +1005,19 @@ def _set_existing_epub_language_attrs(
             element.attrib["lang"] = target_language
         if xml_lang_key in element.attrib:
             element.attrib[xml_lang_key] = target_language
+
+
+def _clean_epub_translated_text(
+    translated_text: str,
+    *,
+    target_language: str | None,
+) -> str:
+    if not target_language:
+        return translated_text
+    return clean_inline_formatting_artifacts(
+        translated_text,
+        target_language=target_language,
+    )
 
 
 def _translated_auxiliary_text(

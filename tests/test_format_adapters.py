@@ -626,6 +626,46 @@ class EpubFormatAdapterTest(unittest.TestCase):
             "Содержание\n\nГлава 1\n\nЧасть I\n\nПервый настоящий абзац книги.",
         )
 
+    def test_assembles_epub_with_russian_front_matter_label_cleanup(self):
+        source_content = _make_epub(
+            {
+                "OPS/front.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <p>Title: The Star</p>
+                    <p>Author: Jane Smith</p>
+                    <p>Illustrator: John Doe</p>
+                    <p>Language: English</p>
+                    <p>Credits: Project Gutenberg team</p>
+                  </body>
+                </html>
+                """,
+            },
+        )
+
+        content = assemble_epub_content_from_block_translations(
+            source_content=source_content,
+            target_language="ru",
+            translated_by_block_id={
+                "epub:OPS/front.xhtml:0": "Title: Звезда",
+                "epub:OPS/front.xhtml:1": "Author: Jane Smith",
+                "epub:OPS/front.xhtml:2": "Illustrator: John Doe",
+                "epub:OPS/front.xhtml:3": "Language: English",
+                "epub:OPS/front.xhtml:4": "Credits: Project Gutenberg team",
+            },
+        )
+
+        self.assertEqual(
+            extract_text_from_epub(content),
+            (
+                "Название: Звезда\n\n"
+                "Автор: Jane Smith\n\n"
+                "Иллюстратор: John Doe\n\n"
+                "Язык: English\n\n"
+                "Подготовка текста: Project Gutenberg team"
+            ),
+        )
+
     def test_extracts_epub_book_mode_audit_chunks_from_final_surface(self):
         content = _make_epub(
             {

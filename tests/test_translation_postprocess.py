@@ -70,6 +70,37 @@ class TranslationPostprocessTest(unittest.TestCase):
             text,
         )
 
+    def test_localizes_standard_front_matter_labels_for_russian(self):
+        cleaned = clean_inline_formatting_artifacts(
+            (
+                "Title: Звездный час\n"
+                "Author: John W. Campbell, Jr.\n"
+                "Illustrator: Jane Smith\n"
+                "Language: English\n"
+                "Credits: Distributed Proofreaders"
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            cleaned,
+            (
+                "Название: Звездный час\n"
+                "Автор: John W. Campbell, Jr.\n"
+                "Иллюстратор: Jane Smith\n"
+                "Язык: English\n"
+                "Подготовка текста: Distributed Proofreaders"
+            ),
+        )
+
+    def test_keeps_front_matter_labels_for_non_russian_targets(self):
+        text = "Title: The Star\nAuthor: Someone"
+
+        self.assertEqual(
+            clean_inline_formatting_artifacts(text, target_language="uk"),
+            text,
+        )
+
     def test_normalizes_squashed_python_like_pseudocode(self):
         normalized = normalize_python_like_code_layout(
             (
