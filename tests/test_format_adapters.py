@@ -886,19 +886,24 @@ class EpubFormatAdapterTest(unittest.TestCase):
                 """,
             },
             opf_content="""
-            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/"
+                     lang="en"
+                     xml:lang="en">
               <metadata>
-                <dc:title>Book Metadata Title</dc:title>
-                <dc:description>Book description.</dc:description>
+                <dc:title xml:lang="en">Book Metadata Title</dc:title>
+                <dc:description xml:lang="en">Book description.</dc:description>
                 <dc:language>en</dc:language>
               </metadata>
             </package>
             """,
             ncx_content="""
-            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"
+                 xml:lang="en">
               <docTitle><text>NCX Book Title</text></docTitle>
               <navMap>
-                <navPoint><navLabel><text>NCX Chapter One</text></navLabel></navPoint>
+                <navPoint>
+                  <navLabel xml:lang="en"><text>NCX Chapter One</text></navLabel>
+                </navPoint>
               </navMap>
             </ncx>
             """,
@@ -945,15 +950,49 @@ class EpubFormatAdapterTest(unittest.TestCase):
             chapter = epub.read("OPS/chapter.xhtml")
             nav = epub.read("OPS/nav.xhtml")
 
-        self.assertIn("<dc:title>Название книги</dc:title>".encode("utf-8"), opf)
-        self.assertIn(
-            "<dc:description>Описание книги.</dc:description>".encode("utf-8"),
-            opf,
-        )
         self.assertIn(b"<dc:language>ru</dc:language>", opf)
         self.assertNotIn(b"<dc:language>en</dc:language>", opf)
-        self.assertIn("Название NCX".encode("utf-8"), toc)
-        self.assertIn("Глава NCX первая".encode("utf-8"), toc)
+        self.assertNotIn(b'xml:lang="en"', opf)
+        self.assertNotIn(b'lang="en"', opf)
+        opf_root = ElementTree.fromstring(opf)
+        self.assertEqual(opf_root.attrib["lang"], "ru")
+        self.assertEqual(
+            opf_root.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        opf_title = next(
+            element for element in opf_root.iter() if element.tag.endswith("title")
+        )
+        self.assertEqual(opf_title.text, "Название книги")
+        self.assertEqual(
+            opf_title.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        opf_description = next(
+            element
+            for element in opf_root.iter()
+            if element.tag.endswith("description")
+        )
+        self.assertEqual(opf_description.text, "Описание книги.")
+        self.assertEqual(
+            opf_description.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        self.assertIn("Название NCX".encode(), toc)
+        self.assertIn("Глава NCX первая".encode(), toc)
+        self.assertNotIn(b'xml:lang="en"', toc)
+        ncx_root = ElementTree.fromstring(toc)
+        self.assertEqual(
+            ncx_root.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
+        ncx_nav_label = next(
+            element for element in ncx_root.iter() if element.tag.endswith("navLabel")
+        )
+        self.assertEqual(
+            ncx_nav_label.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
+            "ru",
+        )
         chapter_root = ElementTree.fromstring(chapter)
         nav_root = ElementTree.fromstring(nav)
         self.assertEqual(chapter_root.attrib["lang"], "ru")
@@ -966,9 +1005,9 @@ class EpubFormatAdapterTest(unittest.TestCase):
             nav_root.attrib["{http://www.w3.org/XML/1998/namespace}lang"],
             "ru",
         )
-        self.assertIn("Название главы".encode("utf-8"), chapter)
-        self.assertIn("Глава первая".encode("utf-8"), chapter)
-        self.assertIn("Содержание".encode("utf-8"), nav)
+        self.assertIn("Название главы".encode(), chapter)
+        self.assertIn("Глава первая".encode(), chapter)
+        self.assertIn("Содержание".encode(), nav)
         self.assertIn(b'href="chapter.xhtml"', nav)
 
     def test_rejects_epub_with_malformed_container_xml(self):

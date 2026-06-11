@@ -758,7 +758,7 @@ def _replace_epub_auxiliary_content(
                     target_language=target_language,
                 )
             elif item.filename.lower().endswith(".ncx"):
-                if _has_auxiliary_translation_for_file(
+                if target_language or _has_auxiliary_translation_for_file(
                     translated_by_block_id,
                     kind="ncx",
                     file_name=item.filename,
@@ -767,6 +767,7 @@ def _replace_epub_auxiliary_content(
                         data,
                         file_name=item.filename,
                         translated_by_block_id=translated_by_block_id,
+                        target_language=target_language,
                     )
                 else:
                     data = normalize_epub_xml_part_for_xml(data)
@@ -838,6 +839,8 @@ def _replace_epub_opf_auxiliary_text(
         content,
         parse_error_message="EPUB package XML is not readable",
     )
+    if target_language:
+        _set_existing_epub_language_attrs(document, target_language)
     counters = {"title": 0, "description": 0}
     for element in document.iter():
         local_name = _local_name(element.tag)
@@ -865,11 +868,14 @@ def _replace_epub_ncx_auxiliary_text(
     *,
     file_name: str,
     translated_by_block_id: dict[str, str],
+    target_language: str | None,
 ) -> bytes:
     document = parse_xml_document(
         normalize_epub_xml_part_for_xml(content),
         parse_error_message="EPUB NCX XML is not readable",
     )
+    if target_language:
+        _set_existing_epub_language_attrs(document, target_language)
     index = 0
     for element in document.iter():
         if _local_name(element.tag) != "text" or not _element_direct_text(element):
@@ -951,10 +957,23 @@ def _set_epub_xhtml_language_attrs(
     document: ElementTree.Element,
     target_language: str,
 ) -> None:
+    _set_existing_epub_language_attrs(document, target_language)
     if _local_name(document.tag) != "html":
         return
     document.attrib["lang"] = target_language
     document.attrib[f"{{{_XML_NAMESPACE}}}lang"] = target_language
+
+
+def _set_existing_epub_language_attrs(
+    document: ElementTree.Element,
+    target_language: str,
+) -> None:
+    xml_lang_key = f"{{{_XML_NAMESPACE}}}lang"
+    for element in document.iter():
+        if "lang" in element.attrib:
+            element.attrib["lang"] = target_language
+        if xml_lang_key in element.attrib:
+            element.attrib[xml_lang_key] = target_language
 
 
 def _translated_auxiliary_text(
