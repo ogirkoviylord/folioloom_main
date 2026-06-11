@@ -1152,6 +1152,47 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertNotIn("Book I", artifact_text)
             self.assertNotIn("Переведенный абзац", artifact_text)
 
+    def test_assemble_due_jobs_does_not_block_final_epub_on_navigation_url_noise(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+                content=_make_epub_with_surface_audit_frontmatter_noise(),
+            )
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Глава 1",
+                    "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
+                    "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "Глава 1",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "Название книги"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": (
+                        "example.org"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:1": (
+                        "example.org/ebooks/12345"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:2": "Глава 1",
+                },
+            )
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(plan.job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertIsNotNone(persisted_job.final_object_key)
+
     def test_assemble_due_jobs_keeps_clean_book_mode_epub_ready(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
@@ -2827,12 +2868,13 @@ def _create_epub_surface_audit_job_plan(
     store: SQLiteTranslationJobStore,
     storage: LocalObjectStorage,
     target_language: str,
+    content: bytes | None = None,
 ):
     original = storage.put_bytes(
         kind=StoredFileKind.ORIGINAL,
         file_name="book.epub",
         content_type="application/epub+zip",
-        content=_make_epub_with_surface_audit_content(),
+        content=content or _make_epub_with_surface_audit_content(),
     )
     return create_persistent_epub_job_plan(
         store=store,
@@ -2956,6 +2998,83 @@ def _make_epub_with_surface_audit_content() -> bytes:
               <body>
                 <nav epub:type="toc">
                   <ol><li><a href="chapter.xhtml">Book I</a></li></ol>
+                </nav>
+              </body>
+            </html>
+            """,
+        )
+    return archive.getvalue()
+
+
+def _make_epub_with_surface_audit_frontmatter_noise() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OPS/content.opf" /></rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Original Book Title</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="chapter" href="chapter.xhtml"
+                      media-type="application/xhtml+xml" />
+                <item id="nav" href="nav.xhtml"
+                      media-type="application/xhtml+xml" properties="nav" />
+                <item id="ncx" href="toc.ncx"
+                      media-type="application/x-dtbncx+xml" />
+              </manifest>
+              <spine toc="ncx"><itemref idref="chapter" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/toc.ncx",
+            """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>Original Book Title</text></docTitle>
+              <navMap>
+                <navPoint><navLabel><text>Chapter 1</text></navLabel></navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+        epub.writestr(
+            "OPS/chapter.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><title>Original Book Title</title></head>
+              <body><h1>Chapter 1</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+        epub.writestr(
+            "OPS/nav.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                  xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc">
+                  <ol>
+                    <li><a href="https://example.org">example.org</a></li>
+                    <li>
+                      <a href="https://example.org/ebooks/12345">
+                        example.org/ebooks/12345
+                      </a>
+                    </li>
+                    <li><a href="chapter.xhtml">Chapter 1</a></li>
+                  </ol>
                 </nav>
               </body>
             </html>

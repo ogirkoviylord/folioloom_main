@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-09
+Last updated: 2026-06-11
 
 ## 1. Текущее состояние проекта
 
@@ -203,6 +203,25 @@ known local-artifact Reader Explorer empty-state assertion because existing
 retries, provider prompt/config changes, schema changes, deployment changes,
 runtime data operations, raw diagnostic expansion, Gate B readiness or release
 readiness.
+
+EPUB standalone heading and audit-noise fix on 2026-06-11: branch
+`codex/fix-epub-heading-audit` fixes the failure mode found after an
+investigated EPUB job translated all work units but failed final assembly.
+EPUB extraction no longer treats an XHTML heading as navigation only because
+the same XHTML file lacks prose, so standalone spine headings remain body
+translation blocks. The final book-mode output audit now masks bare
+domain/path tokens such as `example.org/ebooks/12345`, matching the existing
+URL masking so frontmatter/navigation link noise does not create false terminal
+failures. Real untranslated headings and navigation labels still remain in
+scope for the audit. Local verification passed focused persistent EPUB
+assembly, scheduler final-audit, book-mode audit and translation-run-log tests,
+compileall, targeted ruff and `git diff --check`. Full in-worktree unittest
+discover ran 1421 tests with 34 skipped and failed only the known
+local-artifact Reader Explorer empty-state assertion because existing
+`var/translation-runs` makes the page non-empty; runtime `var/` data was not
+modified. This does not repair existing failed jobs, rerun provider work,
+change provider prompts/config, mutate scheduler/database/runtime state,
+deploy, run server smoke, close Gate B, or claim release readiness.
 
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots

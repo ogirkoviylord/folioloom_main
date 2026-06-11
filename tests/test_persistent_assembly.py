@@ -189,6 +189,38 @@ class PersistentAssemblyTest(unittest.TestCase):
                 ["[uk] Part I", "[uk] Chapter 1"],
             )
 
+    def test_assembles_final_epub_translating_standalone_spine_heading(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            plan = _epub_metadata_plan(
+                store=store,
+                storage=storage,
+                content=_make_epub_with_standalone_spine_heading(),
+            )
+
+            self.assertTrue(
+                any(
+                    "epub:OPS/book1.xhtml:0" in unit.source_block_ids
+                    for unit in plan.work_units
+                )
+            )
+
+            _complete_all_with_prefixed_text(store, storage, plan.job.id)
+
+            stored = assemble_persistent_epub_result(
+                store=store,
+                storage=storage,
+                job_id=plan.job.id,
+                file_name="book.uk.epub",
+                partial=False,
+            )
+
+            text = extract_text_from_epub(storage.get_bytes(stored.object_key))
+            self.assertIn("[uk] Book Alpha. Standalone Heading", text)
+            self.assertNotIn("Book Alpha. Standalone Heading\n\n", text)
+
     def test_assembles_partial_epub_without_metadata_toc_or_nav_translation(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
@@ -931,6 +963,53 @@ def _make_epub_with_metadata_and_toc(*, include_nested_nav: bool = False) -> byt
                 """,
             )
         epub.writestr("OPS/style.css", "body { font-family: serif; }")
+    return archive.getvalue()
+
+
+def _make_epub_with_standalone_spine_heading() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile
+                  full-path="OPS/content.opf"
+                  media-type="application/oebps-package+xml" />
+              </rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/"
+                     unique-identifier="bookid">
+              <metadata>
+                <dc:identifier id="bookid">urn:uuid:test-book</dc:identifier>
+                <dc:title>Original Book Title</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="book1" href="book1.xhtml"
+                      media-type="application/xhtml+xml" />
+              </manifest>
+              <spine><itemref idref="book1" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/book1.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><title>Original Book Title</title></head>
+              <body><h1>Book Alpha. Standalone Heading</h1></body>
+            </html>
+            """,
+        )
     return archive.getvalue()
 
 
