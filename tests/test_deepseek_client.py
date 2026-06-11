@@ -685,7 +685,7 @@ class DeepSeekClientTest(unittest.TestCase):
         for event in events:
             self.assertNotIn("text", event["payload"])
 
-    def test_translate_rejects_invalid_json_batch_after_format_repair(self):
+    def test_translate_rejects_invalid_json_batch_after_xml_fallback(self):
         transport = SequentialTransport(
             responses=[
                 {
@@ -738,7 +738,8 @@ class DeepSeekClientTest(unittest.TestCase):
             )
 
         self.assertIn("malformed structured translation batch", str(error.exception))
-        self.assertIn("invalid_json", str(error.exception))
+        self.assertIn("XML fallback", str(error.exception))
+        self.assertIn("external_text", str(error.exception))
         events = client.consume_security_events()
         self.assertEqual(
             [event["event_type"] for event in events],
@@ -747,8 +748,244 @@ class DeepSeekClientTest(unittest.TestCase):
                 "model_output_repair_retry",
                 "translation_batch_rejected",
                 "model_output_repair_failed",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
             ],
         )
+        self.assertEqual(events[0]["payload"]["reason"], "invalid_json")
+        self.assertEqual(events[2]["payload"]["reason"], "invalid_json")
+        self.assertEqual(events[4]["payload"]["phase"], "xml_fallback")
+        self.assertEqual(events[5]["payload"]["reason"], "external_text")
+        self.assertEqual(events[6]["payload"]["phase"], "xml_fallback")
+        for event in events:
+            self.assertNotIn("text", event["payload"])
+
+    def test_translate_falls_back_to_xml_batch_when_json_repair_stays_malformed(self):
+        archive_shaped_broken_json = (
+            '{"translations":[{"id":"0","text":"Первая строка\n'
+            'Вторая строка с "неэкранированной цитатой"},'
+            '{"id":"1","text":"Готово"}]}'
+        )
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {"content": archive_shaped_broken_json},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {"content": archive_shaped_broken_json},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 4,
+                        "total_tokens": 17,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0">'
+                                    "ZXQPROTECTED0QXZ Первая строка"
+                                    "</translation_block>"
+                                    '<translation_block id="1">'
+                                    "Готово"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 17,
+                        "completion_tokens": 6,
+                        "total_tokens": 23,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Keep ZXQPROTECTED0QXZ</translation_block>'
+                '<translation_block id="1">Done</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0">'
+            "ZXQPROTECTED0QXZ Первая строка"
+            "</translation_block>"
+            '<translation_block id="1">Готово</translation_block>'
+            "</translation_batch>",
+        )
+        self.assertEqual(len(transport.requests), 3)
+        self.assertEqual(
+            transport.requests[0]["response_format"],
+            {"type": "json_object"},
+        )
+        self.assertEqual(
+            transport.requests[1]["response_format"],
+            {"type": "json_object"},
+        )
+        self.assertNotIn("response_format", transport.requests[2])
+        fallback_prompt = transport.requests[2]["messages"][0]["content"]
+        self.assertIn("TRANSLATION_BATCH", fallback_prompt)
+        self.assertNotIn("JSON_TRANSLATION_BATCH", fallback_prompt)
+        fallback_user_text = transport.requests[2]["messages"][1]["content"]
+        self.assertIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", fallback_user_text)
+        self.assertNotIn("BEGIN_UNTRUSTED_PROVIDER_OUTPUT", fallback_user_text)
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            [
+                "translation_batch_rejected",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+                "model_output_repair_retry",
+                "translation_batch_normalized",
+            ],
+        )
+        self.assertEqual(events[0]["payload"]["reason"], "invalid_json")
+        self.assertEqual(events[2]["payload"]["phase"], "repair")
+        self.assertEqual(events[4]["payload"]["phase"], "xml_fallback")
+        self.assertEqual(events[5]["payload"]["phase"], "xml_fallback")
+        for event in events:
+            self.assertNotIn("text", event["payload"])
+
+    def test_translate_rejects_xml_fallback_missing_protected_marker(self):
+        archive_shaped_broken_json = (
+            '{"translations":[{"id":"0","text":"Маркер зник\n'
+            'Рядок із "неекранованою цитатою"},'
+            '{"id":"1","text":"Готово"}]}'
+        )
+        transport = SequentialTransport(
+            responses=[
+                {
+                    "choices": [
+                        {
+                            "message": {"content": archive_shaped_broken_json},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 4,
+                        "total_tokens": 15,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {"content": archive_shaped_broken_json},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 13,
+                        "completion_tokens": 4,
+                        "total_tokens": 17,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "<translation_batch>"
+                                    '<translation_block id="0">'
+                                    "Маркер зник"
+                                    "</translation_block>"
+                                    '<translation_block id="1">'
+                                    "Готово"
+                                    "</translation_block>"
+                                    "</translation_batch>"
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 17,
+                        "completion_tokens": 6,
+                        "total_tokens": 23,
+                    },
+                },
+            ]
+        )
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=1,
+        )
+
+        with self.assertRaises(DeepSeekApiError) as error:
+            client.translate(
+                text=(
+                    "<translation_batch>"
+                    '<translation_block id="0">'
+                    "Keep ZXQPROTECTED0QXZ"
+                    "</translation_block>"
+                    '<translation_block id="1">Done</translation_block>'
+                    "</translation_batch>"
+                ),
+                source_language="en",
+                target_language="uk",
+            )
+
+        self.assertIn("XML fallback", str(error.exception))
+        self.assertIn("missing_protected_marker", str(error.exception))
+        self.assertEqual(len(transport.requests), 3)
+        self.assertNotIn("response_format", transport.requests[2])
+        events = client.consume_security_events()
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            [
+                "translation_batch_rejected",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+                "model_output_repair_retry",
+                "translation_batch_rejected",
+                "model_output_repair_failed",
+            ],
+        )
+        self.assertEqual(events[5]["payload"]["reason"], "missing_protected_marker")
+        self.assertEqual(events[5]["payload"]["phase"], "xml_fallback")
+        self.assertEqual(events[6]["payload"]["phase"], "xml_fallback")
         for event in events:
             self.assertNotIn("text", event["payload"])
 
