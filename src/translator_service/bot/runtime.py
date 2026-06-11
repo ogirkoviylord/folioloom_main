@@ -149,6 +149,9 @@ logger = logging.getLogger(__name__)
 TRANSLATION_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 TRANSLATION_SPINNER_INTERVAL_SECONDS = 5
 TRANSLATION_PROGRESS_EDIT_MIN_INTERVAL_SECONDS = 5
+POLLED_PROGRESS_OBSERVED_MIN_COMPLETED_FRAGMENTS = 3
+POLLED_PROGRESS_OBSERVED_MIN_COMPLETED_FRACTION = 0.02
+POLLED_PROGRESS_HIGH_COMPLETED_FRACTION = 0.95
 HEARTBEAT_PATTERNS = {
     "calm_dots": ("·", "•", "●", "•"),
     "fleuron": ("❦", "❧", "❦", "❧"),
@@ -4051,8 +4054,30 @@ def _polled_progress_estimated_total_seconds(
         * max(total_fragments, completed_fragments)
     )
     if estimated_total_seconds is not None:
-        return max(estimated_total_seconds, observed_total_seconds)
+        if _polled_progress_observed_eta_ready(
+            completed_fragments=completed_fragments,
+            total_fragments=total_fragments,
+        ):
+            return max(elapsed_seconds, observed_total_seconds)
+        return estimated_total_seconds
     return observed_total_seconds
+
+
+def _polled_progress_observed_eta_ready(
+    *,
+    completed_fragments: int,
+    total_fragments: int,
+) -> bool:
+    if completed_fragments <= 0 or total_fragments <= 0:
+        return False
+    safe_total = max(total_fragments, completed_fragments)
+    completed_fraction = completed_fragments / safe_total
+    if completed_fraction >= POLLED_PROGRESS_HIGH_COMPLETED_FRACTION:
+        return True
+    return (
+        completed_fragments >= POLLED_PROGRESS_OBSERVED_MIN_COMPLETED_FRAGMENTS
+        and completed_fraction >= POLLED_PROGRESS_OBSERVED_MIN_COMPLETED_FRACTION
+    )
 
 
 def _include_progress_preview(
