@@ -252,10 +252,6 @@ def _extract_epub_blocks(content: bytes) -> list[EpubTextBlock]:
                     document=document,
                     texts=[text for _, _, text in text_elements],
                 )
-                has_body_prose = any(
-                    _is_epub_body_prose(element, text)
-                    for _, element, text in text_elements
-                )
                 for block_index, element, text in text_elements:
                     kind, group_id = _epub_block_structure(
                         element,
@@ -276,7 +272,6 @@ def _extract_epub_blocks(content: bytes) -> list[EpubTextBlock]:
                                 text=text,
                                 parent_by_child_id=parent_by_child_id,
                                 is_navigation_file=is_navigation_file,
-                                has_body_prose=has_body_prose,
                             ),
                         )
                     )
@@ -415,14 +410,11 @@ def _epub_block_role(
     text: str,
     parent_by_child_id: dict[int, ElementTree.Element],
     is_navigation_file: bool,
-    has_body_prose: bool,
 ) -> str:
     if is_navigation_file or _is_inside_epub_navigation(element, parent_by_child_id):
         return _EPUB_BLOCK_ROLE_NAVIGATION
     if _is_epub_noise_text(text):
         return _EPUB_BLOCK_ROLE_NOISE
-    if _is_epub_heading_element(element) and not has_body_prose:
-        return _EPUB_BLOCK_ROLE_NAVIGATION
     return _EPUB_BLOCK_ROLE_BODY
 
 
@@ -451,13 +443,6 @@ def _epub_type(element: ElementTree.Element) -> str:
 
 def _is_epub_heading_element(element: ElementTree.Element) -> bool:
     return _local_name(element.tag) in {"h1", "h2", "h3", "h4", "h5", "h6"}
-
-
-def _is_epub_body_prose(element: ElementTree.Element, text: str) -> bool:
-    if _is_epub_noise_text(text) or _is_epub_heading_element(element):
-        return False
-    letter_count = len(re.findall(r"[^\W\d_]", text, flags=re.UNICODE))
-    return letter_count >= 12
 
 
 def _is_epub_noise_text(text: str) -> bool:
@@ -583,7 +568,9 @@ def _replace_epub_xhtml_blocks(content: bytes, replacements: dict[int, str]) -> 
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
 
 
-def _epub_text_slots(element: ElementTree.Element) -> list[tuple[ElementTree.Element, str]]:
+def _epub_text_slots(
+    element: ElementTree.Element,
+) -> list[tuple[ElementTree.Element, str]]:
     if (
         _local_name(element.tag) in _EPUB_IGNORED_TAGS
         or _is_epub_atomic_inline_text(element)
@@ -629,7 +616,7 @@ def _split_text_by_lengths(text: str, lengths: list[int]) -> list[str]:
 
     parts: list[str] = []
     consumed = 0
-    for index, length in enumerate(lengths):
+    for index, _length in enumerate(lengths):
         if index == len(lengths) - 1:
             parts.append(text[consumed:])
             break
