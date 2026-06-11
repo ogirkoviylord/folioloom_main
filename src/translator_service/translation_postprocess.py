@@ -27,6 +27,12 @@ _SECTION_LABEL_RE = re.compile(
     r"(?m)^(?P<prefix>\s*)(?P<label>FOOTNOTES|Footnotes|footnotes)"
     r":(?P<spacing>\s*)"
 )
+_RUSSIAN_STRAIGHT_DIALOGUE_QUOTE_RE = re.compile(
+    rf'(?P<prefix>^|[\s:—–-])"'
+    rf"(?P<inner>[{_CYRILLIC_RE}][^\"\n]{{0,160}}?)"
+    rf'"(?=[\s,.;:!?…—–-]|$)',
+    flags=re.MULTILINE,
+)
 
 
 def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str:
@@ -37,6 +43,7 @@ def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str
     text = normalize_cyrillic_guillemet_orientation(text)
     if _language_root(target_language) == "ru":
         text = localize_russian_book_labels(text)
+        text = normalize_russian_straight_dialogue_quotes(text)
     cleaned = re.sub(
         rf"\s+(?:subscript|superscript)\s+[A-Za-z]?\d+[A-Za-z]?(?=[{_CYRILLIC_RE}])",
         " ",
@@ -48,6 +55,13 @@ def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str
 
 def normalize_cyrillic_guillemet_orientation(text: str) -> str:
     return _GERMAN_ORIENTED_GUILLEMET_PAIR_RE.sub(r"\1«\2»", text)
+
+
+def normalize_russian_straight_dialogue_quotes(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        return f"{match.group('prefix')}«{match.group('inner')}»"
+
+    return _RUSSIAN_STRAIGHT_DIALOGUE_QUOTE_RE.sub(replace, text)
 
 
 def localize_russian_book_labels(text: str) -> str:
