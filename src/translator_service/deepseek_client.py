@@ -375,6 +375,79 @@ class DeepSeekClient:
                         )
                         if (
                             batch_validation.rejection_reason
+                            == TranslationBatchRejectionReason.INVALID_JSON
+                        ):
+                            fallback_result = self.create_chat_completion(
+                                system_prompt=build_system_prompt(
+                                    policy,
+                                    provider_output_format=ProviderOutputFormat.DEFAULT,
+                                    expected_batch_count=batch_contract.expected_count,
+                                ),
+                                user_text=provider_user_text,
+                            )
+                            total_usage = _add_usage(total_usage, fallback_result.usage)
+                            self._last_usage.value = total_usage
+                            record_model_security_event(
+                                "model_output_repair_retry",
+                                reason=batch_validation.rejection_reason.value,
+                                phase="xml_fallback",
+                                retry_attempt=1,
+                            )
+                            fallback_validation = (
+                                normalize_provider_translation_batch_contract(
+                                    fallback_result.content,
+                                    expected_count=batch_contract.expected_count,
+                                    required_markers=batch_contract.required_markers,
+                                )
+                            )
+                            if fallback_validation.translated_texts is not None:
+                                record_model_security_event(
+                                    "translation_batch_normalized",
+                                    reason=batch_validation.rejection_reason.value,
+                                    expected_count=batch_contract.expected_count,
+                                    output_chars=len(fallback_result.content),
+                                    phase="xml_fallback",
+                                )
+                                result = DeepSeekChatResult(
+                                    content=(
+                                        fallback_validation.normalized_text
+                                        or fallback_result.content
+                                    ),
+                                    usage=fallback_result.usage,
+                                    finish_reason=fallback_result.finish_reason,
+                                )
+                                return result.content
+                            if fallback_validation.rejection_reason is not None:
+                                record_model_security_event(
+                                    "translation_batch_rejected",
+                                    reason=fallback_validation.rejection_reason.value,
+                                    expected_count=batch_contract.expected_count,
+                                    output_chars=len(fallback_result.content),
+                                    phase="xml_fallback",
+                                )
+                                record_model_security_event(
+                                    "model_output_repair_failed",
+                                    reason=fallback_validation.rejection_reason.value,
+                                    phase="xml_fallback",
+                                    retry_attempt=1,
+                                )
+                                fallback_reason = (
+                                    fallback_validation.rejection_reason
+                                )
+                                unsafe_reason = (
+                                    TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT
+                                )
+                                if fallback_reason == unsafe_reason:
+                                    raise DeepSeekUnsafeModelOutputError(
+                                        fallback_reason.value
+                                    )
+                                raise DeepSeekApiError(
+                                    "DeepSeek produced malformed structured "
+                                    "translation batch output after XML fallback: "
+                                    f"{fallback_reason.value}"
+                                )
+                        if (
+                            batch_validation.rejection_reason
                             == TranslationBatchRejectionReason.UNSAFE_MODEL_OUTPUT
                         ):
                             raise DeepSeekUnsafeModelOutputError(

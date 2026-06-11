@@ -164,6 +164,25 @@ Full in-worktree unittest discover still fails the known local-artifact
 Reader Explorer empty-state assertion because existing `var/translation-runs`
 makes the admin page non-empty; runtime `var/` data was not modified.
 
+Issue #388 provider JSON fallback update on 2026-06-11: branch
+`codex/issue-388-malformed-provider-json` adds one bounded XML
+`translation_batch` fallback after a multi-block JSON batch response remains
+`invalid_json` after local control-character repair and one provider
+JSON-format repair retry. The fallback retranslates the original untrusted
+batch through the existing XML provider path, omits DeepSeek JSON
+`response_format`, and accepts the result only through the existing strict XML
+batch validator, including protected-marker preservation. Regression coverage
+models the archive-shaped malformed JSON content with raw line breaks and
+broken string structure, verifies the fallback request shape, covers
+marker-preserving and missing-marker XML fallback outcomes, and checks that
+fallback events remain metadata-only. Local verification passed focused
+DeepSeek client, output-contract, prompt-security and translation-policy tests,
+compileall and targeted ruff. Full in-worktree unittest discover last ran 1413
+tests with 34 skipped and failed only the known local-artifact Reader Explorer
+empty-state assertion because existing `var/translation-runs` makes the page
+non-empty; runtime `var/` data was not modified. CI, server smoke, deploy,
+provider-backed rerun of the EPUB, Gate B and release readiness remain Unknown.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the
