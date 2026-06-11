@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Callable, Container
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -5,13 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from translator_service.beta_safety import BetaSafetyGuard
+from translator_service.book_mode_output_audit import audit_book_mode_output
 from translator_service.file_storage import LocalObjectStorage
+from translator_service.format_adapters.epub import extract_epub_book_mode_audit_chunks
 from translator_service.job_runner import DocumentKind
 from translator_service.persistent_assembly import (
     assemble_persistent_docx_result,
+    assemble_persistent_epub_content,
     assemble_persistent_epub_result,
     assemble_persistent_txt_result,
     count_unassembled_work_units,
+    store_persistent_epub_result,
 )
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
@@ -28,6 +33,7 @@ from translator_service.scheduler import (
 from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
     record_book_mode_audit_fragment_for_job,
+    record_book_mode_audit_gate_for_job,
 )
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
@@ -50,6 +56,11 @@ from translator_service.worker import (
 )
 
 SAFE_DEFERRED_WORKER_FAILURE_MESSAGE = "Translation failed in the background worker."
+SAFE_FINAL_EPUB_AUDIT_FAILURE_MESSAGE = "Final EPUB surface audit failed safely."
+_BOOK_MODE_TRANSLATION_MODE = "book_manuscript"
+_BOOK_MODE_PROFILE = "book-manuscript-v1"
+_CYRILLIC_TARGETS = {"ru", "uk"}
+_FINAL_EPUB_NAVIGATION_RESIDUE_THRESHOLD = 2
 
 logger = logging.getLogger(__name__)
 
@@ -546,13 +557,53 @@ def assemble_due_jobs(
                 partial=partial,
             )
         elif job.document_kind == DocumentKind.EPUB.value:
-            assemble_persistent_epub_result(
-                store=store,
-                storage=storage,
-                job_id=job.id,
-                file_name=result_name,
-                partial=partial,
-            )
+            if partial:
+                assemble_persistent_epub_result(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    file_name=result_name,
+                    partial=partial,
+                )
+            else:
+                content = assemble_persistent_epub_content(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    partial=False,
+                )
+                gate = _final_epub_book_mode_surface_gate(
+                    job=job,
+                    content=content,
+                )
+                if gate is not None:
+                    record_book_mode_audit_gate_for_job(
+                        translation_run_log_root,
+                        job_id=job.id,
+                        gate=gate,
+                    )
+                    store.mark_job_failed(job.id)
+                    _finish_assembled_translation_run(
+                        translation_run_log_root,
+                        job_id=job.id,
+                        status="failed",
+                        result_file_name=None,
+                        error_message=SAFE_FINAL_EPUB_AUDIT_FAILURE_MESSAGE,
+                    )
+                    _record_failed_beta_safety_terminal(
+                        beta_safety_guard=beta_safety_guard,
+                        job_id=job.id,
+                    )
+                    assembled += 1
+                    continue
+                store_persistent_epub_result(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    file_name=result_name,
+                    partial=False,
+                    content=content,
+                )
         else:
             raise ValueError(
                 f"Unsupported document kind for assembly: {job.document_kind}"
@@ -607,6 +658,7 @@ def _finish_assembled_translation_run(
     job_id: str,
     status: str,
     result_file_name: str | None,
+    error_message: str | None = None,
 ) -> None:
     if root is None:
         return
@@ -616,6 +668,7 @@ def _finish_assembled_translation_run(
         job_id=job_id,
         status=status,
         result_file_name=result_file_name,
+        error_message=error_message,
         current_statuses=current_statuses,
         preserve_existing_error_message=status == "partial",
     )
@@ -643,6 +696,108 @@ def _record_assembled_beta_safety_terminal(
         )
         return
     beta_safety_guard.mark_job_consumed(job_id=job_id)
+
+
+def _record_failed_beta_safety_terminal(
+    *,
+    beta_safety_guard: BetaSafetyGuard | None,
+    job_id: str,
+) -> None:
+    if beta_safety_guard is None:
+        return
+    beta_safety_guard.release_job(
+        job_id=job_id,
+        reason="final_epub_surface_audit_failed",
+    )
+
+
+def _final_epub_book_mode_surface_gate(
+    *,
+    job,
+    content: bytes,
+) -> dict[str, object] | None:
+    if not _is_cyrillic_target(job.target_language):
+        return None
+    if not _is_book_mode_translation_policy(job.translation_policy):
+        return None
+
+    result = audit_book_mode_output(
+        chunks=extract_epub_book_mode_audit_chunks(content),
+        target_language=job.target_language,
+    )
+    blocking_findings = [
+        finding
+        for finding in result.findings
+        if finding.code == "english_navigation_heading_residue"
+        and finding.category == "navigation_heading"
+    ]
+    if len(blocking_findings) < _FINAL_EPUB_NAVIGATION_RESIDUE_THRESHOLD:
+        return None
+
+    return {
+        "schema_version": "book-mode-final-surface-gate-v1",
+        "phase": "final_epub_surface_audit",
+        "status": "failed",
+        "reason": "english_navigation_heading_residue",
+        "blocking_findings": len(blocking_findings),
+        "total_findings": len(result.findings),
+        "counts_by_code": _audit_counts_by(result.findings, "code"),
+        "counts_by_category": _audit_counts_by(result.findings, "category"),
+        "counts_by_severity": _audit_counts_by(result.findings, "severity"),
+        "surface_categories": _surface_categories(blocking_findings),
+    }
+
+
+def _audit_counts_by(findings, field_name: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for finding in findings:
+        value = str(getattr(finding, field_name, "") or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return {key: counts[key] for key in sorted(counts)}
+
+
+def _surface_categories(findings) -> list[str]:
+    return sorted(
+        {
+            _surface_category_from_chunk_id(finding.chunk_id)
+            for finding in findings
+        }
+    )
+
+
+def _surface_category_from_chunk_id(chunk_id: str) -> str:
+    lowered = chunk_id.lower()
+    if ":surface-opf:" in lowered:
+        return "opf_metadata"
+    if ":surface-ncx:" in lowered:
+        return "toc_ncx"
+    if ":surface-xhtml-title:" in lowered:
+        return "xhtml_title"
+    if ":surface-xhtml-navigation:" in lowered:
+        return "xhtml_navigation"
+    if lowered.startswith("epub:"):
+        return "xhtml_body_heading"
+    return "unknown"
+
+
+def _is_book_mode_translation_policy(policy: str | None) -> bool:
+    if not policy:
+        return False
+    try:
+        payload = json.loads(policy)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return (
+        payload.get("translation_mode") == _BOOK_MODE_TRANSLATION_MODE
+        or payload.get("translation_mode_profile") == _BOOK_MODE_PROFILE
+    )
+
+
+def _is_cyrillic_target(target_language: str) -> bool:
+    root = target_language.strip().lower().replace("_", "-").split("-", 1)[0]
+    return root in _CYRILLIC_TARGETS
 
 
 def _translated_file_name(

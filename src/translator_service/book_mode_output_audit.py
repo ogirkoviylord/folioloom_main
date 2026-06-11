@@ -419,11 +419,12 @@ def _is_navigation_or_heading_chunk(chunk: BookModeAuditChunk) -> bool:
 
 
 def _has_heading_navigation_residue(stats: _ChunkLanguageStats) -> bool:
-    if stats.latin_word_count < 2:
+    if stats.latin_word_count < 1:
         return False
+    has_navigation_word = any(word in _NAVIGATION_WORDS for word in stats.latin_words)
     if stats.cyrillic_word_count == 0:
-        return True
-    return any(word in _NAVIGATION_WORDS for word in stats.latin_words)
+        return stats.latin_word_count >= 2 or has_navigation_word
+    return has_navigation_word
 
 
 def _has_suspicious_all_english_chunk(stats: _ChunkLanguageStats) -> bool:

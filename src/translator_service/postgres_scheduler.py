@@ -1103,6 +1103,15 @@ class PostgresSchedulerStore:
             )
         return self._require_job(job_id)
 
+    def mark_job_failed(self, job_id: str) -> PersistentTranslationJob:
+        with self.connection.transaction():
+            self._update_job_status(
+                job_id,
+                PersistentTranslationJobStatus.FAILED,
+                now=_now(),
+            )
+        return self._require_job(job_id)
+
     def get_usage_summary(self, job_id: str) -> JobUsageSummary:
         self._require_job(job_id)
         row = self.connection.execute(
