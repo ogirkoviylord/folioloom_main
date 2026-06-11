@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import re
 
-
 _CYRILLIC_TARGET_LANGUAGES = {"ru", "uk"}
 _CYRILLIC_RE = r"А-Яа-яЁёІіЇїЄєҐґ"
 _GERMAN_ORIENTED_GUILLEMET_PAIR_RE = re.compile(
     r"(^|[\s>(\[{—–-])»([^\s«»][^«»\n]*?)«(?=[\s<.,!?;:)\]}—–-]|$)",
     flags=re.MULTILINE,
+)
+_RUSSIAN_FRONT_MATTER_LABELS = {
+    "title": "Название",
+    "author": "Автор",
+    "illustrator": "Иллюстратор",
+    "language": "Язык",
+    "credits": "Подготовка текста",
+}
+_FRONT_MATTER_LABEL_RE = re.compile(
+    r"(?m)^(?P<prefix>\s*)"
+    r"(?P<label>Title|Author|Illustrator|Language|Credits)"
+    r":(?P<spacing>\s*)"
 )
 
 
@@ -17,6 +28,8 @@ def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str
         return text
 
     text = normalize_cyrillic_guillemet_orientation(text)
+    if _language_root(target_language) == "ru":
+        text = localize_russian_front_matter_labels(text)
     cleaned = re.sub(
         rf"\s+(?:subscript|superscript)\s+[A-Za-z]?\d+[A-Za-z]?(?=[{_CYRILLIC_RE}])",
         " ",
@@ -28,6 +41,14 @@ def clean_inline_formatting_artifacts(text: str, *, target_language: str) -> str
 
 def normalize_cyrillic_guillemet_orientation(text: str) -> str:
     return _GERMAN_ORIENTED_GUILLEMET_PAIR_RE.sub(r"\1«\2»", text)
+
+
+def localize_russian_front_matter_labels(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        label = _RUSSIAN_FRONT_MATTER_LABELS[match.group("label").lower()]
+        return f"{match.group('prefix')}{label}:{match.group('spacing')}"
+
+    return _FRONT_MATTER_LABEL_RE.sub(replace, text)
 
 
 def _language_root(language_code: str) -> str:
