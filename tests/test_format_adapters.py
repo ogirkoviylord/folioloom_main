@@ -721,6 +721,30 @@ class EpubFormatAdapterTest(unittest.TestCase):
             self.assertNotIn("FOOTNOTES:", surface)
         self.assertIn('href="chapter.xhtml#footnotes"', nav)
 
+    def test_assembles_epub_with_russian_straight_quote_cleanup(self):
+        source_content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>"Yes", he said.</p></body>
+                </html>
+                """,
+            },
+        )
+
+        content = assemble_epub_content_from_block_translations(
+            source_content=source_content,
+            target_language="ru",
+            translated_by_block_id={
+                "epub:OPS/chapter.xhtml:0": '"Да", сказал он.',
+            },
+        )
+
+        self.assertEqual(
+            extract_text_from_epub(content),
+            "«Да», сказал он.",
+        )
+
     def test_extracts_epub_book_mode_audit_chunks_from_final_surface(self):
         content = _make_epub(
             {
