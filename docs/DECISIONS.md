@@ -31,6 +31,11 @@ Decision:
   `translation_batch` representation.
 - XML remains the existing internal representation and the fallback/legacy
   provider path. Existing XML validation must stay strict.
+- When a multi-block JSON batch response is still `invalid_json` after local
+  control-character repair and one provider JSON-format repair retry, runtime
+  may perform one bounded fallback retranslation of the original untrusted
+  batch through the existing XML `translation_batch` provider path. The result
+  must pass the existing strict XML batch validator before it is accepted.
 - Rollback direction: disable the JSON provider boundary and return multi-block
   provider calls to the existing XML path while keeping the local validator and
   XML adapter available as safe foundations.
@@ -49,6 +54,12 @@ Evidence:
   JSON Output only for multi-block batch translation requests.
 - GitHub issue #373 contains an owner approval comment for hardening the XML
   batch prompt and repair prompt as a fallback/legacy path.
+- On 2026-06-11, the owner approved issue #388 implementation in the current
+  Codex thread after an architecture review of the
+  `job-afb8c6d771974566a2c738c8c63f333c` diagnostic archive. The approval is
+  scoped to a focused provider-boundary hardening change with no scheduler,
+  database/schema, provider key/config, deployment, cost-cap or release-readiness
+  changes.
 
 Consequences:
 - Issue #371 should add the strict local JSON validator and XML adapter without
@@ -59,6 +70,10 @@ Consequences:
   existing internal batch format.
 - Issue #373 may harden only the XML fallback prompt/repair path, without
   weakening validators or adding adaptive splitting.
+- Issue #388 may add the bounded XML fallback after failed JSON repair without
+  weakening JSON/XML validators. Fallback attempts and outcomes must be recorded
+  as safe metadata only; raw source/provider text stays confined to approved
+  owner-only diagnostic archives.
 - Security and diagnostic surfaces must remain metadata-only outside the
   approved owner-only diagnostic boundaries. Raw source text, translated text,
   prompt bodies, provider bodies and diagnostic archives must not be copied
