@@ -480,7 +480,7 @@ Acceptance criteria:
   claims in #204.
   Status: issues #404 / #204A, #405 / #204B, #406 / #204C, #407 / #204D,
   #408 / #204E, #409 / #204F, #410 / #204G, #411 / #204H, #412 / #204I,
-  #413 / #204J, #414 / #204K and #415 / #204L
+  #413 / #204J, #414 / #204K, #415 / #204L and #416 / #204M
   produced the no-code architecture package, local glossary contracts,
   deterministic scanner over existing TXT/DOCX/EPUB adapter-plan fixtures,
   local book profile detector/rule contract, fake-output DeepSeek Pro role JSON
@@ -494,14 +494,23 @@ Acceptance criteria:
   validated only on the small sample fixture, large-fixture glossary editor
   outputs failed `invalid_json` after provider `length` finishes, and observed
   provider token usage exceeded the approved cap. Do not integrate runtime
-  DeepSeek Pro roles yet. #414 added a local deterministic chunked
+  DeepSeek Pro roles yet. #414-#416 were then used to test whether the
+  glossary-editor path could be made smaller, packetized and locally
+  validated before runtime integration. #414 added a local deterministic chunked
   glossary-editor packetizer with compact reference payloads, stable packet
   ids/signatures, evidence and token-budget caps, degradation/skipped metadata
   and fixture coverage over the three #413 TXT samples. #415 added local
   fake-output validators and deterministic merge/adjudication for one
   `GlossaryEditorPacket` at a time, treating invalid chunks, duplicates,
   target/alias conflicts and low-confidence semantic claims as findings rather
-  than trusted glossary facts. Any further live spike needs fresh exact
+  than trusted glossary facts. #416 added a standalone bounded chunked
+  DeepSeek Pro glossary-editor spike runner and metadata-only report. The live
+  run made 3 approved calls over the first READY packet per approved fixture,
+  observed 16973 provider tokens, validated only the small sample packet, and
+  recorded two invalid larger-fixture outputs due to missing evidence refs. The
+  recommendation is to pivot or iterate chunk prompt/evidence behavior before
+  runtime integration. This is architecture evidence, not a production glossary
+  or runtime translation feature. Any further live spike needs fresh exact
   approval.
 
 - Task: Produce Gate B evidence report.

@@ -14,5 +14,6 @@ build/
 dist/
 *.egg-info/
 var/
+outputs/
 .superpowers/
 epub_audit_output/
