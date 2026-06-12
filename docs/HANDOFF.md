@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 ## 1. Текущее состояние проекта
 
@@ -710,6 +710,19 @@ Owner decisions recorded during issue #71:
   future issues. Owner also approved current/pre-release internal use of all
   uploaded files for analytics and product improvement; release-version behavior
   remains TBD.
+- 2026-06-12: Owner clarified the future book glossary direction. Glossary is
+  the default target for all book/manuscript translations, with later
+  adaptation for document/form routes. The accepted direction is intentionally
+  complex and should split glossary core, `book_translation_profile`, DeepSeek
+  Pro role orchestration and raw diagnostics into separate architecture layers.
+  DeepSeek Pro cost is not a blocker, but role contracts, schema/enums,
+  evidence/confidence fields, failure/fallback behavior, translation snapshot
+  boundaries and diagnostics ownership must be designed before implementation.
+  Local code is not expected to prove semantic truth such as character gender;
+  it should validate structure/evidence and flag uncertainty. Pre-release
+  glossary/profile/provider/prompt/QA diagnostics may be broad and raw for
+  owner debugging, excluding secrets and provider auth material. Release-version
+  privacy, consent, retention, deletion and support/legal policy remain `TBD`.
 - 2026-06-04: Owner clarified that future formats beyond TXT/DOCX/EPUB are a
   committed roadmap, not merely optional candidates. The committed future
   families are RTF (#4), FB2 (#23), PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI,
@@ -1228,8 +1241,17 @@ core flow, release gates, operational visibility and documentation.
   by PR #160 and issues #145-#152 as closed; handle prompt diagnostics,
   Alerts/Backups visibility and release evidence as separate follow-ups;
 - keep issue #165 as a docs-only Book/Manuscript MVP contract and keep
-  terminology/name handling, glossary, analytics release policy, committed
-  future formats and stricter quality criteria in separate future issues;
+  terminology/name handling, complex glossary/profile architecture, analytics
+  release policy, committed future formats and stricter quality criteria in
+  separate future issues;
+- treat issue #404 / #204A as the current no-code glossary architecture
+  package at
+  `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`.
+  It defines the role graph, compact contract sketches, failure modes,
+  translation snapshot boundary, diagnostics/provider boundaries and approval
+  gates for #405-#413. Next scoped step is #405 local contracts/validators
+  only; provider calls, cache/runtime behavior, persistence/schema, admin/UI,
+  raw diagnostics implementation and release/privacy claims remain gated;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1696,6 +1718,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #404 / #204A produced a no-code glossary architecture package
+  at
+  `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`.
+  The package defines the book glossary role graph, compact schema sketches,
+  hard/soft/diagnostic layers, local-vs-model judgment boundary, failure
+  modes, translation snapshot boundary, owner-only diagnostics boundary,
+  provider boundary and approval gates for #405-#413.
+- Evidence: docs-only architecture package; no code, provider calls,
+  persistence/schema/storage, admin/UI, runtime integration, deployment,
+  payment, legal/privacy or release-readiness changes.
+- Follow-up: proceed to #405 only as local contracts/enums/validators/
+  signatures/tests. Pause for explicit approval at #411, keep #412 design-only
+  unless implementation is approved, and do not start #413 without exact
+  provider-spike approval.
 
 - Date: 2026-06-02.
 - Change: Issue
