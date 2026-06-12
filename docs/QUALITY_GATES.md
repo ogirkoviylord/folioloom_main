@@ -87,6 +87,44 @@ Smoke test:
 - Commands found: `scripts/predeploy_check.sh`; server smoke script `scripts/server_smoke_check.sh`.
 - Recommended: локально запускать `scripts/predeploy_check.sh` перед predeploy/release changes; server smoke выполнять только при approved server access.
 
+### Glossary/editor readiness
+
+These gates apply to glossary/editor readiness work such as issue #432 / #204P.
+They are local metadata gates, not release gates and not semantic-quality proof.
+
+Local/fake output -> bounded provider retry gate:
+
+- Schema validity rate must meet the task threshold, default `1.0`.
+- Evidence-ref coverage must meet the task threshold, default `1.0`; missing
+  evidence refs remain failures, not warnings.
+- Invalid chunk rate must stay at or below the task threshold, default `0.0`.
+- Merge/adjudication blocker findings must stay at or below the task threshold,
+  default `0`.
+- Warning findings, duplicate rate, conflict rate, packet budget overruns and
+  `needs_review` rate must be measured and stay within explicit task
+  thresholds.
+- Evaluation outputs must be metadata-only: no raw source text, prompt bodies,
+  provider responses, translated text, API keys or provider auth material.
+- Local code may verify structure, evidence links, confidence ranges, budget
+  metadata and review flags; it must not claim to prove semantic truth such as
+  gender/name identity or literary correctness.
+
+Provider retry -> runtime architecture-review gate:
+
+- The local/fake output gate above must pass.
+- There must be explicit metadata-only provider retry evidence from an
+  owner-approved bounded run; fake/local results alone are not enough.
+- Observed provider token usage must stay within the owner-approved token cap,
+  or the overrun must block readiness and be documented as a failure.
+- Raw prompts, fixture excerpts and provider responses must remain only in the
+  approved owner-only untracked diagnostics directory and must not be copied
+  into ordinary docs, GitHub issues, PR descriptions, support artifacts or
+  release artifacts.
+- Passing this gate only allows no-code runtime architecture review. It does
+  not approve runtime translation integration, cache changes, storage,
+  database/state, admin UI, retention policy, release/privacy claims or live
+  provider work.
+
 ### Docker / infrastructure
 
 Commands found:
