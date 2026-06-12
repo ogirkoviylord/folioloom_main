@@ -538,7 +538,13 @@ Acceptance criteria:
   owner-only diagnostics may continue only inside explicitly approved bounded
   local diagnostics or dedicated owner-only surfaces; #436 does not approve
   retention/delete/export implementation, public/legal copy or release/privacy
-  readiness.
+  readiness. Issue #444 / #204U starts the reduced-glossary iteration with a
+  local metadata-only pressure report builder over adapter-plan, scanner,
+  profile and packetizer metadata. It measures candidate distributions, profile
+  shape, packet counts and advisory token/cap blockers without provider calls,
+  runtime prompt/cache/storage/admin changes, raw excerpts or release/privacy
+  claims. #444 evidence should inform #445 reducer defaults, but it is not
+  semantic truth or runtime readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
