@@ -594,7 +594,12 @@ Acceptance criteria:
   default local readiness still fails on fake low-confidence warning/
   needs-review outputs and the approved local EPUB reducer diagnostic/drop
   pressure. Under the current approval wording, #464 should not start until the
-  local gate is fixed or the owner explicitly defers the failed gates.
+  local gate is fixed or the owner explicitly defers the failed gates. Issue
+  #465 / #204AG records the owner-approved cache policy for the first
+  disabled/default-off adapter: glossary-injected enabled/test-path units must
+  bypass cache, compact signatures stay metadata-only, default/non-glossary
+  cache behavior remains unchanged, and future glossary-aware cache keys need a
+  separate approved issue.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

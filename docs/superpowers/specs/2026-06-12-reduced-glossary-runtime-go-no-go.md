@@ -75,7 +75,7 @@ Additional prior provider evidence:
 | Disabled shadow planning | GO for disabled-by-default rehearsal only | #450 proves default runtime unchanged and compact reduced metadata. | Separate approval before any live runtime use. |
 | Provider retry | NEEDS ITERATION | #449 mixed live evidence still has a `length`/invalid JSON failure and timeout. | Prompt/packet-budget iteration or another approved bounded retry after fixes. |
 | Prompt integration | NO-GO | Provider reliability and prompt-budget behavior are not proven for RU/UK regression packets. | Passing metadata-only provider retry plus prompt-safety tests and owner approval. |
-| Cache signatures/reuse | NO-GO for runtime cache behavior | Signature helpers exist, but stale-cache/migration/bypass policy remains `TBD`. | Owner decision: enforce glossary-aware keys, bypass cache for injected units, or defer cache use. |
+| Cache signatures/reuse | DECIDED for first adapter: bypass glossary-injected enabled/test-path units | #465 owner approval selects cache bypass for the first runtime-adjacent glossary prompt adapter. Compact signatures may remain metadata only and must not enable cache reuse for glossary-injected units in that first implementation. | Future glossary-aware cache keys need a separate approved issue after provider evidence and disabled-adapter tests. |
 | Diagnostics sidecars | GO only for owner-only foundation already implemented | #434 foundation exists, but release/admin/archive/export/retention behavior remains unapproved. | Dedicated approval for any storage/admin/archive/export/delete behavior. |
 | Storage/admin surfaces | NO-GO | No approval for DB/schema/storage/admin expansion, and diagnostics can contain user-data-derived raw-capable fields. | Separate architecture review, tests and owner approval. |
 | Release/privacy/legal/support policy | NO-GO | #436 keeps release-version policy `TBD`/blocking. | Release-readiness and owner decision before claims. |
@@ -103,10 +103,10 @@ Additional prior provider evidence:
 - `Unknown`: provider-reported token usage for the timed-out Ukrainian packet.
 - `Unknown`: reduced glossary quality beyond the bounded validated sample TXT
   and approved EPUB packets.
-- `TBD`: cache stale/migration policy once glossary/profile context can affect
-  output.
-- `TBD`: whether first runtime implementation should bypass cache, require
-  glossary-aware cache keys, or remain shadow-only.
+- `Unknown`: post-#461/#462 provider retry behavior because #464 has not run
+  and #463 blocks it under the current approval wording.
+- `TBD`: future glossary-aware cache-key design and durable cache
+  migration/invalidation behavior.
 - `TBD`: release-version glossary/profile diagnostic consent, retention,
   deletion, export, support and legal/privacy policy.
 - `TBD`: RU/UK morphology strategy beyond evidence, confidence and review
@@ -119,8 +119,10 @@ Before any runtime implementation:
 
 - Owner approval for the exact prompt-integration slice and default-disabled
   rollout behavior.
-- Owner approval for cache behavior: include compact glossary/profile
-  signatures, bypass cache, or defer cache use.
+- Owner approval for cache behavior is satisfied only for the first
+  disabled/default-off adapter policy: bypass cache for glossary-injected
+  enabled/test-path units while leaving default/non-glossary cache unchanged.
+  Any future glossary-aware cache-key reuse still needs separate approval.
 - Owner approval for any durable storage, database/schema, scheduler/work-unit
   state or admin surface change.
 - Owner approval for any raw-capable diagnostic storage, archive inclusion,
@@ -139,8 +141,9 @@ Before any runtime implementation:
    `length`/invalid JSON and timeout failure modes before any runtime proposal.
 3. After local fixes, run another bounded provider retry only with exact owner
    approval and safe secret handling.
-4. Decide cache policy in a separate issue: glossary-aware cache signatures,
-   cache bypass for glossary-injected units, or shadow-only defer.
+4. Cache policy is decided by #465 for the first adapter: bypass cache for
+   glossary-injected enabled/test-path units; keep compact signatures as
+   metadata only.
 5. Keep diagnostics compact by default. Any raw-capable diagnostic sidecar,
    archive inclusion, admin view, retention/export/delete behavior or support
    artifact needs separate approval.
