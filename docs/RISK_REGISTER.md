@@ -356,6 +356,18 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   runtime prompt behavior, provider population, storage policy, retention,
   export/delete implementation or release/privacy claim was added.
 
+- Task: Disabled-by-default glossary/profile runtime-shadow planning path.
+  Risk reduced: R-014, R-019, R-036.
+  Priority: High.
+  Suggested owner: Implementer / Reviewer.
+  Acceptance criteria: default disabled behavior, compact signatures/selections,
+  no live provider calls, no prompt injection, no durable state mutation,
+  fallback for invalid/over-budget data, tests and docs.
+  Decision status: issue #435 / #204S implemented a local helper and tests only.
+  Normal translation prompts, cache behavior, database/scheduler/work-unit
+  state, storage/admin/retention behavior and release/privacy claims remain
+  unchanged.
+
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
   Priority: High.

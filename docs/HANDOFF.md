@@ -1429,6 +1429,17 @@ core flow, release gates, operational visibility and documentation.
   database/schema/cache/scheduler mutation, archive inclusion, retention/
   export/delete implementation or release/privacy claims. Retention, export,
   deletion and release-version policy remain `TBD`;
+- treat issue #435 / #204S as the approved disabled-by-default
+  fake-runtime/shadow glossary planning path:
+  `src/translator_service/glossary_runtime_shadow.py` builds compact shadow
+  metadata from TXT fixture content using the local glossary scanner, profile
+  detector, translation contract snapshot builder, subset selector and policy
+  signature helpers. Focused tests live in
+  `tests/test_glossary_runtime_shadow.py`. Default behavior is disabled and
+  returns existing-translation fallback metadata; enabled test/shadow planning
+  changes no normal translation prompts, makes no live provider calls, mutates
+  no cache/database/scheduler/work-unit/storage/admin state, and makes no
+  release/privacy claims;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1895,6 +1906,21 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #435 / #204S added the disabled-by-default fake-runtime/shadow
+  glossary planning helper in `src/translator_service/glossary_runtime_shadow.py`,
+  with focused tests in `tests/test_glossary_runtime_shadow.py`.
+- Evidence: tests prove default disabled behavior leaves runtime integration
+  flags false, enabled fixture planning builds compact glossary/profile/
+  snapshot/selection signatures without raw source text, prompt-budget
+  exhaustion falls back without prompt injection, and invalid TXT content uses
+  the existing translation fallback path. Local verification covered shadow,
+  selection, snapshot, policy and cache tests.
+- Follow-up: do not inject glossary/profile context into normal translation
+  prompts, enable cache reuse changes, mutate durable runtime state, call live
+  providers, add admin/storage/retention behavior or claim release/privacy
+  readiness from #435 alone.
 
 - Date: 2026-06-12.
 - Change: Issue #434 / #204R added the owner-only glossary/profile diagnostic
