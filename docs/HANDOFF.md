@@ -1382,6 +1382,19 @@ core flow, release gates, operational visibility and documentation.
   blocker findings. This is local prompt/validator evidence only; it does not
   call providers, integrate runtime prompts/cache/storage, mutate persistence,
   expand diagnostics, change retention or claim release/privacy readiness;
+- treat issue #432 / #204P as the local metadata-only glossary/editor
+  evaluation harness:
+  `src/translator_service/glossary_evaluation.py` evaluates validated chunk
+  outputs, merge/adjudication findings, packet budget metadata and optional
+  metadata-only provider reports. The readiness gates measure schema validity,
+  evidence-ref coverage, invalid chunk rate, blocker/warning findings,
+  duplicate/conflict rate, budget overrun, `needs_review` rate and approved
+  provider token caps. Passing local gates can support the next bounded
+  provider retry, but fake/local evidence alone does not approve runtime
+  architecture review or runtime integration. Focused tests live in
+  `tests/test_glossary_evaluation.py`. This does not call providers, judge
+  semantic truth, integrate runtime prompts/cache/storage, mutate persistence,
+  expand diagnostics, change retention or claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1848,6 +1861,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #432 / #204P added a local metadata-only glossary/editor
+  evaluation harness in `src/translator_service/glossary_evaluation.py`, with
+  focused coverage in `tests/test_glossary_evaluation.py`.
+- Evidence: local tests cover a passing fake output for provider-retry
+  readiness, missing-evidence invalid chunks, duplicate/conflicting outputs
+  with `needs_review`, packet budget overrun and provider token-cap overrun.
+  `docs/QUALITY_GATES.md` now records explicit local/fake -> provider-retry and
+  provider-retry -> runtime architecture-review gates. Local verification
+  passed focused evaluation/chunk-output/packet tests, compileall, targeted
+  `ruff`, and `git diff --check`.
+- Follow-up: use the evaluator as metadata-only readiness evidence for #431 and
+  #433. Do not treat evaluator pass as semantic truth, runtime translation
+  readiness, release/privacy readiness, provider approval, prompt rollout,
+  cache/storage/database/admin integration or retention-policy approval.
 
 - Date: 2026-06-12.
 - Change: Issue #430 / #204N tightened the chunked glossary-editor
