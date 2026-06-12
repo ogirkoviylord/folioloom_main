@@ -111,6 +111,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   active design-only package for issue #412 / #204I. It defines the owner-only
   glossary/profile diagnostic sidecar schema, raw-field manifest, existing
   surface alignment, retention/export/deletion TBDs and implementation gates.
+- `docs/superpowers/specs/2026-06-12-deepseek-pro-glossary-profile-spike-report.md` -
+  active metadata-only report for issue #413 / #204J. It records the bounded
+  DeepSeek Pro glossary/profile spike results, validation failures, token
+  overrun evidence and no-runtime-integration recommendation without raw
+  fixture text, prompts, provider bodies or secrets.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing

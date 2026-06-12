@@ -479,7 +479,8 @@ Acceptance criteria:
   persistence/schema, provider config, admin UI, deployment or release/privacy
   claims in #204.
   Status: issues #404 / #204A, #405 / #204B, #406 / #204C, #407 / #204D,
-  #408 / #204E, #409 / #204F, #410 / #204G, #411 / #204H and #412 / #204I
+  #408 / #204E, #409 / #204F, #410 / #204G, #411 / #204H, #412 / #204I
+  and #413 / #204J
   produced the no-code architecture package, local glossary contracts,
   deterministic scanner over existing TXT/DOCX/EPUB adapter-plan fixtures,
   local book profile detector/rule contract, fake-output DeepSeek Pro role JSON
@@ -487,8 +488,13 @@ Acceptance criteria:
   local per-work-unit glossary subset selector, optional compact
   glossary/profile cache/policy signature context and a design-only
   owner-only glossary/profile diagnostics sidecar schema/boundary package.
-  Next scoped step is #413 only after exact owner approval for fixtures,
-  max calls/tokens, model/provider, diagnostic storage and raw-text capture.
+  #413 added a standalone bounded spike runner and a metadata-only
+  provider-backed spike report. The live run made 6 approved calls: profile
+  advisor outputs validated on all three fixtures, glossary editor output
+  validated only on the small sample fixture, large-fixture glossary editor
+  outputs failed `invalid_json` after provider `length` finishes, and observed
+  provider token usage exceeded the approved cap. Do not integrate runtime
+  DeepSeek Pro roles yet; any further live spike needs fresh exact approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

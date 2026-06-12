@@ -263,6 +263,25 @@ local `var/translation-runs` makes the page non-empty; runtime `var/` data was
 not modified. GitHub PR checks for #398-#401 were not reported by
 `gh pr checks` at review time, so CI status remains Unknown.
 
+Issue #413 DeepSeek Pro glossary/profile spike update on 2026-06-12: branch
+`codex/issue-413-deepseek-pro-spike` adds a standalone bounded spike runner
+and metadata-only report for the approved `deepseek-v4-pro` glossary/profile
+role experiment. The live run used only the three approved TXT fixtures and
+made 6 provider calls. Profile-advisor role outputs validated on all three
+fixtures; glossary-editor output validated only on `sample_book.en.txt`.
+Glossary-editor outputs for the two larger regression fixtures ended with
+provider `length` and failed local validation as `invalid_json`. Observed
+provider tokens were 62974 against the approved 60000-token cap, exposing that
+the first local estimator under-reserved provider-reported prompt tokens; the
+runner now uses a conservative reservation multiplier and observed-token guard
+for future runs. Raw prompts/excerpts/provider responses were kept only in the
+approved local untracked owner-only `outputs/issue-413-deepseek-pro-spike/`
+diagnostic directory and are not copied into docs/issues/PR/release artifacts.
+No runtime translation integration, provider runtime/config, cache,
+database/state, deployment, retention, legal/privacy copy or release-readiness
+claim was added. Further live provider work requires fresh exact owner
+approval.
+
 Translation export state update on 2026-06-03: admin translation-log downloads
 now include metadata-only `effective_run.json` and `work_units.json` snapshots
 built through the same persistent scheduler/work-unit overlay used by the
