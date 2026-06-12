@@ -17,6 +17,56 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-13 - First glossary-injected runtime adapter must bypass cache
+
+Status: Active for the first disabled/default-off glossary prompt adapter
+
+Decision:
+- For the first runtime-adjacent glossary prompt adapter, any
+  glossary-injected enabled/test-path translation unit must bypass translation
+  cache reuse.
+- Default runtime behavior and existing non-glossary cache behavior must remain
+  unchanged.
+- Compact glossary/profile/snapshot/selection signatures may be emitted as
+  metadata for planning, diagnostics and future cache-key design, but must not
+  enable cache reuse for glossary-injected units in the first implementation.
+- Future glossary-aware cache keys require a separate approved issue after
+  provider evidence and disabled-adapter tests.
+- This decision does not approve runtime prompt integration, cache code changes,
+  database/schema/state migration, cache migration, storage/admin/retention
+  changes, provider config changes, live provider calls or release/privacy/
+  legal/support claims.
+
+Evidence:
+- Owner approved the #465 / #204AG cache policy in GitHub issue #465 on
+  2026-06-12.
+- `src/translator_service/translation_cache.py` already supports optional
+  compact `TranslationPolicySignatureContext` in in-memory cache keys.
+- `src/translator_service/translation_policy.py` already validates compact
+  glossary/profile/snapshot/selection signature identifiers for policy
+  signatures.
+- #451 recorded runtime glossary prompt integration as NO-GO and cache behavior
+  as unresolved.
+- #463 recorded post-#461/#462 local/fake structural improvements, but default
+  local readiness still fails; post-fix provider evidence remains `Unknown`.
+
+Consequences:
+- The next disabled/default-off adapter may carry compact signatures as
+  metadata, but must not use them to reuse cached translations for
+  glossary-injected units.
+- Tests for the first adapter must prove default runtime behavior and existing
+  non-glossary cache behavior are unchanged.
+- Tests for the enabled/test path must prove glossary-injected units bypass
+  cache get/put and fall back safely when glossary data is invalid, missing,
+  low-confidence or over budget.
+- Any future cache-key reuse design must be split into a new issue with owner
+  approval, provider evidence, disabled-adapter tests and cache-key review.
+
+Human approval required to change:
+- yes; enabling glossary-aware cache reuse, changing existing cache behavior,
+  adding durable cache migration/invalidation, or changing runtime prompt
+  rollout requires explicit owner approval.
+
 ### 2026-06-12 - Release policy: glossary/profile diagnostics remain TBD/blocking
 
 Status: Active release blocker
