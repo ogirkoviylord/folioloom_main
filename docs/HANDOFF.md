@@ -1946,6 +1946,24 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #449 / #204Z added #449-specific reduced-packet support to the
+  standalone chunked glossary-editor spike runner in
+  `tools/deepseek_chunked_glossary_editor_spike.py`, with focused coverage in
+  `tests/test_deepseek_chunked_glossary_editor_spike.py`.
+- Evidence: local fake/dry preflight over the three approved TXT fixtures plus
+  the owner-approved local EPUB input completed with 4 fake calls and 15109
+  observed fake tokens. Focused tests, targeted ruff and `git diff --check`
+  passed for the tooling change. Live provider behavior is `Unknown` because
+  `DEEPSEEK_API_KEY`/`DEEPSEEK_API_KEYS` was not present in the process
+  environment during the attempt.
+- Follow-up: run the approved #449 live retry only from an environment where
+  the provider key is supplied securely through `DEEPSEEK_API_KEY` or
+  `DEEPSEEK_API_KEYS`; do not paste keys into shell commands or copy raw
+  prompts, bounded excerpts, provider responses or translated text into
+  ordinary docs/issues/PRs. No runtime prompt/cache/storage/database/admin/
+  retention behavior or release/privacy claim is approved by #449.
+
+- Date: 2026-06-12.
 - Change: Issue #451 / #204AB added a no-code reduced glossary runtime
   go/no-go review at
   `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md`.
