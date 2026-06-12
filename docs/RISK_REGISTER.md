@@ -315,7 +315,7 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   chunked DeepSeek Pro glossary-editor spike runner and metadata-only report;
   the approved live run made 3 calls, observed 16973 provider tokens, validated
   only the small sample packet and recorded two invalid larger-fixture outputs
-  due missing evidence refs. Runtime integration remains rejected for now;
+  due to missing evidence refs. Runtime integration remains rejected for now;
   further live provider work requires fresh exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.

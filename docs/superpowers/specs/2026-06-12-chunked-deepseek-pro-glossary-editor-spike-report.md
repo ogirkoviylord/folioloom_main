@@ -1,5 +1,13 @@
 # Chunked DeepSeek Pro Glossary Editor Spike Report
 
+## Purpose
+- issues #414-#416 tested whether the failed large #413 glossary-editor payload
+  could be split into small, packetized, locally validated provider calls before
+  any runtime translation integration
+- the result is architecture evidence, not a production glossary: chunking kept
+  this bounded run inside the approved call/token shape, but two of three live
+  chunk outputs still failed local validation due to missing evidence refs
+
 ## Confirmed
 - approved fixtures were packetized with the first READY packet selection rule
 - raw prompts/provider outputs were confined to the approved diagnostics directory

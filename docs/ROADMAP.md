@@ -489,7 +489,9 @@ Acceptance criteria:
   validated only on the small sample fixture, large-fixture glossary editor
   outputs failed `invalid_json` after provider `length` finishes, and observed
   provider token usage exceeded the approved cap. Do not integrate runtime
-  DeepSeek Pro roles yet. #414 added a local deterministic chunked
+  DeepSeek Pro roles yet. #414-#416 were then used to test whether the
+  glossary-editor path could be made smaller, packetized and locally
+  validated before runtime integration. #414 added a local deterministic chunked
   glossary-editor packetizer with compact reference payloads, stable packet
   identifiers/signatures, evidence, budget limits, and degradation/skipped metadata
   and fixture coverage over the three #413 TXT samples. #415 added local
@@ -500,9 +502,11 @@ Acceptance criteria:
   DeepSeek Pro glossary-editor spike runner and metadata-only report. The live
   run made 3 approved calls over the first READY packet per approved fixture,
   observed 16973 provider tokens, validated only the small sample packet, and
-  recorded two invalid larger-fixture outputs due missing evidence refs. The
+  recorded two invalid larger-fixture outputs due to missing evidence refs. The
   recommendation is to pivot or iterate chunk prompt/evidence behavior before
-  runtime integration. Any further live spike needs fresh exact approval.
+  runtime integration. This is architecture evidence, not a production glossary
+  or runtime translation feature. Any further live spike needs fresh exact
+  approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
