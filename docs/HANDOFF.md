@@ -1448,6 +1448,17 @@ core flow, release gates, operational visibility and documentation.
   dedicated owner-only diagnostic surfaces. This does not approve retention/
   delete/export implementation, public/legal copy, support artifacts, release
   telemetry, runtime behavior or release/privacy readiness;
+- treat issue #444 / #204U as the local metadata-only reduced-glossary pressure
+  report foundation:
+  `src/translator_service/glossary_pressure_report.py` builds advisory pressure
+  reports from existing TXT/DOCX/EPUB `FormatAdapterPlan` metadata, local
+  glossary scanner output, book profile detection and glossary-editor packet
+  metadata. Reports include plan/candidate/profile/packet counts,
+  distributions, signatures and advisory findings for candidate volume, packet
+  count, token pressure, profile uncertainty and missing evidence. Focused
+  tests live in `tests/test_glossary_pressure_report.py`. This does not call
+  providers, integrate runtime prompts/cache/storage/admin, mutate persistence,
+  expand diagnostics, change retention or claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1933,6 +1944,22 @@ Potential issues to verify:
   ordinary translation-output changes or release/privacy claims from #447 alone.
 
 - Date: 2026-06-12.
+- Change: Issue #446 / #204W added a local metadata-only book-profile sanity
+  gate in `src/translator_service/book_profile_sanity.py`, with focused
+  coverage in `tests/test_book_profile_sanity.py`.
+- Evidence: local tests cover clean profile pass-through, strong secondary
+  profile review routes, false-confident legal/frontmatter blockers with
+  bookish secondary signals, low-evidence warnings, invalid threshold handling
+  and serialized metadata excluding synthetic raw profile/pressure text. Local
+  verification passed focused sanity/profile/snapshot/packet tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: use sanity results only as compact local metadata until separately
+  approved downstream work consumes them. Do not add provider adjudication,
+  runtime prompt/cache behavior, storage/database/scheduler/admin/retention
+  behavior, user-facing glossary/profile behavior, semantic truth claims or
+  release/privacy claims from #446 alone.
+
+- Date: 2026-06-12.
 - Change: Issue #445 / #204V added a local deterministic glossary candidate
   reducer in `src/translator_service/glossary_candidate_reducer.py`, with
   focused coverage in `tests/test_glossary_candidate_reducer.py`.
@@ -1947,6 +1974,22 @@ Potential issues to verify:
   live provider calls, runtime prompt integration, cache/storage/database/
   scheduler/admin/retention behavior, user-visible glossary behavior, semantic
   truth claims or release/privacy claims from #445 alone.
+
+- Date: 2026-06-12.
+- Change: Issue #444 / #204U added a local metadata-only reduced-glossary
+  pressure report builder in
+  `src/translator_service/glossary_pressure_report.py`, with focused tests in
+  `tests/test_glossary_pressure_report.py`.
+- Evidence: local tests cover metadata-only report shape/signature,
+  authorized TXT fixture planning, DOCX/EPUB-shaped adapter plans, advisory
+  candidate/packet/token/profile findings and missing-evidence blockers
+  without serializing raw source text. Local verification passed focused
+  pressure/scanner/profile/packet tests, `PYTHONPATH=src python3 -m compileall
+  src`, targeted `ruff --select F,I`, and `git diff --check`.
+- Follow-up: use #444 measurements to inform #445 reducer defaults. Do not
+  treat pressure metrics as semantic truth, provider readiness, runtime
+  integration approval, release/privacy readiness, or permission to copy raw
+  excerpts/prompts/provider responses into ordinary artifacts.
 
 - Date: 2026-06-12.
 - Change: Issue #436 / #204T records release-version glossary/profile
