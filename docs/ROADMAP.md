@@ -507,9 +507,14 @@ Acceptance criteria:
   runtime integration. Issue #430 / #204N tightens that local fake-output
   evidence contract by adding a compact `evidence_contract` to the chunked
   prompt, requiring non-empty resolvable `evidence_refs`, and proving missing
-  refs stay structured validation/merge blockers. This is architecture
-  evidence, not a production glossary or runtime translation feature. Any
-  further live spike needs fresh exact approval.
+  refs stay structured validation/merge blockers. Issue #432 / #204P adds a
+  local metadata-only evaluator for schema validity, evidence-ref coverage,
+  invalid chunk rate, blocker/warning findings, duplicate/conflict rate, budget
+  overrun, `needs_review` rate and provider token-cap evidence. These gates
+  help decide when to run a bounded provider retry and when to proceed to
+  no-code runtime architecture review. This is architecture evidence, not a
+  production glossary or runtime translation feature. Any further live spike
+  needs fresh exact approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

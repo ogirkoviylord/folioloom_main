@@ -318,8 +318,13 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   due to missing evidence refs. Issue #430 / #204N tightens the local
   fake-output prompt/evidence contract so valid fake chunks cite resolvable
   packet evidence refs and missing refs remain structured blocker failures.
-  Runtime integration remains rejected for now; further live provider work
-  requires fresh exact owner approval.
+  Issue #432 / #204P adds a local metadata-only evaluator so future
+  glossary/editor steps must measure schema validity, evidence-ref coverage,
+  invalid chunk rate, blocker/warning findings, duplicate/conflict rate,
+  prompt budget overrun, `needs_review` rate and provider token-cap evidence
+  before provider retry or runtime architecture review. Runtime integration
+  remains rejected for now; further live provider work requires fresh exact
+  owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
