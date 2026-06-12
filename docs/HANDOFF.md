@@ -1265,10 +1265,17 @@ core flow, release gates, operational visibility and documentation.
   defines deterministic profile detection over existing adapter plans,
   profile/rule dataclasses, confidence/uncertainty fields, local validators and
   profile-specific glossary rule data. Focused tests live in
-  `tests/test_book_profile.py`. Next scoped step is #408 fake-output DeepSeek
-  role JSON validators only. Provider calls, prompt/runtime/cache behavior,
-  persistence/schema, admin/UI, raw diagnostics implementation and release/
-  privacy claims remain gated;
+  `tests/test_book_profile.py`;
+- treat issue #408 / #204E as the local fake-output DeepSeek Pro glossary role
+  JSON validator implementation: `src/translator_service/glossary_role_validators.py`
+  validates approved role ids, `output_schema_version`, `diagnostics_ref`,
+  status/enums, evidence refs, payload size caps, unsafe/raw-text fields,
+  unsupported direct snapshot-effect claims, unsupported hard promotion,
+  contradiction findings and cross-role profile disagreement using fake JSON
+  only. Focused tests live in `tests/test_glossary_role_validators.py`. Next
+  scoped step is #409 translation contract snapshot builder only. Provider
+  calls, prompt/runtime/cache behavior, persistence/schema, admin/UI, raw
+  diagnostics implementation and release/privacy claims remain gated;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1735,6 +1742,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #408 / #204E added local fake-output JSON validators for
+  approved DeepSeek Pro glossary/profile roles in
+  `src/translator_service/glossary_role_validators.py`, with focused coverage
+  in `tests/test_glossary_role_validators.py`.
+- Evidence: local role-validator tests cover valid glossary editor/profile
+  advisor fake outputs, invalid JSON/root shape, missing evidence refs,
+  unsupported enum values, oversized payloads, unsupported hard promotion,
+  unsafe model-output strings, forbidden raw-text keys, blocking contradiction
+  findings and cross-role profile disagreement. Local verification passed
+  focused role/glossary/profile/output-safety tests, compileall, targeted ruff
+  and `git diff --check`.
+- Follow-up: proceed to #409 only as translation contract snapshot builder;
+  do not add live provider calls, prompt/runtime/cache integration, persisted
+  state, admin UI, raw diagnostic implementation or release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #407 / #204D added a local deterministic book translation
