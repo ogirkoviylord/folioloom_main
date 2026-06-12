@@ -509,9 +509,13 @@ Acceptance criteria:
   observed 16973 provider tokens, validated only the small sample packet, and
   recorded two invalid larger-fixture outputs due to missing evidence refs. The
   recommendation is to pivot or iterate chunk prompt/evidence behavior before
-  runtime integration. This is architecture evidence, not a production glossary
-  or runtime translation feature. Any further live spike needs fresh exact
-  approval.
+  runtime integration. Issue #433 / #204Q adds the no-code runtime integration
+  architecture boundary for job planning, work-unit selection, prompt policy,
+  cache/signature handling, diagnostics, fallback behavior, readiness gates and
+  follow-up order. This is architecture evidence, not a production glossary or
+  runtime translation feature. Any further live spike needs fresh exact
+  approval, and any runtime prompt/cache/storage/admin/retention implementation
+  needs separate owner approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

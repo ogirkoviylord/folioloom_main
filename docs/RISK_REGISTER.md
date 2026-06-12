@@ -325,8 +325,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   chunked DeepSeek Pro glossary-editor spike runner and metadata-only report;
   the approved live run made 3 calls, observed 16973 provider tokens, validated
   only the small sample packet and recorded two invalid larger-fixture outputs
-  due to missing evidence refs. Runtime integration remains rejected for now;
-  further live provider work requires fresh exact owner approval.
+  due to missing evidence refs. Issue #433 / #204Q records the no-code runtime
+  integration boundary, fallback matrix, cache/signature caveats, diagnostics
+  boundary and approval gates before any runtime glossary/profile integration.
+  Runtime integration remains rejected for now; further live provider work and
+  runtime prompt/cache/storage/admin/retention implementation require fresh
+  exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
