@@ -1388,7 +1388,8 @@ core flow, release gates, operational visibility and documentation.
   outputs, merge/adjudication findings, packet budget metadata and optional
   metadata-only provider reports. The readiness gates measure schema validity,
   evidence-ref coverage, invalid chunk rate, blocker/warning findings,
-  duplicate/conflict rate, budget overrun, `needs_review` rate and approved
+  duplicate/conflict rate, budget overrun, `needs_review` rate, reduced-packet
+  reducer decision coverage, reducer diagnostic/drop pressure and approved
   provider token caps. Passing local gates can support the next bounded
   provider retry, but fake/local evidence alone does not approve runtime
   architecture review or runtime integration. Focused tests live in
@@ -1925,6 +1926,21 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #448 / #204Y extended local reduced-packet fake-output
+  validation coverage and `src/translator_service/glossary_evaluation.py`
+  readiness gates with reducer decision coverage and reducer diagnostic/drop
+  pressure metrics.
+- Evidence: tests cover valid reduced packet fake outputs, unknown reduced
+  packet/evidence refs, metadata-only reduced evaluation payloads, reducer
+  drop-pressure threshold failure and missing reducer decision metadata
+  failure. Local verification passed focused chunk-output/evaluation tests,
+  compileall, targeted ruff and `git diff --check`.
+- Follow-up: #448 local gates can support a bounded provider retry only after
+  exact owner approval for #449. Do not add live provider calls, runtime prompt
+  integration, cache/storage/database/scheduler/admin/retention behavior,
+  semantic truth claims or release/privacy claims from #448 alone.
 
 - Date: 2026-06-12.
 - Change: Issue #447 / #204X updated

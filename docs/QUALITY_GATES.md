@@ -103,6 +103,9 @@ Local/fake output -> bounded provider retry gate:
 - Warning findings, duplicate rate, conflict rate, packet budget overruns and
   `needs_review` rate must be measured and stay within explicit task
   thresholds.
+- Reduced-packet retries must measure reducer decision coverage and reducer
+  diagnostic/drop pressure. Missing reducer decision metadata or excessive
+  diagnostic/drop pressure must fail the local gate under the task thresholds.
 - Evaluation outputs must be metadata-only: no raw source text, prompt bodies,
   provider responses, translated text, API keys or provider auth material.
 - Local code may verify structure, evidence links, confidence ranges, budget
