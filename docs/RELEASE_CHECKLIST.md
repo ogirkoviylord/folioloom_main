@@ -166,6 +166,12 @@ Confirmed facts:
 - Owner approved current/pre-release internal use of all uploaded files for
   analytics and product improvement on 2026-06-02. Release-version analytics
   file-use and consent behavior remains TBD and is tracked in issue #207.
+- Owner approved the complex book glossary/profile/DeepSeek Pro discovery
+  direction on 2026-06-12, including broad pre-release raw
+  glossary/profile/provider/prompt/QA diagnostics for owner debugging. Secrets,
+  provider `Authorization` headers, API keys and real `.env*` values remain
+  excluded. Release-version glossary/profile diagnostics, consent, retention,
+  deletion, support and legal/privacy behavior remain TBD.
 
 Checklist:
 
@@ -188,6 +194,9 @@ Checklist:
 - [ ] Retention or user-data behavior changes have explicit human approval.
 - [ ] Release-version analytics file-use and consent policy is decided or
   explicitly deferred by the owner before any public/legal/privacy claims.
+- [ ] If glossary/profile/DeepSeek Pro diagnostics are included in release
+  scope, their release-version diagnostic policy is decided, narrowed or
+  explicitly deferred by the owner before release claims.
 
 ## 7. Security readiness
 
@@ -212,6 +221,10 @@ Checklist:
   full diagnostic archives may show raw source/translated work-unit text and
   exact provider request/response bodies for incident debugging. Provider
   `Authorization` headers and API keys must remain excluded.
+- [ ] Glossary/profile diagnostics, translation contract snapshots and
+  DeepSeek Pro role traces do not expose secrets or provider auth material and
+  are not treated as release telemetry/support artifacts without a later
+  approved release-version policy.
 - [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
   Current Gate B status: checked by issue #73 local synthetic evidence.
 - [x] Local malware/AV scanning gate is confirmed before parsing or explicitly
