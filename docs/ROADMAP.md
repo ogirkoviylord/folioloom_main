@@ -538,13 +538,25 @@ Acceptance criteria:
   owner-only diagnostics may continue only inside explicitly approved bounded
   local diagnostics or dedicated owner-only surfaces; #436 does not approve
   retention/delete/export implementation, public/legal copy or release/privacy
-  readiness. Issue #445 / #204V adds a local deterministic glossary candidate
+  readiness. Issue #444 / #204U starts the reduced-glossary iteration with a
+  local metadata-only pressure report builder over adapter-plan, scanner,
+  profile and packetizer metadata. It measures candidate distributions, profile
+  shape, packet counts and advisory token/cap blockers without provider calls,
+  runtime prompt/cache/storage/admin changes, raw excerpts or release/privacy
+  claims. #444 evidence should inform #445 reducer defaults, but it is not
+  semantic truth or runtime readiness. Issue #445 / #204V adds a local
+  deterministic glossary candidate
   reducer contract that classifies wide-scan entries as editor-ready,
   diagnostic-only or dropped with compact reason/evidence metadata, caps,
   prompt-budget pressure signatures and metadata-only serialization. It does
   not add provider calls, runtime prompt use, cache/storage/database/scheduler/
   admin/retention behavior, user-facing glossary behavior, semantic truth
-  claims or release/privacy readiness. Issue #447 / #204X updates the local
+  claims or release/privacy readiness. Issue #446 / #204W adds a local
+  metadata-only book-profile sanity gate for mixed or suspiciously confident
+  detections, including compact warning/blocker findings, route recommendations
+  and signatures. It does not change the original detector output, prove
+  semantic genre truth, call providers, alter runtime prompts/cache/storage/
+  admin/retention behavior or make release/privacy claims. Issue #447 / #204X updates the local
   glossary-editor packetizer so packets can be built from reducer-retained
   candidates, with reducer policy/signature/count metadata in reduced packet
   signatures while preserving the full-scan path. It does not call providers,
