@@ -300,9 +300,14 @@ Later:
   implemented by PR #160, but Gate B evidence remains separate until
   implemented and verified.
 - Future book/manuscript work is split out of #165: terminology/name policy
-  (#204), read-only glossary viewer (#205), editable glossary workflow (#206),
-  release-version analytics file-use and consent policy (#207), future format
-  prioritization (#208) and stricter quality rubric (#209).
+  and complex glossary/profile architecture (#204), read-only glossary viewer
+  (#205), editable glossary workflow (#206), release-version analytics
+  file-use and consent policy (#207), future format prioritization (#208) and
+  stricter quality rubric (#209). Owner direction on 2026-06-12 makes #204 a
+  complex architecture/discovery item: glossary-by-default for books,
+  `book_translation_profile`, DeepSeek Pro roles, translation contract
+  snapshots, profile-specific rules and broad pre-release diagnostics must be
+  designed before runtime implementation.
 
 ## 7. Phase 3 - Testing and reliability
 
@@ -405,8 +410,9 @@ Acceptance criteria:
 - Complex automation beyond the current worker/scheduler needs.
 - Legal/privacy/AUP/refund text without owner/counsel decision.
 - Book/manuscript future scope without separate issues: terminology/name
-  controls, glossary viewer/editor, stricter literary/editorial quality rubric,
-  user analytics consent/release policy and new formats beyond TXT/DOCX/EPUB.
+  controls, complex glossary/profile architecture, glossary viewer/editor,
+  stricter literary/editorial quality rubric, user analytics consent/release
+  policy and new formats beyond TXT/DOCX/EPUB.
 - New format implementation beyond TXT/DOCX/EPUB. Committed future format
   families are tracked as post-MVP roadmap scope: RTF (#4), FB2 (#23), PDF/OCR,
   HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and image-heavy CBZ/CBR/DJVU.
@@ -453,6 +459,23 @@ Acceptance criteria:
   resource risk, fixture rights basis, dependency/deployment impact,
   privacy/security surface and QA/release burden; produce a format-specific
   issue breakdown and do not implement any format in #208.
+
+- Task: Design complex book glossary/profile architecture (#204).
+  Phase: Later
+  Priority: Medium
+  Risk: High
+  Agent suitability: needs architecture review
+  Suggested acceptance criteria: produce a no-code architecture package for
+  glossary-by-default book routes, `book_translation_profile`, DeepSeek Pro
+  role graph/contracts, schema/enums, evidence/confidence policy,
+  profile-specific rules, translation contract snapshot boundary,
+  diagnostics/logging scope, failure/fallback behavior, RU/UK morphology TBD
+  handling and implementation issue split. Do not add runtime behavior,
+  persistence/schema, provider config, admin UI, deployment or release/privacy
+  claims in #204.
+  Status: issue #404 / #204A produced the no-code architecture package
+  `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`.
+  Next scoped step is #405 local contracts/validators only.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

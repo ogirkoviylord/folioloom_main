@@ -17,6 +17,90 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-12 - Product/architecture direction: complex book glossary, book profile and DeepSeek Pro diagnostics
+
+Status: Active for discovery and architecture planning
+
+Decision:
+- Future book/manuscript translation should assume a glossary exists for every
+  book by default. Glossary depth can vary by file size, language pair,
+  profile confidence and available evidence, but "no glossary path" should not
+  be the default architecture for book routes.
+- The glossary direction remains deliberately complex. The architecture should
+  separate at least four systems: glossary core, book translation profile
+  detection, DeepSeek Pro editorial/reasoning roles, and raw diagnostic
+  evidence capture.
+- `book_translation_profile` detection is a first-class translation-accuracy
+  requirement for books, not optional polish. It should influence glossary
+  rules, prompt policy and QA expectations once the architecture is approved.
+- DeepSeek Pro cost is not a blocker for this design direction. The
+  architecture should still record token usage, latency, provider failure modes
+  and retry behavior so the owner can understand operational tradeoffs.
+- Role-based DeepSeek Pro orchestration is acceptable only with explicit role
+  contracts: role id, version, inputs, outputs, schema/enums, dependency order,
+  fallback behavior, whether the role can affect `translation_snapshot`, and
+  what diagnostics are stored.
+- Local code is not expected to prove semantic truth such as character gender
+  or entity identity. Local validation should prove structure, schema,
+  evidence links, confidence bounds and review flags; uncertain semantic
+  claims remain model/evidence-driven and diagnosable.
+- Pre-release glossary/profile/provider/prompt/QA diagnostics may be broad and
+  raw for owner/operator debugging, consistent with the existing owner-approved
+  raw diagnostic decisions. Secrets, provider `Authorization` headers, API keys
+  and real `.env*` values must still be excluded.
+- Release-version privacy, consent, retention, deletion, support and
+  legal/privacy copy for glossary/profile diagnostics remain `TBD` and must be
+  revisited before free beta/public release claims.
+- Translation contract snapshots may contain rich server-side glossary,
+  profile, prompt-policy and diagnostic contract data during pre-release
+  design. They are not public artifacts, support artifacts or release-version
+  privacy evidence until a later release policy approves that use.
+- The book glossary architecture should later be adapted for document/form
+  translation, but document/form adaptation is not the first implementation
+  target.
+
+Evidence:
+  glossary design is acceptable, glossary should exist for all books, DeepSeek
+  Pro cost is not a blocker, book profile detection is required for accuracy,
+  profile-specific glossary rules are acceptable, pre-release diagnostics/logs
+  should retain all needed debugging data, release privacy can be decided
+  later, and RU/UK morphology remains unresolved.
+- `docs/superpowers/specs/2026-06-07-book-glossary-system-discovery.md` records
+  the updated discovery direction, layer split, role-contract requirements,
+  snapshot caveats and open questions.
+- `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`
+  records the issue #404 no-code role graph, compact contract sketches,
+  failure/fallback behavior, snapshot boundary, diagnostics boundary, provider
+  boundary and approval gates for the #405-#413 implementation sequence.
+- Existing owner-approved diagnostics decisions on 2026-06-01, 2026-06-02,
+  2026-06-06 and 2026-06-07 already allow dedicated owner-only raw text,
+  prompt and provider IO diagnostics for pre-release/debugging boundaries.
+
+Consequences:
+- Issue #204 should be treated as architecture/discovery for the complex
+  glossary/profile/Pro/diagnostics system before any runtime implementation.
+- Follow-up issue breakdown should separate role graph/contracts, schema,
+  book-profile prototype, glossary extraction/normalization, diagnostic
+  artifacts, translation snapshot design, QA/evaluation and later viewer/editor
+  work.
+- Issues #405-#413 should use the #404 architecture package as the current
+  contract boundary unless the owner approves a replacement architecture
+  decision.
+  admin UI, runtime logging changes, retention/TTL behavior, provider config,
+  deployment changes, user-facing glossary controls, public/legal/privacy copy
+  or release-readiness claims from this decision alone.
+- Reviewer/Architect must treat glossary/profile diagnostics as high-risk user
+  data and provider-diagnostics work even when the owner accepts broad
+  pre-release capture.
+- RU/UK morphology strategy remains `TBD`; do not invent a deterministic
+  morphology engine or guarantee grammatical correctness without evidence.
+
+Human approval required to change:
+- yes; changing glossary default scope, raw diagnostic boundaries,
+  provider-role behavior, persistence/retention, privacy/legal claims,
+  release-version policy, provider settings or runtime implementation requires
+  the matching explicit owner approval gate.
+
 ### 2026-06-09 - Architecture decision: JSON provider boundary for multi-block translation batches
 
 Status: Active
