@@ -1254,8 +1254,13 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/glossary_contracts.py` defines schema dataclasses,
   hard/soft/diagnostic vocabulary, status/category/strategy/gender/evidence
   enums, local validators and compact hash signatures; focused tests live in
-  `tests/test_glossary_contracts.py`. Next scoped step is #406 deterministic
-  scanner on authorized fixtures only. Provider calls, cache/runtime behavior,
+  `tests/test_glossary_contracts.py`;
+- treat issue #406 / #204C as the local deterministic glossary scanner
+  implementation: `src/translator_service/glossary_scanner.py` scans existing
+  TXT/DOCX/EPUB `FormatAdapterPlan` fixtures for soft/uncertain candidate
+  names, quoted names, terms, aliases and metadata-only evidence refs; focused
+  tests live in `tests/test_glossary_scanner.py`. Next scoped step is #407
+  profile detector/rule contract only. Provider calls, cache/runtime behavior,
   persistence/schema, admin/UI, raw diagnostics implementation and release/
   privacy claims remain gated;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
@@ -1724,6 +1729,20 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #406 / #204C added a deterministic local glossary
+  candidate/evidence scanner in `src/translator_service/glossary_scanner.py`,
+  with focused coverage in `tests/test_glossary_scanner.py`.
+- Evidence: local scanner tests cover deterministic output, repeated names and
+  terms, simple aliases, ambiguous single-token names with `unknown` gender and
+  `ru_uk_morphology_tbd`, quoted names with metadata-only evidence refs, empty
+  no-candidate documents, bounded evidence refs and unsupported PDF plans.
+  Local verification passed focused scanner/contract tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: proceed to #407 only as local book profile detector/rule contract
+  work; do not add prompt/runtime/cache/storage integration, provider calls,
+  admin UI, raw diagnostics implementation or release/privacy claims in #407.
 
 - Date: 2026-06-12.
 - Change: Issue #405 / #204B added local glossary contract schemas,
