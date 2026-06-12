@@ -389,6 +389,22 @@ class EpubExtractionTest(unittest.TestCase):
             text.index("Mixed, Named Entities, And Protected Text"),
         )
 
+    def test_extracts_pg78824_real_book_epub_samples_without_embedding_text(self):
+        sample_names = (
+            "pg78824-images-3.en-ru.epub",
+            "pg78824-images-3.en-uk.epub",
+        )
+
+        extracted_lengths = []
+        for sample_name in sample_names:
+            content = (TEST_SAMPLES_DIR / sample_name).read_bytes()
+
+            text = extract_text_from_epub(content)
+
+            extracted_lengths.append(len(text))
+
+        self.assertEqual(extracted_lengths, [357401, 357401])
+
 
 def _make_docx(document_xml: str, extra_parts: dict[str, str] | None = None) -> bytes:
     archive = BytesIO()
