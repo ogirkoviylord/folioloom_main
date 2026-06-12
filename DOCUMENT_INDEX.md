@@ -95,6 +95,18 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   structure preservation plus clean translation across TXT/DOCX/EPUB, records
   future terminology/glossary/analytics/new-format/quality issues and does not
   claim Gate B or release readiness.
+- `docs/superpowers/specs/2026-06-07-book-glossary-system-discovery.md` -
+  active discovery note for the complex book glossary/profile/DeepSeek Pro
+  direction. It records glossary-by-default for books, local-vs-model judgment
+  boundaries, broad pre-release diagnostics and release privacy/retention TBDs.
+- `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md` -
+  active no-code architecture package for issues #404-#413. It defines the
+  role graph, compact schemas, failure modes, snapshot boundary, diagnostics
+  boundary, provider boundary and approval gates.
+- `docs/superpowers/specs/2026-06-12-glossary-profile-diagnostics-sidecars.md` -
+  active design-only package for issue #412 / #204I. It defines the owner-only
+  glossary/profile diagnostic sidecar schema, raw-field manifest, existing
+  surface alignment, retention/export/deletion TBDs and implementation gates.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
