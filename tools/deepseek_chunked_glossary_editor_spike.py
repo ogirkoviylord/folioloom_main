@@ -15,7 +15,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from translator_service.book_profile import detect_book_profile
+from translator_service.format_adapters.epub import plan_epub_translation
 from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_candidate_reducer import (
+    GlossaryCandidateReductionResult,
+    glossary_candidate_reduction_payload,
+    reduce_glossary_candidates,
+)
 from translator_service.glossary_editor_chunk_outputs import (
     CHUNKED_GLOSSARY_EDITOR_OUTPUT_SCHEMA_VERSION,
     ChunkedGlossaryEditorFindingCode,
@@ -45,12 +51,27 @@ DEFAULT_DIAGNOSTIC_ROOT = Path("outputs/issue-416-chunked-deepseek-pro-spike")
 ISSUE_431_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-431-bounded-chunked-glossary-editor-retry"
 )
-APPROVED_DIAGNOSTIC_ROOTS = (DEFAULT_DIAGNOSTIC_ROOT, ISSUE_431_DIAGNOSTIC_ROOT)
+ISSUE_449_DIAGNOSTIC_ROOT = Path(
+    "outputs/issue-449-reduced-glossary-editor-retry"
+)
+APPROVED_DIAGNOSTIC_ROOTS = (
+    DEFAULT_DIAGNOSTIC_ROOT,
+    ISSUE_431_DIAGNOSTIC_ROOT,
+    ISSUE_449_DIAGNOSTIC_ROOT,
+)
 APPROVED_FIXTURES = (
     Path("test_samples/russian_profile_regression.en-ru.txt"),
     Path("test_samples/ukrainian_profile_regression.en-uk.txt"),
     Path("test_samples/sample_book.en.txt"),
 )
+ISSUE_449_APPROVED_INPUTS = (
+    *APPROVED_FIXTURES,
+    Path("private_fixtures/pg78824-images-3.epub"),
+)
+ISSUE_449_MAX_CALLS = 4
+ISSUE_449_MAX_TOKENS_TOTAL = 40_000
+ISSUE_449_MAX_PACKETS_TOTAL = 4
+ISSUE_449_PACKET_SELECTION_RULE = "first_ready_reduced_packet_per_approved_input"
 
 
 class ChatProvider(Protocol):
@@ -82,6 +103,7 @@ class SpikeConfig:
     max_packets_total: int = 3
     raw_text_capture: bool = True
     fake: bool = False
+    reduced_packets: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +135,8 @@ class ChunkedFixturePackage:
     glossary_evidence_count: int
     fragment_count: int
     character_count: int
+    reduced_packets: bool
+    reduction: GlossaryCandidateReductionResult | None
 
 
 class OpenAICompatibleProvider:
@@ -185,6 +209,20 @@ class OpenAICompatibleProvider:
                 response_text=None,
                 error_type=error.__class__.__name__,
                 error_message=error.__class__.__name__,
+            )
+        except TimeoutError as error:
+            elapsed = time.monotonic() - start
+            return ChatCallResult(
+                ok=False,
+                content="",
+                usage={},
+                finish_reason=None,
+                http_status=None,
+                elapsed_seconds=elapsed,
+                request_payload=request_payload,
+                response_text=None,
+                error_type=error.__class__.__name__,
+                error_message="provider_response_timeout",
             )
 
         elapsed = time.monotonic() - start
@@ -408,6 +446,7 @@ def select_fixture_packets(
             fixture_path,
             repo_root=repo_root,
             max_fixture_excerpt_chars=config.max_fixture_excerpt_chars,
+            config=config,
         )
         packages.append(package)
     return tuple(packages)
@@ -418,11 +457,12 @@ def build_fixture_package(
     *,
     repo_root: Path,
     max_fixture_excerpt_chars: int,
+    config: SpikeConfig,
 ) -> ChunkedFixturePackage:
-    path = _approved_fixture_path(fixture_path, repo_root=repo_root)
+    path = _approved_fixture_path(fixture_path, repo_root=repo_root, config=config)
     target_language = _target_language_for_path(path)
     content = path.read_bytes()
-    plan = plan_txt_translation(content=content, max_fragment_chars=2_400)
+    plan = _plan_input_translation(path, content=content)
     glossary = scan_glossary_candidates(
         plan,
         source_language="en",
@@ -434,7 +474,23 @@ def build_fixture_package(
         target_language=target_language,
         glossary_snapshot=glossary,
     )
-    packet_result = build_glossary_editor_packets(glossary, profile)
+    reduction = None
+    if config.reduced_packets:
+        reduction = reduce_glossary_candidates(
+            glossary,
+            profile_detection=profile,
+            pressure_context=_pressure_context(
+                fixture_path=path,
+                plan=plan,
+                glossary_entry_count=len(glossary.entries),
+                glossary_evidence_count=len(glossary.evidence),
+            ),
+        )
+    packet_result = build_glossary_editor_packets(
+        glossary,
+        profile,
+        candidate_reduction=reduction,
+    )
     ready_packets = [
         packet
         for packet in packet_result.packets
@@ -456,6 +512,8 @@ def build_fixture_package(
         glossary_evidence_count=len(glossary.evidence),
         fragment_count=plan.fragment_count,
         character_count=plan.character_count,
+        reduced_packets=config.reduced_packets,
+        reduction=reduction,
     )
 
 
@@ -482,6 +540,11 @@ def build_chunk_prompt(package: ChunkedFixturePackage) -> tuple[str, str]:
             "role_version": ROLE_VERSION,
             "fixture_id": package.fixture_id,
             "packet_selection": "first READY packet for this approved fixture",
+            "packet_reduction": (
+                "reduced glossary candidate packet"
+                if package.reduced_packets
+                else "full glossary snapshot packet"
+            ),
             "allowed_entry_ids": list(package.packet.entry_ids),
             "allowed_evidence_ids": list(package.packet.evidence_ids),
             "root_shape": _root_shape(package.packet),
@@ -608,23 +671,62 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fixture", action="append", default=[])
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
+    parser.add_argument(
+        "--issue-449-reduced",
+        action="store_true",
+        help="Use the approved #449 reduced-packet retry boundary.",
+    )
     args = parser.parse_args(argv)
 
     fixture_paths = (
         tuple(Path(item) for item in args.fixture)
         if args.fixture
-        else APPROVED_FIXTURES
+        else (
+            ISSUE_449_APPROVED_INPUTS
+            if args.issue_449_reduced
+            else APPROVED_FIXTURES
+        )
+    )
+    diagnostic_root = (
+        ISSUE_449_DIAGNOSTIC_ROOT
+        if (
+            args.issue_449_reduced
+            and args.diagnostic_root == str(DEFAULT_DIAGNOSTIC_ROOT)
+        )
+        else Path(args.diagnostic_root)
+    )
+    max_calls = (
+        ISSUE_449_MAX_CALLS
+        if args.issue_449_reduced and args.max_calls == DEFAULT_MAX_CALLS
+        else args.max_calls
+    )
+    max_tokens_total = (
+        ISSUE_449_MAX_TOKENS_TOTAL
+        if (
+            args.issue_449_reduced
+            and args.max_tokens_total == DEFAULT_MAX_TOKENS_TOTAL
+        )
+        else args.max_tokens_total
     )
     config = SpikeConfig(
         fixture_paths=fixture_paths,
-        diagnostic_root=Path(args.diagnostic_root),
+        diagnostic_root=diagnostic_root,
         provider_model=args.model,
         provider_base_url=args.base_url,
-        max_calls=args.max_calls,
-        max_tokens_total=args.max_tokens_total,
+        max_calls=max_calls,
+        max_tokens_total=max_tokens_total,
         max_completion_tokens=args.max_completion_tokens,
+        packet_selection_rule=(
+            ISSUE_449_PACKET_SELECTION_RULE
+            if args.issue_449_reduced
+            else "first_ready_packet_per_fixture"
+        ),
+        max_packets_total=(
+            ISSUE_449_MAX_PACKETS_TOTAL if args.issue_449_reduced else 3
+        ),
         raw_text_capture=True,
         fake=args.fake,
+        reduced_packets=args.issue_449_reduced,
     )
     if args.fake:
         provider: ChatProvider = FakeChunkedProvider()
@@ -673,16 +775,43 @@ def _validate_config(config: SpikeConfig) -> None:
         raise ValueError(
             "diagnostic_root does not match approved diagnostics boundary."
         )
-    if config.max_calls > DEFAULT_MAX_CALLS:
+    max_calls = ISSUE_449_MAX_CALLS if config.reduced_packets else DEFAULT_MAX_CALLS
+    max_tokens_total = (
+        ISSUE_449_MAX_TOKENS_TOTAL
+        if config.reduced_packets
+        else DEFAULT_MAX_TOKENS_TOTAL
+    )
+    max_packets_total = (
+        ISSUE_449_MAX_PACKETS_TOTAL if config.reduced_packets else 3
+    )
+    if config.max_calls > max_calls:
         raise ValueError("max_calls exceeds approved cap.")
-    if config.max_tokens_total > DEFAULT_MAX_TOKENS_TOTAL:
+    if config.max_tokens_total > max_tokens_total:
         raise ValueError("max_tokens_total exceeds approved cap.")
-    if config.max_packets_total > 3:
+    if config.max_packets_total > max_packets_total:
         raise ValueError("max_packets_total exceeds approved cap.")
     if not config.raw_text_capture:
         raise ValueError("approved run expects raw_text_capture=True.")
-    if config.packet_selection_rule != "first_ready_packet_per_fixture":
+    expected_packet_selection = (
+        ISSUE_449_PACKET_SELECTION_RULE
+        if config.reduced_packets
+        else "first_ready_packet_per_fixture"
+    )
+    if config.packet_selection_rule != expected_packet_selection:
         raise ValueError("packet_selection_rule does not match approval.")
+    if config.reduced_packets and not config.fake:
+        if config.diagnostic_root != ISSUE_449_DIAGNOSTIC_ROOT:
+            raise ValueError(
+                "diagnostic_root does not match issue #449 diagnostics boundary."
+            )
+    if (
+        not config.reduced_packets
+        and not config.fake
+        and config.diagnostic_root == ISSUE_449_DIAGNOSTIC_ROOT
+    ):
+        raise ValueError(
+            "issue #449 diagnostics boundary requires reduced_packets=True."
+        )
 
 
 def _approval_payload(config: SpikeConfig) -> dict[str, Any]:
@@ -694,6 +823,7 @@ def _approval_payload(config: SpikeConfig) -> dict[str, Any]:
         "max_tokens_total": config.max_tokens_total,
         "provider_model": config.provider_model,
         "diagnostic_storage": str(config.diagnostic_root),
+        "reduced_packets": config.reduced_packets,
         "raw_text_capture": (
             "yes; bounded fixture excerpts, prompts and provider responses only "
             "inside the owner-only untracked diagnostics directory"
@@ -816,14 +946,53 @@ def _fake_chunk_output(
     }
 
 
-def _approved_fixture_path(fixture_path: Path, *, repo_root: Path) -> Path:
-    approved = {(repo_root / item).resolve() for item in APPROVED_FIXTURES}
+def _approved_fixture_path(
+    fixture_path: Path,
+    *,
+    repo_root: Path,
+    config: SpikeConfig,
+) -> Path:
+    approved_inputs = (
+        ISSUE_449_APPROVED_INPUTS
+        if config.reduced_packets
+        else APPROVED_FIXTURES
+    )
+    approved = {(repo_root / item).resolve() for item in approved_inputs}
     resolved = (repo_root / fixture_path).resolve()
     if resolved not in approved:
-        raise ValueError(f"Fixture is not approved for issue #416: {fixture_path}")
+        issue = "#449" if config.reduced_packets else "#416"
+        raise ValueError(f"Fixture is not approved for issue {issue}: {fixture_path}")
     if not resolved.is_file():
         raise FileNotFoundError(f"Approved fixture is missing: {fixture_path}")
     return resolved
+
+
+def _plan_input_translation(path: Path, *, content: bytes) -> Any:
+    if path.suffix.lower() == ".epub":
+        return plan_epub_translation(content=content, max_fragment_chars=2_400)
+    return plan_txt_translation(content=content, max_fragment_chars=2_400)
+
+
+def _pressure_context(
+    *,
+    fixture_path: Path,
+    plan: Any,
+    glossary_entry_count: int,
+    glossary_evidence_count: int,
+) -> Mapping[str, Any]:
+    return {
+        "fixture_id": _fixture_id(fixture_path),
+        "document_format": getattr(
+            plan.document_format,
+            "value",
+            str(plan.document_format),
+        ),
+        "fragment_count": plan.fragment_count,
+        "character_count": plan.character_count,
+        "glossary_entry_count": glossary_entry_count,
+        "glossary_evidence_count": glossary_evidence_count,
+        "selection": ISSUE_449_PACKET_SELECTION_RULE,
+    }
 
 
 def _target_language_for_path(path: Path) -> str:
@@ -961,7 +1130,7 @@ def _fixture_summary(
 ) -> dict[str, Any]:
     return {
         "fixture_id": package.fixture_id,
-        "fixture_path": str(package.fixture_path.relative_to(repo_root)),
+        "fixture_path": _display_path(package.fixture_path, repo_root=repo_root),
         "target_language": package.target_language,
         "fragment_count": package.fragment_count,
         "character_count": package.character_count,
@@ -976,6 +1145,8 @@ def _fixture_summary(
             package.packet.estimated_prompt_tokens
         ),
         "selected_packet_reserved_prompt_tokens": package.packet.reserved_prompt_tokens,
+        "reduced_packets": package.reduced_packets,
+        "reducer": _reducer_summary(package.reduction),
     }
 
 
@@ -983,11 +1154,19 @@ def _packet_diagnostic_summary(package: ChunkedFixturePackage) -> dict[str, Any]
     return {
         "fixture_id": package.fixture_id,
         "packet": glossary_editor_packet_payload(package.packet),
+        "reduction": _reducer_summary(package.reduction),
     }
 
 
+def _display_path(path: Path, *, repo_root: Path) -> str:
+    try:
+        return str(path.relative_to(repo_root))
+    except ValueError:
+        return str(path)
+
+
 def _prompt_packet_payload(packet: GlossaryEditorPacket) -> dict[str, Any]:
-    return {
+    payload = {
         "packet_id": packet.packet_id,
         "packet_signature": packet.packet_signature,
         "packet_index": packet.packet_index,
@@ -1007,10 +1186,49 @@ def _prompt_packet_payload(packet: GlossaryEditorPacket) -> dict[str, Any]:
                 "evidence_refs": list(entry.evidence_refs),
                 "profile_rule_ids": list(entry.profile_rule_ids),
                 "needs_review": entry.needs_review,
+                "reducer_decision_status": entry.reducer_decision_status,
+                "reducer_decision_reasons": list(entry.reducer_decision_reasons),
             }
             for entry in packet.entries
         ],
         "evidence_ids": list(packet.evidence_ids),
+    }
+    if packet.reducer_context is not None:
+        payload["reducer_context"] = {
+            "policy_version": packet.reducer_context.policy_version,
+            "reducer_signature": packet.reducer_context.reducer_signature,
+            "source_glossary_signature": (
+                packet.reducer_context.source_glossary_signature
+            ),
+            "reduced_glossary_signature": (
+                packet.reducer_context.reduced_glossary_signature
+            ),
+            "profile_signature": packet.reducer_context.profile_signature,
+            "pressure_signature": packet.reducer_context.pressure_signature,
+            "retained_count": packet.reducer_context.retained_count,
+            "diagnostic_count": packet.reducer_context.diagnostic_count,
+            "dropped_count": packet.reducer_context.dropped_count,
+        }
+    return payload
+
+
+def _reducer_summary(
+    reduction: GlossaryCandidateReductionResult | None,
+) -> dict[str, Any] | None:
+    if reduction is None:
+        return None
+    payload = glossary_candidate_reduction_payload(reduction)
+    return {
+        "policy_version": payload["policy_version"],
+        "reducer_signature": payload["reducer_signature"],
+        "source_glossary_signature": payload["source_glossary_signature"],
+        "reduced_glossary_signature": payload["reduced_glossary_signature"],
+        "profile_signature": payload["profile_signature"],
+        "pressure_signature": payload["pressure_signature"],
+        "retained_count": len(reduction.retained_entry_ids),
+        "diagnostic_count": len(reduction.diagnostic_entry_ids),
+        "dropped_count": len(reduction.dropped_entry_ids),
+        "caps": payload["caps"],
     }
 
 

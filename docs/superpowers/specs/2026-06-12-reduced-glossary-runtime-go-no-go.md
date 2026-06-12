@@ -28,17 +28,17 @@ readiness claim.
 Overall verdict: NO-GO for normal runtime glossary prompt integration now.
 
 The reduced glossary chain is a GO candidate only for continued local
-metadata-only planning, disabled shadow rehearsal and the already approved but
-not-yet-run live #449 provider retry. It is not ready to affect normal
-translation prompts, cache reuse, durable storage, admin surfaces, release
-claims or public/privacy/legal policy.
+metadata-only planning, disabled shadow rehearsal and prompt/packet-budget
+iteration. It is not ready to affect normal translation prompts, cache reuse,
+durable storage, admin surfaces, release claims or public/privacy/legal policy.
 
 Reasons:
 
 - Local reduced foundations are stronger than the earlier wide-scan path, but
   local/fake evidence does not prove provider reliability or semantic truth.
-- The latest reduced provider retry (#449) has fake/dry preflight evidence but
-  live provider behavior is still `Unknown`.
+- The latest reduced provider retry (#449) produced mixed live evidence:
+  Russian failed with `length`/invalid JSON, Ukrainian timed out with provider
+  usage `Unknown`, and `sample_book` plus the approved EPUB validated.
 - Previous bounded live editor runs (#416 and #431) validated only the small
   sample packet and failed larger RU/UK fixture packets.
 - Release-version glossary/profile diagnostic privacy, consent, retention,
@@ -55,7 +55,7 @@ Reasons:
 | #446 / #204W | Metadata-only profile sanity gate for mixed or suspicious profiles. | Useful review gate; not semantic truth proof. |
 | #447 / #204X | Packetizer can build reduced packets with reducer policy/signature metadata while preserving full-scan behavior. | Good local packet contract; provider success still unproven. |
 | #448 / #204Y | Fake-output validation and readiness gates for reduced packets, including reducer decision coverage/drop pressure. | Necessary local gate; fake/local only. |
-| #449 / #204Z | Draft PR #458 adds reduced provider retry tooling; fake/dry preflight passed with 4 fake calls and 15109 observed fake tokens. | Live provider behavior `Unknown`; #458 remains draft. |
+| #449 / #204Z | Draft PR #458 adds reduced provider retry tooling; fake/dry preflight passed with 4 fake calls and 15109 observed fake tokens; live retry attempted four calls. | Mixed live evidence: Russian `length`/invalid JSON, Ukrainian timeout with usage `Unknown`, sample TXT and approved EPUB validated. |
 | #450 / #204AA | Disabled-by-default shadow runtime planning uses reducer-retained candidates and compact per-work-unit metadata. | GO for metadata-only shadow rehearsal; no runtime prompt/cache behavior. |
 
 Additional prior provider evidence:
@@ -73,8 +73,8 @@ Additional prior provider evidence:
 | --- | --- | --- | --- |
 | Local pressure/reducer/packet/evaluation contracts | GO for local metadata-only use | #444-#448 are merged and tested locally. | Keep metadata-only; no semantic truth claims. |
 | Disabled shadow planning | GO for disabled-by-default rehearsal only | #450 proves default runtime unchanged and compact reduced metadata. | Separate approval before any live runtime use. |
-| Provider retry | NEEDS MORE VERIFICATION | #449 fake/dry passed, but live provider behavior is `Unknown`; prior live retries still had blockers. | Run #449 live only with safe secret handling and exact approved caps, or record live behavior as `Unknown`. |
-| Prompt integration | NO-GO | Provider reliability and prompt-budget behavior are not proven for larger packets. | Passing metadata-only provider retry plus prompt-safety tests and owner approval. |
+| Provider retry | NEEDS ITERATION | #449 mixed live evidence still has a `length`/invalid JSON failure and timeout. | Prompt/packet-budget iteration or another approved bounded retry after fixes. |
+| Prompt integration | NO-GO | Provider reliability and prompt-budget behavior are not proven for RU/UK regression packets. | Passing metadata-only provider retry plus prompt-safety tests and owner approval. |
 | Cache signatures/reuse | NO-GO for runtime cache behavior | Signature helpers exist, but stale-cache/migration/bypass policy remains `TBD`. | Owner decision: enforce glossary-aware keys, bypass cache for injected units, or defer cache use. |
 | Diagnostics sidecars | GO only for owner-only foundation already implemented | #434 foundation exists, but release/admin/archive/export/retention behavior remains unapproved. | Dedicated approval for any storage/admin/archive/export/delete behavior. |
 | Storage/admin surfaces | NO-GO | No approval for DB/schema/storage/admin expansion, and diagnostics can contain user-data-derived raw-capable fields. | Separate architecture review, tests and owner approval. |
@@ -83,9 +83,11 @@ Additional prior provider evidence:
 ## Confirmed Facts
 
 - #444, #445, #446, #447, #448 and #450 are merged to `main`.
-- #449 is open as draft PR #458; its GitHub checks passed, but the approved
-  live provider retry was not run from this process because no
-  `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEYS` environment value was present.
+- #449 is open as draft PR #458; fake/dry preflight passed, and the approved
+  live retry produced mixed evidence rather than runtime readiness.
+- #449 live attempts respected the approved call cap: Russian failed with
+  `length`/invalid JSON, Ukrainian timed out, sample TXT validated and the
+  approved EPUB validated.
 - Local reduced shadow planning serializes compact signatures, ids, counts,
   budget status and fallback reason codes rather than raw source text, prompt
   bodies, provider responses or translated text.
@@ -98,9 +100,9 @@ Additional prior provider evidence:
 
 ## Unknown / TBD
 
-- `Unknown`: #449 live provider schema validity, evidence-ref coverage,
-  finish reasons, latency and provider-reported token usage.
-- `Unknown`: reduced glossary quality on full real-book provider outputs.
+- `Unknown`: provider-reported token usage for the timed-out Ukrainian packet.
+- `Unknown`: reduced glossary quality beyond the bounded validated sample TXT
+  and approved EPUB packets.
 - `TBD`: cache stale/migration policy once glossary/profile context can affect
   output.
 - `TBD`: whether first runtime implementation should bypass cache, require
@@ -131,14 +133,12 @@ Before any runtime implementation:
 
 ## Recommended Follow-Up Order
 
-1. Complete or explicitly defer #449. Preferred path: run the already approved
-   bounded live retry only after the provider key is available through safe
-   environment handling that does not echo or commit the secret.
-2. If #449 fails with `length`, invalid JSON, missing refs or token overrun,
-   create a new local prompt/packet-budget iteration issue before any runtime
-   proposal.
-3. If #449 passes all local gates within caps, run a fresh no-code architecture
-   update focused only on prompt integration and cache behavior.
+1. Treat #449 as evidence for prompt/packet-budget iteration, not runtime
+   prompt integration.
+2. Create a focused local prompt/packet-budget iteration issue for the
+   `length`/invalid JSON and timeout failure modes before any runtime proposal.
+3. After local fixes, run another bounded provider retry only with exact owner
+   approval and safe secret handling.
 4. Decide cache policy in a separate issue: glossary-aware cache signatures,
    cache bypass for glossary-injected units, or shadow-only defer.
 5. Keep diagnostics compact by default. Any raw-capable diagnostic sidecar,
@@ -154,10 +154,10 @@ Before any runtime implementation:
 
 These are issue candidates, not approved implementation:
 
-- Reduced provider retry completion: finish #449 live run or close it with
-  live behavior `Unknown` and record why.
-- Reduced prompt/packet budget iteration: only if #449 fails or cannot fit
-  caps.
+- Reduced prompt/packet budget iteration for #449 `length`/invalid JSON and
+  timeout failures.
+- Optional follow-up bounded provider retry after local fixes and exact owner
+  approval.
 - Cache policy decision for glossary-injected runtime units.
 - Disabled prompt-policy adapter behind a default-off flag, after provider and
   cache gates.
