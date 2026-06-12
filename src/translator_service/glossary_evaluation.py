@@ -37,6 +37,8 @@ class GlossaryEditorReadinessGateCode(StrEnum):
     CONFLICT_RATE = "conflict_rate"
     BUDGET_OVERRUNS = "budget_overruns"
     NEEDS_REVIEW_RATE = "needs_review_rate"
+    REDUCER_DECISION_COVERAGE = "reducer_decision_coverage"
+    REDUCER_DROP_PRESSURE = "reducer_drop_pressure"
     PROVIDER_EVIDENCE = "provider_evidence"
     PROVIDER_TOKEN_CAP = "provider_token_cap"
 
@@ -52,6 +54,8 @@ class GlossaryEditorEvaluationThresholds:
     max_conflict_rate: float = 0.0
     max_budget_overruns: int = 0
     max_needs_review_rate: float = 0.25
+    min_reducer_decision_coverage_rate: float = 1.0
+    max_reducer_drop_or_diagnostic_rate: float = 0.95
 
 
 DEFAULT_GLOSSARY_EDITOR_EVALUATION_THRESHOLDS = (
@@ -78,6 +82,15 @@ class GlossaryEditorEvaluationMetrics:
     conflict_rate: float
     budget_overrun_count: int
     max_packet_budget_utilization: float
+    reduced_packet_count: int
+    reducer_context_count: int
+    reducer_retained_entry_count: int
+    reducer_diagnostic_entry_count: int
+    reducer_dropped_entry_count: int
+    reducer_packet_entry_count: int
+    reducer_packet_entries_with_decisions: int
+    reducer_decision_coverage_rate: float
+    reducer_drop_or_diagnostic_rate: float
     provider_observed_tokens: int | None
     provider_max_tokens_total: int | None
     provider_token_over_cap: bool
@@ -229,6 +242,7 @@ def _metrics(
         and provider_observed_tokens > provider_max_tokens_total
     )
     covered_evidence, total_evidence = _evidence_ref_coverage(validations)
+    reducer_metrics = _reducer_metrics(packets)
     return GlossaryEditorEvaluationMetrics(
         total_chunks=total_chunks,
         valid_chunks=valid_chunks,
@@ -251,6 +265,23 @@ def _metrics(
         conflict_rate=_rate(conflict_finding_count, proposed_entry_count),
         budget_overrun_count=budget_overrun_count,
         max_packet_budget_utilization=_max_packet_budget_utilization(packets),
+        reduced_packet_count=reducer_metrics["reduced_packet_count"],
+        reducer_context_count=reducer_metrics["reducer_context_count"],
+        reducer_retained_entry_count=reducer_metrics["reducer_retained_entry_count"],
+        reducer_diagnostic_entry_count=(
+            reducer_metrics["reducer_diagnostic_entry_count"]
+        ),
+        reducer_dropped_entry_count=reducer_metrics["reducer_dropped_entry_count"],
+        reducer_packet_entry_count=reducer_metrics["reducer_packet_entry_count"],
+        reducer_packet_entries_with_decisions=(
+            reducer_metrics["reducer_packet_entries_with_decisions"]
+        ),
+        reducer_decision_coverage_rate=(
+            reducer_metrics["reducer_decision_coverage_rate"]
+        ),
+        reducer_drop_or_diagnostic_rate=(
+            reducer_metrics["reducer_drop_or_diagnostic_rate"]
+        ),
         provider_observed_tokens=provider_observed_tokens,
         provider_max_tokens_total=provider_max_tokens_total,
         provider_token_over_cap=provider_token_over_cap,
@@ -346,6 +377,28 @@ def _local_gates(
             metrics.needs_review_rate,
             f"<= {thresholds.max_needs_review_rate}",
             "High needs_review rate means outputs are not ready to trust.",
+        ),
+        _gate(
+            stage,
+            GlossaryEditorReadinessGateCode.REDUCER_DECISION_COVERAGE,
+            (
+                metrics.reducer_decision_coverage_rate
+                >= thresholds.min_reducer_decision_coverage_rate
+            ),
+            metrics.reducer_decision_coverage_rate,
+            f">= {thresholds.min_reducer_decision_coverage_rate}",
+            "Reduced packets must preserve reducer decision metadata per entry.",
+        ),
+        _gate(
+            stage,
+            GlossaryEditorReadinessGateCode.REDUCER_DROP_PRESSURE,
+            (
+                metrics.reducer_drop_or_diagnostic_rate
+                <= thresholds.max_reducer_drop_or_diagnostic_rate
+            ),
+            metrics.reducer_drop_or_diagnostic_rate,
+            f"<= {thresholds.max_reducer_drop_or_diagnostic_rate}",
+            "Reducer diagnostic/drop pressure must stay within the retry gate.",
         ),
     )
 
@@ -480,6 +533,56 @@ def _max_packet_budget_utilization(
                 packet.reserved_prompt_tokens / packet.max_reserved_prompt_tokens
             )
     return round(max(utilizations), 6) if utilizations else 0.0
+
+
+def _reducer_metrics(
+    packets: tuple[GlossaryEditorPacket, ...],
+) -> dict[str, int | float]:
+    reduced_packets = tuple(
+        packet for packet in packets if packet.reducer_context is not None
+    )
+    contexts_by_signature = {
+        packet.reducer_context.reducer_signature: packet.reducer_context
+        for packet in reduced_packets
+        if packet.reducer_context is not None
+    }
+    retained_count = sum(
+        context.retained_count for context in contexts_by_signature.values()
+    )
+    diagnostic_count = sum(
+        context.diagnostic_count for context in contexts_by_signature.values()
+    )
+    dropped_count = sum(
+        context.dropped_count for context in contexts_by_signature.values()
+    )
+    reduced_packet_entries = tuple(
+        entry for packet in reduced_packets for entry in packet.entries
+    )
+    entries_with_decisions = sum(
+        1
+        for entry in reduced_packet_entries
+        if entry.reducer_decision_status == "retained_for_editor"
+    )
+    total_reducer_decisions = retained_count + diagnostic_count + dropped_count
+    return {
+        "reduced_packet_count": len(reduced_packets),
+        "reducer_context_count": len(contexts_by_signature),
+        "reducer_retained_entry_count": retained_count,
+        "reducer_diagnostic_entry_count": diagnostic_count,
+        "reducer_dropped_entry_count": dropped_count,
+        "reducer_packet_entry_count": len(reduced_packet_entries),
+        "reducer_packet_entries_with_decisions": entries_with_decisions,
+        "reducer_decision_coverage_rate": _rate(
+            entries_with_decisions,
+            len(reduced_packet_entries),
+            empty=1.0,
+        ),
+        "reducer_drop_or_diagnostic_rate": _rate(
+            diagnostic_count + dropped_count,
+            total_reducer_decisions,
+            empty=0.0,
+        ),
+    }
 
 
 def _provider_tokens(

@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from tests.test_glossary_editor_chunk_outputs import (
     _json,
+    _reduced_test_packet,
     _test_packet,
     _valid_output,
 )
@@ -13,6 +14,7 @@ from translator_service.glossary_editor_chunk_outputs import (
     validate_chunked_glossary_editor_output,
 )
 from translator_service.glossary_evaluation import (
+    GlossaryEditorEvaluationThresholds,
     GlossaryEditorReadinessGateCode,
     GlossaryEditorReadinessStage,
     evaluate_glossary_editor_readiness,
@@ -59,6 +61,88 @@ class GlossaryEvaluationTest(unittest.TestCase):
                 GlossaryEditorReadinessGateCode.PROVIDER_EVIDENCE,
                 GlossaryEditorReadinessGateCode.PROVIDER_TOKEN_CAP,
             },
+        )
+
+    def test_reduced_packet_metrics_pass_with_metadata_only_payload(self):
+        packet = _reduced_test_packet()
+        validation = validate_chunked_glossary_editor_output(
+            _json(_valid_output(packet)),
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((validation,))
+
+        evaluation = evaluate_glossary_editor_readiness(
+            (validation,),
+            merge_result=merge,
+            packets=(packet,),
+        )
+        serialized = serialize_glossary_editor_evaluation(evaluation)
+
+        self.assertTrue(evaluation.provider_retry_ready)
+        self.assertEqual(evaluation.metrics.reduced_packet_count, 1)
+        self.assertEqual(evaluation.metrics.reducer_context_count, 1)
+        self.assertGreater(evaluation.metrics.reducer_retained_entry_count, 0)
+        self.assertGreater(evaluation.metrics.reducer_dropped_entry_count, 0)
+        self.assertEqual(evaluation.metrics.reducer_decision_coverage_rate, 1.0)
+        self.assertGreater(evaluation.metrics.reducer_drop_or_diagnostic_rate, 0.0)
+        self.assertNotIn("Frontmatter Noise", serialized)
+        self.assertNotIn("raw_excerpt", serialized)
+        self.assertNotIn("provider_response", serialized)
+        self.assertNotIn("system prompt", serialized.lower())
+
+    def test_reducer_drop_pressure_threshold_can_fail_readiness(self):
+        packet = _reduced_test_packet()
+        validation = validate_chunked_glossary_editor_output(
+            _json(_valid_output(packet)),
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((validation,))
+
+        evaluation = evaluate_glossary_editor_readiness(
+            (validation,),
+            merge_result=merge,
+            packets=(packet,),
+            thresholds=GlossaryEditorEvaluationThresholds(
+                max_reducer_drop_or_diagnostic_rate=0.0,
+            ),
+        )
+
+        self.assertFalse(evaluation.provider_retry_ready)
+        self.assertIn(
+            GlossaryEditorReadinessGateCode.REDUCER_DROP_PRESSURE,
+            _failed_local_gate_codes(evaluation),
+        )
+
+    def test_reduced_packet_missing_decision_metadata_fails_readiness(self):
+        packet = _reduced_test_packet()
+        stripped_packet = replace(
+            packet,
+            entries=tuple(
+                replace(
+                    entry,
+                    reducer_decision_status=None,
+                    reducer_decision_reasons=(),
+                )
+                for entry in packet.entries
+            ),
+        )
+        validation = validate_chunked_glossary_editor_output(
+            _json(_valid_output(stripped_packet)),
+            packet=stripped_packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((validation,))
+
+        evaluation = evaluate_glossary_editor_readiness(
+            (validation,),
+            merge_result=merge,
+            packets=(stripped_packet,),
+        )
+
+        self.assertFalse(evaluation.provider_retry_ready)
+        self.assertEqual(evaluation.metrics.reducer_decision_coverage_rate, 0.0)
+        self.assertIn(
+            GlossaryEditorReadinessGateCode.REDUCER_DECISION_COVERAGE,
+            _failed_local_gate_codes(evaluation),
         )
 
     def test_missing_evidence_invalid_chunk_fails_structured_gates(self):

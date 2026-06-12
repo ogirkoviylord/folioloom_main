@@ -549,7 +549,12 @@ Acceptance criteria:
   candidates, with reducer policy/signature/count metadata in reduced packet
   signatures while preserving the full-scan path. It does not call providers,
   integrate runtime prompts, mutate cache/storage/database/scheduler/admin/
-  retention behavior or claim release/privacy readiness.
+  retention behavior or claim release/privacy readiness. Issue #448 / #204Y
+  extends local fake-output validation coverage and metadata-only readiness
+  gates for reduced packets, including reducer decision coverage and reducer
+  diagnostic/drop pressure. It does not call providers, integrate runtime
+  prompts, mutate cache/storage/database/scheduler/admin/retention behavior or
+  claim semantic/release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
