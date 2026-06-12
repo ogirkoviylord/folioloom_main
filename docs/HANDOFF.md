@@ -1349,6 +1349,20 @@ core flow, release gates, operational visibility and documentation.
   call providers, integrate prompts/runtime/cache/storage, mutate persistence,
   expand diagnostics, add admin UI, change retention or claim release/privacy
   readiness;
+- treat issue #416 / #204M as the owner-approved bounded chunked DeepSeek Pro
+  glossary-editor spike:
+  `tools/deepseek_chunked_glossary_editor_spike.py` runs fake preflight or an
+  approved live DeepSeek-compatible call set over the first READY packet per
+  approved fixture, validates outputs through #415 and writes raw prompts,
+  bounded excerpts and provider responses only to the approved untracked
+  owner-only diagnostics directory. The live metadata-only report lives at
+  `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md`.
+  The approved run made 3 calls, observed 16973 provider tokens, validated only
+  the small `sample_book.en.txt` packet, and recorded two invalid larger-fixture
+  outputs due missing evidence refs. Recommendation: pivot or iterate the
+  chunk prompt/evidence behavior before any runtime integration. This does not
+  integrate prompts/runtime/cache/storage, mutate persistence, expand admin
+  diagnostics, change retention or claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1817,6 +1831,25 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #416 / #204M added a standalone bounded chunked DeepSeek Pro
+  glossary-editor spike runner in
+  `tools/deepseek_chunked_glossary_editor_spike.py`, focused tests in
+  `tests/test_chunked_deepseek_pro_spike.py`, and a metadata-only report at
+  `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md`.
+- Evidence: after owner approval for the three fixtures, first READY packet per
+  fixture, max 3 calls, max 30000 tokens, `deepseek-v4-pro`, local untracked
+  owner-only diagnostic storage and bounded raw-text capture, the live run made
+  3 provider calls and observed 16973 provider tokens. The small
+  `sample_book.en.txt` packet validated; the two regression-fixture packets
+  failed local chunk validation because evidence refs were missing. Merge/
+  adjudication recorded 4 proposed entries, 2 invalid packets, blocker findings
+  for invalid chunks and missing evidence refs, and 0.0 conflict rate.
+- Follow-up: pivot or iterate chunk prompt/evidence behavior before any runtime
+  integration. Do not add provider runtime/config changes, prompt rollout,
+  cache/storage/database/admin integration, retention behavior, release/privacy
+  claims or further live provider calls without a fresh exact approval.
+
+- Date: 2026-06-12.
 - Change: Issue #415 / #204L added local fake-output validators and
   deterministic merge/adjudication for chunked glossary-editor outputs in
   `src/translator_service/glossary_editor_chunk_outputs.py`, with focused
@@ -1828,12 +1861,10 @@ Potential issues to verify:
   output derived from a #413 fixture packet. Local verification passed focused
   chunk-output tests, glossary/profile related tests, compileall, targeted ruff
   and `git diff --check`.
-- Follow-up: #416 remains blocked until #414 and #415 PRs are complete and the
-  owner gives fresh exact approval for fixture set, packet selection, max
-  calls/tokens, provider/model, diagnostic storage and raw-text capture policy.
-  Do not add live provider calls, prompt/runtime/cache/storage integration,
-  persistence/schema, diagnostic expansion, admin UI, retention behavior or
-  release/privacy claims without that approval.
+- Follow-up: #416 live spike is now complete as a bounded metadata-only
+  report. Do not add prompt/runtime/cache/storage integration, persistence/
+  schema, diagnostic expansion, admin UI, retention behavior or release/privacy
+  claims without a separate approved issue.
 
 - Date: 2026-06-12.
 - Change: Issue #414 / #204K added a local deterministic glossary editor

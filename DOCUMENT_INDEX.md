@@ -116,6 +116,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   DeepSeek Pro glossary/profile spike results, validation failures, token
   overrun evidence and no-runtime-integration recommendation without raw
   fixture text, prompts, provider bodies or secrets.
+- `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md` -
+  active metadata-only report for issue #416 / #204M. It records the bounded
+  chunked DeepSeek Pro glossary-editor spike results, validation failures,
+  merge findings, token/latency shape and pivot-before-runtime recommendation
+  without raw fixture text, prompts, provider bodies or secrets.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
