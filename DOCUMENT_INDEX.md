@@ -121,6 +121,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   chunked DeepSeek Pro glossary-editor spike results, validation failures,
   merge findings, token/latency shape and pivot-before-runtime recommendation
   without raw fixture text, prompts, provider bodies or secrets.
+- `docs/superpowers/specs/2026-06-12-runtime-glossary-integration-architecture.md` -
+  active no-code architecture review for issue #433 / #204Q. It defines future
+  runtime glossary/profile touchpoints, fallback behavior, cache/signature
+  policy, diagnostics boundaries, release/privacy gates and follow-up order
+  without implementing runtime prompt/cache/storage/provider behavior.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing

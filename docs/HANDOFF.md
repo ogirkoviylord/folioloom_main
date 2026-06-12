@@ -1395,6 +1395,15 @@ core flow, release gates, operational visibility and documentation.
   `tests/test_glossary_evaluation.py`. This does not call providers, judge
   semantic truth, integrate runtime prompts/cache/storage, mutate persistence,
   expand diagnostics, change retention or claim release/privacy readiness;
+- treat issue #433 / #204Q as the no-code runtime glossary integration
+  architecture boundary:
+  `docs/superpowers/specs/2026-06-12-runtime-glossary-integration-architecture.md`
+  names future job-planning, work-unit selection, prompt-policy, cache/signature
+  and diagnostics touchpoints, plus fallback behavior for invalid outputs,
+  missing evidence, low confidence, budget exhaustion, provider failure and
+  contradictory role outputs. Runtime prompt/cache/storage/database/admin/
+  retention/provider behavior remains disabled and requires follow-up owner
+  approval;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1861,6 +1870,20 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #433 / #204Q added a no-code runtime glossary integration
+  architecture package at
+  `docs/superpowers/specs/2026-06-12-runtime-glossary-integration-architecture.md`.
+- Evidence: the package names future runtime touchpoints in job planning,
+  work-unit selection, prompt policy, cache/signature handling and diagnostics;
+  defines fallback behavior for invalid glossary/editor output, low confidence,
+  missing evidence refs, budget exhaustion, provider failure and contradictory
+  role outputs; and records follow-up order for #431, #434, #435 and #436.
+- Follow-up: do not implement runtime glossary/profile prompts, cache reuse,
+  storage/database/scheduler/admin diagnostics, retention behavior, live
+  provider work or release/privacy claims from #433 alone. Those remain gated
+  by explicit owner approvals and follow-up issues.
 
 - Date: 2026-06-12.
 - Change: Issue #432 / #204P added a local metadata-only glossary/editor

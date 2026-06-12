@@ -517,9 +517,13 @@ Acceptance criteria:
   invalid chunk rate, blocker/warning findings, duplicate/conflict rate, budget
   overrun, `needs_review` rate and provider token-cap evidence. These gates
   help decide when to run a bounded provider retry and when to proceed to
-  no-code runtime architecture review. This is architecture evidence, not a
-  production glossary or runtime translation feature. Any further live spike
-  needs fresh exact approval.
+  no-code runtime architecture review. Issue #433 / #204Q adds the no-code
+  runtime integration architecture boundary for job planning, work-unit
+  selection, prompt policy, cache/signature handling, diagnostics, fallback
+  behavior, readiness gates and follow-up order. This is architecture evidence,
+  not a production glossary or runtime translation feature. Any further live
+  spike needs fresh exact approval, and any runtime prompt/cache/storage/admin/
+  retention implementation needs separate owner approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
