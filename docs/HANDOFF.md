@@ -1916,6 +1916,22 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #445 / #204V added a local deterministic glossary candidate
+  reducer in `src/translator_service/glossary_candidate_reducer.py`, with
+  focused coverage in `tests/test_glossary_candidate_reducer.py`.
+- Evidence: local reducer tests cover repeated important names/terms, quoted
+  uncertain and frontmatter/navigation noise, deterministic caps and prompt
+  budget pressure, stable signatures, invalid caps and serialized metadata that
+  excludes synthetic raw source/target/pressure text. Local verification passed
+  focused reducer/glossary/profile/packet tests, compileall, targeted ruff and
+  `git diff --check`.
+- Follow-up: use the reducer only as a local contract until separately approved
+  downstream issues wire it into packet building or shadow planning. Do not add
+  live provider calls, runtime prompt integration, cache/storage/database/
+  scheduler/admin/retention behavior, user-visible glossary behavior, semantic
+  truth claims or release/privacy claims from #445 alone.
+
+- Date: 2026-06-12.
 - Change: Issue #436 / #204T records release-version glossary/profile
   diagnostic privacy, consent, retention, deletion, support and legal/privacy
   policy as `TBD`/blocking.
