@@ -532,7 +532,13 @@ Acceptance criteria:
   helper that builds compact glossary/profile/snapshot/selection metadata for
   authorized fixture tests without live provider calls, normal prompt injection,
   user-visible behavior, durable state mutation, admin/storage/retention
-  behavior or release/privacy claims.
+  behavior or release/privacy claims. Issue #436 / #204T records the
+  release-version glossary/profile diagnostic privacy, consent, retention,
+  deletion, support and legal/privacy policy as `TBD`/blocking. Pre-release
+  owner-only diagnostics may continue only inside explicitly approved bounded
+  local diagnostics or dedicated owner-only surfaces; #436 does not approve
+  retention/delete/export implementation, public/legal copy or release/privacy
+  readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

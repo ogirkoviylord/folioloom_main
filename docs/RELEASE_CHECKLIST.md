@@ -176,6 +176,11 @@ Confirmed facts:
   diagnostic sidecar boundary with a raw-field manifest and explicit
   retention/export/deletion `TBD`s. It does not implement storage, admin UI,
   archive inclusion or release-version privacy behavior.
+- Issue #436 / #204T records the release-version glossary/profile diagnostic
+  privacy, consent, retention, deletion, support and legal/privacy policy as
+  `TBD`/blocking. Pre-release owner-only diagnostics may remain allowed only
+  for explicitly approved bounded local diagnostics or dedicated owner-only
+  diagnostic surfaces; this is not release/privacy readiness evidence.
 
 Checklist:
 
@@ -199,12 +204,14 @@ Checklist:
 - [ ] Release-version analytics file-use and consent policy is decided or
   explicitly deferred by the owner before any public/legal/privacy claims.
 - [ ] If glossary/profile/DeepSeek Pro diagnostics are included in release
-  scope, their release-version diagnostic policy is decided, narrowed or
-  explicitly deferred by the owner before release claims.
+  scope, their release-version diagnostic policy is decided, narrowed,
+  implemented where needed and verified before release claims. Current #436
+  status: `TBD`/blocking, not release-ready.
 - [ ] If glossary/profile diagnostic sidecars are implemented or exported,
   their owner-only boundary, raw-field manifest, secret exclusion,
   retention/export/deletion behavior and support/legal/privacy posture are
-  approved and verified before release claims.
+  approved and verified before release claims. Current #436 status:
+  retention/export/deletion/support/legal policy remains `TBD`/blocking.
 
 ## 7. Security readiness
 
@@ -232,7 +239,8 @@ Checklist:
 - [ ] Glossary/profile diagnostics, translation contract snapshots and
   DeepSeek Pro role traces do not expose secrets or provider auth material and
   are not treated as release telemetry/support artifacts without a later
-  approved release-version policy.
+  approved release-version policy. Current #436 status: release-version policy
+  remains `TBD`/blocking.
 - [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
   Current Gate B status: checked by issue #73 local synthetic evidence.
 - [x] Local malware/AV scanning gate is confirmed before parsing or explicitly

@@ -541,6 +541,17 @@ Current status:
 - Deletion policy: `TBD`
 - Release-version consent/legal/privacy/support policy: `TBD`
 
+Issue #436 / #204T update:
+
+- Release-version glossary/profile diagnostic privacy, consent, retention,
+  deletion, support and legal/privacy behavior remains `TBD`/blocking.
+- Pre-release owner-only diagnostics may remain allowed only for explicitly
+  approved bounded local diagnostics or dedicated owner-only diagnostic
+  surfaces.
+- This sidecar design and the later #434 foundation do not approve retention,
+  export, deletion, support artifacts, public/legal copy, release telemetry or
+  release/privacy readiness.
+
 This design does not change current retention/TTL behavior. Future
 implementation must not claim release privacy readiness unless Release
 Readiness reviews and the owner approves the release-version policy.
