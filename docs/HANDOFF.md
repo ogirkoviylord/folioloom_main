@@ -1283,11 +1283,19 @@ core flow, release gates, operational visibility and documentation.
   `src/translator_service/glossary_selection.py` selects hard constraints plus
   relevant soft/diagnostic entries under deterministic prompt-budget limits and
   emits compact selection metadata with ids, reasons, token estimates and a
-  selection signature. Focused tests live in `tests/test_glossary_selection.py`.
-  Next scoped step is #411, but it must pause for explicit owner approval
-  before cache/policy signatures work. Provider calls, prompt/runtime/cache
-  behavior, persistence/schema, admin/UI, raw diagnostics implementation,
-  retention behavior and release/privacy claims remain gated or `TBD`;
+  selection signature. Focused tests live in `tests/test_glossary_selection.py`;
+- treat issue #411 / #204H as the approved signatures-only cache/policy slice:
+  `src/translator_service/translation_policy.py` defines an optional compact
+  `TranslationPolicySignatureContext` for glossary/profile/snapshot/selection
+  signatures, `src/translator_service/translation_cache.py` can include that
+  context in cache keys, and
+  `src/translator_service/translation_contract_snapshot.py` can derive a policy
+  signature context from a compact translation snapshot. This does not inject
+  glossary/profile data into prompts, call providers, mutate/delete runtime
+  cache artifacts, change persistence/schema, change retention/TTL, add admin
+  UI, or make release/privacy claims. Migration/stale-cache behavior remains
+  `TBD`. Next scoped step is #412 diagnostics sidecar design only unless
+  explicit implementation approval exists;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1756,6 +1764,28 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #411 / #204H added signatures-only glossary/profile-aware
+  cache and policy signature foundations. `translation_policy.py` now exposes
+  `TranslationPolicySignatureContext` plus compact normalization/payload
+  helpers; `translation_cache.py` accepts the optional context on get/put/cache
+  key paths; `translation_contract_snapshot.py` can derive a policy signature
+  context from a compact translation contract snapshot and optional work-unit
+  selection signature.
+- Evidence: owner approval for the signatures-only #411 scope was recorded in
+  the current Codex thread on 2026-06-12. Local tests cover signature changes
+  when glossary/profile/snapshot/selection/rule/prompt-contract inputs change,
+  stability across ordering-only selected-rule noise, compact raw-text
+  exclusion and existing translation-runner cache reuse. Local verification
+  passed focused policy/cache/snapshot/glossary/profile tests,
+  `tests.test_translation_runner`, targeted ruff, compileall and
+  `git diff --check`.
+- Follow-up: proceed to #412 only as diagnostics sidecar design unless the
+  owner explicitly approves implementation. Do not start #413 until #405-#408
+  and #412 are complete plus exact owner approval for fixtures, calls/tokens,
+  provider/model, diagnostic storage and raw-text capture. Migration/stale-cache
+  behavior remains `TBD`.
+
+- Date: 2026-06-12.
 - Change: Issue #410 / #204G added a local deterministic per-work-unit glossary
   subset selector in `src/translator_service/glossary_selection.py`, with
   focused coverage in `tests/test_glossary_selection.py`.
@@ -1766,10 +1796,10 @@ Potential issues to verify:
   source/target text. Local verification passed focused selection/glossary/
   scanner/profile/snapshot tests, compileall, targeted ruff and
   `git diff --check`.
-- Follow-up: pause before #411 until explicit owner approval for glossary/
-  profile-aware cache and policy signatures. Do not add live provider calls,
-  prompt/runtime/cache integration, persisted state, admin UI, raw diagnostic
-  implementation, retention behavior or release/privacy claims.
+- Follow-up: proceed to #412 only as diagnostics sidecar design unless explicit
+  implementation approval exists. Do not add live provider calls, prompt/runtime
+  integration, persisted state, admin UI, raw diagnostic implementation,
+  retention behavior or release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #409 / #204F added a local deterministic translation contract

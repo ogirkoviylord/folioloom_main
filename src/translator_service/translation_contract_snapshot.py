@@ -21,6 +21,8 @@ from translator_service.glossary_contracts import (
 )
 from translator_service.translation_policy import (
     TranslationPolicy,
+    TranslationPolicySignatureContext,
+    build_translation_policy_signature_context,
     translation_policy_signature,
 )
 
@@ -241,6 +243,33 @@ def translation_contract_snapshot_signature(
 ) -> str:
     digest = _payload_digest(translation_contract_snapshot_payload(snapshot))
     return f"translation-contract-snapshot:v1:{digest}"
+
+
+def translation_policy_signature_context_from_snapshot(
+    snapshot: TranslationContractSnapshot,
+    *,
+    selection_signature: str | None = None,
+) -> TranslationPolicySignatureContext:
+    if selection_signature is None:
+        return build_translation_policy_signature_context(
+            glossary_signature=snapshot.glossary_signature,
+            profile_signature=snapshot.profile_signature,
+            translation_snapshot_signature=translation_contract_snapshot_signature(
+                snapshot
+            ),
+            selected_rule_ids=snapshot.selected_rule_ids,
+            prompt_contract_version=snapshot.prompt_policy_version,
+        )
+    return build_translation_policy_signature_context(
+        glossary_signature=snapshot.glossary_signature,
+        profile_signature=snapshot.profile_signature,
+        translation_snapshot_signature=translation_contract_snapshot_signature(
+            snapshot
+        ),
+        selection_signature=selection_signature,
+        selected_rule_ids=snapshot.selected_rule_ids,
+        prompt_contract_version=snapshot.prompt_policy_version,
+    )
 
 
 def book_profile_detection_signature(detection: BookProfileDetection) -> str:
