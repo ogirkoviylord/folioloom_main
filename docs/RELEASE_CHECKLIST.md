@@ -172,6 +172,10 @@ Confirmed facts:
   provider `Authorization` headers, API keys and real `.env*` values remain
   excluded. Release-version glossary/profile diagnostics, consent, retention,
   deletion, support and legal/privacy behavior remain TBD.
+- Issue #412 / #204I provides a design-only owner-only glossary/profile
+  diagnostic sidecar boundary with a raw-field manifest and explicit
+  retention/export/deletion `TBD`s. It does not implement storage, admin UI,
+  archive inclusion or release-version privacy behavior.
 
 Checklist:
 
@@ -197,6 +201,10 @@ Checklist:
 - [ ] If glossary/profile/DeepSeek Pro diagnostics are included in release
   scope, their release-version diagnostic policy is decided, narrowed or
   explicitly deferred by the owner before release claims.
+- [ ] If glossary/profile diagnostic sidecars are implemented or exported,
+  their owner-only boundary, raw-field manifest, secret exclusion,
+  retention/export/deletion behavior and support/legal/privacy posture are
+  approved and verified before release claims.
 
 ## 7. Security readiness
 
