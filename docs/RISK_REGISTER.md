@@ -327,7 +327,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   cache/signature caveats, diagnostics boundary and approval gates before any
   runtime glossary/profile integration. Runtime integration remains rejected
   for now; further live provider work and runtime prompt/cache/storage/admin/
-  retention implementation require fresh exact owner approval.
+  retention implementation require fresh exact owner approval. Issue #431 /
+  #204O ran the approved bounded retry after #430; it made 3 calls, observed
+  19592 provider tokens, validated only the small sample packet, and recorded
+  two invalid larger-fixture outputs due to provider `length` completions and
+  invalid JSON. The recommendation remains pivot/iterate before runtime
+  integration.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.

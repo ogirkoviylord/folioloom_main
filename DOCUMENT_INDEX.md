@@ -122,6 +122,11 @@ roadmap: сначала сверяйся с `CURRENT_PROJECT_STATE.md` и docs u
   runtime glossary/profile touchpoints, fallback behavior, cache/signature
   policy, diagnostics boundaries, release/privacy gates and follow-up order
   without implementing runtime prompt/cache/storage/provider behavior.
+- `docs/superpowers/specs/2026-06-12-bounded-chunked-deepseek-pro-glossary-editor-retry-report.md` -
+  active metadata-only report for issue #431 / #204O. It records the bounded
+  chunked DeepSeek Pro glossary-editor retry results, validation failures,
+  token/latency shape and pivot-before-runtime recommendation without raw
+  fixture text, prompts, provider bodies or secrets.
 - `docs/superpowers/specs/2026-05-14-translation-modes-design.md` - active
   Architect design for GitHub issue #43. It defines explicit document/form and
   book/manuscript translation modes, Telegram flow placement, adapter-routing
