@@ -480,7 +480,7 @@ Acceptance criteria:
   claims in #204.
   Status: issues #404 / #204A, #405 / #204B, #406 / #204C, #407 / #204D,
   #408 / #204E, #409 / #204F, #410 / #204G, #411 / #204H, #412 / #204I,
-  #413 / #204J and #414 / #204K
+  #413 / #204J, #414 / #204K and #415 / #204L
   produced the no-code architecture package, local glossary contracts,
   deterministic scanner over existing TXT/DOCX/EPUB adapter-plan fixtures,
   local book profile detector/rule contract, fake-output DeepSeek Pro role JSON
@@ -497,8 +497,12 @@ Acceptance criteria:
   DeepSeek Pro roles yet. #414 added a local deterministic chunked
   glossary-editor packetizer with compact reference payloads, stable packet
   ids/signatures, evidence and token-budget caps, degradation/skipped metadata
-  and fixture coverage over the three #413 TXT samples. Any further live spike
-  needs fresh exact approval.
+  and fixture coverage over the three #413 TXT samples. #415 added local
+  fake-output validators and deterministic merge/adjudication for one
+  `GlossaryEditorPacket` at a time, treating invalid chunks, duplicates,
+  target/alias conflicts and low-confidence semantic claims as findings rather
+  than trusted glossary facts. Any further live spike needs fresh exact
+  approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
