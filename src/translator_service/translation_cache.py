@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from dataclasses import dataclass, field
 import hashlib
 import json
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from translator_service.structure_optimizer import PromptTier
 from translator_service.translation_policy import (
+    TranslationPolicySignatureContext,
     build_translation_policy,
     translation_policy_signature,
+    translation_policy_signature_context_payload,
 )
 
 
@@ -21,6 +23,7 @@ class TranslationCache(Protocol):
         source_language: str,
         target_language: str,
         prompt_tier: PromptTier,
+        signature_context: TranslationPolicySignatureContext | None = None,
     ) -> tuple[str, ...] | None:
         pass
 
@@ -32,6 +35,7 @@ class TranslationCache(Protocol):
         source_language: str,
         target_language: str,
         prompt_tier: PromptTier,
+        signature_context: TranslationPolicySignatureContext | None = None,
     ) -> None:
         pass
 
@@ -39,7 +43,9 @@ class TranslationCache(Protocol):
 @dataclass
 class MemoryTranslationCache:
     max_entries: int = 1_000
-    _translations: OrderedDict[str, tuple[str, ...]] = field(default_factory=OrderedDict)
+    _translations: OrderedDict[str, tuple[str, ...]] = field(
+        default_factory=OrderedDict
+    )
 
     def get(
         self,
@@ -48,12 +54,14 @@ class MemoryTranslationCache:
         source_language: str,
         target_language: str,
         prompt_tier: PromptTier,
+        signature_context: TranslationPolicySignatureContext | None = None,
     ) -> tuple[str, ...] | None:
         key = _cache_key(
             source_texts=source_texts,
             source_language=source_language,
             target_language=target_language,
             prompt_tier=prompt_tier,
+            signature_context=signature_context,
         )
         cached = self._translations.get(key)
         if cached is not None:
@@ -68,6 +76,7 @@ class MemoryTranslationCache:
         source_language: str,
         target_language: str,
         prompt_tier: PromptTier,
+        signature_context: TranslationPolicySignatureContext | None = None,
     ) -> None:
         if len(source_texts) != len(translated_texts):
             raise ValueError("Cached translation must preserve source block count")
@@ -78,6 +87,7 @@ class MemoryTranslationCache:
             source_language=source_language,
             target_language=target_language,
             prompt_tier=prompt_tier,
+            signature_context=signature_context,
         )
         self._translations[key] = translated_texts
         self._translations.move_to_end(key)
@@ -91,6 +101,7 @@ def _cache_key(
     source_language: str,
     target_language: str,
     prompt_tier: PromptTier,
+    signature_context: TranslationPolicySignatureContext | None = None,
 ) -> str:
     payload = {
         "version": 1,
@@ -101,10 +112,15 @@ def _cache_key(
             source_language=source_language,
             target_language=target_language,
             prompt_tier=prompt_tier,
+            signature_context=signature_context,
         ),
         "prompt_tier": prompt_tier.value,
         "source_texts": [_normalize_text(text) for text in source_texts],
     }
+    if signature_context is not None:
+        payload["translation_signature_context"] = (
+            translation_policy_signature_context_payload(signature_context)
+        )
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -115,6 +131,7 @@ def _translation_policy_signatures(
     source_language: str,
     target_language: str,
     prompt_tier: PromptTier,
+    signature_context: TranslationPolicySignatureContext | None = None,
 ) -> tuple[str, ...]:
     return tuple(
         translation_policy_signature(
@@ -123,7 +140,8 @@ def _translation_policy_signatures(
                 source_language=source_language,
                 target_language=target_language,
                 prompt_tier=prompt_tier,
-            )
+            ),
+            signature_context=signature_context,
         )
         for text in source_texts
     )
