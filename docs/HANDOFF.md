@@ -1513,6 +1513,17 @@ core flow, release gates, operational visibility and documentation.
   prove semantic truth or claim release/privacy readiness. Under the current
   #464 approval wording, #464 should not start until a follow-up local gate fix
   or explicit owner gate deferral is recorded;
+- treat issue #465 / #204AG as the owner-approved design-only glossary runtime
+  cache policy decision:
+  `docs/superpowers/specs/2026-06-13-glossary-runtime-cache-policy-decision.md`
+  and `docs/DECISIONS.md` record that the first disabled/default-off
+  glossary-injected enabled/test-path adapter must bypass cache, while default
+  runtime behavior and existing non-glossary cache behavior remain unchanged.
+  Compact glossary/profile/snapshot/selection signatures may be emitted only
+  as metadata for planning, diagnostics and future cache-key design. This does
+  not implement code, mutate cache/database/storage/scheduler/admin/retention
+  state, run providers, integrate prompts or claim release/privacy readiness.
+  Future glossary-aware cache keys require a separate approved issue;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1981,6 +1992,21 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-13.
+- Change: Issue #465 / #204AG records the owner-approved glossary runtime
+  cache policy decision in `docs/DECISIONS.md` and
+  `docs/superpowers/specs/2026-06-13-glossary-runtime-cache-policy-decision.md`.
+- Evidence: owner approval in GitHub issue #465 selects cache bypass for the
+  first glossary-injected enabled/test-path adapter. Existing code evidence
+  shows compact signature context support in `translation_policy.py` and
+  optional cache-key inclusion in `translation_cache.py`, but #465 makes those
+  signatures metadata-only for the first adapter and does not approve cache
+  reuse.
+- Follow-up: #466 may use this cache policy only if its own gates are satisfied
+  or explicitly deferred. Do not implement glossary-aware cache keys, cache
+  migration, runtime prompt rollout, provider calls, storage/admin/retention
+  behavior or release/privacy claims from #465.
+
+- Date: 2026-06-13.
 - Change: Issue #463 / #204AE adds the metadata-only local/fake readiness
   report at
   `docs/superpowers/specs/2026-06-13-reduced-glossary-readiness-after-packet-fixes.md`.
@@ -2362,7 +2388,8 @@ Potential issues to verify:
   `git diff --check`.
 - Follow-up: do not start #413 until exact owner approval records fixtures,
   calls/tokens, provider/model, diagnostic storage and raw-text capture.
-  Migration/stale-cache behavior remains `TBD`.
+  Future cache-key migration/stale-cache reuse behavior remains `TBD`; #465
+  later decides only the first-adapter bypass policy.
 
 - Date: 2026-06-12.
 - Change: Issue #410 / #204G added a local deterministic per-work-unit glossary
