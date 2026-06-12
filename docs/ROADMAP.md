@@ -528,6 +528,11 @@ Acceptance criteria:
   foundation with schema/validator/raw-field manifest/metadata-summary tests,
   but no admin UI, archive inclusion, runtime prompt behavior, provider
   population, retention/export/delete implementation or release/privacy claims.
+  Issue #435 / #204S adds a disabled-by-default fake-runtime/shadow planning
+  helper that builds compact glossary/profile/snapshot/selection metadata for
+  authorized fixture tests without live provider calls, normal prompt injection,
+  user-visible behavior, durable state mutation, admin/storage/retention
+  behavior or release/privacy claims.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
