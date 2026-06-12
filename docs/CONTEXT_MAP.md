@@ -31,6 +31,7 @@
 | `docs/deployment/server-beta.md` | Historical/superseded deployment note. | Читать только как архив, если активные runbooks не отвечают на вопрос. |
 | `docs/superpowers/specs/` | Specs по admin, scheduler, provider, quality, pricing draft и другим зонам. | Читать точечный spec для соответствующей зоны. |
 | `docs/superpowers/specs/2026-06-12-glossary-profile-diagnostics-sidecars.md` | Design-only owner-only glossary/profile diagnostic sidecar schema, raw-field manifest, access/export boundaries and implementation gates. | Перед #412 follow-ups, #413 provider spike planning, glossary/profile diagnostic storage/admin/archive work. |
+| `docs/superpowers/specs/2026-06-12-deepseek-pro-glossary-profile-spike-report.md` | Metadata-only #413 bounded DeepSeek Pro glossary/profile spike report with validation outcomes, token overrun evidence and recommendation not to integrate runtime roles yet. | Перед follow-up provider/glossary prompt design, any further #413-style live spike, runtime integration review or glossary diagnostics planning. |
 | `docs/superpowers/plans/` | Архив implementation plans; многие планы уже реализованы или superseded. | Читать только после `DOCUMENT_INDEX.md`; не считать unchecked items roadmap без подтверждения. |
 
 ## 3. Карта директорий
@@ -59,6 +60,7 @@
 | `var/` | Runtime sqlite DBs, object storage, translation run artifacts. | Ops/debug agents only. | human approval required; likely user/runtime data. |
 | `artifacts/`, `epub_audit_output/`, `test_samples/` | Sample/output files and real-file fixtures. | QA/file-format agents. | medium; high if copyrighted/user data risk. |
 | `tools/` | Utility tooling, currently EPUB audit helper. | QA/tooling agents. | medium. |
+| `tools/deepseek_glossary_profile_spike.py` | Standalone #413 bounded fixture spike runner for local/fake and approved live DeepSeek Pro glossary/profile role validation. | Glossary/provider spike agents only after exact owner approval. | high for live mode; can send fixture excerpts to provider and write owner-only raw diagnostics under approved untracked output directories. |
 | `handoff/` | Restart package archive and copied configs. | Orchestrator/Scribe. | medium; may contain stale or bundled context. |
 | `.superpowers/` | Local skill/process state. | Usually not needed. | low; avoid unrelated edits. |
 | `.pytest_cache/`, `.ruff_cache/`, `__pycache__/`, `.DS_Store` | Generated/cache files. | Usually no one. | low; do not treat as source of truth. |
