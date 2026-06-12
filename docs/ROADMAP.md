@@ -589,7 +589,12 @@ Acceptance criteria:
   #204AD adds local fake failure-mode coverage for truncated JSON after
   `finish_reason=length`, timeout metadata failures and missing provider usage
   as `Unknown`, without live provider calls, repair behavior, runtime changes
-  or release/privacy claims.
+  or release/privacy claims. Issue #463 / #204AE records a metadata-only
+  local/fake readiness report after #461/#462: structural gates pass, but
+  default local readiness still fails on fake low-confidence warning/
+  needs-review outputs and the approved local EPUB reducer diagnostic/drop
+  pressure. Under the current approval wording, #464 should not start until the
+  local gate is fixed or the owner explicitly defers the failed gates.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
