@@ -1927,6 +1927,23 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #447 / #204X updated
+  `src/translator_service/glossary_editor_packets.py` so local glossary-editor
+  packets can optionally be built from reducer-retained candidates, with
+  reducer policy/signature/count metadata and reducer decision reasons included
+  only on reduced packet payloads.
+- Evidence: tests cover reduced packet construction, stable reduced signatures,
+  reducer context payloads, reduced packet pressure on a noisy synthetic
+  glossary, full-scan payloads without reducer fields, reduction/source
+  signature mismatch rejection and metadata-only packet serialization. Local
+  verification passed focused packet/reducer/chunk-output tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: use reduced packets only as a local contract until #448 validates
+  fake outputs/readiness gates. Do not add live provider calls, runtime prompt
+  integration, cache/storage/database/scheduler/admin/retention behavior,
+  ordinary translation-output changes or release/privacy claims from #447 alone.
+
+- Date: 2026-06-12.
 - Change: Issue #446 / #204W added a local metadata-only book-profile sanity
   gate in `src/translator_service/book_profile_sanity.py`, with focused
   coverage in `tests/test_book_profile_sanity.py`.
