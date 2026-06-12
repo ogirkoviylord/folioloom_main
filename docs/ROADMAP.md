@@ -544,7 +544,12 @@ Acceptance criteria:
   prompt-budget pressure signatures and metadata-only serialization. It does
   not add provider calls, runtime prompt use, cache/storage/database/scheduler/
   admin/retention behavior, user-facing glossary behavior, semantic truth
-  claims or release/privacy readiness.
+  claims or release/privacy readiness. Issue #447 / #204X updates the local
+  glossary-editor packetizer so packets can be built from reducer-retained
+  candidates, with reducer policy/signature/count metadata in reduced packet
+  signatures while preserving the full-scan path. It does not call providers,
+  integrate runtime prompts, mutate cache/storage/database/scheduler/admin/
+  retention behavior or claim release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
