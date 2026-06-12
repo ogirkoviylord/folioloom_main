@@ -544,7 +544,14 @@ Acceptance criteria:
   shape, packet counts and advisory token/cap blockers without provider calls,
   runtime prompt/cache/storage/admin changes, raw excerpts or release/privacy
   claims. #444 evidence should inform #445 reducer defaults, but it is not
-  semantic truth or runtime readiness.
+  semantic truth or runtime readiness. Issue #445 / #204V adds a local
+  deterministic glossary candidate
+  reducer contract that classifies wide-scan entries as editor-ready,
+  diagnostic-only or dropped with compact reason/evidence metadata, caps,
+  prompt-budget pressure signatures and metadata-only serialization. It does
+  not add provider calls, runtime prompt use, cache/storage/database/scheduler/
+  admin/retention behavior, user-facing glossary behavior, semantic truth
+  claims or release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
