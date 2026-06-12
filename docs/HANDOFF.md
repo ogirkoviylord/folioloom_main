@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## 1. Текущее состояние проекта
 
@@ -1478,6 +1478,17 @@ core flow, release gates, operational visibility and documentation.
   mixed live evidence. Prompt integration, cache behavior, storage/admin
   diagnostics, retention/export/delete and release/privacy claims remain behind
   separate owner approval gates;
+- treat issue #461 / #204AC as the local reduced packet-budget hardening
+  iteration:
+  `src/translator_service/glossary_editor_packets.py` now keeps the full-scan
+  default packet budget unchanged while using a more conservative default only
+  for reducer-backed packets, records packet split reason codes, and preserves
+  reducer policy/signature/count metadata. Focused tests live in
+  `tests/test_glossary_editor_packets.py` and
+  `tests/test_deepseek_chunked_glossary_editor_spike.py`. This does not call
+  providers, integrate normal runtime prompts, mutate cache/storage/database/
+  scheduler/admin/retention state, prove semantic glossary truth or claim
+  release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1944,6 +1955,23 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #461 / #204AC hardens the local reduced glossary-editor
+  packetizer in `src/translator_service/glossary_editor_packets.py`. The
+  full-scan default budget remains unchanged, while reducer-backed packets use
+  a conservative reduced default budget and record `split_reason_codes` in the
+  packet payload. The #449 fake spike path now selects smaller reduced packets
+  from the same local builder.
+- Evidence: local fixture checks show the RU/UK regression full-scan packet
+  shapes remain unchanged, while first reduced RU/UK packets shrink from about
+  1.49k estimated prompt tokens to about 0.93k estimated prompt tokens with no
+  skipped entries or evidence-ref degradation. Local verification passed
+  focused packet/evaluation/spike-runner tests, compileall, targeted ruff and
+  `git diff --check` for the #461 diff.
+- Follow-up: proceed to #462 fake failure-mode coverage before any further
+  provider retry. Do not enable runtime glossary prompt/cache behavior or make
+  release/privacy claims from #461.
 
 - Date: 2026-06-12.
 - Change: Issue #449 / #204Z added #449-specific reduced-packet support to the

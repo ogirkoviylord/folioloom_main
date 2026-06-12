@@ -586,7 +586,11 @@ Acceptance criteria:
   runtime go/no-go review: normal runtime prompt integration is NO-GO now,
   local metadata-only/shadow rehearsal remains allowed, and prompt/cache/
   storage/admin/retention/release-policy work stays behind separate owner
-  approvals.
+  approvals. Issue #461 / #204AC hardens the local reduced packetizer with a
+  more conservative reduced-packet default budget, split reason metadata and
+  fixture coverage showing smaller first RU/UK reduced packets while preserving
+  full-scan behavior. This remains local packet-readiness evidence only, not
+  runtime prompt/cache integration or release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
