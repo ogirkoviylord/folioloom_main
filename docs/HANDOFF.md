@@ -1249,9 +1249,15 @@ core flow, release gates, operational visibility and documentation.
   `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`.
   It defines the role graph, compact contract sketches, failure modes,
   translation snapshot boundary, diagnostics/provider boundaries and approval
-  gates for #405-#413. Next scoped step is #405 local contracts/validators
-  only; provider calls, cache/runtime behavior, persistence/schema, admin/UI,
-  raw diagnostics implementation and release/privacy claims remain gated;
+  gates for #405-#413;
+- treat issue #405 / #204B as the local glossary contract implementation:
+  `src/translator_service/glossary_contracts.py` defines schema dataclasses,
+  hard/soft/diagnostic vocabulary, status/category/strategy/gender/evidence
+  enums, local validators and compact hash signatures; focused tests live in
+  `tests/test_glossary_contracts.py`. Next scoped step is #406 deterministic
+  scanner on authorized fixtures only. Provider calls, cache/runtime behavior,
+  persistence/schema, admin/UI, raw diagnostics implementation and release/
+  privacy claims remain gated;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1718,6 +1724,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #405 / #204B added local glossary contract schemas,
+  validators and compact signatures in
+  `src/translator_service/glossary_contracts.py`, with focused coverage in
+  `tests/test_glossary_contracts.py`.
+- Evidence: local validation covers required fields, enum values,
+  hard/soft/diagnostic layer/status compatibility, evidence references,
+  confidence ranges, source anchors, raw-excerpt gating and stable compact
+  signatures that hash raw source/target strings instead of returning them.
+  Local verification passed focused glossary contract tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: proceed to #406 only as deterministic scanner work on authorized
+  fixtures; do not add provider calls, prompt/runtime/cache/storage
+  integration, admin UI, raw diagnostics implementation or release/privacy
+  claims in #406.
 
 - Date: 2026-06-12.
 - Change: Issue #404 / #204A produced a no-code glossary architecture package

@@ -478,9 +478,10 @@ Acceptance criteria:
   handling and implementation issue split. Do not add runtime behavior,
   persistence/schema, provider config, admin UI, deployment or release/privacy
   claims in #204.
-  Status: issue #404 / #204A produced the no-code architecture package
-  `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`.
-  Next scoped step is #405 local contracts/validators only.
+  Status: issues #404 / #204A and #405 / #204B produced the no-code
+  architecture package plus local glossary contract dataclasses, enums,
+  validators, compact signatures and focused tests. Next scoped step is #406
+  deterministic scanner on authorized fixtures only.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
