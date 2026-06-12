@@ -18,6 +18,10 @@ from translator_service.book_profile import (
     detect_book_profile,
 )
 from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_candidate_reducer import (
+    GlossaryCandidateReducerCaps,
+    reduce_glossary_candidates,
+)
 from translator_service.glossary_contracts import (
     GlossaryEntry,
     GlossaryEntryCategory,
@@ -35,6 +39,7 @@ from translator_service.glossary_editor_packets import (
     GlossaryEditorPacketDegradationReason,
     GlossaryEditorPacketStatus,
     build_glossary_editor_packets,
+    glossary_editor_packet_payload,
     serialize_glossary_editor_packet,
 )
 from translator_service.glossary_scanner import scan_glossary_candidates
@@ -80,6 +85,92 @@ class GlossaryEditorPacketTest(unittest.TestCase):
         self.assertNotIn("Elizabeth Bennet", payload)
         self.assertNotIn("raw_excerpt", payload)
         self.assertNotIn("raw source text", payload)
+        self.assertNotIn("reducer_context", payload)
+        self.assertNotIn("reducer_decision_status", payload)
+
+    def test_reduced_candidates_build_packets_with_reducer_metadata(self):
+        glossary = _high_noise_glossary_snapshot(noisy_count=18)
+        profile = _profile_detection()
+        budget = GlossaryEditorPacketBudget(max_entries_per_packet=4)
+        full = build_glossary_editor_packets(glossary, profile, budget=budget)
+        reduction = reduce_glossary_candidates(
+            glossary,
+            profile_detection=profile,
+            caps=GlossaryCandidateReducerCaps(max_editor_entries=8),
+        )
+
+        reduced = build_glossary_editor_packets(
+            glossary,
+            profile,
+            budget=budget,
+            candidate_reduction=reduction,
+        )
+        repeated = build_glossary_editor_packets(
+            glossary,
+            profile,
+            budget=budget,
+            candidate_reduction=reduction,
+        )
+
+        self.assertLess(len(reduced.packets), len(full.packets))
+        self.assertEqual(reduced.build_signature, repeated.build_signature)
+        self.assertIsNotNone(reduced.reducer_context)
+        self.assertEqual(
+            reduced.reducer_context.reducer_signature,
+            reduction.reducer_signature,
+        )
+        self.assertEqual(
+            reduced.reducer_context.retained_count,
+            len(reduction.retained_entry_ids),
+        )
+        self.assertEqual(
+            reduced.glossary_signature,
+            reduction.reduced_glossary_signature,
+        )
+        retained_ids = set(reduction.retained_entry_ids)
+        self.assertTrue(retained_ids)
+        self.assertTrue(
+            all(
+                entry_id in retained_ids
+                for packet in reduced.packets
+                for entry_id in packet.entry_ids
+            )
+        )
+
+        packet_payload = glossary_editor_packet_payload(reduced.packets[0])
+        self.assertIn("reducer_context", packet_payload)
+        self.assertIn("reducer_decision_status", packet_payload["entries"][0])
+        self.assertEqual(
+            packet_payload["reducer_context"]["reducer_signature"],
+            reduction.reducer_signature,
+        )
+        serialized = "\n".join(
+            serialize_glossary_editor_packet(packet) for packet in reduced.packets
+        )
+        self.assertIn("retained_for_editor", serialized)
+        self.assertNotIn("Frontmatter Noise", serialized)
+        self.assertNotIn("raw_excerpt", serialized)
+
+    def test_rejects_reduction_from_different_source_snapshot(self):
+        glossary = _high_noise_glossary_snapshot(noisy_count=4)
+        profile = _profile_detection()
+        reduction = reduce_glossary_candidates(
+            glossary,
+            profile_detection=profile,
+        )
+        mismatched = reduction.__class__(
+            **{
+                **reduction.__dict__,
+                "source_glossary_signature": "glossary-snapshot:v1:mismatch",
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "source glossary signature mismatch"):
+            build_glossary_editor_packets(
+                glossary,
+                profile,
+                candidate_reduction=mismatched,
+            )
 
     def test_caps_evidence_refs_and_records_degradation(self):
         glossary = _glossary_snapshot(extra_evidence_count=5)
@@ -323,6 +414,70 @@ def _glossary_snapshot(*, extra_evidence_count: int = 0) -> GlossarySnapshot:
     )
 
 
+def _high_noise_glossary_snapshot(*, noisy_count: int) -> GlossarySnapshot:
+    important_entries = (
+        GlossaryEntry(
+            entry_id="entry:elizabeth",
+            category=GlossaryEntryCategory.NAME,
+            layer=GlossaryLayer.SOFT,
+            status=GlossaryEntryStatus.AUTO_DETECTED,
+            source_canonical="Elizabeth Bennet",
+            aliases=("Elizabeth",),
+            evidence_refs=("ev:elizabeth:1", "ev:elizabeth:2"),
+            confidence=0.84,
+            strategy=GlossaryStrategy.TRANSLITERATE,
+            grammatical_gender=GlossaryGender.UNKNOWN,
+        ),
+        GlossaryEntry(
+            entry_id="entry:quantum-drive",
+            category=GlossaryEntryCategory.TERM,
+            layer=GlossaryLayer.SOFT,
+            status=GlossaryEntryStatus.AUTO_DETECTED,
+            source_canonical="quantum drive",
+            evidence_refs=("ev:term:1",),
+            confidence=0.88,
+            strategy=GlossaryStrategy.PRESERVE_OFFICIAL,
+            grammatical_gender=GlossaryGender.NOT_APPLICABLE,
+        ),
+    )
+    noisy_entries = tuple(
+        GlossaryEntry(
+            entry_id=f"entry:noise:{index:02d}",
+            category=GlossaryEntryCategory.NAME,
+            layer=GlossaryLayer.SOFT,
+            status=GlossaryEntryStatus.UNCERTAIN,
+            source_canonical=f"Frontmatter Noise {index}",
+            evidence_refs=(f"ev:noise:{index:02d}",),
+            confidence=0.41,
+            strategy=GlossaryStrategy.UNKNOWN,
+            grammatical_gender=GlossaryGender.UNKNOWN,
+        )
+        for index in range(noisy_count)
+    )
+    evidence = (
+        _evidence("ev:elizabeth:1", 1, "txt:segment:1"),
+        _evidence("ev:elizabeth:2", 3, "txt:segment:3"),
+        _evidence("ev:term:1", 2, "txt:segment:2", occurrence_count=3),
+        *(
+            _evidence(
+                f"ev:noise:{index:02d}",
+                0,
+                f"epub:nav.xhtml:{index}",
+                source_scope="frontmatter/nav",
+                surface=GlossaryEvidenceSurface.NAV,
+            )
+            for index in range(noisy_count)
+        ),
+    )
+    return GlossarySnapshot(
+        snapshot_id="glossary-snapshot:noisy-test",
+        source_language="en",
+        target_language="ru",
+        entries=(*important_entries, *noisy_entries),
+        evidence=evidence,
+    )
+
+
 def _entry(
     entry_id: str,
     source: str,
@@ -351,14 +506,19 @@ def _evidence(
     evidence_id: str,
     unit_sequence: int,
     source_block_id: str,
+    *,
+    occurrence_count: int = 1,
+    source_scope: str = "chapter-1",
+    surface: GlossaryEvidenceSurface = GlossaryEvidenceSurface.BODY,
 ) -> GlossaryEvidenceRef:
     return GlossaryEvidenceRef(
         evidence_id=evidence_id,
         evidence_type=GlossaryEvidenceType.EXACT_REPEAT,
         unit_sequence=unit_sequence,
         source_block_id=source_block_id,
-        source_scope="chapter-1",
-        surface=GlossaryEvidenceSurface.BODY,
+        source_scope=source_scope,
+        surface=surface,
+        occurrence_count=occurrence_count,
         raw_excerpt=None,
     )
 
