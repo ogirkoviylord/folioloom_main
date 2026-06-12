@@ -1259,8 +1259,14 @@ core flow, release gates, operational visibility and documentation.
   implementation: `src/translator_service/glossary_scanner.py` scans existing
   TXT/DOCX/EPUB `FormatAdapterPlan` fixtures for soft/uncertain candidate
   names, quoted names, terms, aliases and metadata-only evidence refs; focused
-  tests live in `tests/test_glossary_scanner.py`. Next scoped step is #407
-  profile detector/rule contract only. Provider calls, cache/runtime behavior,
+  tests live in `tests/test_glossary_scanner.py`;
+- treat issue #407 / #204D as the local book translation profile detector and
+  rule-contract implementation: `src/translator_service/book_profile.py`
+  defines deterministic profile detection over existing adapter plans,
+  profile/rule dataclasses, confidence/uncertainty fields, local validators and
+  profile-specific glossary rule data. Focused tests live in
+  `tests/test_book_profile.py`. Next scoped step is #408 fake-output DeepSeek
+  role JSON validators only. Provider calls, prompt/runtime/cache behavior,
   persistence/schema, admin/UI, raw diagnostics implementation and release/
   privacy claims remain gated;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
@@ -1729,6 +1735,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #407 / #204D added a local deterministic book translation
+  profile detector and profile-specific glossary rule contract in
+  `src/translator_service/book_profile.py`, with focused coverage in
+  `tests/test_book_profile.py`.
+- Evidence: local profile tests cover literary-fiction detection with
+  contextual name rules, scientific/academic detection with strict term rules,
+  ambiguous/unknown and recognized-profile fallback rules requiring review,
+  metadata-only evidence refs with no raw excerpts and validator rejection of
+  invalid enum, confidence, missing-field and missing-evidence cases. Local
+  verification passed focused profile/scanner/contract tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: proceed to #408 only as fake-output DeepSeek role JSON validators;
+  do not add live provider calls, prompt/runtime/cache integration, persisted
+  state, admin UI, raw diagnostic implementation or release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #406 / #204C added a deterministic local glossary
