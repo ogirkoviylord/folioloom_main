@@ -89,6 +89,43 @@ class ChunkedGlossaryEditorOutputsTest(unittest.TestCase):
             {finding.code for finding in merge.findings},
         )
 
+    def test_truncated_json_rejected_without_body_echo(self):
+        packet = _reduced_test_packet()
+        raw_output = '{"output_schema_version":'
+
+        result = validate_chunked_glossary_editor_output(
+            raw_output,
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((result,))
+        issue_payload = json.dumps(
+            [
+                {
+                    "code": issue.code.value,
+                    "path": issue.path,
+                    "message": issue.message,
+                }
+                for issue in result.issues
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+        self.assertFalse(result.valid)
+        self.assertIsNone(result.document)
+        self.assertEqual(result.packet_id, packet.packet_id)
+        self.assertEqual(
+            {issue.code for issue in result.issues},
+            {ChunkedGlossaryEditorValidationCode.INVALID_JSON},
+        )
+        self.assertIn(packet.packet_id, merge.invalid_packet_ids)
+        self.assertIn(
+            ChunkedGlossaryEditorFindingCode.INVALID_CHUNK,
+            {finding.code for finding in merge.findings},
+        )
+        self.assertNotIn(raw_output, issue_payload)
+        self.assertNotIn("provider_response", issue_payload)
+
     def test_rejects_packet_refs_unknown_entries_enums_and_hard_promotion(self):
         packet = _test_packet()
         document = _valid_output(packet)

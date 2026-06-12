@@ -590,7 +590,11 @@ Acceptance criteria:
   more conservative reduced-packet default budget, split reason metadata and
   fixture coverage showing smaller first RU/UK reduced packets while preserving
   full-scan behavior. This remains local packet-readiness evidence only, not
-  runtime prompt/cache integration or release/privacy readiness.
+  runtime prompt/cache integration or release/privacy readiness. Issue #462 /
+  #204AD adds local fake failure-mode coverage for truncated JSON after
+  `finish_reason=length`, timeout metadata failures and missing provider usage
+  as `Unknown`, without live provider calls, repair behavior, runtime changes
+  or release/privacy claims.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
