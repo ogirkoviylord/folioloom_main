@@ -13,6 +13,13 @@ from tools.deepseek_chunked_glossary_editor_spike import (
     run_spike,
     select_fixture_packets,
 )
+from translator_service.glossary_editor_chunk_outputs import (
+    ChunkedGlossaryEditorFindingCode,
+    ChunkedGlossaryEditorFindingSeverity,
+    ChunkedGlossaryEditorValidationCode,
+    merge_chunked_glossary_editor_outputs,
+    validate_chunked_glossary_editor_output,
+)
 
 
 class ChunkedDeepSeekProSpikeTest(unittest.TestCase):
@@ -100,8 +107,109 @@ class ChunkedDeepSeekProSpikeTest(unittest.TestCase):
 
         self.assertEqual(payload["packet"]["packet_id"], package.packet.packet_id)
         self.assertEqual(payload["allowed_entry_ids"], list(package.packet.entry_ids))
+        self.assertEqual(
+            payload["evidence_contract"]["allowed_evidence_ids_source"],
+            "allowed_evidence_ids",
+        )
+        self.assertEqual(
+            payload["evidence_contract"]["entry_evidence_refs_source"],
+            "packet.entries[].evidence_refs",
+        )
+        self.assertEqual(
+            payload["evidence_contract"]["packet_evidence_count"],
+            len(package.packet.evidence_ids),
+        )
+        self.assertIn(
+            "proposed_entries[].evidence_refs",
+            payload["evidence_contract"]["required_paths"],
+        )
         self.assertNotIn("source_canonical", json.dumps(payload["packet"]))
         self.assertIn("bounded_source_excerpt", payload)
+
+    def test_fake_outputs_for_approved_fixtures_cite_resolvable_evidence_refs(self):
+        packages = select_fixture_packets(
+            SpikeConfig(
+                fixture_paths=APPROVED_FIXTURES,
+                diagnostic_root=DEFAULT_DIAGNOSTIC_ROOT,
+                fake=True,
+            ),
+            repo_root=Path.cwd(),
+        )
+
+        for package in packages:
+            with self.subTest(fixture=package.fixture_id):
+                system_prompt, user_prompt = build_chunk_prompt(package)
+                result = FakeChunkedProvider().chat(
+                    model="deepseek-v4-pro",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_completion_tokens=2200,
+                )
+                validation = validate_chunked_glossary_editor_output(
+                    result.content,
+                    packet=package.packet,
+                )
+                document = validation.document or {}
+                allowed_evidence = set(package.packet.evidence_ids)
+
+                self.assertTrue(validation.valid)
+                self.assertTrue(document["evidence_refs"])
+                self.assertTrue(set(document["evidence_refs"]) <= allowed_evidence)
+                for entry in document["proposed_entries"]:
+                    self.assertTrue(entry["evidence_refs"])
+                    self.assertTrue(set(entry["evidence_refs"]) <= allowed_evidence)
+
+    def test_fixture_missing_evidence_refs_fail_with_structured_findings(self):
+        package = select_fixture_packets(
+            SpikeConfig(
+                fixture_paths=APPROVED_FIXTURES[:1],
+                diagnostic_root=DEFAULT_DIAGNOSTIC_ROOT,
+                fake=True,
+            ),
+            repo_root=Path.cwd(),
+        )[0]
+        system_prompt, user_prompt = build_chunk_prompt(package)
+        result = FakeChunkedProvider().chat(
+            model="deepseek-v4-pro",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=2200,
+        )
+        document = json.loads(result.content)
+        document["evidence_refs"] = []
+        document["proposed_entries"][0]["evidence_refs"] = []
+
+        validation = validate_chunked_glossary_editor_output(
+            json.dumps(document, ensure_ascii=False, sort_keys=True),
+            packet=package.packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((validation,))
+        issue_paths = {issue.path for issue in validation.issues}
+        findings_by_code = {finding.code: finding for finding in merge.findings}
+
+        self.assertFalse(validation.valid)
+        self.assertIn(
+            ChunkedGlossaryEditorValidationCode.MISSING_EVIDENCE,
+            {issue.code for issue in validation.issues},
+        )
+        self.assertIn("evidence_refs", issue_paths)
+        self.assertIn("proposed_entries[0].evidence_refs", issue_paths)
+        self.assertEqual(merge.proposed_entries, ())
+        self.assertEqual(merge.invalid_packet_ids, (package.packet.packet_id,))
+        self.assertIn(
+            ChunkedGlossaryEditorFindingCode.INVALID_CHUNK,
+            findings_by_code,
+        )
+        self.assertIn(
+            ChunkedGlossaryEditorFindingCode.MISSING_EVIDENCE_REFS,
+            findings_by_code,
+        )
+        self.assertEqual(
+            findings_by_code[
+                ChunkedGlossaryEditorFindingCode.MISSING_EVIDENCE_REFS
+            ].severity,
+            ChunkedGlossaryEditorFindingSeverity.BLOCKER,
+        )
 
     def test_rejects_unapproved_fixture_and_over_budget_config(self):
         with self.assertRaisesRegex(ValueError, "not approved"):
