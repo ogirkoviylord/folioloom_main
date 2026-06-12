@@ -509,9 +509,12 @@ Acceptance criteria:
   observed 16973 provider tokens, validated only the small sample packet, and
   recorded two invalid larger-fixture outputs due to missing evidence refs. The
   recommendation is to pivot or iterate chunk prompt/evidence behavior before
-  runtime integration. This is architecture evidence, not a production glossary
-  or runtime translation feature. Any further live spike needs fresh exact
-  approval.
+  runtime integration. Issue #430 / #204N tightens that local fake-output
+  evidence contract by adding a compact `evidence_contract` to the chunked
+  prompt, requiring non-empty resolvable `evidence_refs`, and proving missing
+  refs stay structured validation/merge blockers. This is architecture
+  evidence, not a production glossary or runtime translation feature. Any
+  further live spike needs fresh exact approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

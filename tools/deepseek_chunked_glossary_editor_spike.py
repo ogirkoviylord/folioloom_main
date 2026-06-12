@@ -481,12 +481,21 @@ def build_chunk_prompt(package: ChunkedFixturePackage) -> tuple[str, str]:
             "allowed_entry_ids": list(package.packet.entry_ids),
             "allowed_evidence_ids": list(package.packet.evidence_ids),
             "root_shape": _root_shape(package.packet),
+            "evidence_contract": _evidence_contract(package.packet),
             "packet": packet_payload,
             "bounded_source_excerpt": package.bounded_excerpt,
             "constraints": [
                 "proposed_entries may be empty when evidence is insufficient",
                 "do not invent owner_pinned, locked, or hard layer entries",
-                "use evidence_refs from allowed_evidence_ids only",
+                (
+                    "every root, proposed_entries, rejected_entries and findings "
+                    "evidence_refs array must be non-empty when that object exists"
+                ),
+                (
+                    "use only evidence ids from top-level allowed_evidence_ids; "
+                    "do not omit evidence_refs for accepted, low-confidence, rejected "
+                    "or diagnostic claims"
+                ),
                 "do not include raw/source text fields in the output object",
             ],
         },
@@ -702,7 +711,7 @@ def _root_shape(packet: GlossaryEditorPacket) -> Mapping[str, Any]:
         "glossary_signature": packet.glossary_signature,
         "profile_signature": packet.profile_signature,
         "confidence": "number 0..1",
-        "evidence_refs": "array of allowed evidence ids",
+        "evidence_refs": "non-empty array of allowed evidence ids used by output",
         "proposed_entries": [
             {
                 "entry_id": "one allowed entry id from this packet",
@@ -719,7 +728,7 @@ def _root_shape(packet: GlossaryEditorPacket) -> Mapping[str, Any]:
                 ),
                 "grammatical_gender": "unknown | not_applicable",
                 "confidence": "number 0..1",
-                "evidence_refs": "array of allowed evidence ids",
+                "evidence_refs": "non-empty array of allowed evidence ids",
                 "profile_rule_ids": [],
             }
         ],
@@ -728,7 +737,7 @@ def _root_shape(packet: GlossaryEditorPacket) -> Mapping[str, Any]:
                 "entry_id": "one allowed entry id from this packet",
                 "reason": "short reason code",
                 "confidence": "number 0..1",
-                "evidence_refs": "array of allowed evidence ids",
+                "evidence_refs": "non-empty array of allowed evidence ids",
             }
         ],
         "findings": [
@@ -737,10 +746,31 @@ def _root_shape(packet: GlossaryEditorPacket) -> Mapping[str, Any]:
                 "kind": "short finding kind",
                 "severity": "info | warning | blocker",
                 "entry_ids": "array of allowed entry ids",
-                "evidence_refs": "array of allowed evidence ids",
+                "evidence_refs": "non-empty array of allowed evidence ids",
                 "message": "short metadata-only message",
             }
         ],
+    }
+
+
+def _evidence_contract(packet: GlossaryEditorPacket) -> Mapping[str, Any]:
+    return {
+        "allowed_evidence_ids_source": "allowed_evidence_ids",
+        "entry_evidence_refs_source": "packet.entries[].evidence_refs",
+        "packet_evidence_count": len(packet.evidence_ids),
+        "required_paths": [
+            "evidence_refs",
+            "proposed_entries[].evidence_refs",
+            "rejected_entries[].evidence_refs",
+            "findings[].evidence_refs",
+        ],
+        "minimum_refs_per_required_path": 1,
+        "missing_refs_validation_code": "missing_evidence",
+        "missing_refs_merge_finding_code": "missing_evidence_refs",
+        "raw_text_policy": (
+            "cite evidence ids only; do not copy source text, prompt text or "
+            "provider bodies into output"
+        ),
     }
 
 
