@@ -473,11 +473,12 @@ Acceptance criteria:
   handling and implementation issue split. Do not add runtime behavior,
   persistence/schema, provider config, admin UI, deployment or release/privacy
   claims in #204.
-  Status: issues #404 / #204A, #405 / #204B, #406 / #204C and #407 / #204D
-  produced the no-code architecture package, local glossary contracts,
-  deterministic scanner over existing TXT/DOCX/EPUB adapter-plan fixtures and
-  local book profile detector/rule contract. Next scoped step is #408
-  fake-output DeepSeek role JSON validators only.
+  Status: issues #404 / #204A, #405 / #204B, #406 / #204C, #407 / #204D and
+  #408 / #204E produced the no-code architecture package, local glossary
+  contracts, deterministic scanner over existing TXT/DOCX/EPUB adapter-plan
+  fixtures, local book profile detector/rule contract and fake-output
+  DeepSeek Pro role JSON validators. Next scoped step is #409 translation
+  contract snapshot builder only.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
