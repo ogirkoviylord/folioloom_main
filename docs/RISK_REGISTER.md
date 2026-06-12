@@ -59,6 +59,7 @@
 | R-038 | Internal before-after reader can expand into raw-text admin/user access or overclaim format fidelity | QA / Privacy / Product | Medium | Owner approved `docs/superpowers/specs/2026-06-01-internal-before-after-reader-design.md` as an internal/dev design direction only; issue #199 approves a narrow owner-only internal admin UI; branch `codex/internal-reader-v2` adds a separate run-scoped diagnostic reader from logs/details/Text diagnostics; scope still excludes live `var/`, public routes, user-facing reader, publisher workspace, production dependencies and DOCX full-fidelity claims | A useful QA tool could drift into exposing source/translation text through admin/logs/artifacts, reading live user data, adding heavy dependencies, or promising DOCX/EPUB fidelity before evidence exists | Use existing renderer/work-unit paths; HTML-escape rendered text/metadata; do not log raw text; keep live runtime data, public routes, raw-text APIs or archive exports beyond the approved owner-only full diagnostic download, production dependencies and user-facing/publisher scope in separate owner-approved issues; run DOCX/EPUB renderer spikes before fidelity claims | Architect / Reviewer | Open |
 | R-039 | Analytics/product-improvement file use can become unclear or overclaimed | Privacy / User data / Legal | High | Owner approved current/pre-release internal use of all uploaded files for analytics/product improvement on 2026-06-02; issue #207 records release-version behavior as TBD | User documents or translated output could be used, retained, copied or described without clear release-version policy, consent, retention or legal/privacy boundaries | Keep current owner decision explicit; use #207 for release-version policy; do not add public/legal/privacy claims, consent UI, retention changes or analytics implementation without separate approval and review | Human / Architect / Scribe | Open |
 | R-040 | Pre-release automatic full raw provider diagnostics can become accidental release telemetry | Privacy / User data / Provider diagnostics | High | Owner approved broad automatic raw diagnostic capture for pre-release development on 2026-06-06 after job `job-9488146309f7434b9746580a6cc22d96` could not be fully diagnosed from safe metadata because raw provider output was not persisted | Source text, prompts, provider payloads, raw outputs and translations may accumulate in runtime artifacts; future agents could mistake this for release-version consent, support workflow or public/privacy-ready analytics | Keep the decision explicitly pre-release and owner-only; exclude secrets; require focused Architect/Reviewer pass for implementation; require Release Readiness to revisit and narrow/replace this policy before free beta/public release | Human / Architect / Reviewer / Release Readiness | Open |
+| R-041 | Complex book glossary/profile/DeepSeek Pro diagnostics can become unbounded or over-trusted | Translation architecture / Privacy / Provider diagnostics | High | Owner approved the complex glossary/profile/Pro direction on 2026-06-12 in `docs/DECISIONS.md`; discovery note `docs/superpowers/specs/2026-06-07-book-glossary-system-discovery.md` records glossary-by-default, book profile, Pro roles, broad pre-release diagnostics and release privacy as TBD | Glossary/profile facts can steer an entire book incorrectly; model roles may contradict each other; local code cannot prove semantic truth; raw glossary/profile/prompt/provider/QA artifacts can accumulate; future agents may confuse pre-release diagnostics with release-ready telemetry or add expensive provider loops without failure boundaries | Treat #204 as architecture/discovery before implementation; require explicit role graph/contracts, schema/enums, evidence/confidence fields, fallback behavior, translation snapshot boundaries, diagnostics ownership and evaluation plan; keep secrets excluded; keep release-version privacy/retention/consent/deletion/support policy TBD until Release Readiness review | Human / Architect / Reviewer / Release Readiness | Open |
 
 ## 4. Обязательные категории рисков
 
@@ -123,6 +124,12 @@
   automatic capture during development only, but release-version retention,
   consent, deletion and redaction behavior remains TBD and must be revisited
   before release.
+- Complex glossary/profile/DeepSeek Pro diagnostics: High; owner approved the
+  complex book glossary direction for discovery/architecture, including
+  glossary-by-default, book profile detection, Pro roles and broad pre-release
+  diagnostics. Local validators cannot prove semantic truth, so the
+  architecture must rely on evidence/confidence/review flags, role contracts
+  and release-version policy review before implementation or launch claims.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,
@@ -283,6 +290,21 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   MOBI, AZW3/KPF and CBZ/CBR/DJVU are ranked; supported subsets, authorized
   fixture rights basis, dependency impact, parser/resource safety constraints
   and verification plan are defined before any implementation issue exists.
+
+- Task: Break down complex book glossary/profile architecture through issue
+  #204.
+  Risk reduced: R-014, R-019, R-020, R-021, R-039, R-040, R-041.
+  Priority: Medium / later until owner pulls it forward.
+  Suggested owner: Human / Architect / Orchestrator.
+  Acceptance criteria: issue #204 produces an architecture map, role graph,
+  role contracts, schema/enums, evidence/confidence policy, book profile
+  contract, translation snapshot boundary, diagnostics/retention caveats,
+  failure/fallback behavior, evaluation plan and issue split for implementation
+  without adding runtime behavior, persistence/schema, provider config,
+  deployment, admin UI or release/privacy claims.
+  Status: issue #404 / #204A now has a no-code architecture package at
+  `docs/superpowers/specs/2026-06-12-book-glossary-architecture-package.md`;
+  implementation remains split and gated by #405-#413.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
