@@ -571,16 +571,22 @@ Acceptance criteria:
   gates for reduced packets, including reducer decision coverage and reducer
   diagnostic/drop pressure. It does not call providers, integrate runtime
   prompts, mutate cache/storage/database/scheduler/admin/retention behavior or
-  claim semantic/release/privacy readiness. Issue #450 / #204AA extends the
-  disabled-by-default shadow runtime rehearsal so enabled shadow planning uses
-  reducer-retained candidates and compact per-work-unit budget/fallback
-  metadata, while keeping default runtime behavior unchanged and still avoiding
-  provider calls, normal prompt injection, cache/storage/database/scheduler/
-  admin/retention mutation and release/privacy claims. Issue #451 / #204AB
-  records the reduced glossary runtime go/no-go review: normal runtime prompt
-  integration is NO-GO now, local metadata-only/shadow rehearsal remains
-  allowed, #449 live provider behavior is `Unknown`, and prompt/cache/storage/
-  admin/retention/release-policy work stays behind separate owner approvals.
+  claim semantic/release/privacy readiness. Issue #449 / #204Z adds
+  #449-specific reduced-packet spike-runner support and passed local fake/dry
+  preflight over the approved TXT fixtures plus owner-approved local EPUB input.
+  The live retry used four provider attempts: Russian returned `length` plus
+  invalid JSON, Ukrainian timed out with usage `Unknown`, and `sample_book` plus
+  the approved EPUB validated. This is useful but not runtime readiness. Issue
+  #450 / #204AA extends the disabled-by-default shadow runtime rehearsal so
+  enabled shadow planning uses reducer-retained candidates and compact
+  per-work-unit budget/fallback metadata, while keeping default runtime
+  behavior unchanged and still avoiding provider calls, normal prompt
+  injection, cache/storage/database/scheduler/admin/retention mutation and
+  release/privacy claims. Issue #451 / #204AB records the reduced glossary
+  runtime go/no-go review: normal runtime prompt integration is NO-GO now,
+  local metadata-only/shadow rehearsal remains allowed, and prompt/cache/
+  storage/admin/retention/release-policy work stays behind separate owner
+  approvals.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
