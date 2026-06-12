@@ -473,10 +473,10 @@ Acceptance criteria:
   handling and implementation issue split. Do not add runtime behavior,
   persistence/schema, provider config, admin UI, deployment or release/privacy
   claims in #204.
-  Status: issues #404 / #204A and #405 / #204B produced the no-code
-  architecture package plus local glossary contract dataclasses, enums,
-  validators, compact signatures and focused tests. Next scoped step is #406
-  deterministic scanner on authorized fixtures only.
+  Status: issues #404 / #204A, #405 / #204B and #406 / #204C produced the
+  no-code architecture package, local glossary contracts and deterministic
+  scanner over existing TXT/DOCX/EPUB adapter-plan fixtures. Next scoped step
+  is #407 profile detector/rule contract only.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
