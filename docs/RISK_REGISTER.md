@@ -302,8 +302,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Issue #413 / #204J adds the bounded DeepSeek Pro spike runner and
   metadata-only report at
   `docs/superpowers/specs/2026-06-12-deepseek-pro-glossary-profile-spike-report.md`.
-  Runtime integration remains rejected for now; further live provider work
-  requires fresh exact owner approval.
+  Issue #414 / #204K adds a local deterministic chunked glossary-editor
+  packetizer in `src/translator_service/glossary_editor_packets.py` with
+  compact reference payloads, stable ids/signatures, evidence and token-budget
+  caps, degradation/skipped metadata and fixture coverage over the three #413
+  TXT samples. Runtime integration remains rejected for now; further live
+  provider work requires fresh exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
