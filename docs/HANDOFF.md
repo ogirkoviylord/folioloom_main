@@ -1337,6 +1337,18 @@ core flow, release gates, operational visibility and documentation.
   This does not call providers, integrate prompts/runtime/cache/storage,
   mutate persistence, expand diagnostics, add admin UI, change retention or
   claim release/privacy readiness;
+- treat issue #415 / #204L as the local fake-output chunk validator and
+  merge/adjudication contract:
+  `src/translator_service/glossary_editor_chunk_outputs.py` validates one
+  chunked glossary-editor JSON output against a specific
+  `GlossaryEditorPacket`, rejects invalid packet/entry/evidence refs,
+  unsupported enums, hard-layer promotion, oversized payloads and unsafe/raw
+  keys, then merges valid chunk outputs into deterministic proposed metadata
+  with duplicate/conflict/low-confidence/semantic-review findings. Focused
+  tests live in `tests/test_glossary_editor_chunk_outputs.py`. This does not
+  call providers, integrate prompts/runtime/cache/storage, mutate persistence,
+  expand diagnostics, add admin UI, change retention or claim release/privacy
+  readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1803,6 +1815,25 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #415 / #204L added local fake-output validators and
+  deterministic merge/adjudication for chunked glossary-editor outputs in
+  `src/translator_service/glossary_editor_chunk_outputs.py`, with focused
+  coverage in `tests/test_glossary_editor_chunk_outputs.py`.
+- Evidence: local tests cover valid per-packet fake outputs, invalid packet
+  refs, unknown entry refs, unsupported enum values, hard-layer promotion,
+  missing evidence, oversized payloads, unsafe/raw output, duplicate/conflicting
+  chunk proposals, invalid chunk exclusion, stable merge signatures and a fake
+  output derived from a #413 fixture packet. Local verification passed focused
+  chunk-output tests, glossary/profile related tests, compileall, targeted ruff
+  and `git diff --check`.
+- Follow-up: #416 remains blocked until #414 and #415 PRs are complete and the
+  owner gives fresh exact approval for fixture set, packet selection, max
+  calls/tokens, provider/model, diagnostic storage and raw-text capture policy.
+  Do not add live provider calls, prompt/runtime/cache/storage integration,
+  persistence/schema, diagnostic expansion, admin UI, retention behavior or
+  release/privacy claims without that approval.
 
 - Date: 2026-06-12.
 - Change: Issue #414 / #204K added a local deterministic glossary editor
