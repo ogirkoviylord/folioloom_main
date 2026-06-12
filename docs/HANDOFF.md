@@ -1440,6 +1440,14 @@ core flow, release gates, operational visibility and documentation.
   changes no normal translation prompts, makes no live provider calls, mutates
   no cache/database/scheduler/work-unit/storage/admin state, and makes no
   release/privacy claims;
+- treat issue #436 / #204T as the release-policy blocker for glossary/profile
+  diagnostics:
+  release-version privacy, consent, retention, deletion, support and
+  legal/privacy behavior remain `TBD`/blocking. Pre-release owner-only
+  diagnostics remain allowed only for explicitly approved bounded local runs or
+  dedicated owner-only diagnostic surfaces. This does not approve retention/
+  delete/export implementation, public/legal copy, support artifacts, release
+  telemetry, runtime behavior or release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1906,6 +1914,20 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #436 / #204T records release-version glossary/profile
+  diagnostic privacy, consent, retention, deletion, support and legal/privacy
+  policy as `TBD`/blocking.
+- Evidence: owner approval was given in the current Codex thread on
+  2026-06-12 and recorded in GitHub issue #436. The docs-only update preserves
+  pre-release owner-only diagnostics only for explicitly approved bounded local
+  diagnostics or dedicated owner-only diagnostic surfaces.
+- Follow-up: do not treat glossary/profile diagnostics, diagnostic sidecars,
+  DeepSeek Pro role traces or translation contract snapshots as release
+  telemetry, support artifacts, public/legal evidence or release/privacy-ready
+  behavior until exact owner approval and required implementation/verification
+  issues exist.
 
 - Date: 2026-06-12.
 - Change: Issue #435 / #204S added the disabled-by-default fake-runtime/shadow

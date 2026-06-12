@@ -17,6 +17,61 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-12 - Release policy: glossary/profile diagnostics remain TBD/blocking
+
+Status: Active release blocker
+
+Decision:
+- For issue #436 / #204T, release-version glossary/profile diagnostic privacy,
+  consent, retention, deletion, support and legal/privacy policy are not
+  approved for beta/release use and remain `TBD`.
+- This `TBD` is blocking for any release/privacy/legal/support claim that
+  treats glossary/profile diagnostics, diagnostic sidecars, DeepSeek Pro role
+  traces or translation contract snapshots as release telemetry, support
+  artifacts, user-visible/admin-visible release behavior or public/legal
+  evidence.
+- Pre-release owner-only glossary/profile diagnostics may remain allowed only
+  for explicitly approved bounded local diagnostic runs or explicitly approved
+  dedicated owner-only diagnostic surfaces. Raw fixture excerpts, prompts,
+  provider responses, source/translation snippets and owner notes must stay
+  inside those approved owner-only boundaries.
+- Ordinary logs, telemetry, JSON APIs, support artifacts, GitHub issues, PR
+  descriptions, docs, release artifacts and ordinary user-facing/admin
+  surfaces remain metadata-only/redacted unless a future exact owner-approved
+  diagnostic boundary changes that specific surface.
+- No retention/delete/export implementation, runtime prompt behavior, provider
+  config, admin UI expansion, cache/storage/database/scheduler mutation,
+  public/legal copy finalization or release/privacy readiness claim is approved
+  by #436.
+
+Evidence:
+- GitHub issue #436 asks to settle or explicitly defer release-version
+  glossary/profile diagnostic policy before diagnostics are treated as
+  beta/release-ready.
+- The owner approved #436 docs/policy in the current Codex thread on
+  2026-06-12, specifically to record release-version glossary/profile
+  diagnostic privacy, consent, retention, deletion, support and legal/privacy
+  policy as `TBD`/blocking, while allowing only explicitly approved bounded
+  local pre-release owner-only diagnostics.
+- Approval context was recorded in GitHub issue #436 on 2026-06-12 without raw
+  text, keys, fixture excerpts, prompts or provider responses.
+
+Consequences:
+- #434 sidecar foundation and #435 disabled-by-default shadow planning do not
+  make glossary/profile diagnostics release-ready.
+- Release readiness must treat release-version glossary/profile diagnostic
+  policy as blocked until the owner approves exact consent, access, retention,
+  deletion, export, support and legal/privacy behavior, and any required
+  implementation/verification issues are complete.
+- Future issues that implement retention/delete/export, support artifacts,
+  public/legal copy, admin/UI exposure or runtime diagnostic behavior need
+  separate explicit approval and focused review.
+
+Human approval required to change:
+- yes; changing this release blocker, approving release-version diagnostic
+  behavior or finalizing public/legal/privacy/support copy requires explicit
+  owner approval and may require counsel review.
+
 ### 2026-06-12 - Product/architecture direction: complex book glossary, book profile and DeepSeek Pro diagnostics
 
 Status: Active for discovery and architecture planning
