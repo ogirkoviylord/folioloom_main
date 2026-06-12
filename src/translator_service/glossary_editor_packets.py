@@ -12,6 +12,10 @@ from translator_service.book_profile import (
     BookProfileDetection,
     validate_book_profile_detection,
 )
+from translator_service.glossary_candidate_reducer import (
+    GlossaryCandidateReductionDecision,
+    GlossaryCandidateReductionResult,
+)
 from translator_service.glossary_contracts import (
     GlossaryEntry,
     GlossaryEvidenceRef,
@@ -72,6 +76,21 @@ class GlossaryEditorPacketEntryRef:
     profile_rule_ids: tuple[str, ...]
     estimated_prompt_tokens: int
     needs_review: bool
+    reducer_decision_status: str | None = None
+    reducer_decision_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class GlossaryEditorPacketReducerContext:
+    policy_version: str
+    reducer_signature: str
+    source_glossary_signature: str
+    reduced_glossary_signature: str
+    profile_signature: str
+    pressure_signature: str
+    retained_count: int
+    diagnostic_count: int
+    dropped_count: int
 
 
 @dataclass(frozen=True)
@@ -128,6 +147,7 @@ class GlossaryEditorPacket:
     max_estimated_prompt_tokens: int
     max_reserved_prompt_tokens: int
     degradations: tuple[GlossaryEditorPacketDegradation, ...] = ()
+    reducer_context: GlossaryEditorPacketReducerContext | None = None
 
     @property
     def entry_ids(self) -> tuple[str, ...]:
@@ -146,6 +166,7 @@ class GlossaryEditorPacketBuildResult:
     glossary_signature: str
     profile_signature: str
     policy_version: str = GLOSSARY_EDITOR_PACKET_POLICY_VERSION
+    reducer_context: GlossaryEditorPacketReducerContext | None = None
 
 
 def build_glossary_editor_packets(
@@ -153,29 +174,48 @@ def build_glossary_editor_packets(
     profile_detection: BookProfileDetection,
     *,
     budget: GlossaryEditorPacketBudget = DEFAULT_GLOSSARY_EDITOR_PACKET_BUDGET,
+    candidate_reduction: GlossaryCandidateReductionResult | None = None,
 ) -> GlossaryEditorPacketBuildResult:
     _validate_budget(budget)
     _validate_inputs(glossary_snapshot, profile_detection)
 
-    glossary_signature = glossary_snapshot_signature(glossary_snapshot)
     profile_signature = book_profile_detection_signature(profile_detection)
+    effective_glossary_snapshot = glossary_snapshot
+    reducer_context = None
+    reducer_decisions_by_entry_id: Mapping[str, GlossaryCandidateReductionDecision] = {}
+    if candidate_reduction is not None:
+        _validate_candidate_reduction(
+            glossary_snapshot,
+            profile_signature=profile_signature,
+            candidate_reduction=candidate_reduction,
+        )
+        effective_glossary_snapshot = candidate_reduction.retained_snapshot
+        _validate_inputs(effective_glossary_snapshot, profile_detection)
+        reducer_context = _reducer_context(candidate_reduction)
+        reducer_decisions_by_entry_id = {
+            decision.entry_id: decision for decision in candidate_reduction.decisions
+        }
+
+    glossary_signature = glossary_snapshot_signature(effective_glossary_snapshot)
     selected_rule_ids = tuple(sorted(rule.rule_id for rule in profile_detection.rules))
     profile_evidence_refs = tuple(
         sorted(evidence.evidence_id for evidence in profile_detection.evidence)
     )
 
     evidence_by_id = {
-        evidence.evidence_id: evidence for evidence in glossary_snapshot.evidence
+        evidence.evidence_id: evidence
+        for evidence in effective_glossary_snapshot.evidence
     }
     packet_states: list[_PacketState] = []
     current = _PacketState()
     skipped: list[SkippedGlossaryEditorEntry] = []
 
-    for entry in sorted(glossary_snapshot.entries, key=_entry_sort_key):
+    for entry in sorted(effective_glossary_snapshot.entries, key=_entry_sort_key):
         entry_ref, entry_degradations = _entry_ref(
             entry,
             evidence_by_id=evidence_by_id,
             budget=budget,
+            reducer_decision=reducer_decisions_by_entry_id.get(entry.entry_id),
         )
         single_entry_state = _PacketState().with_entry(
             entry_ref,
@@ -184,14 +224,16 @@ def build_glossary_editor_packets(
         )
         if not _packet_state_within_budget(
             single_entry_state,
-            glossary_snapshot=glossary_snapshot,
+            glossary_snapshot=effective_glossary_snapshot,
             profile_detection=profile_detection,
             budget=budget,
+            reducer_context=reducer_context,
         ):
             single_entry_estimate = _packet_estimated_prompt_tokens(
                 single_entry_state,
-                glossary_snapshot=glossary_snapshot,
+                glossary_snapshot=effective_glossary_snapshot,
                 profile_detection=profile_detection,
+                reducer_context=reducer_context,
             )
             skipped.append(
                 SkippedGlossaryEditorEntry(
@@ -214,9 +256,10 @@ def build_glossary_editor_packets(
         )
         if _packet_state_within_budget(
             candidate,
-            glossary_snapshot=glossary_snapshot,
+            glossary_snapshot=effective_glossary_snapshot,
             profile_detection=profile_detection,
             budget=budget,
+            reducer_context=reducer_context,
         ):
             current = candidate
             continue
@@ -233,13 +276,14 @@ def build_glossary_editor_packets(
         _packet_from_state(
             state,
             packet_index=index,
-            glossary_snapshot=glossary_snapshot,
+            glossary_snapshot=effective_glossary_snapshot,
             profile_detection=profile_detection,
             glossary_signature=glossary_signature,
             profile_signature=profile_signature,
             selected_rule_ids=selected_rule_ids,
             profile_evidence_refs=profile_evidence_refs,
             budget=budget,
+            reducer_context=reducer_context,
         )
         for index, state in enumerate(packet_states)
     )
@@ -252,17 +296,20 @@ def build_glossary_editor_packets(
             _skipped_entry_payload(entry) for entry in sorted(skipped, key=_skipped_key)
         ],
     }
+    if reducer_context is not None:
+        build_payload["reducer_context"] = _reducer_context_payload(reducer_context)
     return GlossaryEditorPacketBuildResult(
         packets=packets,
         skipped_entries=tuple(sorted(skipped, key=_skipped_key)),
         build_signature=f"glossary-editor-packets:v1:{_payload_digest(build_payload)}",
         glossary_signature=glossary_signature,
         profile_signature=profile_signature,
+        reducer_context=reducer_context,
     )
 
 
 def glossary_editor_packet_payload(packet: GlossaryEditorPacket) -> dict[str, Any]:
-    return {
+    payload = {
         "packet_id": packet.packet_id,
         "packet_signature": packet.packet_signature,
         "packet_index": packet.packet_index,
@@ -289,6 +336,9 @@ def glossary_editor_packet_payload(packet: GlossaryEditorPacket) -> dict[str, An
             _degradation_payload(degradation) for degradation in packet.degradations
         ],
     }
+    if packet.reducer_context is not None:
+        payload["reducer_context"] = _reducer_context_payload(packet.reducer_context)
+    return payload
 
 
 def serialize_glossary_editor_packet(packet: GlossaryEditorPacket) -> str:
@@ -339,6 +389,7 @@ def _packet_from_state(
     selected_rule_ids: tuple[str, ...],
     profile_evidence_refs: tuple[str, ...],
     budget: GlossaryEditorPacketBudget,
+    reducer_context: GlossaryEditorPacketReducerContext | None,
 ) -> GlossaryEditorPacket:
     evidence_refs = tuple(sorted(state.evidence_refs, key=_evidence_sort_key))
     estimated_prompt_tokens = _packet_estimated_prompt_tokens(
@@ -349,6 +400,7 @@ def _packet_from_state(
         ),
         glossary_snapshot=glossary_snapshot,
         profile_detection=profile_detection,
+        reducer_context=reducer_context,
     )
     reserved_prompt_tokens = _reserve_tokens(estimated_prompt_tokens, budget=budget)
     status = (
@@ -373,6 +425,7 @@ def _packet_from_state(
         reserved_prompt_tokens=reserved_prompt_tokens,
         budget=budget,
         degradations=state.degradations,
+        reducer_context=reducer_context,
     )
     packet_id = f"glossary-editor-packet:v1:{_payload_digest(body_payload)}"
     signature_payload = {"packet_id": packet_id, **body_payload}
@@ -401,6 +454,7 @@ def _packet_from_state(
         max_estimated_prompt_tokens=budget.max_estimated_prompt_tokens,
         max_reserved_prompt_tokens=budget.max_reserved_prompt_tokens,
         degradations=state.degradations,
+        reducer_context=reducer_context,
     )
 
 
@@ -409,6 +463,7 @@ def _entry_ref(
     *,
     evidence_by_id: Mapping[str, GlossaryEvidenceRef],
     budget: GlossaryEditorPacketBudget,
+    reducer_decision: GlossaryCandidateReductionDecision | None = None,
 ) -> tuple[GlossaryEditorPacketEntryRef, tuple[GlossaryEditorPacketDegradation, ...]]:
     sorted_evidence_refs = tuple(
         sorted(
@@ -426,6 +481,7 @@ def _entry_ref(
     estimated_prompt_tokens = _estimate_entry_prompt_tokens(
         entry,
         evidence_refs=kept_evidence_refs,
+        reducer_decision=reducer_decision,
     )
     if len(kept_evidence_refs) < len(sorted_evidence_refs):
         degradations.append(
@@ -467,6 +523,14 @@ def _entry_ref(
             ),
             estimated_prompt_tokens=estimated_prompt_tokens,
             needs_review=_entry_needs_review(entry),
+            reducer_decision_status=(
+                reducer_decision.status.value if reducer_decision is not None else None
+            ),
+            reducer_decision_reasons=(
+                tuple(reason.value for reason in reducer_decision.reasons)
+                if reducer_decision is not None
+                else ()
+            ),
         ),
         tuple(degradations),
     )
@@ -478,6 +542,7 @@ def _packet_state_within_budget(
     glossary_snapshot: GlossarySnapshot,
     profile_detection: BookProfileDetection,
     budget: GlossaryEditorPacketBudget,
+    reducer_context: GlossaryEditorPacketReducerContext | None,
 ) -> bool:
     if len(state.entries) > budget.max_entries_per_packet:
         return False
@@ -485,6 +550,7 @@ def _packet_state_within_budget(
         state,
         glossary_snapshot=glossary_snapshot,
         profile_detection=profile_detection,
+        reducer_context=reducer_context,
     )
     if estimated > budget.max_estimated_prompt_tokens:
         return False
@@ -499,9 +565,14 @@ def _packet_estimated_prompt_tokens(
     *,
     glossary_snapshot: GlossarySnapshot,
     profile_detection: BookProfileDetection,
+    reducer_context: GlossaryEditorPacketReducerContext | None,
 ) -> int:
     return (
-        _base_packet_tokens(glossary_snapshot, profile_detection)
+        _base_packet_tokens(
+            glossary_snapshot,
+            profile_detection,
+            reducer_context=reducer_context,
+        )
         + sum(entry.estimated_prompt_tokens for entry in state.entries)
         + sum(
             _estimate_evidence_prompt_tokens(evidence)
@@ -514,20 +585,31 @@ def _packet_estimated_prompt_tokens(
 def _base_packet_tokens(
     glossary_snapshot: GlossarySnapshot,
     profile_detection: BookProfileDetection,
+    *,
+    reducer_context: GlossaryEditorPacketReducerContext | None,
 ) -> int:
-    compact = " ".join(
-        (
-            GLOSSARY_EDITOR_PACKET_SCHEMA_VERSION,
-            GLOSSARY_EDITOR_PACKET_POLICY_VERSION,
-            glossary_snapshot.source_language,
-            glossary_snapshot.target_language,
-            glossary_snapshot.snapshot_id,
-            profile_detection.profile.profile_id,
-            _enum_value(profile_detection.profile.primary_profile),
-            " ".join(rule.rule_id for rule in profile_detection.rules),
-            " ".join(profile_detection.profile.evidence_refs),
+    values = [
+        GLOSSARY_EDITOR_PACKET_SCHEMA_VERSION,
+        GLOSSARY_EDITOR_PACKET_POLICY_VERSION,
+        glossary_snapshot.source_language,
+        glossary_snapshot.target_language,
+        glossary_snapshot.snapshot_id,
+        profile_detection.profile.profile_id,
+        _enum_value(profile_detection.profile.primary_profile),
+        " ".join(rule.rule_id for rule in profile_detection.rules),
+        " ".join(profile_detection.profile.evidence_refs),
+    ]
+    if reducer_context is not None:
+        values.extend(
+            (
+                reducer_context.policy_version,
+                reducer_context.reducer_signature,
+                reducer_context.source_glossary_signature,
+                reducer_context.reduced_glossary_signature,
+                reducer_context.pressure_signature,
+            )
         )
-    )
+    compact = " ".join(values)
     return max(48, math.ceil(len(compact) / 4) + 32)
 
 
@@ -535,26 +617,32 @@ def _estimate_entry_prompt_tokens(
     entry: GlossaryEntry,
     *,
     evidence_refs: Sequence[str],
+    reducer_decision: GlossaryCandidateReductionDecision | None,
 ) -> int:
-    compact = " ".join(
-        str(value)
-        for value in (
-            entry.entry_id,
-            _enum_value(entry.category),
-            _enum_value(entry.layer),
-            _enum_value(entry.status),
-            entry.source_canonical,
-            " ".join(entry.aliases),
-            entry.target_canonical or "",
-            " ".join(entry.target_variants),
-            " ".join(entry.forbidden_variants),
-            _enum_value(entry.strategy),
-            _enum_value(entry.grammatical_gender),
-            f"{float(entry.confidence):.4f}",
-            " ".join(evidence_refs),
-            " ".join(entry.profile_rule_ids),
+    values = [
+        entry.entry_id,
+        _enum_value(entry.category),
+        _enum_value(entry.layer),
+        _enum_value(entry.status),
+        entry.source_canonical,
+        " ".join(entry.aliases),
+        entry.target_canonical or "",
+        " ".join(entry.target_variants),
+        " ".join(entry.forbidden_variants),
+        _enum_value(entry.strategy),
+        _enum_value(entry.grammatical_gender),
+        f"{float(entry.confidence):.4f}",
+        " ".join(evidence_refs),
+        " ".join(entry.profile_rule_ids),
+    ]
+    if reducer_decision is not None:
+        values.extend(
+            (
+                reducer_decision.status.value,
+                " ".join(reason.value for reason in reducer_decision.reasons),
+            )
         )
-    )
+    compact = " ".join(str(value) for value in values)
     return max(12, math.ceil(len(compact) / 4) + 12)
 
 
@@ -603,6 +691,59 @@ def _validate_inputs(
         raise ValueError("glossary/profile source_language mismatch.")
     if glossary_snapshot.target_language != profile_detection.profile.target_language:
         raise ValueError("glossary/profile target_language mismatch.")
+
+
+def _validate_candidate_reduction(
+    glossary_snapshot: GlossarySnapshot,
+    *,
+    profile_signature: str,
+    candidate_reduction: GlossaryCandidateReductionResult,
+) -> None:
+    source_signature = glossary_snapshot_signature(glossary_snapshot)
+    if candidate_reduction.source_glossary_signature != source_signature:
+        raise ValueError("candidate_reduction source glossary signature mismatch.")
+    reduced_signature = glossary_snapshot_signature(
+        candidate_reduction.retained_snapshot
+    )
+    if candidate_reduction.reduced_glossary_signature != reduced_signature:
+        raise ValueError("candidate_reduction reduced glossary signature mismatch.")
+    if candidate_reduction.profile_signature not in {
+        "book-profile:none",
+        profile_signature,
+    }:
+        raise ValueError("candidate_reduction profile signature mismatch.")
+    if (
+        glossary_snapshot.source_language
+        != candidate_reduction.retained_snapshot.source_language
+    ):
+        raise ValueError("candidate_reduction source_language mismatch.")
+    if (
+        glossary_snapshot.target_language
+        != candidate_reduction.retained_snapshot.target_language
+    ):
+        raise ValueError("candidate_reduction target_language mismatch.")
+    retained_ids = {
+        entry.entry_id for entry in candidate_reduction.retained_snapshot.entries
+    }
+    retained_decision_ids = set(candidate_reduction.retained_entry_ids)
+    if retained_ids != retained_decision_ids:
+        raise ValueError("candidate_reduction retained decision ids mismatch.")
+
+
+def _reducer_context(
+    candidate_reduction: GlossaryCandidateReductionResult,
+) -> GlossaryEditorPacketReducerContext:
+    return GlossaryEditorPacketReducerContext(
+        policy_version=candidate_reduction.policy_version,
+        reducer_signature=candidate_reduction.reducer_signature,
+        source_glossary_signature=candidate_reduction.source_glossary_signature,
+        reduced_glossary_signature=candidate_reduction.reduced_glossary_signature,
+        profile_signature=candidate_reduction.profile_signature,
+        pressure_signature=candidate_reduction.pressure_signature,
+        retained_count=len(candidate_reduction.retained_entry_ids),
+        diagnostic_count=len(candidate_reduction.diagnostic_entry_ids),
+        dropped_count=len(candidate_reduction.dropped_entry_ids),
+    )
 
 
 def _validate_budget(budget: GlossaryEditorPacketBudget) -> None:
@@ -658,8 +799,9 @@ def _packet_body_payload(
     reserved_prompt_tokens: int,
     budget: GlossaryEditorPacketBudget,
     degradations: Sequence[GlossaryEditorPacketDegradation],
+    reducer_context: GlossaryEditorPacketReducerContext | None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": GLOSSARY_EDITOR_PACKET_SCHEMA_VERSION,
         "policy_version": GLOSSARY_EDITOR_PACKET_POLICY_VERSION,
         "packet_index": packet_index,
@@ -680,10 +822,13 @@ def _packet_body_payload(
         "max_reserved_prompt_tokens": budget.max_reserved_prompt_tokens,
         "degradations": [_degradation_payload(item) for item in degradations],
     }
+    if reducer_context is not None:
+        payload["reducer_context"] = _reducer_context_payload(reducer_context)
+    return payload
 
 
 def _entry_ref_payload(entry: GlossaryEditorPacketEntryRef) -> dict[str, Any]:
-    return {
+    payload = {
         "entry_id": entry.entry_id,
         "category": entry.category,
         "layer": entry.layer,
@@ -701,6 +846,26 @@ def _entry_ref_payload(entry: GlossaryEditorPacketEntryRef) -> dict[str, Any]:
         "profile_rule_ids": list(entry.profile_rule_ids),
         "estimated_prompt_tokens": entry.estimated_prompt_tokens,
         "needs_review": entry.needs_review,
+    }
+    if entry.reducer_decision_status is not None:
+        payload["reducer_decision_status"] = entry.reducer_decision_status
+        payload["reducer_decision_reasons"] = list(entry.reducer_decision_reasons)
+    return payload
+
+
+def _reducer_context_payload(
+    context: GlossaryEditorPacketReducerContext,
+) -> dict[str, Any]:
+    return {
+        "policy_version": context.policy_version,
+        "reducer_signature": context.reducer_signature,
+        "source_glossary_signature": context.source_glossary_signature,
+        "reduced_glossary_signature": context.reduced_glossary_signature,
+        "profile_signature": context.profile_signature,
+        "pressure_signature": context.pressure_signature,
+        "retained_count": context.retained_count,
+        "diagnostic_count": context.diagnostic_count,
+        "dropped_count": context.dropped_count,
     }
 
 
