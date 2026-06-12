@@ -538,7 +538,13 @@ Acceptance criteria:
   owner-only diagnostics may continue only inside explicitly approved bounded
   local diagnostics or dedicated owner-only surfaces; #436 does not approve
   retention/delete/export implementation, public/legal copy or release/privacy
-  readiness.
+  readiness. Issue #445 / #204V adds a local deterministic glossary candidate
+  reducer contract that classifies wide-scan entries as editor-ready,
+  diagnostic-only or dropped with compact reason/evidence metadata, caps,
+  prompt-budget pressure signatures and metadata-only serialization. It does
+  not add provider calls, runtime prompt use, cache/storage/database/scheduler/
+  admin/retention behavior, user-facing glossary behavior, semantic truth
+  claims or release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
