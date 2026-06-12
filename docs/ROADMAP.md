@@ -571,7 +571,12 @@ Acceptance criteria:
   gates for reduced packets, including reducer decision coverage and reducer
   diagnostic/drop pressure. It does not call providers, integrate runtime
   prompts, mutate cache/storage/database/scheduler/admin/retention behavior or
-  claim semantic/release/privacy readiness.
+  claim semantic/release/privacy readiness. Issue #450 / #204AA extends the
+  disabled-by-default shadow runtime rehearsal so enabled shadow planning uses
+  reducer-retained candidates and compact per-work-unit budget/fallback
+  metadata, while keeping default runtime behavior unchanged and still avoiding
+  provider calls, normal prompt injection, cache/storage/database/scheduler/
+  admin/retention mutation and release/privacy claims.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

@@ -2,6 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
+from translator_service.glossary_candidate_reducer import GlossaryCandidateReducerCaps
 from translator_service.glossary_runtime_shadow import (
     GLOSSARY_RUNTIME_SHADOW_SCHEMA_VERSION,
     GlossaryRuntimeShadowConfig,
@@ -21,7 +22,13 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
         self.assertEqual(plan["schema_version"], GLOSSARY_RUNTIME_SHADOW_SCHEMA_VERSION)
         self.assertFalse(plan["enabled"])
         self.assertEqual(plan["status"], "disabled")
+        self.assertEqual(
+            plan["fallback_reason"],
+            "shadow_planning_disabled_by_default",
+        )
         self.assertEqual(plan["work_unit_plans"], [])
+        self.assertNotIn("reducer", plan)
+        self.assertNotIn("policy_signature_context", plan)
         self.assertFalse(
             plan["runtime_integration"]["normal_translation_prompts_changed"]
         )
@@ -43,6 +50,19 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
 
         self.assertTrue(plan["enabled"])
         self.assertIn(plan["status"], {"planned", "planned_with_drops"})
+        self.assertIn("reducer", plan)
+        self.assertEqual(
+            plan["glossary_signature"],
+            plan["reducer"]["reduced_glossary_signature"],
+        )
+        self.assertEqual(
+            plan["reduced_glossary_signature"],
+            plan["reducer"]["reduced_glossary_signature"],
+        )
+        self.assertTrue(plan["reducer"]["reducer_signature"].startswith(
+            "glossary-candidate-reducer:v1:"
+        ))
+        self.assertGreater(plan["reducer"]["retained_count"], 0)
         self.assertTrue(plan["translation_snapshot_signature"].startswith(
             "translation-contract-snapshot:v1:"
         ))
@@ -55,12 +75,28 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
         )
         self.assertGreaterEqual(plan["planned_work_unit_count"], 1)
         self.assertLessEqual(plan["planned_work_unit_count"], 2)
+        self.assertTrue(
+            all(
+                item["reducer_signature"] == plan["reducer"]["reducer_signature"]
+                for item in plan["work_unit_plans"]
+            )
+        )
+        self.assertTrue(
+            all(
+                item["reduced_glossary_signature"]
+                == plan["reducer"]["reduced_glossary_signature"]
+                for item in plan["work_unit_plans"]
+            )
+        )
         self.assertFalse(
             plan["runtime_integration"]["normal_translation_prompts_changed"]
         )
         self.assertNotIn(source_text[:80], serialized)
         self.assertNotIn("bounded_source_excerpt", serialized)
         self.assertNotIn("raw_source", serialized)
+        self.assertNotIn("prompt_body", serialized)
+        self.assertNotIn("provider_response", serialized)
+        self.assertNotIn("translated_text", serialized)
 
     def test_prompt_budget_exhaustion_falls_back_without_prompt_injection(self):
         fixture = Path("test_samples/russian_profile_regression.en-ru.txt")
@@ -82,6 +118,14 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
 
         self.assertEqual(plan["status"], "planned_with_budget_fallback")
         self.assertEqual(plan["fallback_reason"], "prompt_budget_exhausted")
+        self.assertEqual(
+            plan["work_unit_plans"][0]["budget_status"],
+            "fallback_omitted",
+        )
+        self.assertIn(
+            "prompt_budget_exhausted",
+            plan["work_unit_plans"][0]["fallback_reason_codes"],
+        )
         self.assertEqual(
             plan["runtime_integration"]["fallback_action"],
             "omit_glossary_prompt_context",
@@ -106,6 +150,58 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
             "use_existing_translation_path",
         )
         self.assertFalse(plan["runtime_integration"]["durable_state_mutation_allowed"])
+
+    def test_missing_reduced_candidates_falls_back_to_existing_translation_path(self):
+        fixture = Path("test_samples/sample_book.en.txt")
+
+        plan = build_glossary_runtime_shadow_plan_for_txt(
+            content=fixture.read_bytes(),
+            source_language="en",
+            target_language="ru",
+            config=GlossaryRuntimeShadowConfig(
+                enabled=True,
+                reducer_caps=GlossaryCandidateReducerCaps(
+                    max_editor_entries=0,
+                    max_diagnostic_entries=0,
+                    max_estimated_editor_tokens=0,
+                    min_editor_score=999_999,
+                    min_diagnostic_score=999_999,
+                ),
+            ),
+        )
+
+        self.assertEqual(plan["status"], "fallback")
+        self.assertEqual(plan["fallback_reason"], "no_reduced_candidates")
+        self.assertEqual(plan["work_unit_plans"], [])
+        self.assertEqual(
+            plan["runtime_integration"]["fallback_action"],
+            "use_existing_translation_path",
+        )
+        self.assertFalse(
+            plan["runtime_integration"]["normal_translation_prompts_changed"]
+        )
+
+    def test_invalid_reducer_config_falls_back_without_state_mutation(self):
+        fixture = Path("test_samples/sample_book.en.txt")
+
+        plan = build_glossary_runtime_shadow_plan_for_txt(
+            content=fixture.read_bytes(),
+            source_language="en",
+            target_language="uk",
+            config=GlossaryRuntimeShadowConfig(
+                enabled=True,
+                reducer_caps=GlossaryCandidateReducerCaps(max_editor_entries=-1),
+            ),
+        )
+
+        self.assertEqual(plan["status"], "fallback")
+        self.assertEqual(plan["fallback_reason"], "shadow_planning_failed")
+        self.assertEqual(plan["error_type"], "ValueError")
+        self.assertEqual(
+            plan["runtime_integration"]["fallback_action"],
+            "use_existing_translation_path",
+        )
+        self.assertFalse(plan["runtime_integration"]["cache_mutation_allowed"])
 
 
 if __name__ == "__main__":

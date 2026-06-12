@@ -1460,6 +1460,16 @@ core flow, release gates, operational visibility and documentation.
   tests live in `tests/test_glossary_pressure_report.py`. This does not call
   providers, integrate runtime prompts/cache/storage/admin, mutate persistence,
   expand diagnostics, change retention or claim release/privacy readiness;
+- treat issue #450 / #204AA as the disabled-by-default reduced shadow runtime
+  planning rehearsal:
+  `src/translator_service/glossary_runtime_shadow.py` uses the local reducer's
+  retained glossary snapshot for enabled shadow planning and emits compact
+  source/reduced glossary signatures, reducer signature/count metadata,
+  per-work-unit budget status and fallback reason codes. Focused tests live in
+  `tests/test_glossary_runtime_shadow.py`. This does not call providers,
+  inject glossary context into normal prompts, mutate cache/database/scheduler/
+  work-unit/storage/admin/retention state, change user-visible behavior or
+  claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1926,6 +1936,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #450 / #204AA extends the disabled-by-default shadow runtime
+  planning helper in `src/translator_service/glossary_runtime_shadow.py` to use
+  reducer-retained glossary candidates and emit compact reduced glossary,
+  reducer and per-work-unit budget/fallback metadata.
+- Evidence: local tests prove default disabled behavior remains unchanged,
+  enabled shadow planning uses the reduced glossary signature, over-budget and
+  missing/invalid reduced data fall back without prompt injection or state
+  mutation, and serialized shadow payloads omit raw source text, prompt bodies,
+  provider responses and translated text. Local verification passed focused
+  shadow/selection/reducer tests, compileall, targeted ruff and `git diff
+  --check`.
+- Follow-up: keep #450 as metadata-only rehearsal until separate approval for
+  real runtime prompt/cache/provider/storage/admin/retention behavior. #450
+  does not prove semantic glossary truth or release/privacy readiness.
 
 - Date: 2026-06-12.
 - Change: Issue #448 / #204Y extended local reduced-packet fake-output
