@@ -181,6 +181,37 @@ class GlossaryEvaluationTest(unittest.TestCase):
             failed_local_gates,
         )
 
+    def test_truncated_json_invalid_chunk_fails_without_raw_body(self):
+        packet = _reduced_test_packet()
+        raw_output = '{"output_schema_version":'
+        validation = validate_chunked_glossary_editor_output(
+            raw_output,
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((validation,))
+
+        evaluation = evaluate_glossary_editor_readiness(
+            (validation,),
+            merge_result=merge,
+            packets=(packet,),
+        )
+        serialized = serialize_glossary_editor_evaluation(evaluation)
+
+        self.assertFalse(evaluation.provider_retry_ready)
+        self.assertEqual(evaluation.metrics.schema_validity_rate, 0.0)
+        self.assertEqual(evaluation.metrics.invalid_chunk_rate, 1.0)
+        self.assertEqual(evaluation.metrics.blocker_finding_count, 1)
+        self.assertIn(
+            GlossaryEditorReadinessGateCode.SCHEMA_VALIDITY,
+            _failed_local_gate_codes(evaluation),
+        )
+        self.assertIn(
+            GlossaryEditorReadinessGateCode.INVALID_CHUNK_RATE,
+            _failed_local_gate_codes(evaluation),
+        )
+        self.assertNotIn(raw_output, serialized)
+        self.assertNotIn("provider_response", serialized)
+
     def test_duplicate_conflict_and_needs_review_rates_fail_readiness(self):
         packet = _test_packet()
         first = validate_chunked_glossary_editor_output(
