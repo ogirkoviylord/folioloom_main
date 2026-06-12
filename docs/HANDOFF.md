@@ -1323,6 +1323,20 @@ core flow, release gates, operational visibility and documentation.
   storage, admin UI, archive inclusion, provider calls, retention/TTL changes,
   release/privacy/legal copy or raw diagnostics behavior. Retention, export,
   deletion and release-version policy remain `TBD`;
+- treat issue #413 / #204J as the bounded DeepSeek Pro glossary/profile spike:
+  profile-advisor outputs validated on all three approved fixtures, but larger
+  glossary-editor outputs failed with provider `length` and `invalid_json`.
+  The metadata-only report lives at
+  `docs/superpowers/specs/2026-06-12-deepseek-pro-glossary-profile-spike-report.md`;
+- treat issue #414 / #204K as the local chunked glossary-editor packetizer:
+  `src/translator_service/glossary_editor_packets.py` builds deterministic,
+  compact/reference-oriented `GlossaryEditorPacket` objects from validated
+  `GlossarySnapshot` and `BookProfileDetection` outputs, enforcing packet
+  entry/evidence/token budgets, stable ids/signatures and degradation/skipped
+  metadata. Focused tests live in `tests/test_glossary_editor_packets.py`.
+  This does not call providers, integrate prompts/runtime/cache/storage,
+  mutate persistence, expand diagnostics, add admin UI, change retention or
+  claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1789,6 +1803,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #414 / #204K added a local deterministic glossary editor
+  packet contract and packet builder in
+  `src/translator_service/glossary_editor_packets.py`, with focused coverage
+  in `tests/test_glossary_editor_packets.py`.
+- Evidence: local packet tests cover stable packet ids/signatures,
+  compact/reference payloads without raw fixture excerpts, budget and reserved
+  token enforcement, evidence-ref integrity, evidence-ref degradation,
+  skipped-entry metadata and the three #413 TXT fixtures. Local verification
+  passed focused packet tests, glossary/profile related tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: proceed to #415 only as fake-output chunk validators and
+  deterministic merge/adjudication tied to packet ids. Do not add live provider
+  calls, prompt/runtime/cache/storage integration, persistence/schema,
+  diagnostic expansion, admin UI, retention behavior or release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #412 / #204I added a design-only owner-only glossary/profile
