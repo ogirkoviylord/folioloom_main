@@ -1418,6 +1418,17 @@ core flow, release gates, operational visibility and documentation.
   which is local owner-only and untracked. This does not integrate prompts/
   runtime/cache/storage, mutate persistence, expand admin diagnostics, change
   retention or claim release/privacy readiness;
+- treat issue #434 / #204R as the approved owner-only glossary/profile
+  diagnostic sidecar foundation:
+  `src/translator_service/glossary_profile_diagnostics.py` defines the
+  dedicated `glossary_profile_diagnostics.json` schema/version/scope,
+  owner-only access boundary, raw-field manifest validation, secret exclusion,
+  metadata-only summary and file read/write boundary. Focused tests live in
+  `tests/test_glossary_profile_diagnostics.py`. This does not add admin UI,
+  public/user diagnostics, live provider calls, runtime prompt behavior,
+  database/schema/cache/scheduler mutation, archive inclusion, retention/
+  export/delete implementation or release/privacy claims. Retention, export,
+  deletion and release-version policy remain `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1884,6 +1895,19 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #434 / #204R added the owner-only glossary/profile diagnostic
+  sidecar foundation in `src/translator_service/glossary_profile_diagnostics.py`,
+  with focused tests in `tests/test_glossary_profile_diagnostics.py`.
+- Evidence: tests cover compact sidecar validation, dedicated
+  `glossary_profile_diagnostics.json` file read/write boundary, raw-capable
+  field manifest requirements, metadata-only summary exclusion of raw values,
+  security telemetry sanitization, secret/provider-auth rejection, owner-only
+  access boundary enforcement and `TBD` retention policy enforcement.
+- Follow-up: do not add admin UI, archive inclusion, runtime prompt behavior,
+  live provider population, database/schema/cache/scheduler mutation,
+  retention/export/delete behavior or release/privacy claims from #434 alone.
 
 - Date: 2026-06-12.
 - Change: Issue #431 / #204O ran the owner-approved bounded chunked DeepSeek Pro

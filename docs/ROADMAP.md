@@ -529,6 +529,10 @@ Acceptance criteria:
   recorded invalid JSON for the RU/UK regression packets because both ended
   with provider `finish_reason=length`. The recommendation remains
   pivot/iterate prompt/packet/completion budgeting before runtime integration.
+  Issue #434 / #204R adds the owner-only glossary/profile diagnostic sidecar
+  foundation with schema/validator/raw-field manifest/metadata-summary tests,
+  but no admin UI, archive inclusion, runtime prompt behavior, provider
+  population, retention/export/delete implementation or release/privacy claims.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
