@@ -1272,10 +1272,16 @@ core flow, release gates, operational visibility and documentation.
   status/enums, evidence refs, payload size caps, unsafe/raw-text fields,
   unsupported direct snapshot-effect claims, unsupported hard promotion,
   contradiction findings and cross-role profile disagreement using fake JSON
-  only. Focused tests live in `tests/test_glossary_role_validators.py`. Next
-  scoped step is #409 translation contract snapshot builder only. Provider
-  calls, prompt/runtime/cache behavior, persistence/schema, admin/UI, raw
-  diagnostics implementation and release/privacy claims remain gated;
+  only. Focused tests live in `tests/test_glossary_role_validators.py`;
+- treat issue #409 / #204F as the local translation contract snapshot builder:
+  `src/translator_service/translation_contract_snapshot.py` builds compact,
+  deterministic glossary/profile planning snapshots from existing translation
+  policy metadata plus glossary/profile signatures, selected rule ids,
+  uncertainty markers and diagnostics policy ids. Focused tests live in
+  `tests/test_translation_contract_snapshot.py`. Next scoped step is #410
+  per-work-unit glossary subset selection only. Provider calls, prompt/runtime/
+  cache behavior, persistence/schema, admin/UI, raw diagnostics implementation,
+  retention behavior and release/privacy claims remain gated or `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1742,6 +1748,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #409 / #204F added a local deterministic translation contract
+  snapshot builder in `src/translator_service/translation_contract_snapshot.py`,
+  with focused coverage in `tests/test_translation_contract_snapshot.py`.
+- Evidence: local snapshot tests cover required contract/version/signature
+  fields, stable serialization across reordered rule/uncertainty ids,
+  signature changes when glossary metadata changes, compact snapshots excluding
+  synthetic raw source/target/profile excerpt text by default, rejection of
+  non-compact rule and uncertainty markers, and explicit `TBD` retention
+  policy. Local verification passed focused snapshot/policy/glossary/profile
+  tests, compileall, targeted ruff and `git diff --check`.
+- Follow-up: proceed to #410 only as per-work-unit glossary subset selector;
+  do not add live provider calls, prompt/runtime/cache integration, persisted
+  state, admin UI, raw diagnostic implementation, retention behavior or
+  release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #408 / #204E added local fake-output JSON validators for
