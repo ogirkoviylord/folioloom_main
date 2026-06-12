@@ -4,8 +4,13 @@ from pathlib import Path
 
 from tests.test_glossary_editor_packets import (
     _glossary_snapshot,
+    _high_noise_glossary_snapshot,
     _pack_fixture,
     _profile_detection,
+)
+from translator_service.glossary_candidate_reducer import (
+    GlossaryCandidateReducerCaps,
+    reduce_glossary_candidates,
 )
 from translator_service.glossary_contracts import (
     GlossaryEntryCategory,
@@ -40,6 +45,49 @@ class ChunkedGlossaryEditorOutputsTest(unittest.TestCase):
         self.assertTrue(result.valid)
         self.assertEqual(result.packet_id, packet.packet_id)
         self.assertIsNotNone(result.document)
+
+    def test_reduced_packet_fake_output_validates_with_metadata_only_refs(self):
+        packet = _reduced_test_packet()
+
+        result = validate_chunked_glossary_editor_output(
+            _json(_valid_output(packet)),
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((result,))
+        serialized = serialize_chunked_glossary_editor_merge(merge)
+
+        self.assertTrue(result.valid)
+        self.assertIsNotNone(packet.reducer_context)
+        self.assertEqual(result.packet_id, packet.packet_id)
+        self.assertEqual(result.packet_signature, packet.packet_signature)
+        self.assertNotIn("Frontmatter Noise", serialized)
+        self.assertNotIn("raw_excerpt", serialized)
+        self.assertNotIn("system prompt", serialized.lower())
+
+    def test_reduced_packet_rejects_unknown_packet_and_evidence_refs(self):
+        packet = _reduced_test_packet()
+        document = _valid_output(packet)
+        document["packet_signature"] = "glossary-editor-packet-signature:v1:wrong"
+        document["evidence_refs"] = ["ev:noise:missing"]
+        document["proposed_entries"][0]["evidence_refs"] = ["ev:noise:missing"]
+
+        result = validate_chunked_glossary_editor_output(
+            _json(document),
+            packet=packet,
+        )
+        merge = merge_chunked_glossary_editor_outputs((result,))
+
+        codes = {issue.code for issue in result.issues}
+        self.assertIn(ChunkedGlossaryEditorValidationCode.INVALID_PACKET_REF, codes)
+        self.assertIn(ChunkedGlossaryEditorValidationCode.MISSING_EVIDENCE, codes)
+        self.assertIn(
+            ChunkedGlossaryEditorFindingCode.INVALID_CHUNK,
+            {finding.code for finding in merge.findings},
+        )
+        self.assertIn(
+            ChunkedGlossaryEditorFindingCode.MISSING_EVIDENCE_REFS,
+            {finding.code for finding in merge.findings},
+        )
 
     def test_rejects_packet_refs_unknown_entries_enums_and_hard_promotion(self):
         packet = _test_packet()
@@ -187,6 +235,21 @@ def _test_packet():
     return build_glossary_editor_packets(
         _glossary_snapshot(),
         _profile_detection(),
+    ).packets[0]
+
+
+def _reduced_test_packet():
+    glossary = _high_noise_glossary_snapshot(noisy_count=4)
+    profile = _profile_detection()
+    reduction = reduce_glossary_candidates(
+        glossary,
+        profile_detection=profile,
+        caps=GlossaryCandidateReducerCaps(max_editor_entries=4),
+    )
+    return build_glossary_editor_packets(
+        glossary,
+        profile,
+        candidate_reduction=reduction,
     ).packets[0]
 
 
