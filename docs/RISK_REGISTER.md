@@ -322,9 +322,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   glossary/editor steps must measure schema validity, evidence-ref coverage,
   invalid chunk rate, blocker/warning findings, duplicate/conflict rate,
   prompt budget overrun, `needs_review` rate and provider token-cap evidence
-  before provider retry or runtime architecture review. Runtime integration
-  remains rejected for now; further live provider work requires fresh exact
-  owner approval.
+  before provider retry or runtime architecture review. Issue #433 / #204Q
+  records the no-code runtime integration boundary, fallback matrix,
+  cache/signature caveats, diagnostics boundary and approval gates before any
+  runtime glossary/profile integration. Runtime integration remains rejected
+  for now; further live provider work and runtime prompt/cache/storage/admin/
+  retention implementation require fresh exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
