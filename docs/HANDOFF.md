@@ -1294,8 +1294,16 @@ core flow, release gates, operational visibility and documentation.
   glossary/profile data into prompts, call providers, mutate/delete runtime
   cache artifacts, change persistence/schema, change retention/TTL, add admin
   UI, or make release/privacy claims. Migration/stale-cache behavior remains
-  `TBD`. Next scoped step is #412 diagnostics sidecar design only unless
-  explicit implementation approval exists;
+  `TBD`;
+- treat issue #412 / #204I as the design-only owner-only glossary/profile
+  diagnostics sidecar package at
+  `docs/superpowers/specs/2026-06-12-glossary-profile-diagnostics-sidecars.md`.
+  It defines a dedicated sidecar boundary, raw-field manifest, compact vs
+  raw-capable field classes, existing surface alignment, failure modes,
+  required implementation tests and follow-up split. It does not implement
+  storage, admin UI, archive inclusion, provider calls, retention/TTL changes,
+  release/privacy/legal copy or raw diagnostics behavior. Retention, export,
+  deletion and release-version policy remain `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1764,6 +1772,24 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #412 / #204I added a design-only owner-only glossary/profile
+  diagnostics sidecar package at
+  `docs/superpowers/specs/2026-06-12-glossary-profile-diagnostics-sidecars.md`.
+- Evidence: the package defines the proposed
+  `glossary_profile_diagnostics.json` boundary, top-level schema,
+  raw-text-field manifest, compact/reference-only fields, raw-capable sections,
+  alignment with `raw_text_diagnostics.json` and
+  `provider_io_diagnostics.jsonl`, failure behavior, implementation follow-up
+  split and required future tests. This is docs-only; no code, provider calls,
+  prompt/runtime integration, storage, admin UI, archive inclusion,
+  retention/TTL behavior or release/privacy/legal claims changed.
+- Follow-up: #413 must not start until exact owner approval records fixtures,
+  max calls/tokens, provider/model, diagnostic storage and raw-text capture.
+  Any #412 implementation remains a separate approved issue. Retention, export,
+  deletion, consent, support and release-version legal/privacy behavior remain
+  `TBD`.
+
+- Date: 2026-06-12.
 - Change: Issue #411 / #204H added signatures-only glossary/profile-aware
   cache and policy signature foundations. `translation_policy.py` now exposes
   `TranslationPolicySignatureContext` plus compact normalization/payload
@@ -1779,11 +1805,9 @@ Potential issues to verify:
   passed focused policy/cache/snapshot/glossary/profile tests,
   `tests.test_translation_runner`, targeted ruff, compileall and
   `git diff --check`.
-- Follow-up: proceed to #412 only as diagnostics sidecar design unless the
-  owner explicitly approves implementation. Do not start #413 until #405-#408
-  and #412 are complete plus exact owner approval for fixtures, calls/tokens,
-  provider/model, diagnostic storage and raw-text capture. Migration/stale-cache
-  behavior remains `TBD`.
+- Follow-up: do not start #413 until exact owner approval records fixtures,
+  calls/tokens, provider/model, diagnostic storage and raw-text capture.
+  Migration/stale-cache behavior remains `TBD`.
 
 - Date: 2026-06-12.
 - Change: Issue #410 / #204G added a local deterministic per-work-unit glossary
@@ -1796,10 +1820,9 @@ Potential issues to verify:
   source/target text. Local verification passed focused selection/glossary/
   scanner/profile/snapshot tests, compileall, targeted ruff and
   `git diff --check`.
-- Follow-up: proceed to #412 only as diagnostics sidecar design unless explicit
-  implementation approval exists. Do not add live provider calls, prompt/runtime
-  integration, persisted state, admin UI, raw diagnostic implementation,
-  retention behavior or release/privacy claims.
+- Follow-up: do not add live provider calls, prompt/runtime integration,
+  persisted state, admin UI, raw diagnostic implementation, retention behavior
+  or release/privacy claims outside separately approved issues.
 
 - Date: 2026-06-12.
 - Change: Issue #409 / #204F added a local deterministic translation contract
@@ -1890,10 +1913,9 @@ Potential issues to verify:
 - Evidence: docs-only architecture package; no code, provider calls,
   persistence/schema/storage, admin/UI, runtime integration, deployment,
   payment, legal/privacy or release-readiness changes.
-- Follow-up: proceed to #405 only as local contracts/enums/validators/
-  signatures/tests. Pause for explicit approval at #411, keep #412 design-only
-  unless implementation is approved, and do not start #413 without exact
-  provider-spike approval.
+- Follow-up: #405-#412 now provide the local contract/scanner/profile/
+  role-validator/snapshot/selector/signature/design foundations. Do not start
+  #413 without exact provider-spike approval.
 
 - Date: 2026-06-02.
 - Change: Issue

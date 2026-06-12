@@ -479,14 +479,16 @@ Acceptance criteria:
   persistence/schema, provider config, admin UI, deployment or release/privacy
   claims in #204.
   Status: issues #404 / #204A, #405 / #204B, #406 / #204C, #407 / #204D,
-  #408 / #204E, #409 / #204F, #410 / #204G and #411 / #204H produced the
-  no-code architecture package, local glossary contracts, deterministic scanner
-  over existing TXT/DOCX/EPUB adapter-plan fixtures, local book profile
-  detector/rule contract, fake-output DeepSeek Pro role JSON validators, a
-  local deterministic translation contract snapshot builder, a local
-  per-work-unit glossary subset selector and optional compact glossary/profile
-  cache/policy signature context. Next scoped step is #412 diagnostics sidecar
-  design only unless explicit implementation approval exists.
+  #408 / #204E, #409 / #204F, #410 / #204G, #411 / #204H and #412 / #204I
+  produced the no-code architecture package, local glossary contracts,
+  deterministic scanner over existing TXT/DOCX/EPUB adapter-plan fixtures,
+  local book profile detector/rule contract, fake-output DeepSeek Pro role JSON
+  validators, a local deterministic translation contract snapshot builder, a
+  local per-work-unit glossary subset selector, optional compact
+  glossary/profile cache/policy signature context and a design-only
+  owner-only glossary/profile diagnostics sidecar schema/boundary package.
+  Next scoped step is #413 only after exact owner approval for fixtures,
+  max calls/tokens, model/provider, diagnostic storage and raw-text capture.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
