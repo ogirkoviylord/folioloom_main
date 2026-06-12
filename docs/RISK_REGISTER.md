@@ -334,6 +334,18 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   invalid JSON. The recommendation remains pivot/iterate before runtime
   integration.
 
+- Task: Owner-only glossary/profile diagnostic sidecar foundation.
+  Risk reduced: R-014, R-019, R-020, R-036.
+  Priority: High.
+  Suggested owner: Implementer / Reviewer / Human.
+  Acceptance criteria: dedicated sidecar schema, raw-field manifest, secret
+  exclusion, ordinary-surface metadata summaries, tests, and explicit `TBD`
+  retention/export/delete policy.
+  Decision status: issue #434 / #204R implemented the schema/validator/
+  metadata-summary/read-write foundation only. No admin UI, archive inclusion,
+  runtime prompt behavior, provider population, storage policy, retention,
+  export/delete implementation or release/privacy claim was added.
+
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
   Priority: High.
