@@ -306,8 +306,13 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   packetizer in `src/translator_service/glossary_editor_packets.py` with
   compact reference payloads, stable ids/signatures, evidence and token-budget
   caps, degradation/skipped metadata and fixture coverage over the three #413
-  TXT samples. Runtime integration remains rejected for now; further live
-  provider work requires fresh exact owner approval.
+  TXT samples. Issue #415 / #204L adds local fake-output validators and
+  deterministic merge/adjudication in
+  `src/translator_service/glossary_editor_chunk_outputs.py`, rejecting invalid
+  packet/entry/evidence refs, unsafe/raw output, hard-layer promotion and
+  oversized outputs while recording duplicates, conflicts and low-confidence
+  semantic claims as findings. Runtime integration remains rejected for now;
+  further live provider work requires fresh exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
