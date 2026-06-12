@@ -42,6 +42,10 @@ DEFAULT_MAX_COMPLETION_TOKENS = 2_200
 DEFAULT_PROMPT_TOKEN_RESERVATION_MULTIPLIER = 2.0
 DEFAULT_MAX_FIXTURE_EXCERPT_CHARS = 2_400
 DEFAULT_DIAGNOSTIC_ROOT = Path("outputs/issue-416-chunked-deepseek-pro-spike")
+ISSUE_431_DIAGNOSTIC_ROOT = Path(
+    "outputs/issue-431-bounded-chunked-glossary-editor-retry"
+)
+APPROVED_DIAGNOSTIC_ROOTS = (DEFAULT_DIAGNOSTIC_ROOT, ISSUE_431_DIAGNOSTIC_ROOT)
 APPROVED_FIXTURES = (
     Path("test_samples/russian_profile_regression.en-ru.txt"),
     Path("test_samples/ukrainian_profile_regression.en-uk.txt"),
@@ -664,21 +668,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _validate_config(config: SpikeConfig) -> None:
     if config.provider_model != DEFAULT_MODEL:
-        raise ValueError("provider_model does not match approved #416 model.")
-    if not config.fake and config.diagnostic_root != DEFAULT_DIAGNOSTIC_ROOT:
+        raise ValueError("provider_model does not match approved model.")
+    if not config.fake and config.diagnostic_root not in APPROVED_DIAGNOSTIC_ROOTS:
         raise ValueError(
-            "diagnostic_root does not match approved #416 diagnostics boundary."
+            "diagnostic_root does not match approved diagnostics boundary."
         )
     if config.max_calls > DEFAULT_MAX_CALLS:
-        raise ValueError("max_calls exceeds approved #416 cap.")
+        raise ValueError("max_calls exceeds approved cap.")
     if config.max_tokens_total > DEFAULT_MAX_TOKENS_TOTAL:
-        raise ValueError("max_tokens_total exceeds approved #416 cap.")
+        raise ValueError("max_tokens_total exceeds approved cap.")
     if config.max_packets_total > 3:
-        raise ValueError("max_packets_total exceeds approved #416 cap.")
+        raise ValueError("max_packets_total exceeds approved cap.")
     if not config.raw_text_capture:
-        raise ValueError("approved #416 run expects raw_text_capture=True.")
+        raise ValueError("approved run expects raw_text_capture=True.")
     if config.packet_selection_rule != "first_ready_packet_per_fixture":
-        raise ValueError("packet_selection_rule does not match #416 approval.")
+        raise ValueError("packet_selection_rule does not match approval.")
 
 
 def _approval_payload(config: SpikeConfig) -> dict[str, Any]:

@@ -6,8 +6,10 @@ from pathlib import Path
 from tools.deepseek_chunked_glossary_editor_spike import (
     APPROVED_FIXTURES,
     DEFAULT_DIAGNOSTIC_ROOT,
+    ISSUE_431_DIAGNOSTIC_ROOT,
     FakeChunkedProvider,
     SpikeConfig,
+    _validate_config,
     build_chunk_prompt,
     render_metadata_report,
     run_spike,
@@ -254,6 +256,15 @@ class ChunkedDeepSeekProSpikeTest(unittest.TestCase):
                     provider=FakeChunkedProvider(),
                     repo_root=Path.cwd(),
                 )
+
+    def test_issue_431_live_diagnostic_root_is_approved(self):
+        _validate_config(
+            SpikeConfig(
+                fixture_paths=APPROVED_FIXTURES,
+                diagnostic_root=ISSUE_431_DIAGNOSTIC_ROOT,
+                fake=False,
+            )
+        )
 
 
 if __name__ == "__main__":

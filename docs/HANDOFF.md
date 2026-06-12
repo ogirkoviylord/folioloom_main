@@ -1404,6 +1404,20 @@ core flow, release gates, operational visibility and documentation.
   contradictory role outputs. Runtime prompt/cache/storage/database/admin/
   retention/provider behavior remains disabled and requires follow-up owner
   approval;
+- treat issue #431 / #204O as the owner-approved bounded chunked DeepSeek Pro
+  glossary-editor retry after the #430 evidence-contract fix:
+  `docs/superpowers/specs/2026-06-12-bounded-chunked-deepseek-pro-glossary-editor-retry-report.md`
+  records metadata-only results. The approved live run made 3 calls over the
+  first READY packet per approved fixture, observed 19592 provider tokens,
+  validated only the small `sample_book.en.txt` packet, and recorded two
+  invalid larger-fixture outputs due to provider `length` completions and
+  invalid JSON. Recommendation: pivot or iterate the chunk prompt/packet shape
+  before runtime integration. Raw prompts, bounded excerpts and provider
+  responses remain only in
+  `outputs/issue-431-bounded-chunked-glossary-editor-retry/<timestamp>/`,
+  which is local owner-only and untracked. This does not integrate prompts/
+  runtime/cache/storage, mutate persistence, expand admin diagnostics, change
+  retention or claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1870,6 +1884,24 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #431 / #204O ran the owner-approved bounded chunked DeepSeek Pro
+  glossary-editor retry after #430 and added the metadata-only report at
+  `docs/superpowers/specs/2026-06-12-bounded-chunked-deepseek-pro-glossary-editor-retry-report.md`.
+- Evidence: fake/dry preflight passed locally. The live run used the three
+  approved fixtures, first READY packet per fixture, max 3 calls, max 30000
+  tokens, `deepseek-v4-pro`, local untracked owner-only diagnostic storage and
+  bounded raw-text capture. It made 3 provider calls, observed 19592 provider
+  tokens, validated only `sample_book.en.txt`, and recorded invalid JSON for
+  the RU/UK regression packets because both completions ended with provider
+  `finish_reason=length`. Merge/adjudication recorded 4 proposed entries, 2
+  invalid packets, blocker `invalid_chunk` findings and warning
+  `low_confidence_semantics` findings.
+- Follow-up: pivot or iterate prompt/packet/completion budgeting before runtime
+  integration. Do not add runtime translation integration, prompt rollout,
+  cache/storage/database/admin integration, retention behavior,
+  release/privacy claims or further live provider calls from #431 alone.
 
 - Date: 2026-06-12.
 - Change: Issue #433 / #204Q added a no-code runtime glossary integration
