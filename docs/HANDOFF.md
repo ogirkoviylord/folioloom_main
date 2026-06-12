@@ -1278,9 +1278,15 @@ core flow, release gates, operational visibility and documentation.
   deterministic glossary/profile planning snapshots from existing translation
   policy metadata plus glossary/profile signatures, selected rule ids,
   uncertainty markers and diagnostics policy ids. Focused tests live in
-  `tests/test_translation_contract_snapshot.py`. Next scoped step is #410
-  per-work-unit glossary subset selection only. Provider calls, prompt/runtime/
-  cache behavior, persistence/schema, admin/UI, raw diagnostics implementation,
+  `tests/test_translation_contract_snapshot.py`;
+- treat issue #410 / #204G as the local per-work-unit glossary subset selector:
+  `src/translator_service/glossary_selection.py` selects hard constraints plus
+  relevant soft/diagnostic entries under deterministic prompt-budget limits and
+  emits compact selection metadata with ids, reasons, token estimates and a
+  selection signature. Focused tests live in `tests/test_glossary_selection.py`.
+  Next scoped step is #411, but it must pause for explicit owner approval
+  before cache/policy signatures work. Provider calls, prompt/runtime/cache
+  behavior, persistence/schema, admin/UI, raw diagnostics implementation,
   retention behavior and release/privacy claims remain gated or `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
@@ -1748,6 +1754,22 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #410 / #204G added a local deterministic per-work-unit glossary
+  subset selector in `src/translator_service/glossary_selection.py`, with
+  focused coverage in `tests/test_glossary_selection.py`.
+- Evidence: local selection tests cover small/medium/large glossary budgets,
+  hard constraints under tight budgets, deterministic repeated selection,
+  empty glossary behavior, conflicting soft entries, profile-rule relevance,
+  multi-work-unit anchor selection and compact metadata without synthetic raw
+  source/target text. Local verification passed focused selection/glossary/
+  scanner/profile/snapshot tests, compileall, targeted ruff and
+  `git diff --check`.
+- Follow-up: pause before #411 until explicit owner approval for glossary/
+  profile-aware cache and policy signatures. Do not add live provider calls,
+  prompt/runtime/cache integration, persisted state, admin UI, raw diagnostic
+  implementation, retention behavior or release/privacy claims.
 
 - Date: 2026-06-12.
 - Change: Issue #409 / #204F added a local deterministic translation contract
