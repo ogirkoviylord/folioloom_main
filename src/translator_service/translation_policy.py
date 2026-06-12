@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -34,6 +36,16 @@ from translator_service.translation_profiles import (
 PROMPT_POLICY_VERSION = "prompt-policy-v9"
 PROTECTION_POLICY_VERSION = "protection-policy-v2"
 ADAPTER_POLICY_VERSION = "generic-adapter-v2"
+TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION = (
+    "translation-policy-signature-context-v1"
+)
+DEFAULT_GLOSSARY_SIGNATURE = "glossary-snapshot:none"
+DEFAULT_BOOK_PROFILE_SIGNATURE = "book-profile:none"
+DEFAULT_TRANSLATION_SNAPSHOT_SIGNATURE = "translation-contract-snapshot:none"
+DEFAULT_GLOSSARY_SELECTION_SIGNATURE = "glossary-selection:none"
+DEFAULT_PROMPT_CONTRACT_VERSION = "prompt-contract:none"
+
+_SAFE_SIGNATURE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{0,127}$")
 
 
 class OutputContract(StrEnum):
@@ -44,6 +56,17 @@ class OutputContract(StrEnum):
 class ProviderOutputFormat(StrEnum):
     DEFAULT = "default"
     JSON_TRANSLATION_BATCH = "json_translation_batch"
+
+
+@dataclass(frozen=True)
+class TranslationPolicySignatureContext:
+    glossary_signature: str = DEFAULT_GLOSSARY_SIGNATURE
+    profile_signature: str = DEFAULT_BOOK_PROFILE_SIGNATURE
+    translation_snapshot_signature: str = DEFAULT_TRANSLATION_SNAPSHOT_SIGNATURE
+    selection_signature: str = DEFAULT_GLOSSARY_SELECTION_SIGNATURE
+    selected_rule_ids: tuple[str, ...] = ()
+    prompt_contract_version: str = DEFAULT_PROMPT_CONTRACT_VERSION
+    context_version: str = TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION
 
 
 @dataclass(frozen=True)
@@ -206,7 +229,47 @@ def build_system_prompt(
     )
 
 
-def translation_policy_signature(policy: TranslationPolicy) -> str:
+def build_translation_policy_signature_context(
+    *,
+    glossary_signature: str = DEFAULT_GLOSSARY_SIGNATURE,
+    profile_signature: str = DEFAULT_BOOK_PROFILE_SIGNATURE,
+    translation_snapshot_signature: str = DEFAULT_TRANSLATION_SNAPSHOT_SIGNATURE,
+    selection_signature: str = DEFAULT_GLOSSARY_SELECTION_SIGNATURE,
+    selected_rule_ids: Iterable[str] = (),
+    prompt_contract_version: str = DEFAULT_PROMPT_CONTRACT_VERSION,
+) -> TranslationPolicySignatureContext:
+    return _normalize_signature_context(
+        TranslationPolicySignatureContext(
+            glossary_signature=glossary_signature,
+            profile_signature=profile_signature,
+            translation_snapshot_signature=translation_snapshot_signature,
+            selection_signature=selection_signature,
+            selected_rule_ids=tuple(selected_rule_ids),
+            prompt_contract_version=prompt_contract_version,
+        )
+    )
+
+
+def translation_policy_signature_context_payload(
+    context: TranslationPolicySignatureContext,
+) -> dict[str, object]:
+    normalized = _normalize_signature_context(context)
+    return {
+        "context_version": normalized.context_version,
+        "glossary_signature": normalized.glossary_signature,
+        "profile_signature": normalized.profile_signature,
+        "translation_snapshot_signature": normalized.translation_snapshot_signature,
+        "selection_signature": normalized.selection_signature,
+        "selected_rule_ids": list(normalized.selected_rule_ids),
+        "prompt_contract_version": normalized.prompt_contract_version,
+    }
+
+
+def translation_policy_signature(
+    policy: TranslationPolicy,
+    *,
+    signature_context: TranslationPolicySignatureContext | None = None,
+) -> str:
     payload = {
         "prompt_policy_version": policy.prompt_policy_version,
         "protection_policy_version": policy.protection_policy_version,
@@ -222,6 +285,10 @@ def translation_policy_signature(policy: TranslationPolicy) -> str:
         "prompt_tier": policy.prompt_tier.value,
         "output_contract": policy.output_contract_signature,
     }
+    if signature_context is not None:
+        payload["translation_signature_context"] = (
+            translation_policy_signature_context_payload(signature_context)
+        )
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
@@ -235,6 +302,68 @@ def _output_contract_signature(output_contract: OutputContract) -> str:
     if output_contract is OutputContract.TRANSLATION_BATCH:
         return "translation-batch-v1"
     return "plain-text-v1"
+
+
+def _normalize_signature_context(
+    context: TranslationPolicySignatureContext,
+) -> TranslationPolicySignatureContext:
+    return TranslationPolicySignatureContext(
+        glossary_signature=_normalize_signature_identifier(
+            context.glossary_signature,
+            field_name="glossary_signature",
+        ),
+        profile_signature=_normalize_signature_identifier(
+            context.profile_signature,
+            field_name="profile_signature",
+        ),
+        translation_snapshot_signature=_normalize_signature_identifier(
+            context.translation_snapshot_signature,
+            field_name="translation_snapshot_signature",
+        ),
+        selection_signature=_normalize_signature_identifier(
+            context.selection_signature,
+            field_name="selection_signature",
+        ),
+        selected_rule_ids=_normalize_signature_identifier_sequence(
+            context.selected_rule_ids,
+            field_name="selected_rule_ids",
+        ),
+        prompt_contract_version=_normalize_signature_identifier(
+            context.prompt_contract_version,
+            field_name="prompt_contract_version",
+        ),
+        context_version=_normalize_signature_identifier(
+            context.context_version,
+            field_name="context_version",
+        ),
+    )
+
+
+def _normalize_signature_identifier_sequence(
+    values: Iterable[str],
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                _normalize_signature_identifier(
+                    value,
+                    field_name=f"{field_name}[]",
+                )
+                for value in values
+            }
+        )
+    )
+
+
+def _normalize_signature_identifier(value: str, *, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty compact identifier.")
+    normalized = value.strip()
+    if not _SAFE_SIGNATURE_IDENTIFIER_RE.fullmatch(normalized):
+        raise ValueError(f"{field_name} must be a compact identifier.")
+    return normalized
 
 
 def _build_output_contract_prompt(

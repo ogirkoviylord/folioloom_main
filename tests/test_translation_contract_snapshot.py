@@ -38,10 +38,12 @@ from translator_service.translation_contract_snapshot import (
     serialize_translation_contract_snapshot,
     translation_contract_snapshot_payload,
     translation_contract_snapshot_signature,
+    translation_policy_signature_context_from_snapshot,
 )
 from translator_service.translation_policy import (
     PROMPT_POLICY_VERSION,
     build_translation_policy,
+    translation_policy_signature_context_payload,
 )
 
 
@@ -199,6 +201,44 @@ class TranslationContractSnapshotTest(unittest.TestCase):
 
     def test_retention_policy_is_explicitly_tbd(self):
         self.assertEqual(TRANSLATION_CONTRACT_SNAPSHOT_RETENTION_POLICY, "TBD")
+
+    def test_snapshot_builds_policy_signature_context(self):
+        policy = build_translation_policy(
+            text="Elizabeth checks the callback handler.",
+            source_language="en",
+            target_language="ru",
+        )
+        snapshot = build_translation_contract_snapshot(
+            policy,
+            glossary_signature="glossary-snapshot:v1:fixed",
+            profile_signature="book-profile:v1:fixed",
+            selected_rule_ids=(
+                "profile-rule:terminology:v1",
+                "profile-rule:literary-fiction:names-v1",
+            ),
+        )
+
+        context = translation_policy_signature_context_from_snapshot(
+            snapshot,
+            selection_signature="glossary-selection:v1:fixed",
+        )
+        payload = translation_policy_signature_context_payload(context)
+
+        self.assertEqual(payload["glossary_signature"], snapshot.glossary_signature)
+        self.assertEqual(payload["profile_signature"], snapshot.profile_signature)
+        self.assertEqual(
+            payload["translation_snapshot_signature"],
+            translation_contract_snapshot_signature(snapshot),
+        )
+        self.assertEqual(payload["selection_signature"], "glossary-selection:v1:fixed")
+        self.assertEqual(payload["prompt_contract_version"], PROMPT_POLICY_VERSION)
+        self.assertEqual(
+            payload["selected_rule_ids"],
+            [
+                "profile-rule:literary-fiction:names-v1",
+                "profile-rule:terminology:v1",
+            ],
+        )
 
 
 def _glossary_snapshot(
