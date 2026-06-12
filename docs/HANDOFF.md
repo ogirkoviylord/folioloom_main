@@ -1501,6 +1501,18 @@ core flow, release gates, operational visibility and documentation.
   providers, add repair behavior, integrate runtime prompts, mutate cache/
   storage/database/scheduler/admin/retention state or claim release/privacy
   readiness;
+- treat issue #463 / #204AE as the metadata-only local/fake readiness report
+  after #461/#462:
+  `docs/superpowers/specs/2026-06-13-reduced-glossary-readiness-after-packet-fixes.md`
+  records that the approved four-input fake run passes schema validity,
+  evidence-ref coverage, invalid chunk, blocker, duplicate/conflict, budget
+  overrun and reducer decision coverage gates, but fails default readiness on
+  warning findings, `needs_review_rate=1.0` and EPUB reducer diagnostic/drop
+  pressure `0.967801` against the default `0.95` threshold. This does not call
+  providers, integrate runtime prompts/cache/storage/admin, mutate persistence,
+  prove semantic truth or claim release/privacy readiness. Under the current
+  #464 approval wording, #464 should not start until a follow-up local gate fix
+  or explicit owner gate deferral is recorded;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1967,6 +1979,23 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #463 / #204AE adds the metadata-only local/fake readiness
+  report at
+  `docs/superpowers/specs/2026-06-13-reduced-glossary-readiness-after-packet-fixes.md`.
+  The report measures the post-#461/#462 reduced packet path over the three
+  repo fixtures plus the owner-approved local EPUB input.
+- Evidence: local fake validation completed four calls with 12737 fake observed
+  tokens. Structural gates passed for schema validity, evidence-ref coverage,
+  invalid chunk rate, blockers, duplicate/conflict rate, budget overruns and
+  reducer decision coverage. Default local readiness still fails on warning
+  findings, `needs_review_rate=1.0` and EPUB reducer diagnostic/drop pressure
+  `0.967801` versus the default `0.95` threshold.
+- Follow-up: do not start #464 under the current approval wording until a
+  follow-up local hardening issue passes the gate or the owner explicitly
+  records a gate deferral. Do not infer runtime prompt/cache/storage/admin/
+  retention/release readiness from #463.
 
 - Date: 2026-06-13.
 - Change: Issue #462 / #204AD adds local fake failure-mode coverage for
