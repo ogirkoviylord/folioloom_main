@@ -244,15 +244,10 @@ class OpenAICompatibleProvider:
             )
         choice = (response_payload.get("choices") or [{}])[0]
         message = choice.get("message") or {}
-        usage = response_payload.get("usage") or {}
         return ChatCallResult(
             ok=http_status == 200,
             content=str(message.get("content") or ""),
-            usage={
-                "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-                "completion_tokens": int(usage.get("completion_tokens") or 0),
-                "total_tokens": int(usage.get("total_tokens") or 0),
-            },
+            usage=_provider_usage(response_payload.get("usage")),
             finish_reason=choice.get("finish_reason"),
             http_status=http_status,
             elapsed_seconds=elapsed,
@@ -322,7 +317,7 @@ def run_spike(
     validation_results = []
     calls_made = 0
     reserved_tokens = 0
-    observed_tokens = 0
+    observed_tokens: int | None = 0
 
     for package in packages:
         if calls_made >= config.max_calls:
@@ -337,7 +332,10 @@ def run_spike(
         )
         if (
             reserved_tokens + reservation > config.max_tokens_total
-            or observed_tokens + reservation > config.max_tokens_total
+            or (
+                observed_tokens is not None
+                and observed_tokens + reservation > config.max_tokens_total
+            )
         ):
             call_summaries.append(
                 _skipped_call_summary(
@@ -346,7 +344,7 @@ def run_spike(
                     estimated_prompt_tokens=estimated_prompt_tokens,
                     reservation=reservation,
                     reserved_tokens=reserved_tokens,
-                    observed_tokens_before_call=observed_tokens,
+                    observed_tokens_before_call=_unknown_int(observed_tokens),
                 )
             )
             continue
@@ -360,7 +358,11 @@ def run_spike(
             user_prompt=user_prompt,
             max_completion_tokens=config.max_completion_tokens,
         )
-        observed_tokens += int(result.usage.get("total_tokens") or 0)
+        usage_tokens = _usage_total_tokens(result.usage)
+        if usage_tokens is None:
+            observed_tokens = None
+        elif observed_tokens is not None:
+            observed_tokens += usage_tokens
         validation = validate_chunked_glossary_editor_output(
             result.content,
             packet=package.packet,
@@ -398,7 +400,7 @@ def run_spike(
         "diagnostic_dir": str(diagnostic_dir),
         "calls_made": calls_made,
         "reserved_tokens": reserved_tokens,
-        "observed_tokens": observed_tokens,
+        "observed_tokens": _unknown_int(observed_tokens),
         "fixtures": [
             _fixture_summary(package, repo_root=repo_root)
             for package in packages
@@ -1285,6 +1287,11 @@ def _unknown_items(call_summaries: Sequence[Mapping[str, Any]]) -> list[str]:
     unknown: list[str] = []
     if not call_summaries:
         unknown.append("provider behavior is Unknown because no calls were made")
+    if any(
+        "usage" in call and _usage_total_tokens(call.get("usage")) is None
+        for call in call_summaries
+    ):
+        unknown.append("provider-reported token usage is Unknown for one or more calls")
     if any(call.get("status") != "validated" for call in call_summaries):
         unknown.append("one or more chunk outputs did not validate")
     return unknown
@@ -1362,6 +1369,34 @@ def _validation_issue_payload(issue: Any) -> dict[str, str]:
         "path": issue.path,
         "message": issue.message,
     }
+
+
+def _provider_usage(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    usage: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        item = value.get(key)
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int):
+            usage[key] = item
+    return usage
+
+
+def _usage_total_tokens(value: Any) -> int | None:
+    if not isinstance(value, Mapping):
+        return None
+    total_tokens = value.get("total_tokens")
+    if isinstance(total_tokens, bool):
+        return None
+    if isinstance(total_tokens, int):
+        return total_tokens
+    return None
+
+
+def _unknown_int(value: int | None) -> int | str:
+    return value if value is not None else "Unknown"
 
 
 def _write_json(path: Path, payload: Any) -> None:

@@ -1489,6 +1489,18 @@ core flow, release gates, operational visibility and documentation.
   providers, integrate normal runtime prompts, mutate cache/storage/database/
   scheduler/admin/retention state, prove semantic glossary truth or claim
   release/privacy readiness;
+- treat issue #462 / #204AD as local fake failure-mode coverage for reduced
+  packet retries:
+  `tools/deepseek_chunked_glossary_editor_spike.py` keeps provider `length`,
+  timeout and missing-usage outcomes as metadata-only failures or `Unknown`
+  usage in reports, while validators/evaluation reject truncated JSON as
+  structured invalid chunks. Focused tests live in
+  `tests/test_glossary_editor_chunk_outputs.py`,
+  `tests/test_glossary_evaluation.py` and
+  `tests/test_deepseek_chunked_glossary_editor_spike.py`. This does not call
+  providers, add repair behavior, integrate runtime prompts, mutate cache/
+  storage/database/scheduler/admin/retention state or claim release/privacy
+  readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1955,6 +1967,21 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #462 / #204AD adds local fake failure-mode coverage for
+  reduced glossary-editor retries. The spike runner now preserves missing
+  provider usage as `Unknown` instead of inventing `0`, and focused tests cover
+  truncated JSON after `finish_reason=length`, timeout metadata failures and
+  valid outputs with missing usage.
+- Evidence: local validators/evaluation reject truncated JSON as structured
+  invalid chunks and readiness blockers without copying raw bodies into
+  metadata reports. Local verification passed focused chunk-output/evaluation/
+  spike-runner tests, compileall, targeted ruff and `git diff --check` for the
+  #462 diff.
+- Follow-up: proceed to #463 metadata-only readiness reporting after #461 and
+  #462 are merged. Do not add provider calls, runtime glossary prompt/cache
+  behavior, provider repair behavior or release/privacy claims from #462.
 
 - Date: 2026-06-13.
 - Change: Issue #461 / #204AC hardens the local reduced glossary-editor

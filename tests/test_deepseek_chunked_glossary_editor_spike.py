@@ -184,6 +184,175 @@ class DeepSeekChunkedGlossaryEditorSpikeTest(unittest.TestCase):
         self.assertEqual(result.content, "")
         self.assertEqual(result.usage, {})
 
+    def test_length_truncated_output_is_metadata_only_failure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "metadata-report.md"
+            report = _run_single_fake_failure(
+                provider=_LengthTruncatedJsonProvider(),
+                temp_dir=Path(temp_dir),
+                report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed_with_failures")
+            self.assertEqual(report["observed_tokens"], "Unknown")
+            self.assertIn(
+                "provider-reported token usage is Unknown for one or more calls",
+                report["unknown"],
+            )
+            self.assertIn(
+                "one or more chunk outputs did not validate",
+                report["unknown"],
+            )
+            self.assertEqual(report["calls"][0]["finish_reason"], "length")
+            self.assertEqual(report["calls"][0]["usage"], {})
+            self.assertFalse(report["calls"][0]["validation"]["valid"])
+            self.assertEqual(
+                report["calls"][0]["validation"]["issues"][0]["code"],
+                "invalid_json",
+            )
+            metadata = report_path.read_text(encoding="utf-8")
+            self.assertIn("| length |", metadata)
+            self.assertIn("| Unknown |", metadata)
+            self.assertNotIn('{"output_schema_version":', metadata)
+            self.assertNotIn("provider_response", metadata)
+            self.assertNotIn("Traceback", metadata)
+
+    def test_timeout_report_is_metadata_only_failure_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "metadata-report.md"
+            report = _run_single_fake_failure(
+                provider=_TimeoutFailureProvider(),
+                temp_dir=Path(temp_dir),
+                report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed_with_failures")
+            self.assertEqual(report["observed_tokens"], "Unknown")
+            self.assertEqual(report["calls"][0]["error_type"], "TimeoutError")
+            self.assertEqual(
+                report["calls"][0]["error_message"],
+                "provider_response_timeout",
+            )
+            self.assertFalse(report["calls"][0]["validation"]["valid"])
+            metadata = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("Traceback", metadata)
+            self.assertNotIn("provider_response", metadata)
+            self.assertNotIn("response_payload", metadata)
+
+    def test_missing_usage_metadata_remains_unknown_for_valid_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "metadata-report.md"
+            report = _run_single_fake_failure(
+                provider=_ValidMissingUsageProvider(),
+                temp_dir=Path(temp_dir),
+                report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["observed_tokens"], "Unknown")
+            self.assertTrue(report["calls"][0]["validation"]["valid"])
+            self.assertEqual(report["calls"][0]["usage"], {})
+            self.assertIn(
+                "provider-reported token usage is Unknown for one or more calls",
+                report["unknown"],
+            )
+            self.assertIn("| Unknown |", report_path.read_text(encoding="utf-8"))
+
+def _run_single_fake_failure(
+    *,
+    provider,
+    temp_dir: Path,
+    report_path: Path,
+):
+    return spike.run_spike(
+        spike.SpikeConfig(
+            fixture_paths=(spike.APPROVED_FIXTURES[0],),
+            diagnostic_root=temp_dir,
+            max_calls=1,
+            max_tokens_total=40_000,
+            max_packets_total=1,
+            packet_selection_rule=spike.ISSUE_449_PACKET_SELECTION_RULE,
+            reduced_packets=True,
+            raw_text_capture=True,
+            fake=True,
+        ),
+        provider=provider,
+        repo_root=_ROOT,
+        metadata_report_path=report_path,
+    )
+
+
+class _LengthTruncatedJsonProvider:
+    def chat(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_completion_tokens: int,
+    ):
+        return spike.ChatCallResult(
+            ok=True,
+            content='{"output_schema_version":',
+            usage={},
+            finish_reason="length",
+            http_status=200,
+            elapsed_seconds=1.25,
+            request_payload={"model": model},
+            response_payload={"choices": [{"finish_reason": "length"}]},
+            response_text='{"choices":[{"finish_reason":"length"}]}',
+        )
+
+
+class _TimeoutFailureProvider:
+    def chat(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_completion_tokens: int,
+    ):
+        return spike.ChatCallResult(
+            ok=False,
+            content="",
+            usage={},
+            finish_reason=None,
+            http_status=None,
+            elapsed_seconds=9.5,
+            request_payload={"model": model},
+            error_type="TimeoutError",
+            error_message="provider_response_timeout",
+        )
+
+
+class _ValidMissingUsageProvider:
+    def chat(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_completion_tokens: int,
+    ):
+        result = spike.FakeChunkedProvider().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        return spike.ChatCallResult(
+            ok=result.ok,
+            content=result.content,
+            usage={},
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
