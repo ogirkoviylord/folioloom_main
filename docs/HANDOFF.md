@@ -1328,6 +1328,13 @@ core flow, release gates, operational visibility and documentation.
   glossary-editor outputs failed with provider `length` and `invalid_json`.
   The metadata-only report lives at
   `docs/superpowers/specs/2026-06-12-deepseek-pro-glossary-profile-spike-report.md`;
+- treat issues #414-#416 / #204K-#204M as the chunked glossary-editor
+  feasibility sequence after #413: #414 proves deterministic packetization,
+  #415 proves strict local validation and merge/adjudication boundaries, and
+  #416 tests the same boundary with bounded live DeepSeek Pro calls. This
+  sequence is architecture evidence, not a finished runtime glossary. Current
+  conclusion: chunking improves the provider-call shape, but the live editor
+  still needs prompt/evidence iteration before any runtime integration;
 - treat issue #414 / #204K as the local chunked glossary-editor packetizer:
   `src/translator_service/glossary_editor_packets.py` builds deterministic,
   compact/reference-oriented `GlossaryEditorPacket` objects from validated
@@ -1359,7 +1366,7 @@ core flow, release gates, operational visibility and documentation.
   `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md`.
   The approved run made 3 calls, observed 16973 provider tokens, validated only
   the small `sample_book.en.txt` packet, and recorded two invalid larger-fixture
-  outputs due missing evidence refs. Recommendation: pivot or iterate the
+  outputs due to missing evidence refs. Recommendation: pivot or iterate the
   chunk prompt/evidence behavior before any runtime integration. This does not
   integrate prompts/runtime/cache/storage, mutate persistence, expand admin
   diagnostics, change retention or claim release/privacy readiness;
@@ -1836,6 +1843,10 @@ Potential issues to verify:
   `tools/deepseek_chunked_glossary_editor_spike.py`, focused tests in
   `tests/test_chunked_deepseek_pro_spike.py`, and a metadata-only report at
   `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md`.
+- Purpose: #414-#416 were done to see whether the invalid/oversized #413
+  glossary-editor path could become a smaller packetized provider boundary with
+  deterministic local validation before any runtime integration. The sequence
+  produced useful architecture evidence, but not a production-ready glossary.
 - Evidence: after owner approval for the three fixtures, first READY packet per
   fixture, max 3 calls, max 30000 tokens, `deepseek-v4-pro`, local untracked
   owner-only diagnostic storage and bounded raw-text capture, the live run made
