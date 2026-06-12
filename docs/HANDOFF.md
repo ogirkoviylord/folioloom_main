@@ -1470,6 +1470,14 @@ core flow, release gates, operational visibility and documentation.
   inject glossary context into normal prompts, mutate cache/database/scheduler/
   work-unit/storage/admin/retention state, change user-visible behavior or
   claim release/privacy readiness;
+- treat issue #451 / #204AB as the no-code reduced glossary runtime
+  go/no-go review:
+  `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md`
+  records NO-GO for normal runtime glossary prompt integration now, GO only
+  for local metadata-only/shadow rehearsal, and NEEDS MORE VERIFICATION for
+  provider retry because #449 live behavior is `Unknown`. Prompt integration,
+  cache behavior, storage/admin diagnostics, retention/export/delete and
+  release/privacy claims remain behind separate owner approval gates;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1936,6 +1944,20 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #451 / #204AB added a no-code reduced glossary runtime
+  go/no-go review at
+  `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md`.
+- Evidence: review cites merged local reduced-glossary work #444-#448 and
+  #450, draft #449 fake/dry evidence, and prior live #416/#431 provider
+  failures. Verdict is NO-GO for normal runtime prompt/cache/storage/admin/
+  release integration now; GO only for local metadata-only/shadow rehearsal;
+  #449 live provider behavior remains `Unknown`.
+- Follow-up: complete or explicitly defer #449 with safe secret handling, then
+  decide whether another prompt/packet-budget iteration is needed before any
+  runtime prompt/cache proposal. Release-version glossary/profile diagnostic
+  policy remains `TBD`/blocking per #436.
 
 - Date: 2026-06-12.
 - Change: Issue #450 / #204AA extends the disabled-by-default shadow runtime

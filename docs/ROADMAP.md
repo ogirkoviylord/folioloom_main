@@ -576,7 +576,11 @@ Acceptance criteria:
   reducer-retained candidates and compact per-work-unit budget/fallback
   metadata, while keeping default runtime behavior unchanged and still avoiding
   provider calls, normal prompt injection, cache/storage/database/scheduler/
-  admin/retention mutation and release/privacy claims.
+  admin/retention mutation and release/privacy claims. Issue #451 / #204AB
+  records the reduced glossary runtime go/no-go review: normal runtime prompt
+  integration is NO-GO now, local metadata-only/shadow rehearsal remains
+  allowed, #449 live provider behavior is `Unknown`, and prompt/cache/storage/
+  admin/retention/release-policy work stays behind separate owner approvals.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
