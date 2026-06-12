@@ -311,7 +311,11 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   `src/translator_service/glossary_editor_chunk_outputs.py`, rejecting invalid
   packet/entry/evidence refs, unsafe/raw output, hard-layer promotion and
   oversized outputs while recording duplicates, conflicts and low-confidence
-  semantic claims as findings. Runtime integration remains rejected for now;
+  semantic claims as findings. Issue #416 / #204M adds a standalone bounded
+  chunked DeepSeek Pro glossary-editor spike runner and metadata-only report;
+  the approved live run made 3 calls, observed 16973 provider tokens, validated
+  only the small sample packet and recorded two invalid larger-fixture outputs
+  due to missing evidence refs. Runtime integration remains rejected for now;
   further live provider work requires fresh exact owner approval.
 
 - Task: Спроектировать TTL cleanup/delete verification.
