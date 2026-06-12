@@ -8,6 +8,13 @@ from typing import Any
 
 from translator_service.book_profile import detect_book_profile
 from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_candidate_reducer import (
+    DEFAULT_GLOSSARY_CANDIDATE_REDUCER_CAPS,
+    GlossaryCandidateReducerCaps,
+    GlossaryCandidateReductionResult,
+    glossary_candidate_reduction_payload,
+    reduce_glossary_candidates,
+)
 from translator_service.glossary_scanner import scan_glossary_candidates
 from translator_service.glossary_selection import (
     GLOSSARY_SELECTION_POLICY_VERSION,
@@ -39,6 +46,7 @@ class GlossaryRuntimeShadowConfig:
         max_entries=12,
         max_diagnostic_entries=2,
     )
+    reducer_caps: GlossaryCandidateReducerCaps = DEFAULT_GLOSSARY_CANDIDATE_REDUCER_CAPS
 
 
 def build_glossary_runtime_shadow_plan_for_txt(
@@ -70,6 +78,23 @@ def build_glossary_runtime_shadow_plan_for_txt(
             target_language=target_language,
             glossary_snapshot=glossary,
         )
+        reduction = reduce_glossary_candidates(
+            glossary,
+            profile_detection=profile,
+            pressure_context=_shadow_pressure_context(
+                plan=plan,
+                glossary_entry_count=len(glossary.entries),
+                glossary_evidence_count=len(glossary.evidence),
+            ),
+            caps=config.reducer_caps,
+        )
+        if not reduction.retained_entry_ids:
+            return _fallback_payload(
+                source_language=source_language,
+                target_language=target_language,
+                fallback_reason="no_reduced_candidates",
+                error_type="MissingReducedGlossaryData",
+            )
         policy = build_translation_policy(
             text=_policy_sample_text(plan),
             source_language=source_language,
@@ -79,7 +104,7 @@ def build_glossary_runtime_shadow_plan_for_txt(
         selected_rule_ids = tuple(rule.rule_id for rule in profile.rules)
         snapshot = build_translation_contract_snapshot(
             policy,
-            glossary_snapshot=glossary,
+            glossary_snapshot=reduction.retained_snapshot,
             profile_detection=profile,
             selected_rule_ids=selected_rule_ids,
             selection_policy_version=GLOSSARY_SELECTION_POLICY_VERSION,
@@ -88,7 +113,7 @@ def build_glossary_runtime_shadow_plan_for_txt(
         units = plan.units[: max(0, config.max_work_units)]
         selections = select_glossary_subsets_for_units(
             units,
-            glossary,
+            reduction.retained_snapshot,
             budget=config.selection_budget,
             profile_rule_ids=selected_rule_ids,
         )
@@ -103,6 +128,7 @@ def build_glossary_runtime_shadow_plan_for_txt(
     selection_payloads = tuple(
         glossary_selection_metadata_payload(selection) for selection in selections
     )
+    reducer_payload = _reducer_shadow_payload(reduction)
     aggregate_selection_signature = _aggregate_selection_signature(
         selection["selection_signature"] for selection in selection_payloads
     )
@@ -124,15 +150,19 @@ def build_glossary_runtime_shadow_plan_for_txt(
         "translation_mode": "book",
         "fragment_count": plan.fragment_count,
         "planned_work_unit_count": len(selection_payloads),
+        "source_glossary_signature": reducer_payload["source_glossary_signature"],
         "glossary_signature": snapshot.glossary_signature,
+        "reduced_glossary_signature": reducer_payload["reduced_glossary_signature"],
         "profile_signature": snapshot.profile_signature,
+        "reducer": reducer_payload,
         "translation_snapshot_signature": snapshot_signature,
         "aggregate_selection_signature": aggregate_selection_signature,
         "selected_rule_ids": list(snapshot.selected_rule_ids),
         "uncertainty_markers": list(snapshot.uncertainty_markers),
         "policy_signature_context": policy_context,
         "work_unit_plans": [
-            _work_unit_shadow_payload(selection) for selection in selection_payloads
+            _work_unit_shadow_payload(selection, reducer_payload=reducer_payload)
+            for selection in selection_payloads
         ],
         "runtime_integration": {
             "normal_translation_prompts_changed": False,
@@ -189,27 +219,40 @@ def _fallback_payload(
     }
 
 
-def _work_unit_shadow_payload(selection: Mapping[str, Any]) -> dict[str, Any]:
+def _work_unit_shadow_payload(
+    selection: Mapping[str, Any],
+    *,
+    reducer_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    drop_reasons = sorted(
+        {entry["reason"] for entry in selection["dropped_entries"]}
+    )
+    fallback_reasons = _fallback_reason_codes(selection, drop_reasons=drop_reasons)
     return {
         "work_unit_sequence": selection["work_unit_sequence"],
         "source_block_ids": list(selection["source_block_ids"]),
+        "source_glossary_signature": reducer_payload["source_glossary_signature"],
+        "reduced_glossary_signature": reducer_payload["reduced_glossary_signature"],
+        "reducer_signature": reducer_payload["reducer_signature"],
         "prompt_budget_tokens": selection["prompt_budget_tokens"],
         "estimated_prompt_tokens": selection["estimated_prompt_tokens"],
         "budget_exceeded": selection["budget_exceeded"],
+        "budget_status": (
+            "fallback_omitted" if fallback_reasons else "within_budget"
+        ),
+        "fallback_reason_codes": fallback_reasons,
         "selected_entry_ids": [
             entry["entry_id"] for entry in selection["selected_entries"]
         ],
         "dropped_entry_ids": [
             entry["entry_id"] for entry in selection["dropped_entries"]
         ],
-        "drop_reasons": sorted(
-            {entry["reason"] for entry in selection["dropped_entries"]}
-        ),
+        "drop_reasons": drop_reasons,
         "selection_signature": selection["selection_signature"],
         "policy_version": selection["policy_version"],
         "fallback_action": (
             "omit_glossary_prompt_context"
-            if selection["budget_exceeded"]
+            if fallback_reasons
             else "shadow_metadata_only"
         ),
     }
@@ -232,6 +275,58 @@ def _status_for_selections(
     if any(selection["dropped_entries"] for selection in selections):
         return "planned_with_drops", "some_entries_omitted"
     return "planned", "none"
+
+
+def _fallback_reason_codes(
+    selection: Mapping[str, Any],
+    *,
+    drop_reasons: list[str],
+) -> list[str]:
+    reasons: list[str] = []
+    if selection["budget_exceeded"]:
+        reasons.append("selection_budget_exceeded")
+    if "prompt_budget_exhausted" in drop_reasons:
+        reasons.append("prompt_budget_exhausted")
+    return sorted(dict.fromkeys(reasons))
+
+
+def _reducer_shadow_payload(
+    reduction: GlossaryCandidateReductionResult,
+) -> dict[str, Any]:
+    payload = glossary_candidate_reduction_payload(reduction)
+    return {
+        "policy_version": payload["policy_version"],
+        "reducer_signature": payload["reducer_signature"],
+        "source_glossary_signature": payload["source_glossary_signature"],
+        "reduced_glossary_signature": payload["reduced_glossary_signature"],
+        "profile_signature": payload["profile_signature"],
+        "pressure_signature": payload["pressure_signature"],
+        "retained_count": len(reduction.retained_entry_ids),
+        "diagnostic_count": len(reduction.diagnostic_entry_ids),
+        "dropped_count": len(reduction.dropped_entry_ids),
+        "caps": payload["caps"],
+    }
+
+
+def _shadow_pressure_context(
+    *,
+    plan: Any,
+    glossary_entry_count: int,
+    glossary_evidence_count: int,
+) -> Mapping[str, Any]:
+    return {
+        "document_format": getattr(
+            plan.document_format,
+            "value",
+            str(plan.document_format),
+        ),
+        "fragment_count": plan.fragment_count,
+        "character_count": plan.character_count,
+        "glossary_entry_count": glossary_entry_count,
+        "glossary_evidence_count": glossary_evidence_count,
+        "selection_policy_version": GLOSSARY_SELECTION_POLICY_VERSION,
+        "shadow_schema_version": GLOSSARY_RUNTIME_SHADOW_SCHEMA_VERSION,
+    }
 
 
 def _aggregate_selection_signature(selection_signatures: Any) -> str:
