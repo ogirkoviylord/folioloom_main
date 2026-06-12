@@ -523,7 +523,12 @@ Acceptance criteria:
   behavior, readiness gates and follow-up order. This is architecture evidence,
   not a production glossary or runtime translation feature. Any further live
   spike needs fresh exact approval, and any runtime prompt/cache/storage/admin/
-  retention implementation needs separate owner approval.
+  retention implementation needs separate owner approval. Issue #431 / #204O
+  ran the approved bounded retry after #430; the live run made 3 calls,
+  observed 19592 provider tokens, validated only `sample_book.en.txt`, and
+  recorded invalid JSON for the RU/UK regression packets because both ended
+  with provider `finish_reason=length`. The recommendation remains
+  pivot/iterate prompt/packet/completion budgeting before runtime integration.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
