@@ -30,6 +30,7 @@
 | `docs/deployment/restore-runbook.md` | Backup verification и restore rehearsal. | Перед backup/restore задачами. |
 | `docs/deployment/server-beta.md` | Historical/superseded deployment note. | Читать только как архив, если активные runbooks не отвечают на вопрос. |
 | `docs/superpowers/specs/` | Specs по admin, scheduler, provider, quality, pricing draft и другим зонам. | Читать точечный spec для соответствующей зоны. |
+| `docs/superpowers/specs/2026-06-12-glossary-profile-diagnostics-sidecars.md` | Design-only owner-only glossary/profile diagnostic sidecar schema, raw-field manifest, access/export boundaries and implementation gates. | Перед #412 follow-ups, #413 provider spike planning, glossary/profile diagnostic storage/admin/archive work. |
 | `docs/superpowers/plans/` | Архив implementation plans; многие планы уже реализованы или superseded. | Читать только после `DOCUMENT_INDEX.md`; не считать unchecked items roadmap без подтверждения. |
 
 ## 3. Карта директорий
