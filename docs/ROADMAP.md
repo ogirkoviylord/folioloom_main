@@ -543,7 +543,12 @@ Acceptance criteria:
   owner-only diagnostics may continue only inside explicitly approved bounded
   local diagnostics or dedicated owner-only surfaces; #436 does not approve
   retention/delete/export implementation, public/legal copy or release/privacy
-  readiness.
+  readiness. Issue #446 / #204W adds a local metadata-only book-profile sanity
+  gate for mixed or suspiciously confident detections, including compact
+  warning/blocker findings, route recommendations and signatures. It does not
+  change the original detector output, prove semantic genre truth, call
+  providers, alter runtime prompts/cache/storage/admin/retention behavior or
+  make release/privacy claims.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
