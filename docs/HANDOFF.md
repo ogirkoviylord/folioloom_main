@@ -1370,6 +1370,18 @@ core flow, release gates, operational visibility and documentation.
   chunk prompt/evidence behavior before any runtime integration. This does not
   integrate prompts/runtime/cache/storage, mutate persistence, expand admin
   diagnostics, change retention or claim release/privacy readiness;
+- treat issue #430 / #204N as the local fake-output evidence-contract
+  iteration after #416:
+  `tools/deepseek_chunked_glossary_editor_spike.py` now includes a compact
+  `evidence_contract` in the chunked editor prompt and explicitly requires
+  non-empty root, proposed-entry, rejected-entry and finding `evidence_refs`
+  drawn from packet `allowed_evidence_ids`. Focused tests in
+  `tests/test_chunked_deepseek_pro_spike.py` prove fake valid outputs for the
+  three approved fixtures cite resolvable packet evidence refs, and fake
+  missing-ref outputs fail validation and merge/adjudication with structured
+  blocker findings. This is local prompt/validator evidence only; it does not
+  call providers, integrate runtime prompts/cache/storage, mutate persistence,
+  expand diagnostics, change retention or claim release/privacy readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1836,6 +1848,25 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-12.
+- Change: Issue #430 / #204N tightened the chunked glossary-editor
+  prompt/evidence contract in
+  `tools/deepseek_chunked_glossary_editor_spike.py` and expanded fake-output
+  coverage in `tests/test_chunked_deepseek_pro_spike.py`.
+- Evidence: focused local tests prove the prompt exposes a compact
+  `evidence_contract`, fake valid outputs for the three approved fixtures cite
+  resolvable packet evidence refs, and fake missing-ref outputs are rejected
+  with `missing_evidence` validation issues plus blocker merge findings for
+  invalid chunks and missing evidence refs. Local verification passed focused
+  chunked-spike/chunk-output tests, `PYTHONPATH=src python3 -m compileall src`,
+  targeted `ruff`, and `git diff --check`.
+- Follow-up: #431 / #204O remains the next live retry candidate only after
+  #430 is merged/verified and exact owner approval is recorded for fixtures,
+  packet selection, call/token caps, provider/model, diagnostic storage and raw
+  text policy. Do not add runtime translation integration, prompt rollout,
+  cache/storage/database/admin integration, retention behavior,
+  release/privacy claims or live provider calls from #430 alone.
 
 - Date: 2026-06-12.
 - Change: Issue #416 / #204M added a standalone bounded chunked DeepSeek Pro
