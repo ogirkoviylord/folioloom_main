@@ -1927,6 +1927,22 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-12.
+- Change: Issue #446 / #204W added a local metadata-only book-profile sanity
+  gate in `src/translator_service/book_profile_sanity.py`, with focused
+  coverage in `tests/test_book_profile_sanity.py`.
+- Evidence: local tests cover clean profile pass-through, strong secondary
+  profile review routes, false-confident legal/frontmatter blockers with
+  bookish secondary signals, low-evidence warnings, invalid threshold handling
+  and serialized metadata excluding synthetic raw profile/pressure text. Local
+  verification passed focused sanity/profile/snapshot/packet tests, compileall,
+  targeted ruff and `git diff --check`.
+- Follow-up: use sanity results only as compact local metadata until separately
+  approved downstream work consumes them. Do not add provider adjudication,
+  runtime prompt/cache behavior, storage/database/scheduler/admin/retention
+  behavior, user-facing glossary/profile behavior, semantic truth claims or
+  release/privacy claims from #446 alone.
+
+- Date: 2026-06-12.
 - Change: Issue #445 / #204V added a local deterministic glossary candidate
   reducer in `src/translator_service/glossary_candidate_reducer.py`, with
   focused coverage in `tests/test_glossary_candidate_reducer.py`.
