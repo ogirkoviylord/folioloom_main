@@ -35,6 +35,8 @@ from translator_service.glossary_contracts import (
     GlossaryStrategy,
 )
 from translator_service.glossary_editor_packets import (
+    DEFAULT_GLOSSARY_EDITOR_PACKET_BUDGET,
+    DEFAULT_REDUCED_GLOSSARY_EDITOR_PACKET_BUDGET,
     GlossaryEditorPacketBudget,
     GlossaryEditorPacketDegradationReason,
     GlossaryEditorPacketStatus,
@@ -87,6 +89,7 @@ class GlossaryEditorPacketTest(unittest.TestCase):
         self.assertNotIn("raw source text", payload)
         self.assertNotIn("reducer_context", payload)
         self.assertNotIn("reducer_decision_status", payload)
+        self.assertNotIn("split_reason_codes", payload)
 
     def test_reduced_candidates_build_packets_with_reducer_metadata(self):
         glossary = _high_noise_glossary_snapshot(noisy_count=18)
@@ -326,6 +329,77 @@ class GlossaryEditorPacketTest(unittest.TestCase):
                     serialized = serialize_glossary_editor_packet(packet)
                     self.assertNotIn("raw_excerpt", serialized)
 
+    def test_reduced_fixture_packets_use_hardened_budget_and_split_metadata(self):
+        fixture_expectations = {
+            "test_samples/russian_profile_regression.en-ru.txt": ("ru", 10),
+            "test_samples/ukrainian_profile_regression.en-uk.txt": ("uk", 10),
+            "test_samples/sample_book.en.txt": ("ru", 1),
+        }
+
+        for fixture, expectation in fixture_expectations.items():
+            target_language, expected_packets = expectation
+            with self.subTest(fixture=fixture):
+                full = _pack_fixture(fixture, target_language)
+                reduced = _pack_reduced_fixture(fixture, target_language)
+
+                self.assertEqual(
+                    full.packets[0].max_estimated_prompt_tokens,
+                    DEFAULT_GLOSSARY_EDITOR_PACKET_BUDGET.max_estimated_prompt_tokens,
+                )
+                self.assertEqual(len(reduced.packets), expected_packets)
+                self.assertEqual(reduced.skipped_entries, ())
+                self.assertIsNotNone(reduced.reducer_context)
+                for packet in reduced.packets:
+                    self.assertEqual(
+                        packet.max_estimated_prompt_tokens,
+                        DEFAULT_REDUCED_GLOSSARY_EDITOR_PACKET_BUDGET
+                        .max_estimated_prompt_tokens,
+                    )
+                    self.assertLessEqual(
+                        len(packet.entries),
+                        DEFAULT_REDUCED_GLOSSARY_EDITOR_PACKET_BUDGET.max_entries_per_packet,
+                    )
+                    self.assertLessEqual(
+                        packet.estimated_prompt_tokens,
+                        packet.max_estimated_prompt_tokens,
+                    )
+                    self.assertLessEqual(
+                        packet.reserved_prompt_tokens,
+                        packet.max_reserved_prompt_tokens,
+                    )
+                    self.assertEqual(packet.status, GlossaryEditorPacketStatus.READY)
+                    self.assertTrue(
+                        set(packet.evidence_ids).issuperset(
+                            evidence_ref
+                            for entry in packet.entries
+                            for evidence_ref in entry.evidence_refs
+                        )
+                    )
+                    payload = glossary_editor_packet_payload(packet)
+                    if packet.split_reason_codes:
+                        self.assertEqual(
+                            payload["split_reason_codes"],
+                            list(packet.split_reason_codes),
+                        )
+                    else:
+                        self.assertNotIn("split_reason_codes", payload)
+                    self.assertIn("reducer_context", payload)
+                    self.assertEqual(
+                        payload["reducer_context"]["retained_count"],
+                        reduced.reducer_context.retained_count,
+                    )
+
+                split_reasons = {
+                    reason
+                    for packet in reduced.packets
+                    for reason in packet.split_reason_codes
+                }
+                if expected_packets > 1:
+                    self.assertIn(
+                        GlossaryEditorPacketDegradationReason.ENTRY_LIMIT_EXHAUSTED.value,
+                        split_reasons,
+                    )
+
     def test_fixture_packet_payload_is_metadata_only_for_document_text(self):
         fixture = "test_samples/russian_profile_regression.en-ru.txt"
         fixture_text = Path(fixture).read_text(encoding="utf-8")
@@ -362,6 +436,31 @@ def _pack_fixture(fixture: str, target_language: str):
         glossary_snapshot=glossary,
     )
     return build_glossary_editor_packets(glossary, profile)
+
+
+def _pack_reduced_fixture(fixture: str, target_language: str):
+    content = Path(fixture).read_bytes()
+    plan = plan_txt_translation(content=content, max_fragment_chars=2400)
+    glossary = scan_glossary_candidates(
+        plan,
+        source_language="en",
+        target_language=target_language,
+    )
+    profile = detect_book_profile(
+        plan,
+        source_language="en",
+        target_language=target_language,
+        glossary_snapshot=glossary,
+    )
+    reduction = reduce_glossary_candidates(
+        glossary,
+        profile_detection=profile,
+    )
+    return build_glossary_editor_packets(
+        glossary,
+        profile,
+        candidate_reduction=reduction,
+    )
 
 
 def _glossary_snapshot(*, extra_evidence_count: int = 0) -> GlossarySnapshot:

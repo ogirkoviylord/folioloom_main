@@ -55,6 +55,18 @@ class DeepSeekChunkedGlossaryEditorSpikeTest(unittest.TestCase):
             )
             self.assertTrue(
                 all(
+                    fixture["selected_packet_entry_count"] <= 4
+                    for fixture in report["fixtures"]
+                )
+            )
+            self.assertTrue(
+                all(
+                    fixture["selected_packet_estimated_prompt_tokens"] <= 1000
+                    for fixture in report["fixtures"]
+                )
+            )
+            self.assertTrue(
+                all(
                     call["validation"]["valid"]
                     for call in report["calls"]
                     if call["status"] == "validated"
@@ -70,6 +82,10 @@ class DeepSeekChunkedGlossaryEditorSpikeTest(unittest.TestCase):
             self.assertIn(
                 "reducer_context",
                 selected_packets[0]["packet"],
+            )
+            self.assertIn(
+                "entry_limit_exhausted",
+                selected_packets[0]["packet"]["split_reason_codes"],
             )
             self.assertNotIn(
                 "raw_excerpt",
