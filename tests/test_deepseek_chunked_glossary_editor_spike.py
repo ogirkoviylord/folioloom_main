@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SCRIPT_PATH = _ROOT / "tools" / "deepseek_chunked_glossary_editor_spike.py"
@@ -145,6 +146,27 @@ class DeepSeekChunkedGlossaryEditorSpikeTest(unittest.TestCase):
             spike._display_path(external, repo_root=_ROOT),
             str(external),
         )
+
+    def test_provider_timeout_returns_metadata_failure(self):
+        provider = spike.OpenAICompatibleProvider(
+            api_key="synthetic-key",
+            base_url="https://example.invalid",
+            timeout_seconds=0.01,
+        )
+
+        with patch.object(spike, "urlopen", side_effect=TimeoutError):
+            result = provider.chat(
+                model=spike.DEFAULT_MODEL,
+                system_prompt="system",
+                user_prompt='{"packet": {"entries": []}}',
+                max_completion_tokens=10,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_type, "TimeoutError")
+        self.assertEqual(result.error_message, "provider_response_timeout")
+        self.assertEqual(result.content, "")
+        self.assertEqual(result.usage, {})
 
 
 if __name__ == "__main__":

@@ -210,6 +210,20 @@ class OpenAICompatibleProvider:
                 error_type=error.__class__.__name__,
                 error_message=error.__class__.__name__,
             )
+        except TimeoutError as error:
+            elapsed = time.monotonic() - start
+            return ChatCallResult(
+                ok=False,
+                content="",
+                usage={},
+                finish_reason=None,
+                http_status=None,
+                elapsed_seconds=elapsed,
+                request_payload=request_payload,
+                response_text=None,
+                error_type=error.__class__.__name__,
+                error_message="provider_response_timeout",
+            )
 
         elapsed = time.monotonic() - start
         response_text = _decode_response(response_bytes)

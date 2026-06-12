@@ -1474,10 +1474,10 @@ core flow, release gates, operational visibility and documentation.
   go/no-go review:
   `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md`
   records NO-GO for normal runtime glossary prompt integration now, GO only
-  for local metadata-only/shadow rehearsal, and NEEDS MORE VERIFICATION for
-  provider retry because #449 live behavior is `Unknown`. Prompt integration,
-  cache behavior, storage/admin diagnostics, retention/export/delete and
-  release/privacy claims remain behind separate owner approval gates;
+  for local metadata-only/shadow rehearsal, and NEEDS ITERATION after #449
+  mixed live evidence. Prompt integration, cache behavior, storage/admin
+  diagnostics, retention/export/delete and release/privacy claims remain behind
+  separate owner approval gates;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -1952,30 +1952,34 @@ Potential issues to verify:
   `tests/test_deepseek_chunked_glossary_editor_spike.py`.
 - Evidence: local fake/dry preflight over the three approved TXT fixtures plus
   the owner-approved local EPUB input completed with 4 fake calls and 15109
-  observed fake tokens. Focused tests, targeted ruff and `git diff --check`
-  passed for the tooling change. Live provider behavior is `Unknown` because
-  `DEEPSEEK_API_KEY`/`DEEPSEEK_API_KEYS` was not present in the process
-  environment during the attempt.
-- Follow-up: run the approved #449 live retry only from an environment where
-  the provider key is supplied securely through `DEEPSEEK_API_KEY` or
-  `DEEPSEEK_API_KEYS`; do not paste keys into shell commands or copy raw
-  prompts, bounded excerpts, provider responses or translated text into
-  ordinary docs/issues/PRs. No runtime prompt/cache/storage/database/admin/
-  retention behavior or release/privacy claim is approved by #449.
+  observed fake tokens. The approved live retry used four provider attempts:
+  the Russian packet returned `finish_reason=length` and invalid JSON, the
+  Ukrainian packet timed out before provider usage metadata was available, and
+  `sample_book.en.txt` plus the approved EPUB packet validated successfully.
+  Known observed live provider tokens are 18271, with the timed-out Ukrainian
+  usage `Unknown`. Focused tests, targeted ruff, compileall and `git diff
+  --check` passed for the tooling/report change.
+- Follow-up: do not enable runtime glossary prompt/cache behavior from #449.
+  The reduced path still needs prompt/packet-budget iteration or a later
+  architecture update before runtime proposals. Do not paste keys into shell
+  commands or copy raw prompts, bounded excerpts, provider responses or
+  translated text into ordinary docs/issues/PRs. No runtime prompt/cache/
+  storage/database/admin/retention behavior or release/privacy claim is
+  approved by #449.
 
 - Date: 2026-06-12.
 - Change: Issue #451 / #204AB added a no-code reduced glossary runtime
   go/no-go review at
   `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md`.
 - Evidence: review cites merged local reduced-glossary work #444-#448 and
-  #450, draft #449 fake/dry evidence, and prior live #416/#431 provider
-  failures. Verdict is NO-GO for normal runtime prompt/cache/storage/admin/
-  release integration now; GO only for local metadata-only/shadow rehearsal;
-  #449 live provider behavior remains `Unknown`.
-- Follow-up: complete or explicitly defer #449 with safe secret handling, then
-  decide whether another prompt/packet-budget iteration is needed before any
-  runtime prompt/cache proposal. Release-version glossary/profile diagnostic
-  policy remains `TBD`/blocking per #436.
+  #450, #449 fake/dry evidence, prior live #416/#431 provider failures and the
+  later #449 live retry report. Verdict remains NO-GO for normal runtime
+  prompt/cache/storage/admin/release integration now; GO only for local
+  metadata-only/shadow rehearsal. #449 live behavior is mixed rather than
+  runtime-ready.
+- Follow-up: decide whether another prompt/packet-budget iteration is needed
+  before any runtime prompt/cache proposal. Release-version glossary/profile
+  diagnostic policy remains `TBD`/blocking per #436.
 
 - Date: 2026-06-12.
 - Change: Issue #450 / #204AA extends the disabled-by-default shadow runtime
