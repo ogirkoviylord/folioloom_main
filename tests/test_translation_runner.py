@@ -1622,7 +1622,10 @@ class TranslationRunnerTest(unittest.TestCase):
             "[ru] Darcy returns.",
         )
         self.assertNotIn("<glossary_context", translator.requests[0][0])
-        self.assertEqual([item["status"] for item in metadata], ["fallback", "fallback"])
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["fallback", "fallback"],
+        )
         self.assertTrue(
             all(
                 item["fallback_reason"] == "over_budget_glossary_selection"
@@ -1739,6 +1742,7 @@ class TranslationRunnerTest(unittest.TestCase):
             glossary_plan=_compact_glossary_runtime_hook_plan(),
             prompt_rehearsal_enabled=True,
             prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            owner_battle_test_enabled=True,
         )
 
         first = translate_docx_document(
@@ -1787,10 +1791,55 @@ class TranslationRunnerTest(unittest.TestCase):
             metadata[0]["prompt_context"]["included_entry_ids"],
             ["glossary-entry:v1:darcy"],
         )
+        self.assertEqual(
+            metadata[0]["battle_test_preflight"]["status"],
+            "ready",
+        )
+        self.assertEqual(
+            metadata[0]["battle_test_preflight"]["useful_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
         self.assertNotIn("text", metadata[0]["prompt_context"])
         serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Darcy returns", serialized)
         self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_rehearsal_requires_owner_battle_switch(
+        self,
+    ):
+        translator = RecordingTranslator()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+        )
+
+        translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(metadata[0]["status"], "ready")
+        self.assertNotIn("battle_test_preflight", metadata[0])
+        self.assertNotIn("prompt_context", metadata[0])
 
     def test_docx_glossary_runtime_rehearsal_invalid_context_config_has_no_context(
         self,
@@ -1813,6 +1862,7 @@ class TranslationRunnerTest(unittest.TestCase):
             prompt_rehearsal_enabled=True,
             prompt_context_entries=_compact_glossary_prompt_context_entries(),
             prompt_context_config=GlossaryPromptContextConfig(max_entries=-1),
+            owner_battle_test_enabled=True,
         )
 
         translate_docx_document(
@@ -1828,8 +1878,227 @@ class TranslationRunnerTest(unittest.TestCase):
 
         self.assertEqual(len(translator.requests), 1)
         self.assertNotIn("<glossary_context", translator.requests[0][0])
-        self.assertEqual(metadata[0]["status"], "ready")
+        self.assertEqual(metadata[0]["status"], "fallback")
+        self.assertEqual(
+            metadata[0]["fallback_reason"],
+            "prompt_context_config_invalid",
+        )
+        self.assertEqual(
+            metadata[0]["cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
         self.assertNotIn("prompt_context", metadata[0])
+
+    def test_docx_glossary_runtime_battle_preflight_skips_absent_source_term(
+        self,
+    ):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Bingley returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            owner_battle_test_enabled=True,
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(extract_text_from_docx(first.content), "[ru] Bingley returns.")
+        self.assertEqual(
+            extract_text_from_docx(second.content),
+            "[ru] Bingley returns.",
+        )
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["fallback", "fallback"],
+        )
+        self.assertTrue(
+            all(
+                item["fallback_reason"] == "source_term_or_alias_absent"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "default_runtime_cache"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["battle_test_preflight"]["status"] == "skipped"
+                for item in metadata
+            )
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Bingley returns", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_battle_preflight_skips_missing_target_metadata(
+        self,
+    ):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=(
+                _compact_glossary_prompt_context_entries_without_target()
+            ),
+            owner_battle_test_enabled=True,
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(extract_text_from_docx(first.content), "[ru] Darcy returns.")
+        self.assertEqual(extract_text_from_docx(second.content), "[ru] Darcy returns.")
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["fallback", "fallback"],
+        )
+        self.assertTrue(
+            all(
+                item["fallback_reason"] == "target_metadata_missing"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["battle_test_preflight"]["source_match_entry_count"] == 1
+                for item in metadata
+            )
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_battle_preflight_skips_source_pressure(
+        self,
+    ):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns with a long sentence.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            owner_battle_test_enabled=True,
+            battle_test_max_source_characters=8,
+        )
+
+        translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["fallback", "fallback"],
+        )
+        self.assertTrue(
+            all(
+                item["fallback_reason"] == "source_character_count_exceeds_limit"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "default_runtime_cache"
+                for item in metadata
+            )
+        )
 
     def test_docx_translation_expands_vml_textbox_height_to_avoid_clipping(self):
         class TextboxTranslator:
@@ -2012,6 +2281,7 @@ class TranslationRunnerTest(unittest.TestCase):
             glossary_plan=_compact_glossary_runtime_hook_plan(),
             prompt_rehearsal_enabled=True,
             prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            owner_battle_test_enabled=True,
         )
 
         first = translate_epub_document(
@@ -2047,6 +2317,10 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertEqual(
             metadata[0]["prompt_context"]["included_entry_ids"],
             ["glossary-entry:v1:darcy"],
+        )
+        self.assertEqual(
+            metadata[0]["battle_test_preflight"]["status"],
+            "ready",
         )
         serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Darcy returns", serialized)
@@ -2949,6 +3223,15 @@ def _compact_glossary_prompt_context_entries() -> tuple[dict[str, object], ...]:
             "profile_rule_ids": ["profile-rule:literary-fiction:names-v1"],
         },
     )
+
+
+def _compact_glossary_prompt_context_entries_without_target() -> tuple[
+    dict[str, object],
+]:
+    entry = dict(_compact_glossary_prompt_context_entries()[0])
+    entry.pop("target_canonical")
+    entry["target_variants"] = []
+    return (entry,)
 
 
 def _parse_xml(content: bytes):
