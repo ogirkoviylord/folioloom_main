@@ -599,11 +599,16 @@ Acceptance criteria:
   merge/adjudication still produced warning-only duplicate/low-confidence
   semantic findings. This is positive provider-boundary evidence, not normal
   runtime prompt integration approval. Issue #465 / #204AG records the
-  owner-approved cache policy for the first
-  disabled/default-off adapter: glossary-injected enabled/test-path units must
-  bypass cache, compact signatures stay metadata-only, default/non-glossary
-  cache behavior remains unchanged, and future glossary-aware cache keys need a
-  separate approved issue.
+  owner-approved cache policy for the first disabled/default-off adapter:
+  glossary-injected enabled/test-path units must bypass cache, compact
+  signatures stay metadata-only, default/non-glossary cache behavior remains
+  unchanged, and future glossary-aware cache keys need a separate approved
+  issue. Issue #466 / #204AH implements that adapter as a disabled-by-default
+  prompt-policy decision contract: enabled/test-path compact glossary selections
+  can become planning metadata only, cache get/put is disallowed for those
+  glossary-injected units, and invalid/missing/low-confidence/over-budget data
+  falls back to the existing translation path. Normal runtime prompt integration
+  remains unapproved.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

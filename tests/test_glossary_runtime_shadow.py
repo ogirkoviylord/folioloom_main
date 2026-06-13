@@ -9,6 +9,13 @@ from translator_service.glossary_runtime_shadow import (
     build_glossary_runtime_shadow_plan_for_txt,
 )
 from translator_service.glossary_selection import GlossarySelectionBudget
+from translator_service.translation_policy import (
+    GlossaryPromptPolicyAdapterConfig,
+    GlossaryPromptPolicyAdapterStatus,
+    GlossaryPromptPolicyCacheBehavior,
+    build_glossary_prompt_policy_adapter_decision,
+    glossary_prompt_policy_adapter_decision_payload,
+)
 
 
 class GlossaryRuntimeShadowTest(unittest.TestCase):
@@ -94,6 +101,52 @@ class GlossaryRuntimeShadowTest(unittest.TestCase):
         self.assertNotIn(source_text[:80], serialized)
         self.assertNotIn("bounded_source_excerpt", serialized)
         self.assertNotIn("raw_source", serialized)
+        self.assertNotIn("prompt_body", serialized)
+        self.assertNotIn("provider_response", serialized)
+        self.assertNotIn("translated_text", serialized)
+
+    def test_enabled_shadow_plan_feeds_prompt_policy_adapter_test_path(self):
+        fixture = Path("test_samples/sample_book.en.txt")
+        source_text = fixture.read_text(encoding="utf-8")
+
+        plan = build_glossary_runtime_shadow_plan_for_txt(
+            content=fixture.read_bytes(),
+            source_language="en",
+            target_language="ru",
+            config=GlossaryRuntimeShadowConfig(enabled=True, max_work_units=3),
+        )
+        decision = build_glossary_prompt_policy_adapter_decision(
+            plan,
+            config=GlossaryPromptPolicyAdapterConfig(
+                enabled=True,
+                work_unit_sequence=2,
+            ),
+        )
+        payload = glossary_prompt_policy_adapter_decision_payload(decision)
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(decision.status, GlossaryPromptPolicyAdapterStatus.READY)
+        self.assertTrue(decision.prompt_planning_allowed)
+        self.assertGreater(len(decision.selected_entry_ids), 0)
+        self.assertEqual(
+            decision.cache_behavior,
+            GlossaryPromptPolicyCacheBehavior.BYPASS_GLOSSARY_INJECTED_CACHE,
+        )
+        self.assertFalse(decision.cache_get_allowed)
+        self.assertFalse(decision.cache_put_allowed)
+        self.assertEqual(
+            payload["policy_signature_context"]["selection_signature"],
+            plan["policy_signature_context"]["selection_signature"],
+        )
+        self.assertEqual(
+            payload["work_unit_selection_signature"],
+            plan["work_unit_plans"][1]["selection_signature"],
+        )
+        self.assertFalse(
+            payload["runtime_integration"]["normal_translation_prompts_changed"]
+        )
+        self.assertNotIn(source_text[:80], serialized)
+        self.assertNotIn("bounded_source_excerpt", serialized)
         self.assertNotIn("prompt_body", serialized)
         self.assertNotIn("provider_response", serialized)
         self.assertNotIn("translated_text", serialized)
