@@ -4,7 +4,7 @@ import html
 import logging
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath, PurePosixPath
@@ -17,6 +17,12 @@ from translator_service.extractors import (
     parse_xml_document,
     validate_archive_members,
     validate_epub_text_block_count,
+)
+from translator_service.glossary_prompt_context import (
+    GlossaryPromptContextConfig,
+    GlossaryPromptContextResult,
+    format_glossary_prompt_context,
+    glossary_prompt_context_metadata_payload,
 )
 from translator_service.language_detection import (
     detect_language_from_text,
@@ -77,6 +83,9 @@ class GlossaryRuntimeAdapterHookConfig:
     enabled: bool = False
     glossary_plan: Mapping[str, Any] | None = None
     max_selected_entries: int = 32
+    prompt_rehearsal_enabled: bool = False
+    prompt_context_entries: Sequence[Mapping[str, Any]] = ()
+    prompt_context_config: GlossaryPromptContextConfig | None = None
 
 
 def translate_txt_document(
@@ -1651,9 +1660,14 @@ def _translate_docx_units(
             glossary_runtime_hook,
             work_unit_sequence=unit_index,
         )
+        glossary_prompt_context = _glossary_runtime_prompt_context(
+            glossary_runtime_hook,
+            glossary_adapter_decision,
+        )
         _emit_glossary_adapter_metadata(
             glossary_adapter_decision,
             glossary_adapter_metadata_callback,
+            prompt_context=glossary_prompt_context,
         )
         for subgroup_source_language, subgroup_blocks in _docx_translation_subgroups(
             unit.blocks,
@@ -1744,9 +1758,12 @@ def _translate_docx_units(
             )
             translated_text = translate_with_context(
                 translator,
-                text=_format_translation_batch(
+                text=_format_translation_request_text(
                     [protected_block.text for protected_block in protected_blocks],
                     source_language_hints=source_language_hints,
+                    glossary_prompt_context=_glossary_prompt_context_text(
+                        glossary_prompt_context,
+                    ),
                 ),
                 source_language=subgroup_source_language,
                 target_language=target_language,
@@ -2624,9 +2641,14 @@ def _translate_epub_units(
             glossary_runtime_hook,
             work_unit_sequence=unit_index,
         )
+        glossary_prompt_context = _glossary_runtime_prompt_context(
+            glossary_runtime_hook,
+            glossary_adapter_decision,
+        )
         _emit_glossary_adapter_metadata(
             glossary_adapter_decision,
             glossary_adapter_metadata_callback,
+            prompt_context=glossary_prompt_context,
         )
         cached = _translation_cache_get(
             translation_cache,
@@ -2673,9 +2695,12 @@ def _translate_epub_units(
         )
         translated_text = translate_with_context(
             translator,
-            text=_format_translation_batch(
+            text=_format_translation_request_text(
                 [protected_block.text for protected_block in protected_blocks],
                 source_language_hints=source_language_hints,
+                glossary_prompt_context=_glossary_prompt_context_text(
+                    glossary_prompt_context,
+                ),
             ),
             source_language=source_language,
             target_language=target_language,
@@ -2889,10 +2914,43 @@ def _glossary_runtime_adapter_decision(
 def _emit_glossary_adapter_metadata(
     decision: GlossaryPromptPolicyAdapterDecision | None,
     callback: Callable[[dict[str, object]], None] | None,
+    *,
+    prompt_context: GlossaryPromptContextResult | None = None,
 ) -> None:
     if decision is None or callback is None:
         return
-    callback(glossary_prompt_policy_adapter_decision_payload(decision))
+    payload = glossary_prompt_policy_adapter_decision_payload(decision)
+    if prompt_context is not None:
+        payload["prompt_context"] = glossary_prompt_context_metadata_payload(
+            prompt_context,
+        )
+    callback(payload)
+
+
+def _glossary_runtime_prompt_context(
+    config: GlossaryRuntimeAdapterHookConfig | None,
+    decision: GlossaryPromptPolicyAdapterDecision | None,
+) -> GlossaryPromptContextResult | None:
+    if config is None or decision is None:
+        return None
+    if not config.prompt_rehearsal_enabled or not decision.prompt_planning_allowed:
+        return None
+    try:
+        return format_glossary_prompt_context(
+            config.prompt_context_entries,
+            selected_entry_ids=decision.selected_entry_ids,
+            config=config.prompt_context_config or GlossaryPromptContextConfig(),
+        )
+    except ValueError:
+        return None
+
+
+def _glossary_prompt_context_text(
+    prompt_context: GlossaryPromptContextResult | None,
+) -> str | None:
+    if prompt_context is None or not prompt_context.included_entries:
+        return None
+    return prompt_context.text
 
 
 def _translation_cache_get(
@@ -2978,6 +3036,21 @@ def _format_translation_batch(
         )
     lines.append("</translation_batch>")
     return "\n".join(lines)
+
+
+def _format_translation_request_text(
+    texts: list[str],
+    source_language_hints: list[str | None] | None = None,
+    *,
+    glossary_prompt_context: str | None = None,
+) -> str:
+    batch = _format_translation_batch(
+        texts,
+        source_language_hints=source_language_hints,
+    )
+    if not glossary_prompt_context:
+        return batch
+    return f"{glossary_prompt_context}\n\n{batch}"
 
 
 def _source_language_hints(
