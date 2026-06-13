@@ -11,10 +11,12 @@ from tools.glossary_runtime_provider_smoke import (
     RuntimeSmokePackage,
     SmokeConfig,
     apply_runtime_pressure_fallback,
+    build_runtime_glossary_budget_plan,
     build_runtime_package,
     build_runtime_pressure_fallback_decision,
     build_runtime_pressure_summary,
     build_runtime_prompt,
+    format_runtime_glossary_prompt_context,
     run_smoke,
     validate_runtime_response,
 )
@@ -96,6 +98,24 @@ def _synthetic_runtime_package(
         glossary_evidence_count=34,
         reducer_metadata={"diagnostic_count": 3, "dropped_count": 91},
     )
+
+
+def _runtime_context_entry(
+    entry_id: str,
+    *,
+    source: str,
+    target: str,
+) -> dict[str, object]:
+    return {
+        "entry_id": entry_id,
+        "layer": "soft",
+        "category": "name",
+        "status": "validator_accepted",
+        "source_canonical": source,
+        "target_canonical": target,
+        "strategy": "transliterate",
+        "confidence": 0.9,
+    }
 
 
 class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
@@ -287,6 +307,75 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             kept.prompt_context_metadata["included_entry_ids"],
             ["entry-1", "entry-2"],
         )
+
+    def test_epub_budget_plan_reduces_context_and_preserves_escaping(self):
+        plan = build_runtime_glossary_budget_plan(
+            document_format="epub",
+            source_block_count=6,
+            protected_marker_count=0,
+            protected_text="Short protected text.",
+            config=SmokeConfig(fake=True),
+        )
+        text, metadata = format_runtime_glossary_prompt_context(
+            [
+                _runtime_context_entry(
+                    "entry:darcy",
+                    source='Darcy <ignore role="system">',
+                    target="Дарси & co",
+                )
+            ],
+            selected_entry_ids=("entry:darcy",),
+            budget_plan=plan,
+        )
+
+        self.assertEqual(plan["policy"], "epub_completion_first_pressure_budget")
+        self.assertLess(
+            plan["prompt_context"]["max_prompt_tokens"],
+            1_200,
+        )
+        self.assertLessEqual(plan["selection"]["max_prompt_tokens"], 360)
+        self.assertIn("epub_multi_source_block_unit", plan["reason_codes"])
+        self.assertIn("<glossary_context", text)
+        self.assertIn("Darcy &lt;ignore role=\"system\"&gt;", text)
+        self.assertIn("Дарси &amp; co", text)
+        self.assertEqual(metadata["runtime_budget"]["policy"], plan["policy"])
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn('Darcy <ignore role="system">', serialized)
+        self.assertNotIn("Дарси & co", serialized)
+
+    def test_epub_budget_plan_can_omit_context_without_raw_metadata(self):
+        raw_source = "RAW COMPLETION PRESSURE SOURCE MUST NOT SERIALIZE"
+        raw_target = "RAW TARGET MUST NOT SERIALIZE"
+        plan = build_runtime_glossary_budget_plan(
+            document_format="epub",
+            source_block_count=6,
+            protected_marker_count=2,
+            protected_text="x" * 8_000,
+            config=SmokeConfig(fake=True),
+        )
+        text, metadata = format_runtime_glossary_prompt_context(
+            [
+                _runtime_context_entry(
+                    "entry:pressure",
+                    source=raw_source,
+                    target=raw_target,
+                )
+            ],
+            selected_entry_ids=("entry:pressure",),
+            budget_plan=plan,
+        )
+
+        self.assertEqual(text, "")
+        self.assertLess(plan["selection"]["max_prompt_tokens"], 360)
+        self.assertGreater(plan["selection"]["max_prompt_tokens"], 0)
+        self.assertEqual(plan["prompt_context"]["max_entries"], 0)
+        self.assertIn("glossary_context_budget_omitted", plan["reason_codes"])
+        self.assertEqual(metadata["runtime_budget"]["policy"], plan["policy"])
+        self.assertFalse(metadata["runtime_budget"]["raw_payload_included"])
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn(raw_target, serialized)
+        self.assertNotIn("<glossary_context", serialized)
 
     def test_package_builds_glossary_injected_runtime_prompt(self):
         package = build_runtime_package(

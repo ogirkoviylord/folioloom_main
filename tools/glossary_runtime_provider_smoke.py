@@ -33,7 +33,7 @@ from translator_service.glossary_selection import (
     GLOSSARY_SELECTION_POLICY_VERSION,
     GlossarySelectionBudget,
     glossary_selection_metadata_payload,
-    select_glossary_subsets_for_units,
+    select_glossary_subset_for_work_unit,
 )
 from translator_service.model_output_safety import validate_model_output_safety
 from translator_service.output_contracts import (
@@ -69,6 +69,15 @@ DEFAULT_MAX_TOKENS_TOTAL = 50_000
 DEFAULT_MAX_COMPLETION_TOKENS = 1_800
 DEFAULT_PROMPT_TOKEN_RESERVATION_MULTIPLIER = 2.0
 DEFAULT_MAX_FRAGMENT_CHARS = 2_400
+DEFAULT_RUNTIME_SELECTION_PROMPT_TOKENS = 360
+DEFAULT_RUNTIME_SELECTION_MAX_ENTRIES = 12
+DEFAULT_RUNTIME_SELECTION_MAX_DIAGNOSTIC_ENTRIES = 2
+DEFAULT_RUNTIME_CONTEXT_PROMPT_TOKENS = 1_200
+DEFAULT_RUNTIME_CONTEXT_MAX_ENTRIES = 12
+DEFAULT_RUNTIME_CONTEXT_MAX_CHARACTERS = 6_000
+HIGH_PRESSURE_EPUB_CONTEXT_PROMPT_TOKEN_CAP = 420
+HIGH_PRESSURE_EPUB_CONTEXT_MAX_ENTRIES = 4
+HIGH_PRESSURE_EPUB_MIN_SELECTION_PROMPT_TOKENS = 120
 DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS = 12
 DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS = 80
 DEFAULT_DIAGNOSTIC_ROOT = Path(
@@ -553,16 +562,35 @@ def build_runtime_package(
         selection_policy_version=GLOSSARY_SELECTION_POLICY_VERSION,
         quality_route="runtime_provider_smoke",
     )
-    selections = select_glossary_subsets_for_units(
-        plan.units,
-        reduction.retained_snapshot,
-        budget=GlossarySelectionBudget(
-            max_prompt_tokens=360,
-            max_entries=12,
-            max_diagnostic_entries=2,
-        ),
-        profile_rule_ids=selected_rule_ids,
-    )
+    selections = []
+    protected_by_sequence: dict[int, Any] = {}
+    budget_plan_by_sequence: dict[int, dict[str, Any]] = {}
+    for unit in plan.units:
+        protected = protect_text(unit.source_text)
+        budget_plan = build_runtime_glossary_budget_plan(
+            document_format=plan.document_format.value,
+            source_block_count=len(unit.source_block_ids),
+            protected_marker_count=len(protected.replacements),
+            protected_text=protected.text,
+            config=config,
+        )
+        protected_by_sequence[unit.sequence] = protected
+        budget_plan_by_sequence[unit.sequence] = budget_plan
+        selection_budget = budget_plan["selection"]
+        selections.append(
+            select_glossary_subset_for_work_unit(
+                unit,
+                reduction.retained_snapshot,
+                budget=GlossarySelectionBudget(
+                    max_prompt_tokens=selection_budget["max_prompt_tokens"],
+                    max_entries=selection_budget["max_entries"],
+                    max_diagnostic_entries=selection_budget[
+                        "max_diagnostic_entries"
+                    ],
+                ),
+                profile_rule_ids=selected_rule_ids,
+            )
+        )
     reducer_metadata = _reducer_metadata(reduction)
     for selection in selections:
         selection_metadata = glossary_selection_metadata_payload(selection)
@@ -583,19 +611,21 @@ def build_runtime_package(
         )
         if decision.status is not GlossaryPromptPolicyAdapterStatus.READY:
             continue
-        prompt_context = format_glossary_prompt_context(
-            reduction.retained_snapshot.entries,
-            selected_entry_ids=decision.selected_entry_ids,
-            config=GlossaryPromptContextConfig(
-                max_entries=12,
-                max_prompt_tokens=1_200,
-                max_characters=6_000,
-            ),
+        budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
+        prompt_context_text, prompt_context_metadata = (
+            format_runtime_glossary_prompt_context(
+                reduction.retained_snapshot.entries,
+                selected_entry_ids=decision.selected_entry_ids,
+                budget_plan=budget_plan,
+            )
         )
-        if not prompt_context.included_entries:
+        if (
+            not prompt_context_metadata["included_entry_ids"]
+            and not budget_plan["reason_codes"]
+        ):
             continue
         unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
-        protected = protect_text(unit.source_text)
+        protected = protected_by_sequence[selection.work_unit_sequence]
         package = RuntimeSmokePackage(
             input_path=path,
             input_id=_input_id(path, target_language),
@@ -612,10 +642,8 @@ def build_runtime_package(
             adapter_metadata=glossary_prompt_policy_adapter_decision_payload(
                 decision
             ),
-            prompt_context_text=prompt_context.text,
-            prompt_context_metadata=glossary_prompt_context_metadata_payload(
-                prompt_context
-            ),
+            prompt_context_text=prompt_context_text,
+            prompt_context_metadata=prompt_context_metadata,
             selection_metadata=selection_metadata,
             glossary_entry_count=len(reduction.retained_snapshot.entries),
             glossary_evidence_count=len(reduction.retained_snapshot.evidence),
@@ -623,6 +651,175 @@ def build_runtime_package(
         )
         return apply_runtime_pressure_fallback(package, config=config)
     raise ValueError("no_ready_glossary_injected_runtime_unit")
+
+
+def build_runtime_glossary_budget_plan(
+    *,
+    document_format: str,
+    source_block_count: int,
+    protected_marker_count: int,
+    protected_text: str,
+    config: SmokeConfig,
+) -> dict[str, Any]:
+    estimated_completion_pressure = estimate_tokens(protected_text)
+    is_high_pressure_epub = document_format == "epub" and (
+        source_block_count > 1
+        or protected_marker_count > 0
+        or estimated_completion_pressure > config.max_completion_tokens // 2
+    )
+    if not is_high_pressure_epub:
+        return _runtime_glossary_budget_plan_payload(
+            policy="default_runtime_smoke_budget",
+            reason_codes=(),
+            selection_prompt_tokens=DEFAULT_RUNTIME_SELECTION_PROMPT_TOKENS,
+            selection_max_entries=DEFAULT_RUNTIME_SELECTION_MAX_ENTRIES,
+            selection_max_diagnostic_entries=(
+                DEFAULT_RUNTIME_SELECTION_MAX_DIAGNOSTIC_ENTRIES
+            ),
+            context_prompt_tokens=DEFAULT_RUNTIME_CONTEXT_PROMPT_TOKENS,
+            context_max_entries=DEFAULT_RUNTIME_CONTEXT_MAX_ENTRIES,
+            context_max_characters=DEFAULT_RUNTIME_CONTEXT_MAX_CHARACTERS,
+            estimated_completion_pressure=estimated_completion_pressure,
+            max_completion_tokens=config.max_completion_tokens,
+        )
+
+    completion_headroom = max(
+        0,
+        config.max_completion_tokens - estimated_completion_pressure,
+    )
+    context_prompt_tokens = min(
+        DEFAULT_RUNTIME_CONTEXT_PROMPT_TOKENS,
+        HIGH_PRESSURE_EPUB_CONTEXT_PROMPT_TOKEN_CAP,
+        max(0, completion_headroom // 3),
+    )
+    context_max_entries = (
+        0
+        if context_prompt_tokens <= 0
+        else min(
+            DEFAULT_RUNTIME_CONTEXT_MAX_ENTRIES,
+            HIGH_PRESSURE_EPUB_CONTEXT_MAX_ENTRIES,
+        )
+    )
+    selection_prompt_tokens = min(
+        DEFAULT_RUNTIME_SELECTION_PROMPT_TOKENS,
+        max(HIGH_PRESSURE_EPUB_MIN_SELECTION_PROMPT_TOKENS, context_prompt_tokens),
+    )
+    selection_max_entries = min(
+        DEFAULT_RUNTIME_SELECTION_MAX_ENTRIES,
+        context_max_entries if context_max_entries else 1,
+    )
+    reason_codes = [
+        "epub_completion_safety_reserved",
+        "glossary_context_budget_reduced",
+    ]
+    if source_block_count > 1:
+        reason_codes.append("epub_multi_source_block_unit")
+    if protected_marker_count > 0:
+        reason_codes.append("protected_markers_present")
+    if estimated_completion_pressure > config.max_completion_tokens // 2:
+        reason_codes.append("estimated_completion_pressure_high")
+    if context_prompt_tokens <= 0:
+        reason_codes.append("glossary_context_budget_omitted")
+
+    return _runtime_glossary_budget_plan_payload(
+        policy="epub_completion_first_pressure_budget",
+        reason_codes=tuple(sorted(dict.fromkeys(reason_codes))),
+        selection_prompt_tokens=selection_prompt_tokens,
+        selection_max_entries=selection_max_entries,
+        selection_max_diagnostic_entries=min(
+            DEFAULT_RUNTIME_SELECTION_MAX_DIAGNOSTIC_ENTRIES,
+            1 if context_max_entries else 0,
+        ),
+        context_prompt_tokens=context_prompt_tokens,
+        context_max_entries=context_max_entries,
+        context_max_characters=(
+            0
+            if context_prompt_tokens <= 0
+            else min(
+                DEFAULT_RUNTIME_CONTEXT_MAX_CHARACTERS,
+                max(350, context_prompt_tokens * 4),
+            )
+        ),
+        estimated_completion_pressure=estimated_completion_pressure,
+        max_completion_tokens=config.max_completion_tokens,
+    )
+
+
+def format_runtime_glossary_prompt_context(
+    entries: Iterable[Any],
+    *,
+    selected_entry_ids: Iterable[str],
+    budget_plan: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    context_budget = budget_plan["prompt_context"]
+    prompt_context = format_glossary_prompt_context(
+        entries,
+        selected_entry_ids=selected_entry_ids,
+        config=GlossaryPromptContextConfig(
+            max_entries=context_budget["max_entries"],
+            max_prompt_tokens=context_budget["max_prompt_tokens"],
+            max_characters=context_budget["max_characters"],
+        ),
+    )
+    metadata = glossary_prompt_context_metadata_payload(prompt_context)
+    metadata["runtime_budget"] = _runtime_budget_metadata_payload(budget_plan)
+    text = prompt_context.text if prompt_context.included_entries else ""
+    return text, metadata
+
+
+def _runtime_glossary_budget_plan_payload(
+    *,
+    policy: str,
+    reason_codes: Sequence[str],
+    selection_prompt_tokens: int,
+    selection_max_entries: int,
+    selection_max_diagnostic_entries: int,
+    context_prompt_tokens: int,
+    context_max_entries: int,
+    context_max_characters: int,
+    estimated_completion_pressure: int,
+    max_completion_tokens: int,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "glossary-runtime-budget-tuning-v1",
+        "policy": policy,
+        "reason_codes": list(reason_codes),
+        "selection": {
+            "max_prompt_tokens": selection_prompt_tokens,
+            "max_entries": selection_max_entries,
+            "max_diagnostic_entries": selection_max_diagnostic_entries,
+        },
+        "prompt_context": {
+            "max_prompt_tokens": context_prompt_tokens,
+            "max_entries": context_max_entries,
+            "max_characters": context_max_characters,
+        },
+        "completion_safety": {
+            "reserved_first": True,
+            "estimated_completion_pressure_tokens": estimated_completion_pressure,
+            "max_completion_tokens": max_completion_tokens,
+        },
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _runtime_budget_metadata_payload(
+    budget_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": budget_plan.get(
+            "schema_version",
+            "glossary-runtime-budget-tuning-v1",
+        ),
+        "policy": budget_plan.get("policy", "Unknown"),
+        "reason_codes": list(budget_plan.get("reason_codes") or ()),
+        "selection": dict(budget_plan.get("selection") or {}),
+        "prompt_context": dict(budget_plan.get("prompt_context") or {}),
+        "completion_safety": dict(budget_plan.get("completion_safety") or {}),
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
 
 
 def apply_runtime_pressure_fallback(
@@ -757,6 +954,9 @@ def build_runtime_pressure_summary(
         (),
     )
     pressure_fallback = package.prompt_context_metadata.get("pressure_fallback") or {}
+    runtime_budget = package.prompt_context_metadata.get("runtime_budget") or {}
+    runtime_budget_context = runtime_budget.get("prompt_context") or {}
+    runtime_budget_completion = runtime_budget.get("completion_safety") or {}
     selected_entry_ids = package.adapter_metadata.get("selected_entry_ids") or ()
     selection_dropped = package.selection_metadata.get("dropped_entries") or ()
     cache_policy = package.adapter_metadata.get("cache_policy") or {}
@@ -815,6 +1015,33 @@ def build_runtime_pressure_summary(
             "reserved_request_tokens": _unknown_int(reserved_tokens),
             "max_completion_tokens": config.max_completion_tokens,
             "max_tokens_total": config.max_tokens_total,
+        },
+        "budget_tuning": {
+            "policy": runtime_budget.get("policy", "default_runtime_smoke_budget"),
+            "reason_codes": list(runtime_budget.get("reason_codes") or ()),
+            "selection_prompt_budget_tokens": package.selection_metadata.get(
+                "prompt_budget_tokens",
+                "Unknown",
+            ),
+            "context_prompt_budget_tokens": runtime_budget_context.get(
+                "max_prompt_tokens",
+                package.prompt_context_metadata.get(
+                    "prompt_budget_tokens",
+                    "Unknown",
+                ),
+            ),
+            "context_entry_limit": runtime_budget_context.get(
+                "max_entries",
+                package.prompt_context_metadata.get("entry_limit", "Unknown"),
+            ),
+            "estimated_completion_pressure_tokens": runtime_budget_completion.get(
+                "estimated_completion_pressure_tokens",
+                "Unknown",
+            ),
+            "completion_safety_reserved_first": runtime_budget_completion.get(
+                "reserved_first",
+                "Unknown",
+            ),
         },
         "cache_policy": {
             "behavior": cache_policy.get("behavior", "Unknown"),
@@ -935,7 +1162,7 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         pressure_rows = (
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
-            "| Unknown | Unknown |\n"
+            "| Unknown | Unknown | Unknown | Unknown |\n"
         )
     return (
         "# Glossary Runtime Provider Smoke Report\n\n"
@@ -962,9 +1189,9 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         "| Input | Target | Format | Unit | Source blocks | Source chars "
         "| Protected markers | Selected entries | Context tokens "
         "| Prompt tokens | Completion cap | Risk category | Fallback action "
-        "| Fallback reason codes |\n"
+        "| Fallback reason codes | Budget policy | Budget reason codes |\n"
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: "
-        "| ---: | ---: | --- | --- | --- |\n"
+        "| ---: | ---: | --- | --- | --- | --- | --- |\n"
         f"{pressure_rows}\n\n"
         "## Token And Latency Shape\n"
         f"- Mode: {report['mode']}\n"
@@ -1580,9 +1807,11 @@ def _pressure_report_row(call: Mapping[str, Any]) -> str:
     unit = pressure.get("unit") or {}
     glossary = pressure.get("glossary") or {}
     tokens = pressure.get("tokens") or {}
+    budget_tuning = pressure.get("budget_tuning") or {}
     fallback = pressure.get("fallback") or {}
     output_contract = pressure.get("output_contract") or {}
     fallback_codes = fallback.get("pressure_fallback_reason_codes") or ["none"]
+    budget_codes = budget_tuning.get("reason_codes") or ["none"]
     return (
         f"| {call.get('input_id', 'Unknown')} "
         f"| {call.get('target_language', 'Unknown')} "
@@ -1597,7 +1826,9 @@ def _pressure_report_row(call: Mapping[str, Any]) -> str:
         f"| {tokens.get('max_completion_tokens', 'Unknown')} "
         f"| {output_contract.get('risk_category', 'Unknown')} "
         f"| {fallback.get('pressure_fallback_action', 'Unknown')} "
-        f"| {', '.join(str(code) for code in fallback_codes)} |"
+        f"| {', '.join(str(code) for code in fallback_codes)} "
+        f"| {budget_tuning.get('policy', 'Unknown')} "
+        f"| {', '.join(str(code) for code in budget_codes)} |"
     )
 
 
