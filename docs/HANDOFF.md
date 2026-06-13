@@ -1625,6 +1625,12 @@ core flow, release gates, operational visibility and documentation.
   glossary-on and glossary-off fake rehearsal summaries for an EPUB runtime
   package, proving cache-bypass/default-cache visibility and safe fallback
   metadata without live provider calls or quality claims;
+- treat issue #491 / #204AT as bounded paired EPUB provider-boundary evidence,
+  not a readiness gate pass: fake preflight passed, but all four approved live
+  glossary-on/off EPUB calls for `ru` and `uk` failed with provider `length`
+  and local `truncated_output`/`external_text`. Both glossary-on and
+  glossary-off failed, so current evidence points to unresolved EPUB
+  unit/output-completion pressure rather than a glossary-only issue;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2243,9 +2249,26 @@ Potential issues to verify:
   selector/formatter and focused runtime-hook tests passed locally before final
   full-gate verification.
 - Follow-up: #490 is fake/local rehearsal evidence only. It does not implement
-  #491 live provider smoke, #492 quality review, default runtime glossary
-  rollout, cache reuse, durable state/storage/admin/retention mutation,
-  provider config changes or release/privacy/legal/support claims.
+  #492 quality review, default runtime glossary rollout, cache reuse, durable
+  state/storage/admin/retention mutation, provider config changes or
+  release/privacy/legal/support claims.
+
+- Date: 2026-06-13.
+- Change: Issue #491 / #204AT ran the owner-approved bounded paired EPUB
+  glossary runtime provider smoke and records a metadata-only report at
+  `docs/superpowers/specs/2026-06-13-bounded-paired-epub-glossary-runtime-smoke-report.md`.
+- Evidence: fake/dry paired preflight completed first for `ru` and `uk`; the
+  live run made 4 approved calls, reserved 29920 tokens, observed 20516
+  provider-reported tokens, and stayed under the 50000-token cap. All four live
+  calls failed with provider `length` plus local `truncated_output` and
+  `external_text` issue codes. Owner-only raw diagnostics remain under
+  `outputs/issue-491-bounded-paired-epub-glossary-runtime-smoke/20260613T151426Z/`
+  and are untracked.
+- Follow-up: #492 should produce the metadata-only quality/decision review.
+  Keep runtime glossary shadow-only. Do not run another live paired smoke,
+  enable runtime rollout, change cache reuse, mutate durable state/storage/admin
+  behavior, or make release/privacy/legal/support claims without a new approved
+  issue.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
