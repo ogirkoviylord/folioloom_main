@@ -644,7 +644,14 @@ Acceptance criteria:
   EPUB prompt/selection iteration. Issue #479 / #204AO prepares the owner
   decision packet and rejects normal/default or limited-beta runtime glossary
   rollout for now. Final owner path remains `TBD`; no follow-up issues are
-  created until the owner selects the path.
+  created until the owner selects the path. Issues #487-#491 locally profiled,
+  degraded, tuned and paired-smoked the EPUB path; the #491 bounded paired live
+  smoke still failed all four glossary-on/off calls with provider `length` plus
+  local validation failures. Issue #492 records a metadata-only `FAIL` verdict
+  for runtime rollout readiness, limited-beta readiness, owner-only battle-test
+  candidacy and positive glossary quality claims from the current EPUB
+  evidence. The nearest safe next step is another local-only smaller EPUB unit
+  selection/output-budget issue before any fresh provider-smoke approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

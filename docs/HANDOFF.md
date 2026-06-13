@@ -1631,6 +1631,13 @@ core flow, release gates, operational visibility and documentation.
   and local `truncated_output`/`external_text`. Both glossary-on and
   glossary-off failed, so current evidence points to unresolved EPUB
   unit/output-completion pressure rather than a glossary-only issue;
+- treat issue #492 / #204AU as the metadata-only quality/decision review for
+  #491: verdict `FAIL` for runtime rollout readiness, limited-beta readiness,
+  owner-only battle-test candidacy and positive glossary-on/off quality claims
+  from current EPUB evidence. Translation quality and glossary benefit remain
+  `Unknown`; final owner go/no-go remains `TBD`. Keep runtime glossary
+  shadow-only and iterate smaller EPUB runtime unit selection/output-budget
+  locally before requesting any fresh paired provider smoke approval;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2269,6 +2276,21 @@ Potential issues to verify:
   enable runtime rollout, change cache reuse, mutate durable state/storage/admin
   behavior, or make release/privacy/legal/support claims without a new approved
   issue.
+
+- Date: 2026-06-13.
+- Change: Issue #492 / #204AU records a metadata-only EPUB glossary runtime
+  quality/decision review at
+  `docs/superpowers/specs/2026-06-13-epub-glossary-runtime-quality-decision-review.md`.
+- Evidence: #492 reviewed only metadata from #491 and did not inspect or copy
+  raw source text, prompt bodies, provider response bodies or translated
+  bodies. The review verdict is `FAIL` for runtime glossary rollout readiness,
+  limited-beta readiness, owner-only battle-test candidacy and positive
+  glossary-on/off quality claims from the current EPUB evidence, because all
+  four paired #491 live calls failed validation.
+- Follow-up: keep runtime glossary shadow-only. Create a separate local-only
+  issue for smaller EPUB runtime unit selection and output-budget reduction
+  before requesting a fresh paired provider-smoke approval. Final owner go/no-go
+  remains `TBD`.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
