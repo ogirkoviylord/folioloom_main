@@ -374,9 +374,11 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   local `truncated_output`/`external_text` validation. Issue #478 / #204AN
   records a `NEEDS REVIEW` quality verdict because paired non-glossary
   comparison outputs were unavailable, so comparative glossary benefit remains
-  `Unknown`. Normal/default translation prompts, live provider rollout,
-  glossary-aware cache reuse, database/scheduler/work-unit state,
-  storage/admin/retention behavior,
+  `Unknown`. Issue #479 / #204AO records metadata-only decision preparation:
+  normal/default and limited-beta runtime glossary rollout are rejected for now,
+  and the final owner path remains `TBD`. Normal/default translation prompts,
+  live provider rollout, glossary-aware cache reuse, database/scheduler/
+  work-unit state, storage/admin/retention behavior,
   user-visible behavior and release/privacy claims remain unchanged.
 
 - Task: Спроектировать TTL cleanup/delete verification.
