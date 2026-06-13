@@ -608,7 +608,13 @@ Acceptance criteria:
   can become planning metadata only, cache get/put is disallowed for those
   glossary-injected units, and invalid/missing/low-confidence/over-budget data
   falls back to the existing translation path. Normal runtime prompt integration
-  remains unapproved.
+  remains unapproved. Issue #474 adds the next controlled battle-test slice:
+  DOCX/EPUB translation calls can receive a default-off in-process glossary
+  runtime adapter hook and emit compact test metadata; READY enabled/test-path
+  units request cache get/put bypass, while disabled/fallback paths keep
+  existing cache behavior. #474 still does not inject glossary text into normal
+  prompts, call providers, mutate durable state/storage/admin/retention, change
+  user-visible behavior or claim release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
