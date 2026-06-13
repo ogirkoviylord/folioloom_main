@@ -1562,6 +1562,16 @@ core flow, release gates, operational visibility and documentation.
   call providers, change cache behavior, mutate durable state/storage/admin/
   retention behavior, prove semantic glossary truth or claim release/privacy
   readiness;
+- treat issue #476 / #204AL as the disabled/test-only fake runtime glossary
+  prompt rehearsal slice: `src/translator_service/translation_runner.py` can
+  prefix DOCX/EPUB fake-provider requests with a bounded glossary context only
+  when the explicit runtime hook and `prompt_rehearsal_enabled` test flag are
+  enabled and the adapter decision is READY. The rehearsal path uses the #475
+  formatter, keeps compact metadata only in ordinary callbacks, and proves
+  cache bypass/fallback behavior with local stubs. Normal/default prompts,
+  live provider calls, durable cache/storage/database/scheduler/admin/retention
+  state, user-visible behavior and release/privacy/legal/support claims remain
+  unchanged;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2056,6 +2066,21 @@ Potential issues to verify:
   prompt integration, live provider calls, cache behavior changes, durable
   state mutation, storage/admin/retention behavior, semantic truth or release/
   privacy/legal/support readiness from #475.
+
+- Date: 2026-06-13.
+- Change: Issue #476 / #204AL adds a disabled/test-only fake runtime glossary
+  prompt rehearsal path in `src/translator_service/translation_runner.py`, with
+  focused DOCX/EPUB coverage in `tests/test_translation_runner.py`.
+- Evidence: local tests cover READY rehearsal prompts that include the bounded
+  #475 glossary context only when `prompt_rehearsal_enabled` is set, cache
+  get/put bypass for glossary-injected READY test units, disabled/fallback
+  behavior that keeps the existing prompt/cache path, and metadata callbacks
+  that omit raw prompt/source/translation bodies.
+- Follow-up: #476 is fake/local rehearsal evidence only. Do not infer normal
+  runtime glossary prompt injection, live provider calls, glossary-aware cache
+  reuse, durable state mutation, storage/admin/retention behavior, user-visible
+  behavior, semantic truth or release/privacy/legal/support readiness from
+  #476.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
