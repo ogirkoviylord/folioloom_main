@@ -632,7 +632,11 @@ Acceptance criteria:
   RU/UK calls failed with provider `length` plus local `truncated_output`/
   `external_text` validation issues. Runtime prompt rollout remains unapproved;
   the next implementation direction is prompt/selection budget iteration before
-  any broader smoke or owner-only quality review.
+  any broader smoke. Issue #478 / #204AN records a metadata-only quality review
+  verdict of `NEEDS REVIEW`: no paired non-glossary comparison outputs were
+  available, so glossary-on/off quality benefit remains `Unknown`; keep
+  runtime glossary shadow-only and design a paired bounded quality run after
+  EPUB prompt/selection iteration.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
