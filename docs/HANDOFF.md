@@ -1583,6 +1583,13 @@ core flow, release gates, operational visibility and documentation.
   boundary evidence only; normal runtime prompt rollout, cache reuse, durable
   state/storage/admin/retention behavior, user-visible behavior and release/
   privacy/legal/support claims remain unapproved;
+- treat issue #478 / #204AN as a metadata-only quality review with verdict
+  `NEEDS REVIEW`: the approved #477 TXT calls provide structural
+  provider-boundary evidence only, the approved EPUB RU/UK calls were invalid,
+  and no paired non-glossary comparison outputs were available. Glossary-on vs
+  glossary-off quality benefit remains `Unknown`; keep runtime glossary
+  shadow-only and iterate EPUB prompt/selection budget before another bounded
+  paired quality review;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2110,6 +2117,20 @@ Potential issues to verify:
   glossary-aware cache reuse, durable state mutation, storage/admin/retention
   behavior, user-visible behavior, semantic truth or release/privacy/legal/
   support readiness from #477.
+
+- Date: 2026-06-13.
+- Change: Issue #478 / #204AN adds a metadata-only glossary-on/off translation
+  quality review report at
+  `docs/superpowers/specs/2026-06-13-glossary-on-off-quality-review.md`.
+- Evidence: the review used the approved #477 metadata and a local owner-only
+  #478 metadata artifact under `outputs/issue-478-glossary-quality-review/`.
+  No raw excerpts were copied into committed docs. Verdict is `NEEDS REVIEW`:
+  three TXT outputs were structurally validated, both approved EPUB outputs
+  failed validation, and no paired non-glossary comparison outputs were
+  available.
+- Follow-up: keep runtime glossary shadow-only, iterate EPUB prompt/selection
+  budget and design a paired glossary-on/off bounded quality run before any
+  rollout decision. Comparative glossary benefit remains `Unknown`.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
