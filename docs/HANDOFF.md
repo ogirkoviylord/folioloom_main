@@ -1544,6 +1544,16 @@ core flow, release gates, operational visibility and documentation.
   over-budget glossary data. Default normal translation prompts, provider
   calls, cache/storage/database/scheduler/admin/retention state, user-visible
   behavior and release/privacy/legal/support claims remain unchanged;
+- treat issue #474 as the first controlled runtime battle-test implementation
+  slice after #473: `src/translator_service/translation_runner.py` now accepts
+  a default-off glossary runtime adapter hook for DOCX/EPUB translation calls,
+  computes compact adapter decisions from already-built shadow glossary
+  metadata, and can emit compact in-process metadata through an explicit test
+  callback. READY enabled/test-path units request cache get/put bypass per
+  #465/#466, while disabled/fallback paths keep existing cache behavior.
+  Normal prompts, provider calls, durable cache/storage/database/scheduler/
+  admin/retention state, user-visible behavior and release/privacy/legal/
+  support claims remain unchanged;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2010,6 +2020,21 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #474 adds a default-off glossary runtime adapter hook in
+  `src/translator_service/translation_runner.py`, with focused DOCX cache/
+  prompt regression coverage in `tests/test_translation_runner.py`.
+- Evidence: local tests cover disabled hook behavior with unchanged prompt and
+  cache reuse, fallback hook behavior with default cache behavior, and READY
+  enabled/test-path metadata that requests cache get/put bypass without adding
+  glossary entries, signature context, raw source text or prompt bodies to the
+  translation request.
+- Follow-up: #474 is still a controlled test-path hook only. Do not infer
+  normal runtime glossary prompt injection, live provider calls, glossary-aware
+  cache reuse, durable state mutation, storage/admin/retention behavior,
+  user-visible behavior, semantic truth or release/privacy/legal/support
+  readiness from #474.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary

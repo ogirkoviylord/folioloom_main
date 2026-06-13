@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from io import BytesIO
@@ -15,6 +16,7 @@ from translator_service.translation_cache import MemoryTranslationCache
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_runner import (
+    GlossaryRuntimeAdapterHookConfig,
     TranslatedDocument,
     translate_docx_document,
     translate_epub_document,
@@ -1431,6 +1433,221 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertEqual(extract_text_from_docx(first.content), "[uk] Repeated sentence.")
         self.assertEqual(extract_text_from_docx(second.content), "[uk] Repeated sentence.")
 
+    def test_docx_glossary_runtime_hook_disabled_keeps_prompt_and_cache_behavior(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Repeated sentence.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=GlossaryRuntimeAdapterHookConfig(),
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=GlossaryRuntimeAdapterHookConfig(),
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(
+            translator.requests[0][0],
+            "<translation_batch>\n"
+            '<translation_block id="0">Repeated sentence.</translation_block>\n'
+            "</translation_batch>",
+        )
+        self.assertEqual(
+            extract_text_from_docx(first.content),
+            "[uk] Repeated sentence.",
+        )
+        self.assertEqual(
+            extract_text_from_docx(second.content),
+            "[uk] Repeated sentence.",
+        )
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["disabled", "disabled"],
+        )
+        self.assertTrue(
+            all(item["cache_policy"]["cache_get_allowed"] for item in metadata)
+        )
+        self.assertTrue(
+            all(item["cache_policy"]["cache_put_allowed"] for item in metadata)
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("policy_signature_context", serialized)
+        self.assertNotIn("Repeated sentence", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_hook_fallback_keeps_default_cache_behavior(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Fallback sentence.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan={"enabled": False, "status": "disabled"},
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertEqual(
+            extract_text_from_docx(first.content),
+            "[uk] Fallback sentence.",
+        )
+        self.assertEqual(
+            extract_text_from_docx(second.content),
+            "[uk] Fallback sentence.",
+        )
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["fallback", "fallback"],
+        )
+        self.assertTrue(
+            all(
+                item["fallback_reason"] == "glossary_shadow_plan_disabled"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "default_runtime_cache"
+                for item in metadata
+            )
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Fallback sentence", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_hook_ready_path_requests_cache_bypass(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+        )
+
+        first = translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_docx_document(
+            file_name="second.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 2)
+        self.assertEqual(
+            extract_text_from_docx(first.content),
+            "[ru] Darcy returns.",
+        )
+        self.assertEqual(
+            extract_text_from_docx(second.content),
+            "[ru] Darcy returns.",
+        )
+        self.assertEqual(
+            [item["status"] for item in metadata],
+            ["ready", "ready"],
+        )
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "bypass_glossary_injected_cache"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                not item["cache_policy"]["cache_get_allowed"]
+                and not item["cache_policy"]["cache_put_allowed"]
+                for item in metadata
+            )
+        )
+        self.assertEqual(
+            metadata[0]["selected_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
+        self.assertTrue(
+            all("glossary-entry" not in request[0] for request in translator.requests)
+        )
+        self.assertTrue(
+            all(
+                "policy_signature_context" not in request[0]
+                for request in translator.requests
+            )
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
     def test_docx_translation_expands_vml_textbox_height_to_avoid_clipping(self):
         class TextboxTranslator:
             def translate(self, *, text: str, source_language: str, target_language: str) -> str:
@@ -1530,6 +1747,69 @@ class TranslationRunnerTest(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_epub_glossary_runtime_hook_ready_path_requests_cache_bypass(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Darcy returns.</p></body>
+                </html>
+                """,
+            }
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+        )
+
+        first = translate_epub_document(
+            file_name="first.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+        second = translate_epub_document(
+            file_name="second.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 2)
+        self.assertEqual(extract_text_from_epub(first.content), "[ru] Darcy returns.")
+        self.assertEqual(extract_text_from_epub(second.content), "[ru] Darcy returns.")
+        self.assertEqual([item["status"] for item in metadata], ["ready", "ready"])
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "bypass_glossary_injected_cache"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                not item["cache_policy"]["cache_get_allowed"]
+                and not item["cache_policy"]["cache_put_allowed"]
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all("glossary-entry" not in request[0] for request in translator.requests)
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns", serialized)
+        self.assertNotIn("translation_batch", serialized)
 
     def test_translates_epub_div_text_without_duplicate_parent_blocks(self):
         translator = RecordingTranslator()
@@ -2360,6 +2640,47 @@ def _translate_marked_blocks(text: str, target_language: str) -> str:
     for block in document:
         block.text = f"[{target_language}] {block.text}"
     return ElementTree.tostring(document, encoding="unicode")
+
+
+def _compact_glossary_runtime_hook_plan() -> dict[str, object]:
+    return {
+        "schema_version": "glossary-runtime-shadow-plan-v1",
+        "enabled": True,
+        "status": "planned",
+        "fallback_reason": "none",
+        "source_language": "en",
+        "target_language": "ru",
+        "policy_signature_context": {
+            "context_version": "translation-policy-signature-context-v1",
+            "glossary_signature": "glossary-snapshot:v1:fixed",
+            "profile_signature": "book-profile:v1:fixed",
+            "translation_snapshot_signature": "translation-contract-snapshot:v1:fixed",
+            "selection_signature": "glossary-shadow-selection:v1:fixed",
+            "selected_rule_ids": [
+                "profile-rule:literary-fiction:names-v1",
+            ],
+            "prompt_contract_version": "prompt-contract:v1",
+        },
+        "work_unit_plans": [
+            {
+                "work_unit_sequence": 0,
+                "source_block_ids": ["block:v1:0"],
+                "budget_exceeded": False,
+                "budget_status": "within_budget",
+                "fallback_reason_codes": [],
+                "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                "selection_signature": "glossary-selection:v1:fixed",
+                "fallback_action": "shadow_metadata_only",
+            }
+        ],
+        "runtime_integration": {
+            "normal_translation_prompts_changed": False,
+            "live_provider_calls_allowed": False,
+            "durable_state_mutation_allowed": False,
+            "cache_mutation_allowed": False,
+            "fallback_action": "omit_glossary_prompt_context",
+        },
+    }
 
 
 def _parse_xml(content: bytes):

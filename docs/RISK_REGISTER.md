@@ -372,7 +372,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   decision contract that accepts compact shadow metadata in an enabled/test path
   and falls back for unready data. Normal translation prompts, provider calls,
   glossary-aware cache reuse, database/scheduler/work-unit state, storage/admin/
-  retention behavior and release/privacy claims remain unchanged.
+  retention behavior and release/privacy claims remain unchanged. Issue #474
+  adds a controlled default-off runtime hook in the DOCX/EPUB runner that can
+  emit compact adapter metadata and request cache bypass for READY enabled/
+  test-path units only; it does not add normal prompt injection, provider
+  calls, durable state mutation, user-visible behavior or release/privacy
+  claims.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.
