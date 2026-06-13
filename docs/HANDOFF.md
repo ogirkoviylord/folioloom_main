@@ -1607,6 +1607,13 @@ core flow, release gates, operational visibility and documentation.
   material. It does not call providers, change normal/default runtime prompts,
   change cache reuse, mutate durable state/storage/admin/retention behavior,
   prove semantic quality or claim release/privacy/legal/support readiness;
+- treat issue #488 / #204AQ as the disabled/test-only high-pressure EPUB
+  runtime glossary fallback policy: the same smoke runner now omits glossary
+  prompt context for EPUB units that exceed conservative local source-block,
+  protected-marker or completion-pressure thresholds, while preserving compact
+  cache-bypass metadata and recording metadata-only fallback action/reason
+  codes. Thresholds are local guardrails for bounded rehearsal/smoke only;
+  release/runtime rollout thresholds remain `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2174,9 +2181,26 @@ Potential issues to verify:
   compileall src`, targeted `ruff`, `git diff --check` and added-line
   redaction scan passed locally.
 - Follow-up: #487 is local profiler evidence only. It does not implement the
-  #488 fallback policy, #489 selector/formatter tuning, #490 fake paired
-  rehearsal, #491 live smoke, default runtime glossary rollout, cache reuse,
+  #489 selector/formatter tuning, #490 fake paired rehearsal, #491 live smoke,
+  default runtime glossary rollout, cache reuse,
   durable state/storage/admin/retention mutation, provider config changes or
+  release/privacy/legal/support claims.
+
+- Date: 2026-06-13.
+- Change: Issue #488 / #204AQ adds a disabled/test-only high-pressure EPUB
+  glossary runtime fallback policy to `tools/glossary_runtime_provider_smoke.py`,
+  with focused tests in `tests/test_glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover synthetic high-pressure EPUB units omitting
+  glossary prompt context, low-pressure TXT-like units remaining eligible,
+  cache-bypass metadata preservation and metadata-only fallback summaries
+  without raw source/prompt/provider/translation bodies. `PYTHONPATH=src
+  python3 -m unittest tests.test_glossary_runtime_provider_smoke` plus focused
+  `tests.test_translation_runner.TranslationRunnerTest` runtime-hook tests and
+  targeted `ruff` passed locally before final full-gate verification.
+- Follow-up: #488 is a local disabled/test-only guardrail. It does not implement
+  #489 selector/formatter tuning, #490 fake paired rehearsal, #491 live smoke,
+  default runtime glossary rollout, cache reuse, durable
+  state/storage/admin/retention mutation, provider config changes or
   release/privacy/legal/support claims.
 
 - Date: 2026-06-13.
