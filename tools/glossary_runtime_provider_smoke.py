@@ -8,7 +8,7 @@ import math
 import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -58,6 +58,10 @@ from translator_service.translation_policy import (
 
 SMOKE_SCHEMA_VERSION = "glossary-runtime-provider-smoke-v1"
 PRESSURE_SCHEMA_VERSION = "glossary-runtime-pressure-v1"
+PRESSURE_FALLBACK_SCHEMA_VERSION = "glossary-runtime-pressure-fallback-v1"
+PRESSURE_FALLBACK_THRESHOLD_POLICY = (
+    "conservative_local_test_path;runtime_rollout_thresholds=TBD"
+)
 DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MAX_CALLS = 5
@@ -65,6 +69,8 @@ DEFAULT_MAX_TOKENS_TOTAL = 50_000
 DEFAULT_MAX_COMPLETION_TOKENS = 1_800
 DEFAULT_PROMPT_TOKEN_RESERVATION_MULTIPLIER = 2.0
 DEFAULT_MAX_FRAGMENT_CHARS = 2_400
+DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS = 12
+DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS = 80
 DEFAULT_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-477-bounded-glossary-runtime-provider-smoke"
 )
@@ -590,7 +596,7 @@ def build_runtime_package(
             continue
         unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
         protected = protect_text(unit.source_text)
-        return RuntimeSmokePackage(
+        package = RuntimeSmokePackage(
             input_path=path,
             input_id=_input_id(path, target_language),
             target_language=target_language,
@@ -615,7 +621,128 @@ def build_runtime_package(
             glossary_evidence_count=len(reduction.retained_snapshot.evidence),
             reducer_metadata=reducer_metadata,
         )
+        return apply_runtime_pressure_fallback(package, config=config)
     raise ValueError("no_ready_glossary_injected_runtime_unit")
+
+
+def apply_runtime_pressure_fallback(
+    package: RuntimeSmokePackage,
+    *,
+    config: SmokeConfig,
+) -> RuntimeSmokePackage:
+    decision = build_runtime_pressure_fallback_decision(package, config=config)
+    if decision["action"] == "keep_glossary_prompt_context":
+        return package
+    return replace(
+        package,
+        prompt_context_text="",
+        prompt_context_metadata=_pressure_degraded_prompt_context_metadata(
+            package.prompt_context_metadata,
+            decision=decision,
+        ),
+    )
+
+
+def build_runtime_pressure_fallback_decision(
+    package: RuntimeSmokePackage,
+    *,
+    config: SmokeConfig,
+    pressure_summary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    pressure_summary = pressure_summary or build_runtime_pressure_summary(
+        package,
+        config=config,
+    )
+    document = pressure_summary.get("document") or {}
+    unit = pressure_summary.get("unit") or {}
+    tokens = pressure_summary.get("tokens") or {}
+    source_block_count = _optional_int(unit.get("source_block_id_count"))
+    protected_marker_count = _optional_int(unit.get("protected_marker_count"))
+    estimated_completion_pressure = _optional_int(
+        tokens.get("estimated_protected_text_tokens")
+    )
+
+    reason_codes: list[str] = []
+    if document.get("format") == "epub":
+        if (
+            source_block_count is not None
+            and source_block_count > DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS
+        ):
+            reason_codes.append("epub_source_block_count_exceeds_limit")
+        if (
+            protected_marker_count is not None
+            and protected_marker_count
+            > DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS
+        ):
+            reason_codes.append("epub_protected_marker_count_exceeds_limit")
+        if (
+            estimated_completion_pressure is not None
+            and estimated_completion_pressure > config.max_completion_tokens
+        ):
+            reason_codes.append("estimated_completion_pressure_exceeds_cap")
+
+    action = (
+        "omit_glossary_prompt_context"
+        if reason_codes
+        else "keep_glossary_prompt_context"
+    )
+    return {
+        "schema_version": PRESSURE_FALLBACK_SCHEMA_VERSION,
+        "action": action,
+        "reason_codes": sorted(dict.fromkeys(reason_codes)),
+        "thresholds": {
+            "policy": PRESSURE_FALLBACK_THRESHOLD_POLICY,
+            "max_epub_source_blocks": (
+                DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS
+            ),
+            "max_epub_protected_markers": (
+                DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS
+            ),
+            "max_estimated_completion_tokens": config.max_completion_tokens,
+        },
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+    }
+
+
+def _pressure_degraded_prompt_context_metadata(
+    metadata: Mapping[str, Any],
+    *,
+    decision: Mapping[str, Any],
+) -> dict[str, Any]:
+    included_entries = tuple(metadata.get("included_entries") or ())
+    estimates_by_entry_id = {
+        str(entry.get("entry_id")): _optional_int(entry.get("estimated_prompt_tokens"))
+        for entry in included_entries
+        if isinstance(entry, Mapping) and entry.get("entry_id")
+    }
+    omitted_entries = [dict(entry) for entry in metadata.get("omitted_entries") or ()]
+    for entry_id in metadata.get("included_entry_ids") or ():
+        omitted_entries.append(
+            {
+                "entry_id": str(entry_id),
+                "reason": "high_pressure_epub_runtime_fallback",
+                "estimated_prompt_tokens": _unknown_int(
+                    estimates_by_entry_id.get(str(entry_id))
+                ),
+            }
+        )
+    degraded = dict(metadata)
+    degraded.update(
+        {
+            "included_entry_ids": [],
+            "included_entries": [],
+            "omitted_entries": omitted_entries,
+            "estimated_prompt_tokens": 0,
+            "character_count": 0,
+            "pressure_fallback": dict(decision),
+        }
+    )
+    return degraded
 
 
 def build_runtime_pressure_summary(
@@ -629,6 +756,7 @@ def build_runtime_pressure_summary(
         "omitted_entries",
         (),
     )
+    pressure_fallback = package.prompt_context_metadata.get("pressure_fallback") or {}
     selected_entry_ids = package.adapter_metadata.get("selected_entry_ids") or ()
     selection_dropped = package.selection_metadata.get("dropped_entries") or ()
     cache_policy = package.adapter_metadata.get("cache_policy") or {}
@@ -712,6 +840,13 @@ def build_runtime_pressure_summary(
             ),
             "prompt_context_omission_reasons": _prompt_context_omission_reasons(
                 prompt_context_omitted
+            ),
+            "pressure_fallback_action": pressure_fallback.get(
+                "action",
+                "keep_glossary_prompt_context",
+            ),
+            "pressure_fallback_reason_codes": list(
+                pressure_fallback.get("reason_codes") or ()
             ),
         },
         "output_contract": {
@@ -799,7 +934,8 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
     if not pressure_rows:
         pressure_rows = (
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
-            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown |\n"
+            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
+            "| Unknown | Unknown |\n"
         )
     return (
         "# Glossary Runtime Provider Smoke Report\n\n"
@@ -825,9 +961,10 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         "## Runtime Pressure Summary\n"
         "| Input | Target | Format | Unit | Source blocks | Source chars "
         "| Protected markers | Selected entries | Context tokens "
-        "| Prompt tokens | Completion cap | Risk category |\n"
+        "| Prompt tokens | Completion cap | Risk category | Fallback action "
+        "| Fallback reason codes |\n"
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: "
-        "| ---: | ---: | --- |\n"
+        "| ---: | ---: | --- | --- | --- |\n"
         f"{pressure_rows}\n\n"
         "## Token And Latency Shape\n"
         f"- Mode: {report['mode']}\n"
@@ -1443,7 +1580,9 @@ def _pressure_report_row(call: Mapping[str, Any]) -> str:
     unit = pressure.get("unit") or {}
     glossary = pressure.get("glossary") or {}
     tokens = pressure.get("tokens") or {}
+    fallback = pressure.get("fallback") or {}
     output_contract = pressure.get("output_contract") or {}
+    fallback_codes = fallback.get("pressure_fallback_reason_codes") or ["none"]
     return (
         f"| {call.get('input_id', 'Unknown')} "
         f"| {call.get('target_language', 'Unknown')} "
@@ -1456,7 +1595,9 @@ def _pressure_report_row(call: Mapping[str, Any]) -> str:
         f"| {tokens.get('prompt_context_estimated_tokens', 'Unknown')} "
         f"| {tokens.get('estimated_request_prompt_tokens', 'Unknown')} "
         f"| {tokens.get('max_completion_tokens', 'Unknown')} "
-        f"| {output_contract.get('risk_category', 'Unknown')} |"
+        f"| {output_contract.get('risk_category', 'Unknown')} "
+        f"| {fallback.get('pressure_fallback_action', 'Unknown')} "
+        f"| {', '.join(str(code) for code in fallback_codes)} |"
     )
 
 
@@ -1514,6 +1655,14 @@ def _usage_total_tokens(value: Any) -> int | None:
 
 def _unknown_int(value: int | None) -> int | str:
     return value if value is not None else "Unknown"
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _timestamped_diagnostic_dir(root: Path) -> Path:

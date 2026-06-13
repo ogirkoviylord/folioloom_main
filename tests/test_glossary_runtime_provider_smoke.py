@@ -10,12 +10,92 @@ from tools.glossary_runtime_provider_smoke import (
     FakeRuntimeProvider,
     RuntimeSmokePackage,
     SmokeConfig,
+    apply_runtime_pressure_fallback,
     build_runtime_package,
+    build_runtime_pressure_fallback_decision,
     build_runtime_pressure_summary,
     build_runtime_prompt,
     run_smoke,
     validate_runtime_response,
 )
+
+
+def _synthetic_runtime_package(
+    *,
+    document_format: str = "epub",
+    source_block_count: int = 58,
+    raw_source: str = "RAW SOURCE SENTENCE MUST NOT SERIALIZE",
+    protected_text: str = "{{PH_1}} {{PH_2}}",
+    required_markers: tuple[tuple[str, ...], ...] = (("{{PH_1}}",), ("{{PH_2}}",)),
+) -> RuntimeSmokePackage:
+    return RuntimeSmokePackage(
+        input_path=Path(f"/tmp/synthetic.{document_format}"),
+        input_id=f"synthetic-{document_format}-ru",
+        target_language="ru",
+        document_format=document_format,
+        fragment_count=1,
+        character_count=12_000,
+        unit_sequence=1,
+        source_block_ids=tuple(
+            f"block:v1:{index}" for index in range(source_block_count)
+        ),
+        source_text=raw_source,
+        protected_text=protected_text,
+        required_markers=required_markers,
+        glossary_plan={
+            "status": "planned",
+            "fallback_reason": "none",
+            "work_unit_plans": [
+                {
+                    "work_unit_sequence": 1,
+                    "fallback_reason_codes": ["prompt_budget_exhausted"],
+                }
+            ],
+        },
+        adapter_metadata={
+            "status": "ready",
+            "selected_entry_ids": ["entry-1", "entry-2"],
+            "cache_policy": {
+                "behavior": "bypass_glossary_injected_cache",
+                "cache_get_allowed": False,
+                "cache_put_allowed": False,
+            },
+            "work_unit_selection_signature": "selection:v1:test",
+        },
+        prompt_context_text="<glossary_context>redacted</glossary_context>",
+        prompt_context_metadata={
+            "included_entry_ids": ["entry-1", "entry-2"],
+            "included_entries": [
+                {
+                    "entry_id": "entry-1",
+                    "estimated_prompt_tokens": 100,
+                    "character_count": 300,
+                    "field_omissions": [],
+                },
+                {
+                    "entry_id": "entry-2",
+                    "estimated_prompt_tokens": 120,
+                    "character_count": 360,
+                    "field_omissions": [],
+                },
+            ],
+            "omitted_entries": [
+                {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
+            ],
+            "estimated_prompt_tokens": 837,
+            "character_count": 2_400,
+        },
+        selection_metadata={
+            "dropped_entries": [
+                {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
+            ],
+            "budget_exceeded": False,
+            "estimated_prompt_tokens": 360,
+        },
+        glossary_entry_count=12,
+        glossary_evidence_count=34,
+        reducer_metadata={"diagnostic_count": 3, "dropped_count": 91},
+    )
 
 
 class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
@@ -105,57 +185,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
 
     def test_pressure_summary_distinguishes_epub_shape_without_raw_text(self):
         raw_source = "RAW SOURCE SENTENCE MUST NOT SERIALIZE"
-        package = RuntimeSmokePackage(
-            input_path=Path("/tmp/synthetic.epub"),
-            input_id="synthetic-epub-ru",
-            target_language="ru",
-            document_format="epub",
-            fragment_count=1,
-            character_count=12_000,
-            unit_sequence=1,
-            source_block_ids=tuple(f"block:v1:{index}" for index in range(58)),
-            source_text=raw_source,
-            protected_text="{{PH_1}} {{PH_2}}",
-            required_markers=(("{{PH_1}}",), ("{{PH_2}}",)),
-            glossary_plan={
-                "status": "planned",
-                "fallback_reason": "none",
-                "work_unit_plans": [
-                    {
-                        "work_unit_sequence": 1,
-                        "fallback_reason_codes": ["prompt_budget_exhausted"],
-                    }
-                ],
-            },
-            adapter_metadata={
-                "status": "ready",
-                "selected_entry_ids": ["entry-1", "entry-2"],
-                "cache_policy": {
-                    "behavior": "bypass_glossary_injected_cache",
-                    "cache_get_allowed": False,
-                    "cache_put_allowed": False,
-                },
-                "work_unit_selection_signature": "selection:v1:test",
-            },
-            prompt_context_text="<glossary_context>redacted</glossary_context>",
-            prompt_context_metadata={
-                "included_entry_ids": ["entry-1", "entry-2"],
-                "omitted_entries": [
-                    {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
-                ],
-                "estimated_prompt_tokens": 837,
-            },
-            selection_metadata={
-                "dropped_entries": [
-                    {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
-                ],
-                "budget_exceeded": False,
-                "estimated_prompt_tokens": 360,
-            },
-            glossary_entry_count=12,
-            glossary_evidence_count=34,
-            reducer_metadata={"diagnostic_count": 3, "dropped_count": 91},
-        )
+        package = _synthetic_runtime_package(raw_source=raw_source)
 
         summary = build_runtime_pressure_summary(
             package,
@@ -182,6 +212,81 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertNotIn(raw_source, serialized)
         self.assertNotIn("{{PH_1}}", serialized)
         self.assertNotIn("<glossary_context", serialized)
+
+    def test_pressure_fallback_omits_context_for_high_pressure_epub_unit(self):
+        raw_source = "RAW EPUB SOURCE MUST NOT SERIALIZE"
+        package = _synthetic_runtime_package(raw_source=raw_source)
+
+        degraded = apply_runtime_pressure_fallback(
+            package,
+            config=SmokeConfig(fake=True),
+        )
+        summary = build_runtime_pressure_summary(
+            degraded,
+            config=SmokeConfig(fake=True),
+        )
+        _, _, request_text = build_runtime_prompt(degraded)
+
+        self.assertEqual(degraded.prompt_context_text, "")
+        self.assertNotIn("<glossary_context", request_text)
+        self.assertEqual(degraded.prompt_context_metadata["included_entry_ids"], [])
+        self.assertEqual(degraded.prompt_context_metadata["estimated_prompt_tokens"], 0)
+        self.assertEqual(
+            degraded.adapter_metadata["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        pressure_fallback = degraded.prompt_context_metadata["pressure_fallback"]
+        self.assertEqual(
+            pressure_fallback["action"],
+            "omit_glossary_prompt_context",
+        )
+        self.assertIn(
+            "epub_source_block_count_exceeds_limit",
+            pressure_fallback["reason_codes"],
+        )
+        self.assertEqual(
+            summary["fallback"]["pressure_fallback_action"],
+            "omit_glossary_prompt_context",
+        )
+        self.assertIn(
+            "high_pressure_epub_runtime_fallback",
+            summary["fallback"]["prompt_context_omission_reasons"],
+        )
+        serialized = json.dumps(
+            {
+                "decision": pressure_fallback,
+                "metadata": degraded.prompt_context_metadata,
+                "summary": summary,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn("{{PH_1}}", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_pressure_fallback_keeps_low_pressure_txt_like_context_eligible(self):
+        package = _synthetic_runtime_package(
+            document_format="txt",
+            source_block_count=1,
+            raw_source="Short safe source text.",
+            protected_text="Short safe source text.",
+            required_markers=(),
+        )
+
+        decision = build_runtime_pressure_fallback_decision(
+            package,
+            config=SmokeConfig(fake=True),
+        )
+        kept = apply_runtime_pressure_fallback(package, config=SmokeConfig(fake=True))
+
+        self.assertEqual(decision["action"], "keep_glossary_prompt_context")
+        self.assertEqual(decision["reason_codes"], [])
+        self.assertEqual(kept.prompt_context_text, package.prompt_context_text)
+        self.assertEqual(
+            kept.prompt_context_metadata["included_entry_ids"],
+            ["entry-1", "entry-2"],
+        )
 
     def test_package_builds_glossary_injected_runtime_prompt(self):
         package = build_runtime_package(
