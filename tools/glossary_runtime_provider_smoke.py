@@ -6,6 +6,7 @@ import html
 import json
 import math
 import os
+import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -60,6 +61,12 @@ SMOKE_SCHEMA_VERSION = "glossary-runtime-provider-smoke-v1"
 PRESSURE_SCHEMA_VERSION = "glossary-runtime-pressure-v1"
 PRESSURE_FALLBACK_SCHEMA_VERSION = "glossary-runtime-pressure-fallback-v1"
 PAIRED_REHEARSAL_SCHEMA_VERSION = "glossary-runtime-paired-rehearsal-v1"
+EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION = (
+    "glossary-epub-runtime-unit-selection-v1"
+)
+EPUB_RUNTIME_UNIT_SELECTION_POLICY = (
+    "local_owner_only_first_glossary_useful_pressure_safe_epub_unit_v1"
+)
 PRESSURE_FALLBACK_THRESHOLD_POLICY = (
     "conservative_local_test_path;runtime_rollout_thresholds=TBD"
 )
@@ -158,6 +165,13 @@ class RuntimeSmokePackage:
     glossary_entry_count: int
     glossary_evidence_count: int
     reducer_metadata: Mapping[str, Any]
+
+
+class RuntimePackageSelectionError(ValueError):
+    def __init__(self, code: str, *, metadata: Mapping[str, Any] | None = None):
+        super().__init__(code)
+        self.code = code
+        self.metadata = dict(metadata or {})
 
 
 class OpenAICompatibleProvider:
@@ -818,6 +832,9 @@ def build_runtime_package(
             )
         )
     reducer_metadata = _reducer_metadata(reduction)
+    epub_candidate_packages: list[RuntimeSmokePackage] = []
+    epub_skipped_candidates: list[dict[str, Any]] = []
+    is_epub_plan = plan.document_format.value == "epub"
     for selection in selections:
         selection_metadata = glossary_selection_metadata_payload(selection)
         glossary_plan = _one_unit_glossary_plan(
@@ -836,6 +853,26 @@ def build_runtime_package(
             ),
         )
         if decision.status is not GlossaryPromptPolicyAdapterStatus.READY:
+            if is_epub_plan:
+                unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
+                protected = protected_by_sequence[selection.work_unit_sequence]
+                epub_skipped_candidates.append(
+                    _epub_runtime_unit_selection_skip_payload(
+                        unit,
+                        protected,
+                        config=config,
+                        reason_codes=("adapter_not_ready",),
+                        selection_metadata=selection_metadata,
+                        adapter_metadata=(
+                            glossary_prompt_policy_adapter_decision_payload(
+                                decision
+                            )
+                        ),
+                        budget_plan=budget_plan_by_sequence[
+                            selection.work_unit_sequence
+                        ],
+                    )
+                )
             continue
         budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
         prompt_context_text, prompt_context_metadata = (
@@ -849,6 +886,25 @@ def build_runtime_package(
             not prompt_context_metadata["included_entry_ids"]
             and not budget_plan["reason_codes"]
         ):
+            if is_epub_plan:
+                unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
+                protected = protected_by_sequence[selection.work_unit_sequence]
+                epub_skipped_candidates.append(
+                    _epub_runtime_unit_selection_skip_payload(
+                        unit,
+                        protected,
+                        config=config,
+                        reason_codes=("prompt_context_not_included",),
+                        selection_metadata=selection_metadata,
+                        adapter_metadata=(
+                            glossary_prompt_policy_adapter_decision_payload(
+                                decision
+                            )
+                        ),
+                        prompt_context_metadata=prompt_context_metadata,
+                        budget_plan=budget_plan,
+                    )
+                )
             continue
         unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
         protected = protected_by_sequence[selection.work_unit_sequence]
@@ -875,8 +931,407 @@ def build_runtime_package(
             glossary_evidence_count=len(reduction.retained_snapshot.evidence),
             reducer_metadata=reducer_metadata,
         )
+        if is_epub_plan:
+            epub_candidate_packages.append(package)
+            continue
         return apply_runtime_pressure_fallback(package, config=config)
+    if is_epub_plan:
+        return select_epub_runtime_unit_for_rehearsal(
+            epub_candidate_packages,
+            config=config,
+            entries=reduction.retained_snapshot.entries,
+            skipped_candidates=epub_skipped_candidates,
+            input_id=_input_id(path, target_language),
+            target_language=target_language,
+            document_format=plan.document_format.value,
+        )
     raise ValueError("no_ready_glossary_injected_runtime_unit")
+
+
+def select_epub_runtime_unit_for_rehearsal(
+    packages: Sequence[RuntimeSmokePackage],
+    *,
+    config: SmokeConfig,
+    entries: Iterable[Any],
+    skipped_candidates: Sequence[Mapping[str, Any]] = (),
+    input_id: str = "Unknown",
+    target_language: str = "Unknown",
+    document_format: str = "epub",
+) -> RuntimeSmokePackage:
+    safe_skips = [dict(item) for item in skipped_candidates]
+    entry_tuple = tuple(entries)
+    for package in packages:
+        decision = build_epub_runtime_unit_selection_decision(
+            package,
+            config=config,
+            entries=entry_tuple,
+        )
+        if decision["status"] == "selected":
+            decision = dict(decision)
+            decision["skipped_before_selected_count"] = len(safe_skips)
+            decision["skipped_before_selected"] = safe_skips
+            return _attach_epub_runtime_unit_selection(package, decision)
+        safe_skips.append(decision)
+
+    raise RuntimePackageSelectionError(
+        "no_glossary_useful_pressure_safe_epub_unit",
+        metadata=_epub_runtime_no_selection_metadata(
+            input_id=input_id,
+            target_language=target_language,
+            document_format=document_format,
+            skipped_candidates=safe_skips,
+        ),
+    )
+
+
+def build_epub_runtime_unit_selection_decision(
+    package: RuntimeSmokePackage,
+    *,
+    config: SmokeConfig,
+    entries: Iterable[Any],
+) -> dict[str, Any]:
+    if package.document_format != "epub":
+        return {
+            "schema_version": EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION,
+            "policy": EPUB_RUNTIME_UNIT_SELECTION_POLICY,
+            "status": "not_applicable",
+            "reason_codes": ["not_epub_runtime_unit"],
+            "metadata_only": True,
+            "raw_payload_included": False,
+        }
+
+    pressure_summary = build_runtime_pressure_summary(package, config=config)
+    pressure_fallback = build_runtime_pressure_fallback_decision(
+        package,
+        config=config,
+        pressure_summary=pressure_summary,
+    )
+    useful = _glossary_useful_preflight_metadata(
+        entries,
+        selected_entry_ids=package.adapter_metadata.get("selected_entry_ids") or (),
+        source_text=package.source_text,
+    )
+    reason_codes: list[str] = []
+    if package.adapter_metadata.get("status") != "ready":
+        reason_codes.append("adapter_not_ready")
+    if not package.adapter_metadata.get("selected_entry_ids"):
+        reason_codes.append("selected_glossary_entry_missing")
+    if not package.prompt_context_metadata.get("included_entry_ids"):
+        reason_codes.append("prompt_context_not_included")
+    if useful["status"] != "ready":
+        reason_codes.extend(str(item) for item in useful["reason_codes"])
+    if pressure_fallback["action"] != "keep_glossary_prompt_context":
+        reason_codes.extend(str(item) for item in pressure_fallback["reason_codes"])
+
+    status = "selected" if not reason_codes else "skipped"
+    cache_policy = package.adapter_metadata.get("cache_policy") or {}
+    unit = pressure_summary["unit"]
+    tokens = pressure_summary["tokens"]
+    return {
+        "schema_version": EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION,
+        "policy": EPUB_RUNTIME_UNIT_SELECTION_POLICY,
+        "status": status,
+        "reason_codes": sorted(dict.fromkeys(reason_codes)),
+        "unit": {
+            "sequence": package.unit_sequence,
+            "source_block_id_count": unit["source_block_id_count"],
+            "source_character_count": unit["source_character_count"],
+            "protected_text_character_count": unit[
+                "protected_text_character_count"
+            ],
+            "protected_marker_count": unit["protected_marker_count"],
+        },
+        "glossary": {
+            "selected_entry_count": len(
+                package.adapter_metadata.get("selected_entry_ids") or ()
+            ),
+            "prompt_context_included_entry_count": len(
+                package.prompt_context_metadata.get("included_entry_ids") or ()
+            ),
+            "prompt_context_omitted_entry_count": len(
+                package.prompt_context_metadata.get("omitted_entries") or ()
+            ),
+            "target_metadata_entry_count": useful["target_metadata_entry_count"],
+            "source_match_entry_count": useful["source_match_entry_count"],
+            "useful_entry_count": useful["useful_entry_count"],
+            "useful_entry_ids": list(useful["useful_entry_ids"]),
+        },
+        "tokens": {
+            "estimated_source_tokens": tokens["estimated_source_tokens"],
+            "estimated_protected_text_tokens": tokens[
+                "estimated_protected_text_tokens"
+            ],
+            "prompt_context_estimated_tokens": tokens[
+                "prompt_context_estimated_tokens"
+            ],
+            "max_completion_tokens": config.max_completion_tokens,
+            "max_tokens_total": config.max_tokens_total,
+        },
+        "cache_policy": {
+            "behavior": cache_policy.get("behavior", "Unknown"),
+            "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
+            "cache_put_allowed": cache_policy.get("cache_put_allowed", "Unknown"),
+        },
+        "pressure_fallback": {
+            "action": pressure_fallback["action"],
+            "reason_codes": list(pressure_fallback["reason_codes"]),
+            "thresholds": dict(pressure_fallback["thresholds"]),
+        },
+        "thresholds": {
+            "policy": PRESSURE_FALLBACK_THRESHOLD_POLICY,
+            "max_epub_source_blocks": DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS,
+            "max_epub_protected_markers": (
+                DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS
+            ),
+            "max_estimated_completion_tokens": config.max_completion_tokens,
+        },
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+        "quality_claims_made": False,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _attach_epub_runtime_unit_selection(
+    package: RuntimeSmokePackage,
+    selection_metadata: Mapping[str, Any],
+) -> RuntimeSmokePackage:
+    prompt_context_metadata = dict(package.prompt_context_metadata)
+    prompt_context_metadata["epub_runtime_unit_selection"] = dict(
+        selection_metadata
+    )
+    return replace(package, prompt_context_metadata=prompt_context_metadata)
+
+
+def _epub_runtime_unit_selection_skip_payload(
+    unit: Any,
+    protected: Any,
+    *,
+    config: SmokeConfig,
+    reason_codes: Sequence[str],
+    selection_metadata: Mapping[str, Any] | None = None,
+    adapter_metadata: Mapping[str, Any] | None = None,
+    prompt_context_metadata: Mapping[str, Any] | None = None,
+    budget_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    selection_metadata = selection_metadata or {}
+    adapter_metadata = adapter_metadata or {}
+    prompt_context_metadata = prompt_context_metadata or {}
+    runtime_budget = (
+        _runtime_budget_metadata_payload(budget_plan)
+        if budget_plan is not None
+        else {}
+    )
+    cache_policy = adapter_metadata.get("cache_policy") or {}
+    return {
+        "schema_version": EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION,
+        "policy": EPUB_RUNTIME_UNIT_SELECTION_POLICY,
+        "status": "skipped",
+        "reason_codes": sorted(dict.fromkeys(str(item) for item in reason_codes)),
+        "unit": {
+            "sequence": unit.sequence,
+            "source_block_id_count": len(unit.source_block_ids),
+            "source_character_count": len(unit.source_text),
+            "protected_text_character_count": len(protected.text),
+            "protected_marker_count": len(protected.replacements),
+        },
+        "glossary": {
+            "selected_entry_count": len(
+                adapter_metadata.get("selected_entry_ids") or ()
+            ),
+            "prompt_context_included_entry_count": len(
+                prompt_context_metadata.get("included_entry_ids") or ()
+            ),
+            "prompt_context_omitted_entry_count": len(
+                prompt_context_metadata.get("omitted_entries") or ()
+            ),
+        },
+        "tokens": {
+            "estimated_source_tokens": estimate_tokens(unit.source_text),
+            "estimated_protected_text_tokens": estimate_tokens(protected.text),
+            "selection_estimated_prompt_tokens": selection_metadata.get(
+                "estimated_prompt_tokens",
+                "Unknown",
+            ),
+            "prompt_context_estimated_tokens": prompt_context_metadata.get(
+                "estimated_prompt_tokens",
+                "Unknown",
+            ),
+            "max_completion_tokens": config.max_completion_tokens,
+            "max_tokens_total": config.max_tokens_total,
+        },
+        "budget_tuning": {
+            "policy": runtime_budget.get("policy", "Unknown"),
+            "reason_codes": list(runtime_budget.get("reason_codes") or ()),
+        },
+        "cache_policy": {
+            "behavior": cache_policy.get("behavior", "Unknown"),
+            "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
+            "cache_put_allowed": cache_policy.get("cache_put_allowed", "Unknown"),
+        },
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+        "quality_claims_made": False,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _epub_runtime_no_selection_metadata(
+    *,
+    input_id: str,
+    target_language: str,
+    document_format: str,
+    skipped_candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    reason_codes = sorted(
+        {
+            str(reason)
+            for item in skipped_candidates
+            for reason in item.get("reason_codes", ())
+        }
+    )
+    return {
+        "schema_version": EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION,
+        "policy": EPUB_RUNTIME_UNIT_SELECTION_POLICY,
+        "input_id": input_id,
+        "target_language": target_language,
+        "document_format": document_format,
+        "status": "skipped_selection",
+        "skip_code": "no_glossary_useful_pressure_safe_epub_unit",
+        "reason_codes": reason_codes or ["no_epub_runtime_unit_candidates"],
+        "skipped_candidate_count": len(skipped_candidates),
+        "skipped_candidates": [dict(item) for item in skipped_candidates],
+        "fallback_action": "use_glossary_off_local_rehearsal_metadata",
+        "fallback_cache_policy": {
+            "behavior": "default_runtime_cache",
+            "cache_get_allowed": True,
+            "cache_put_allowed": True,
+        },
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+        "quality_claims_made": False,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _glossary_useful_preflight_metadata(
+    entries: Iterable[Any],
+    *,
+    selected_entry_ids: Iterable[Any],
+    source_text: str,
+) -> dict[str, Any]:
+    selected_ids = tuple(
+        str(entry_id) for entry_id in selected_entry_ids if str(entry_id).strip()
+    )
+    entries_by_id = {
+        str(entry_id): entry
+        for entry in entries
+        if (entry_id := _entry_value(entry, "entry_id"))
+    }
+    target_metadata_entry_count = 0
+    source_match_entry_count = 0
+    useful_entry_ids: list[str] = []
+    for entry_id in selected_ids:
+        entry = entries_by_id.get(entry_id)
+        if entry is None:
+            continue
+        has_target_metadata = _entry_has_target_metadata(entry)
+        source_matches = _entry_source_matches(entry, source_text)
+        if has_target_metadata:
+            target_metadata_entry_count += 1
+        if source_matches:
+            source_match_entry_count += 1
+        if has_target_metadata and source_matches:
+            useful_entry_ids.append(entry_id)
+
+    reason_codes: list[str] = []
+    if not useful_entry_ids:
+        if target_metadata_entry_count == 0:
+            reason_codes.append("target_metadata_missing")
+        if source_match_entry_count == 0:
+            reason_codes.append("source_term_or_alias_absent")
+        if not reason_codes:
+            reason_codes.append("useful_glossary_entry_missing")
+
+    return {
+        "schema_version": "glossary-runtime-battle-test-preflight-v1",
+        "status": "ready" if useful_entry_ids else "skipped",
+        "reason_codes": reason_codes,
+        "selected_entry_count": len(selected_ids),
+        "target_metadata_entry_count": target_metadata_entry_count,
+        "source_match_entry_count": source_match_entry_count,
+        "useful_entry_count": len(useful_entry_ids),
+        "useful_entry_ids": useful_entry_ids,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _entry_has_target_metadata(entry: Any) -> bool:
+    target_canonical = _entry_value(entry, "target_canonical")
+    if isinstance(target_canonical, str) and target_canonical.strip():
+        return True
+    target_variants = _entry_value(entry, "target_variants")
+    if isinstance(target_variants, Sequence) and not isinstance(
+        target_variants,
+        (str, bytes),
+    ):
+        return any(
+            isinstance(variant, str) and variant.strip()
+            for variant in target_variants
+        )
+    return False
+
+
+def _entry_source_matches(entry: Any, source_text: str) -> bool:
+    if not source_text:
+        return False
+    return any(
+        _source_term_present(term, source_text)
+        for term in _entry_source_terms(entry)
+    )
+
+
+def _entry_source_terms(entry: Any) -> tuple[str, ...]:
+    terms: list[str] = []
+    source_canonical = _entry_value(entry, "source_canonical")
+    if isinstance(source_canonical, str) and source_canonical.strip():
+        terms.append(source_canonical.strip())
+    aliases = _entry_value(entry, "aliases")
+    if isinstance(aliases, Sequence) and not isinstance(aliases, (str, bytes)):
+        terms.extend(
+            alias.strip()
+            for alias in aliases
+            if isinstance(alias, str) and alias.strip()
+        )
+    return tuple(dict.fromkeys(terms))
+
+
+def _source_term_present(term: str, source_text: str) -> bool:
+    normalized_term = term.strip()
+    if not normalized_term:
+        return False
+    pattern = re.escape(normalized_term)
+    if normalized_term[0].isalnum():
+        pattern = rf"(?<!\w){pattern}"
+    if normalized_term[-1].isalnum():
+        pattern = rf"{pattern}(?!\w)"
+    return re.search(pattern, source_text, flags=re.IGNORECASE) is not None
+
+
+def _entry_value(entry: Any, field_name: str) -> Any:
+    if isinstance(entry, Mapping):
+        return entry.get(field_name)
+    return getattr(entry, field_name, None)
 
 
 def build_runtime_glossary_budget_plan(
@@ -1183,10 +1638,13 @@ def build_runtime_pressure_summary(
     runtime_budget = package.prompt_context_metadata.get("runtime_budget") or {}
     runtime_budget_context = runtime_budget.get("prompt_context") or {}
     runtime_budget_completion = runtime_budget.get("completion_safety") or {}
+    epub_runtime_unit_selection = package.prompt_context_metadata.get(
+        "epub_runtime_unit_selection"
+    )
     selected_entry_ids = package.adapter_metadata.get("selected_entry_ids") or ()
     selection_dropped = package.selection_metadata.get("dropped_entries") or ()
     cache_policy = package.adapter_metadata.get("cache_policy") or {}
-    return {
+    summary = {
         "schema_version": PRESSURE_SCHEMA_VERSION,
         "input_id": package.input_id,
         "target_language": package.target_language,
@@ -1311,6 +1769,9 @@ def build_runtime_pressure_summary(
         },
         "raw_payload_included": False,
     }
+    if isinstance(epub_runtime_unit_selection, Mapping):
+        summary["epub_runtime_unit_selection"] = dict(epub_runtime_unit_selection)
+    return summary
 
 
 def _protected_marker_count(required_markers: Sequence[Sequence[str]]) -> int:
@@ -1525,6 +1986,18 @@ def _build_package_or_skip(
             config=config,
             repo_root=repo_root,
         )
+    except RuntimePackageSelectionError as error:
+        path = _resolve_input_path(input_path, repo_root=repo_root)
+        return {
+            "input_id": _input_id(path, target_language),
+            "input_path": _display_path(path, repo_root=repo_root),
+            "target_language": target_language,
+            "document_format": error.metadata.get("document_format", "Unknown"),
+            "status": "skipped_selection",
+            "skip_reason": error.__class__.__name__,
+            "skip_code": error.code,
+            "epub_runtime_unit_selection": dict(error.metadata),
+        }
     except Exception as error:
         path = _resolve_input_path(input_path, repo_root=repo_root)
         return {
