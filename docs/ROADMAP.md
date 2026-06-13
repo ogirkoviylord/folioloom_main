@@ -593,9 +593,13 @@ Acceptance criteria:
   local/fake readiness report after #461/#462: structural gates pass, but
   default local readiness still fails on fake low-confidence warning/
   needs-review outputs and the approved local EPUB reducer diagnostic/drop
-  pressure. Under the current approval wording, #464 should not start until the
-  local gate is fixed or the owner explicitly defers the failed gates. Issue
-  #465 / #204AG records the owner-approved cache policy for the first
+  pressure. Issue #464 / #204AF records an explicit owner gate deferral and a
+  bounded post-fix provider retry: all four approved packets validated with
+  provider usage present and observed tokens within the approved cap, while
+  merge/adjudication still produced warning-only duplicate/low-confidence
+  semantic findings. This is positive provider-boundary evidence, not normal
+  runtime prompt integration approval. Issue #465 / #204AG records the
+  owner-approved cache policy for the first
   disabled/default-off adapter: glossary-injected enabled/test-path units must
   bypass cache, compact signatures stay metadata-only, default/non-glossary
   cache behavior remains unchanged, and future glossary-aware cache keys need a

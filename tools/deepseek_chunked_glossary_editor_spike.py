@@ -54,10 +54,14 @@ ISSUE_431_DIAGNOSTIC_ROOT = Path(
 ISSUE_449_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-449-reduced-glossary-editor-retry"
 )
+ISSUE_464_DIAGNOSTIC_ROOT = Path(
+    "outputs/issue-464-reduced-glossary-editor-retry"
+)
 APPROVED_DIAGNOSTIC_ROOTS = (
     DEFAULT_DIAGNOSTIC_ROOT,
     ISSUE_431_DIAGNOSTIC_ROOT,
     ISSUE_449_DIAGNOSTIC_ROOT,
+    ISSUE_464_DIAGNOSTIC_ROOT,
 )
 APPROVED_FIXTURES = (
     Path("test_samples/russian_profile_regression.en-ru.txt"),
@@ -72,6 +76,11 @@ ISSUE_449_MAX_CALLS = 4
 ISSUE_449_MAX_TOKENS_TOTAL = 40_000
 ISSUE_449_MAX_PACKETS_TOTAL = 4
 ISSUE_449_PACKET_SELECTION_RULE = "first_ready_reduced_packet_per_approved_input"
+ISSUE_464_APPROVED_INPUTS = ISSUE_449_APPROVED_INPUTS
+ISSUE_464_MAX_CALLS = 4
+ISSUE_464_MAX_TOKENS_TOTAL = 40_000
+ISSUE_464_MAX_PACKETS_TOTAL = 4
+ISSUE_464_PACKET_SELECTION_RULE = ISSUE_449_PACKET_SELECTION_RULE
 
 
 class ChatProvider(Protocol):
@@ -104,6 +113,7 @@ class SpikeConfig:
     raw_text_capture: bool = True
     fake: bool = False
     reduced_packets: bool = False
+    issue_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -678,34 +688,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Use the approved #449 reduced-packet retry boundary.",
     )
+    parser.add_argument(
+        "--issue-464-reduced",
+        action="store_true",
+        help="Use the approved #464 reduced-packet retry boundary.",
+    )
     args = parser.parse_args(argv)
+    if args.issue_449_reduced and args.issue_464_reduced:
+        parser.error(
+            "--issue-449-reduced and --issue-464-reduced are mutually exclusive"
+        )
 
+    issue_id = ""
+    if args.issue_449_reduced:
+        issue_id = "449"
+    elif args.issue_464_reduced:
+        issue_id = "464"
+    reduced_issue = bool(issue_id)
     fixture_paths = (
         tuple(Path(item) for item in args.fixture)
         if args.fixture
         else (
-            ISSUE_449_APPROVED_INPUTS
-            if args.issue_449_reduced
+            _approved_inputs_for_issue(issue_id)
+            if reduced_issue
             else APPROVED_FIXTURES
         )
     )
     diagnostic_root = (
-        ISSUE_449_DIAGNOSTIC_ROOT
+        _diagnostic_root_for_issue(issue_id)
         if (
-            args.issue_449_reduced
+            reduced_issue
             and args.diagnostic_root == str(DEFAULT_DIAGNOSTIC_ROOT)
         )
         else Path(args.diagnostic_root)
     )
     max_calls = (
-        ISSUE_449_MAX_CALLS
-        if args.issue_449_reduced and args.max_calls == DEFAULT_MAX_CALLS
+        _max_calls_for_issue(issue_id)
+        if reduced_issue and args.max_calls == DEFAULT_MAX_CALLS
         else args.max_calls
     )
     max_tokens_total = (
-        ISSUE_449_MAX_TOKENS_TOTAL
+        _max_tokens_total_for_issue(issue_id)
         if (
-            args.issue_449_reduced
+            reduced_issue
             and args.max_tokens_total == DEFAULT_MAX_TOKENS_TOTAL
         )
         else args.max_tokens_total
@@ -719,16 +744,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_tokens_total=max_tokens_total,
         max_completion_tokens=args.max_completion_tokens,
         packet_selection_rule=(
-            ISSUE_449_PACKET_SELECTION_RULE
-            if args.issue_449_reduced
+            _packet_selection_rule_for_issue(issue_id)
+            if reduced_issue
             else "first_ready_packet_per_fixture"
         ),
         max_packets_total=(
-            ISSUE_449_MAX_PACKETS_TOTAL if args.issue_449_reduced else 3
+            _max_packets_total_for_issue(issue_id) if reduced_issue else 3
         ),
         raw_text_capture=True,
         fake=args.fake,
-        reduced_packets=args.issue_449_reduced,
+        reduced_packets=reduced_issue,
+        issue_id=issue_id,
     )
     if args.fake:
         provider: ChatProvider = FakeChunkedProvider()
@@ -773,18 +799,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _validate_config(config: SpikeConfig) -> None:
     if config.provider_model != DEFAULT_MODEL:
         raise ValueError("provider_model does not match approved model.")
+    issue_id = _issue_id(config)
     if not config.fake and config.diagnostic_root not in APPROVED_DIAGNOSTIC_ROOTS:
         raise ValueError(
             "diagnostic_root does not match approved diagnostics boundary."
         )
-    max_calls = ISSUE_449_MAX_CALLS if config.reduced_packets else DEFAULT_MAX_CALLS
+    max_calls = (
+        _max_calls_for_issue(issue_id)
+        if config.reduced_packets
+        else DEFAULT_MAX_CALLS
+    )
     max_tokens_total = (
-        ISSUE_449_MAX_TOKENS_TOTAL
+        _max_tokens_total_for_issue(issue_id)
         if config.reduced_packets
         else DEFAULT_MAX_TOKENS_TOTAL
     )
     max_packets_total = (
-        ISSUE_449_MAX_PACKETS_TOTAL if config.reduced_packets else 3
+        _max_packets_total_for_issue(issue_id) if config.reduced_packets else 3
     )
     if config.max_calls > max_calls:
         raise ValueError("max_calls exceeds approved cap.")
@@ -795,29 +826,32 @@ def _validate_config(config: SpikeConfig) -> None:
     if not config.raw_text_capture:
         raise ValueError("approved run expects raw_text_capture=True.")
     expected_packet_selection = (
-        ISSUE_449_PACKET_SELECTION_RULE
+        _packet_selection_rule_for_issue(issue_id)
         if config.reduced_packets
         else "first_ready_packet_per_fixture"
     )
     if config.packet_selection_rule != expected_packet_selection:
         raise ValueError("packet_selection_rule does not match approval.")
     if config.reduced_packets and not config.fake:
-        if config.diagnostic_root != ISSUE_449_DIAGNOSTIC_ROOT:
+        if config.diagnostic_root != _diagnostic_root_for_issue(issue_id):
             raise ValueError(
-                "diagnostic_root does not match issue #449 diagnostics boundary."
+                f"diagnostic_root does not match issue #{issue_id} "
+                "diagnostics boundary."
             )
     if (
         not config.reduced_packets
         and not config.fake
-        and config.diagnostic_root == ISSUE_449_DIAGNOSTIC_ROOT
+        and config.diagnostic_root
+        in (ISSUE_449_DIAGNOSTIC_ROOT, ISSUE_464_DIAGNOSTIC_ROOT)
     ):
         raise ValueError(
-            "issue #449 diagnostics boundary requires reduced_packets=True."
+            "reduced issue diagnostics boundary requires reduced_packets=True."
         )
 
 
 def _approval_payload(config: SpikeConfig) -> dict[str, Any]:
     return {
+        "issue_id": _issue_id(config),
         "fixtures": [str(path) for path in config.fixture_paths],
         "packet_selection_rule": config.packet_selection_rule,
         "max_packets_total": config.max_packets_total,
@@ -955,14 +989,14 @@ def _approved_fixture_path(
     config: SpikeConfig,
 ) -> Path:
     approved_inputs = (
-        ISSUE_449_APPROVED_INPUTS
+        _approved_inputs_for_issue(_issue_id(config))
         if config.reduced_packets
         else APPROVED_FIXTURES
     )
     approved = {(repo_root / item).resolve() for item in approved_inputs}
     resolved = (repo_root / fixture_path).resolve()
     if resolved not in approved:
-        issue = "#449" if config.reduced_packets else "#416"
+        issue = f"#{_issue_id(config)}" if config.reduced_packets else "#416"
         raise ValueError(f"Fixture is not approved for issue {issue}: {fixture_path}")
     if not resolved.is_file():
         raise FileNotFoundError(f"Approved fixture is missing: {fixture_path}")
@@ -995,6 +1029,60 @@ def _pressure_context(
         "glossary_evidence_count": glossary_evidence_count,
         "selection": ISSUE_449_PACKET_SELECTION_RULE,
     }
+
+
+def _issue_id(config: SpikeConfig) -> str:
+    if not config.reduced_packets:
+        return config.issue_id or "416"
+    return config.issue_id or "449"
+
+
+def _approved_inputs_for_issue(issue_id: str) -> tuple[Path, ...]:
+    if issue_id == "449":
+        return ISSUE_449_APPROVED_INPUTS
+    if issue_id == "464":
+        return ISSUE_464_APPROVED_INPUTS
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
+
+
+def _diagnostic_root_for_issue(issue_id: str) -> Path:
+    if issue_id == "449":
+        return ISSUE_449_DIAGNOSTIC_ROOT
+    if issue_id == "464":
+        return ISSUE_464_DIAGNOSTIC_ROOT
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
+
+
+def _max_calls_for_issue(issue_id: str) -> int:
+    if issue_id == "449":
+        return ISSUE_449_MAX_CALLS
+    if issue_id == "464":
+        return ISSUE_464_MAX_CALLS
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
+
+
+def _max_tokens_total_for_issue(issue_id: str) -> int:
+    if issue_id == "449":
+        return ISSUE_449_MAX_TOKENS_TOTAL
+    if issue_id == "464":
+        return ISSUE_464_MAX_TOKENS_TOTAL
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
+
+
+def _max_packets_total_for_issue(issue_id: str) -> int:
+    if issue_id == "449":
+        return ISSUE_449_MAX_PACKETS_TOTAL
+    if issue_id == "464":
+        return ISSUE_464_MAX_PACKETS_TOTAL
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
+
+
+def _packet_selection_rule_for_issue(issue_id: str) -> str:
+    if issue_id == "449":
+        return ISSUE_449_PACKET_SELECTION_RULE
+    if issue_id == "464":
+        return ISSUE_464_PACKET_SELECTION_RULE
+    raise ValueError(f"Unknown reduced-packet issue id: {issue_id}")
 
 
 def _target_language_for_path(path: Path) -> str:

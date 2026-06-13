@@ -155,6 +155,68 @@ class DeepSeekChunkedGlossaryEditorSpikeTest(unittest.TestCase):
                 repo_root=_ROOT,
             )
 
+    def test_issue_464_live_config_requires_its_own_boundary(self):
+        spike._validate_config(
+            spike.SpikeConfig(
+                fixture_paths=(spike.APPROVED_FIXTURES[-1],),
+                diagnostic_root=spike.ISSUE_464_DIAGNOSTIC_ROOT,
+                max_calls=4,
+                max_tokens_total=40_000,
+                max_packets_total=4,
+                packet_selection_rule=spike.ISSUE_464_PACKET_SELECTION_RULE,
+                reduced_packets=True,
+                fake=False,
+                issue_id="464",
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "issue #464"):
+            spike._validate_config(
+                spike.SpikeConfig(
+                    fixture_paths=(spike.APPROVED_FIXTURES[-1],),
+                    diagnostic_root=spike.ISSUE_449_DIAGNOSTIC_ROOT,
+                    max_calls=4,
+                    max_tokens_total=40_000,
+                    max_packets_total=4,
+                    packet_selection_rule=spike.ISSUE_464_PACKET_SELECTION_RULE,
+                    reduced_packets=True,
+                    fake=False,
+                    issue_id="464",
+                )
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "not approved for issue #464"):
+                spike.run_spike(
+                    spike.SpikeConfig(
+                        fixture_paths=(Path("README.md"),),
+                        diagnostic_root=Path(temp_dir),
+                        packet_selection_rule=spike.ISSUE_464_PACKET_SELECTION_RULE,
+                        reduced_packets=True,
+                        fake=True,
+                        issue_id="464",
+                    ),
+                    provider=spike.FakeChunkedProvider(),
+                    repo_root=_ROOT,
+                )
+
+    def test_issue_464_approval_payload_records_issue_id(self):
+        payload = spike._approval_payload(
+            spike.SpikeConfig(
+                fixture_paths=(spike.APPROVED_FIXTURES[-1],),
+                diagnostic_root=spike.ISSUE_464_DIAGNOSTIC_ROOT,
+                packet_selection_rule=spike.ISSUE_464_PACKET_SELECTION_RULE,
+                reduced_packets=True,
+                issue_id="464",
+            )
+        )
+
+        self.assertEqual(payload["issue_id"], "464")
+        self.assertEqual(
+            payload["diagnostic_storage"],
+            str(spike.ISSUE_464_DIAGNOSTIC_ROOT),
+        )
+
     def test_external_approved_path_display_does_not_require_repo_relative_path(self):
         external = Path("private_fixtures/pg78824-images-3.epub")
 
