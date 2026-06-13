@@ -11,12 +11,14 @@ from tools.glossary_runtime_provider_smoke import (
     RuntimeSmokePackage,
     SmokeConfig,
     apply_runtime_pressure_fallback,
+    build_glossary_off_runtime_package,
     build_runtime_glossary_budget_plan,
     build_runtime_package,
     build_runtime_pressure_fallback_decision,
     build_runtime_pressure_summary,
     build_runtime_prompt,
     format_runtime_glossary_prompt_context,
+    run_fake_paired_epub_rehearsal,
     run_smoke,
     validate_runtime_response,
 )
@@ -376,6 +378,73 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertNotIn(raw_source, serialized)
         self.assertNotIn(raw_target, serialized)
         self.assertNotIn("<glossary_context", serialized)
+
+    def test_fake_paired_epub_rehearsal_reports_metadata_only_baseline(self):
+        raw_source = "RAW EPUB PAIRED SOURCE MUST NOT SERIALIZE"
+        package = apply_runtime_pressure_fallback(
+            _synthetic_runtime_package(raw_source=raw_source),
+            config=SmokeConfig(fake=True),
+        )
+
+        report = run_fake_paired_epub_rehearsal(
+            package,
+            config=SmokeConfig(fake=True),
+            provider=FakeRuntimeProvider(),
+        )
+
+        self.assertEqual(
+            report["schema_version"],
+            "glossary-runtime-paired-rehearsal-v1",
+        )
+        self.assertEqual(report["status"], "completed")
+        self.assertFalse(report["live_provider_calls_allowed"])
+        self.assertFalse(report["quality_claims_made"])
+        glossary_on = report["pairs"]["glossary_on"]
+        glossary_off = report["pairs"]["glossary_off"]
+        self.assertEqual(glossary_on["status"], "validated")
+        self.assertEqual(glossary_off["status"], "validated")
+        self.assertEqual(
+            glossary_on["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        self.assertEqual(
+            glossary_off["cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
+        self.assertEqual(
+            glossary_on["prompt_context"]["pressure_fallback_action"],
+            "omit_glossary_prompt_context",
+        )
+        self.assertEqual(glossary_off["prompt_context"]["included_entry_count"], 0)
+        serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", serialized)
+        self.assertNotIn("<translation_batch>", serialized)
+
+    def test_glossary_off_runtime_package_keeps_default_cache_metadata(self):
+        package = _synthetic_runtime_package(document_format="epub")
+
+        baseline = build_glossary_off_runtime_package(package)
+
+        self.assertEqual(baseline.prompt_context_text, "")
+        self.assertEqual(baseline.adapter_metadata["status"], "disabled")
+        self.assertEqual(
+            baseline.adapter_metadata["cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
+        self.assertTrue(baseline.adapter_metadata["cache_policy"]["cache_get_allowed"])
+        self.assertTrue(baseline.adapter_metadata["cache_policy"]["cache_put_allowed"])
+
+    def test_fake_paired_epub_rehearsal_rejects_non_fake_provider(self):
+        class NotFakeProvider:
+            pass
+
+        with self.assertRaises(ValueError):
+            run_fake_paired_epub_rehearsal(
+                _synthetic_runtime_package(document_format="epub"),
+                config=SmokeConfig(fake=True),
+                provider=NotFakeProvider(),  # type: ignore[arg-type]
+            )
 
     def test_package_builds_glossary_injected_runtime_prompt(self):
         package = build_runtime_package(

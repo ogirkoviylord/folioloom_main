@@ -1620,6 +1620,11 @@ core flow, release gates, operational visibility and documentation.
   provider smoke when source-block or completion pressure is high, and records
   compact budget policy/reason codes. This is still disabled/test-path
   behavior only, not a normal runtime rollout or provider evidence;
+- treat issue #490 / #204AS as the local fake paired EPUB glossary-on/off
+  runtime rehearsal slice: the smoke runner can now build metadata-only
+  glossary-on and glossary-off fake rehearsal summaries for an EPUB runtime
+  package, proving cache-bypass/default-cache visibility and safe fallback
+  metadata without live provider calls or quality claims;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2187,8 +2192,7 @@ Potential issues to verify:
   compileall src`, targeted `ruff`, `git diff --check` and added-line
   redaction scan passed locally.
 - Follow-up: #487 is local profiler evidence only. It does not implement the
-  #489 selector/formatter tuning, #490 fake paired rehearsal, #491 live smoke,
-  default runtime glossary rollout, cache reuse,
+  #491 live smoke, #492 quality review, default runtime glossary rollout, cache reuse,
   durable state/storage/admin/retention mutation, provider config changes or
   release/privacy/legal/support claims.
 
@@ -2204,9 +2208,9 @@ Potential issues to verify:
   `tests.test_translation_runner.TranslationRunnerTest` runtime-hook tests and
   targeted `ruff` passed locally before final full-gate verification.
 - Follow-up: #488 is a local disabled/test-only guardrail. It does not implement
-  #490 fake paired rehearsal, #491 live smoke, default runtime glossary rollout,
-  cache reuse, durable state/storage/admin/retention mutation, provider config
-  changes or release/privacy/legal/support claims.
+  #491 live smoke, default runtime glossary rollout, cache reuse, durable
+  state/storage/admin/retention mutation, provider config changes or
+  release/privacy/legal/support claims.
 
 - Date: 2026-06-13.
 - Change: Issue #489 / #204AR adds local completion-first EPUB glossary
@@ -2222,10 +2226,26 @@ Potential issues to verify:
   focused `tests.test_translation_runner.TranslationRunnerTest` runtime-hook
   tests, targeted `ruff`, and `py_compile` passed locally before final
   full-gate verification.
-- Follow-up: #489 is local tuning evidence only. It does not implement #490 fake
-  paired rehearsal, #491 live smoke, default runtime glossary rollout, cache
-  reuse, durable state/storage/admin/retention mutation, provider config
-  changes or release/privacy/legal/support claims.
+- Follow-up: #489 is local tuning evidence only. It does not implement #491
+  live smoke, #492 quality review, default runtime glossary rollout, cache reuse,
+  durable state/storage/admin/retention mutation, provider config changes or
+  release/privacy/legal/support claims.
+
+- Date: 2026-06-13.
+- Change: Issue #490 / #204AS adds a local fake paired EPUB glossary-on/off
+  runtime rehearsal to `tools/glossary_runtime_provider_smoke.py`, with focused
+  tests in `tests/test_glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover metadata-only glossary-on/off fake rehearsal,
+  high-pressure EPUB fallback/degrade metadata, glossary-on cache bypass,
+  glossary-off default cache metadata, and absence of raw source/prompt/provider
+  output/translation bodies in ordinary rehearsal summaries. `PYTHONPATH=src
+  python3 -m unittest tests.test_glossary_runtime_provider_smoke` plus existing
+  selector/formatter and focused runtime-hook tests passed locally before final
+  full-gate verification.
+- Follow-up: #490 is fake/local rehearsal evidence only. It does not implement
+  #491 live provider smoke, #492 quality review, default runtime glossary
+  rollout, cache reuse, durable state/storage/admin/retention mutation,
+  provider config changes or release/privacy/legal/support claims.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary

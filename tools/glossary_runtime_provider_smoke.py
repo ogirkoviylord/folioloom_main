@@ -59,6 +59,7 @@ from translator_service.translation_policy import (
 SMOKE_SCHEMA_VERSION = "glossary-runtime-provider-smoke-v1"
 PRESSURE_SCHEMA_VERSION = "glossary-runtime-pressure-v1"
 PRESSURE_FALLBACK_SCHEMA_VERSION = "glossary-runtime-pressure-fallback-v1"
+PAIRED_REHEARSAL_SCHEMA_VERSION = "glossary-runtime-paired-rehearsal-v1"
 PRESSURE_FALLBACK_THRESHOLD_POLICY = (
     "conservative_local_test_path;runtime_rollout_thresholds=TBD"
 )
@@ -510,6 +511,231 @@ def validate_runtime_response(
             if batch_validation.translated_texts is not None
             else 0
         ),
+    }
+
+
+def build_glossary_off_runtime_package(
+    package: RuntimeSmokePackage,
+) -> RuntimeSmokePackage:
+    return replace(
+        package,
+        glossary_plan={
+            "schema_version": "glossary-runtime-shadow-plan-v1",
+            "enabled": False,
+            "status": "disabled",
+            "fallback_reason": "glossary_off_baseline",
+            "work_unit_plans": [],
+            "runtime_integration": {
+                "normal_translation_prompts_changed": False,
+                "live_provider_calls_allowed": False,
+                "durable_state_mutation_allowed": False,
+                "cache_mutation_allowed": False,
+                "fallback_action": "use_existing_translation_path",
+            },
+        },
+        adapter_metadata={
+            "status": "disabled",
+            "selected_entry_ids": [],
+            "cache_policy": {
+                "behavior": "default_runtime_cache",
+                "cache_get_allowed": True,
+                "cache_put_allowed": True,
+            },
+            "work_unit_selection_signature": "glossary-selection:none",
+        },
+        prompt_context_text="",
+        prompt_context_metadata=_empty_prompt_context_metadata(
+            reason="glossary_off_baseline",
+        ),
+        selection_metadata={
+            "source_block_ids": list(package.source_block_ids),
+            "work_unit_sequence": package.unit_sequence,
+            "prompt_budget_tokens": 0,
+            "estimated_prompt_tokens": 0,
+            "budget_exceeded": False,
+            "selected_entries": [],
+            "dropped_entries": [],
+            "selection_signature": "glossary-selection:none",
+        },
+        glossary_entry_count=0,
+        glossary_evidence_count=0,
+        reducer_metadata={},
+    )
+
+
+def run_fake_paired_epub_rehearsal(
+    glossary_on_package: RuntimeSmokePackage,
+    *,
+    config: SmokeConfig,
+    provider: FakeRuntimeProvider | None = None,
+) -> dict[str, Any]:
+    if glossary_on_package.document_format != "epub":
+        raise ValueError("paired rehearsal requires an EPUB runtime package")
+    if provider is not None and not isinstance(provider, FakeRuntimeProvider):
+        raise ValueError("paired rehearsal requires a fake provider stub")
+    provider = provider or FakeRuntimeProvider()
+    glossary_off_package = build_glossary_off_runtime_package(glossary_on_package)
+    glossary_on = _fake_rehearsal_side_summary(
+        glossary_on_package,
+        side="glossary_on",
+        config=config,
+        provider=provider,
+    )
+    glossary_off = _fake_rehearsal_side_summary(
+        glossary_off_package,
+        side="glossary_off",
+        config=config,
+        provider=provider,
+    )
+    sides = [glossary_on, glossary_off]
+    status = (
+        "completed"
+        if all(item["status"] == "validated" for item in sides)
+        else "completed_with_failures"
+    )
+    return {
+        "schema_version": PAIRED_REHEARSAL_SCHEMA_VERSION,
+        "mode": "fake",
+        "status": status,
+        "input_id": glossary_on_package.input_id,
+        "target_language": glossary_on_package.target_language,
+        "document_format": glossary_on_package.document_format,
+        "unit_sequence": glossary_on_package.unit_sequence,
+        "source_block_id_count": len(glossary_on_package.source_block_ids),
+        "provider_stub": provider.__class__.__name__,
+        "live_provider_calls_allowed": False,
+        "quality_claims_made": False,
+        "raw_payload_included": False,
+        "ordinary_artifact_safety": {
+            "source_text_included": False,
+            "prompt_body_included": False,
+            "provider_body_included": False,
+            "translated_body_included": False,
+            "api_key_or_auth_material_included": False,
+        },
+        "pairs": {
+            "glossary_on": glossary_on,
+            "glossary_off": glossary_off,
+        },
+        "confirmed": [
+            "fake paired rehearsal built glossary-on and glossary-off metadata",
+            "glossary-on enabled/test-path cache policy bypass is visible",
+            "glossary-off baseline default cache policy is visible",
+            "metadata report omits raw source, prompt, provider and translation bodies",
+        ],
+        "unknown": [
+            "provider compliance is Unknown because no live provider calls were made",
+            (
+                "translation quality is Unknown because fake outputs are not "
+                "quality evidence"
+            ),
+        ],
+        "tbd": [
+            "owner go/no-go for bounded live paired EPUB smoke remains TBD",
+            "runtime glossary rollout remains TBD",
+            "glossary-aware cache reuse remains TBD",
+        ],
+    }
+
+
+def _fake_rehearsal_side_summary(
+    package: RuntimeSmokePackage,
+    *,
+    side: str,
+    config: SmokeConfig,
+    provider: ChatProvider,
+) -> dict[str, Any]:
+    system_text, user_text, _request_text = build_runtime_prompt(package)
+    estimated_prompt_tokens = estimate_tokens(system_text + user_text)
+    reservation = reserve_tokens(
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        max_completion_tokens=config.max_completion_tokens,
+        prompt_token_multiplier=config.prompt_token_reservation_multiplier,
+    )
+    result = provider.chat(
+        model=config.provider_model,
+        system_prompt=system_text,
+        user_prompt=user_text,
+        max_completion_tokens=config.max_completion_tokens,
+    )
+    validation = validate_runtime_response(result, package=package)
+    pressure_summary = build_runtime_pressure_summary(
+        package,
+        config=config,
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        reserved_tokens=reservation,
+    )
+    cache_policy = package.adapter_metadata.get("cache_policy") or {}
+    return {
+        "side": side,
+        "status": "validated" if result.ok and validation["valid"] else "failed",
+        "finish_reason": result.finish_reason or "Unknown",
+        "http_status": result.http_status,
+        "usage": dict(result.usage),
+        "estimated_prompt_tokens": estimated_prompt_tokens,
+        "reserved_tokens": reservation,
+        "validation": dict(validation),
+        "cache_policy": {
+            "behavior": cache_policy.get("behavior", "Unknown"),
+            "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
+            "cache_put_allowed": cache_policy.get("cache_put_allowed", "Unknown"),
+        },
+        "prompt_context": {
+            "included_entry_count": len(
+                package.prompt_context_metadata.get("included_entry_ids") or ()
+            ),
+            "omitted_entry_count": len(
+                package.prompt_context_metadata.get("omitted_entries") or ()
+            ),
+            "pressure_fallback_action": pressure_summary["fallback"][
+                "pressure_fallback_action"
+            ],
+            "pressure_fallback_reason_codes": pressure_summary["fallback"][
+                "pressure_fallback_reason_codes"
+            ],
+            "budget_policy": pressure_summary["budget_tuning"]["policy"],
+            "budget_reason_codes": pressure_summary["budget_tuning"][
+                "reason_codes"
+            ],
+        },
+        "pressure_summary": pressure_summary,
+        "raw_payload_included": False,
+    }
+
+
+def _empty_prompt_context_metadata(*, reason: str) -> dict[str, Any]:
+    return {
+        "schema_version": "glossary-prompt-context-v1",
+        "included_entry_ids": [],
+        "included_entries": [],
+        "omitted_entries": [],
+        "estimated_prompt_tokens": 0,
+        "character_count": 0,
+        "entry_limit": 0,
+        "prompt_budget_tokens": 0,
+        "character_budget": 0,
+        "runtime_budget": {
+            "schema_version": "glossary-runtime-budget-tuning-v1",
+            "policy": reason,
+            "reason_codes": [reason],
+            "selection": {
+                "max_prompt_tokens": 0,
+                "max_entries": 0,
+                "max_diagnostic_entries": 0,
+            },
+            "prompt_context": {
+                "max_prompt_tokens": 0,
+                "max_entries": 0,
+                "max_characters": 0,
+            },
+            "completion_safety": {
+                "reserved_first": True,
+                "estimated_completion_pressure_tokens": "Unknown",
+                "max_completion_tokens": "Unknown",
+            },
+            "metadata_only": True,
+            "raw_payload_included": False,
+        },
     }
 
 
