@@ -1596,6 +1596,17 @@ core flow, release gates, operational visibility and documentation.
   create a local EPUB prompt/selection budget iteration issue only after owner
   selection, then request fresh approval for a paired glossary-on/off smoke.
   Final owner path remains `TBD`;
+- treat issue #487 / #204AP as the local metadata-only EPUB/TXT runtime
+  pressure-profiler slice for the #477 follow-up chain:
+  `tools/glossary_runtime_provider_smoke.py` now adds compact pressure summaries
+  to call metadata and metadata reports, including source block count, source
+  character count, protected-marker count, glossary/context counts, token
+  estimates, completion cap, cache-bypass metadata and a structural
+  output-contract risk category. The summary intentionally omits raw source
+  text, prompt bodies, provider bodies, translations, secrets and auth
+  material. It does not call providers, change normal/default runtime prompts,
+  change cache reuse, mutate durable state/storage/admin/retention behavior,
+  prove semantic quality or claim release/privacy/legal/support readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2150,6 +2161,23 @@ Potential issues to verify:
   created because no owner path has been selected. Recommended path is
   shadow-only plus local EPUB prompt/selection budget iteration, then a fresh
   owner-approved paired glossary-on/off provider smoke.
+
+- Date: 2026-06-13.
+- Change: Issue #487 / #204AP adds a local metadata-only runtime pressure
+  summary to `tools/glossary_runtime_provider_smoke.py`, with focused tests in
+  `tests/test_glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover the new pressure summary in the fake metadata
+  report, cache-bypass metadata visibility, a synthetic EPUB-like 58-block
+  shape with protected markers and no raw source/prompt/provider/translation
+  bodies in the pressure summary. `PYTHONPATH=src python3 -m unittest
+  tests.test_glossary_runtime_provider_smoke`, `PYTHONPATH=src python3 -m
+  compileall src`, targeted `ruff`, `git diff --check` and added-line
+  redaction scan passed locally.
+- Follow-up: #487 is local profiler evidence only. It does not implement the
+  #488 fallback policy, #489 selector/formatter tuning, #490 fake paired
+  rehearsal, #491 live smoke, default runtime glossary rollout, cache reuse,
+  durable state/storage/admin/retention mutation, provider config changes or
+  release/privacy/legal/support claims.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
