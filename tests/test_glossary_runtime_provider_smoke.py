@@ -8,8 +8,10 @@ from tools.glossary_runtime_provider_smoke import (
     DEFAULT_DIAGNOSTIC_ROOT,
     DEFAULT_MODEL,
     FakeRuntimeProvider,
+    RuntimeSmokePackage,
     SmokeConfig,
     build_runtime_package,
+    build_runtime_pressure_summary,
     build_runtime_prompt,
     run_smoke,
     validate_runtime_response,
@@ -46,6 +48,17 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             self.assertNotIn("provider_response", rendered)
             self.assertIn("Validation issue codes", rendered)
             self.assertIn("| none |", rendered)
+            self.assertIn("Runtime Pressure Summary", rendered)
+            pressure = report["calls"][0]["pressure_summary"]
+            self.assertFalse(pressure["raw_payload_included"])
+            self.assertEqual(
+                pressure["cache_policy"]["behavior"],
+                "bypass_glossary_injected_cache",
+            )
+            self.assertNotIn(
+                source_text[:40],
+                json.dumps(pressure, ensure_ascii=False, sort_keys=True),
+            )
             diagnostic_dir = Path(report["diagnostic_dir"])
             self.assertTrue((diagnostic_dir / "manifest.json").is_file())
             call_files = sorted(diagnostic_dir.glob("call-*.json"))
@@ -89,6 +102,86 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertEqual(config.max_calls, 5)
         self.assertEqual(config.max_tokens_total, 50_000)
         self.assertTrue(config.raw_text_capture)
+
+    def test_pressure_summary_distinguishes_epub_shape_without_raw_text(self):
+        raw_source = "RAW SOURCE SENTENCE MUST NOT SERIALIZE"
+        package = RuntimeSmokePackage(
+            input_path=Path("/tmp/synthetic.epub"),
+            input_id="synthetic-epub-ru",
+            target_language="ru",
+            document_format="epub",
+            fragment_count=1,
+            character_count=12_000,
+            unit_sequence=1,
+            source_block_ids=tuple(f"block:v1:{index}" for index in range(58)),
+            source_text=raw_source,
+            protected_text="{{PH_1}} {{PH_2}}",
+            required_markers=(("{{PH_1}}",), ("{{PH_2}}",)),
+            glossary_plan={
+                "status": "planned",
+                "fallback_reason": "none",
+                "work_unit_plans": [
+                    {
+                        "work_unit_sequence": 1,
+                        "fallback_reason_codes": ["prompt_budget_exhausted"],
+                    }
+                ],
+            },
+            adapter_metadata={
+                "status": "ready",
+                "selected_entry_ids": ["entry-1", "entry-2"],
+                "cache_policy": {
+                    "behavior": "bypass_glossary_injected_cache",
+                    "cache_get_allowed": False,
+                    "cache_put_allowed": False,
+                },
+                "work_unit_selection_signature": "selection:v1:test",
+            },
+            prompt_context_text="<glossary_context>redacted</glossary_context>",
+            prompt_context_metadata={
+                "included_entry_ids": ["entry-1", "entry-2"],
+                "omitted_entries": [
+                    {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
+                ],
+                "estimated_prompt_tokens": 837,
+            },
+            selection_metadata={
+                "dropped_entries": [
+                    {"entry_id": "entry-3", "reason": "prompt_budget_exhausted"}
+                ],
+                "budget_exceeded": False,
+                "estimated_prompt_tokens": 360,
+            },
+            glossary_entry_count=12,
+            glossary_evidence_count=34,
+            reducer_metadata={"diagnostic_count": 3, "dropped_count": 91},
+        )
+
+        summary = build_runtime_pressure_summary(
+            package,
+            config=SmokeConfig(fake=True),
+            estimated_prompt_tokens=4_500,
+            reserved_tokens=10_800,
+        )
+
+        self.assertEqual(summary["unit"]["source_block_id_count"], 58)
+        self.assertEqual(summary["unit"]["protected_marker_count"], 2)
+        self.assertEqual(summary["unit"]["source_character_count"], len(raw_source))
+        self.assertEqual(summary["glossary"]["selected_entry_count"], 2)
+        self.assertEqual(summary["tokens"]["estimated_request_prompt_tokens"], 4_500)
+        self.assertEqual(summary["tokens"]["reserved_request_tokens"], 10_800)
+        self.assertEqual(
+            summary["output_contract"]["risk_category"],
+            "epub_multi_block_with_protected_markers",
+        )
+        self.assertIn(
+            "prompt_budget_exhausted",
+            summary["fallback"]["work_unit_fallback_reason_codes"],
+        )
+        serialized = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn("{{PH_1}}", serialized)
+        self.assertNotIn("<glossary_context", serialized)
 
     def test_package_builds_glossary_injected_runtime_prompt(self):
         package = build_runtime_package(

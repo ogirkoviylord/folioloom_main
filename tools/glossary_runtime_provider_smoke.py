@@ -57,6 +57,7 @@ from translator_service.translation_policy import (
 )
 
 SMOKE_SCHEMA_VERSION = "glossary-runtime-provider-smoke-v1"
+PRESSURE_SCHEMA_VERSION = "glossary-runtime-pressure-v1"
 DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MAX_CALLS = 5
@@ -84,7 +85,7 @@ class ChatProvider(Protocol):
         system_prompt: str,
         user_prompt: str,
         max_completion_tokens: int,
-    ) -> "ChatCallResult":
+    ) -> ChatCallResult:
         pass
 
 
@@ -321,7 +322,13 @@ def run_smoke(
         )
         if calls_made >= config.max_calls:
             call_summaries.append(
-                _skipped_call_summary(package, "skipped_max_calls")
+                _skipped_call_summary(
+                    package,
+                    "skipped_max_calls",
+                    config=config,
+                    estimated_prompt_tokens=estimated_prompt_tokens,
+                    reservation=reservation,
+                )
             )
             continue
         if (
@@ -335,6 +342,7 @@ def run_smoke(
                 _skipped_call_summary(
                     package,
                     "skipped_token_budget",
+                    config=config,
                     estimated_prompt_tokens=estimated_prompt_tokens,
                     reservation=reservation,
                     reserved_tokens=reserved_tokens,
@@ -362,6 +370,7 @@ def run_smoke(
         validation = validate_runtime_response(result, package=package)
         summary = _call_summary(
             package=package,
+            config=config,
             call_index=call_index,
             estimated_prompt_tokens=estimated_prompt_tokens,
             reservation=reservation,
@@ -380,6 +389,7 @@ def run_smoke(
                 result=result,
                 validation_summary=summary["validation"],
                 raw_text_capture=config.raw_text_capture,
+                pressure_summary=summary["pressure_summary"],
             ),
         )
         if observed_over_cap:
@@ -387,6 +397,7 @@ def run_smoke(
 
     report = {
         "schema_version": SMOKE_SCHEMA_VERSION,
+        "pressure_schema_version": PRESSURE_SCHEMA_VERSION,
         "status": _smoke_status(call_summaries),
         "mode": "fake" if config.fake else "live",
         "created_at": datetime.now(UTC).isoformat(),
@@ -607,12 +618,188 @@ def build_runtime_package(
     raise ValueError("no_ready_glossary_injected_runtime_unit")
 
 
+def build_runtime_pressure_summary(
+    package: RuntimeSmokePackage,
+    *,
+    config: SmokeConfig,
+    estimated_prompt_tokens: int | None = None,
+    reserved_tokens: int | None = None,
+) -> dict[str, Any]:
+    prompt_context_omitted = package.prompt_context_metadata.get(
+        "omitted_entries",
+        (),
+    )
+    selected_entry_ids = package.adapter_metadata.get("selected_entry_ids") or ()
+    selection_dropped = package.selection_metadata.get("dropped_entries") or ()
+    cache_policy = package.adapter_metadata.get("cache_policy") or {}
+    return {
+        "schema_version": PRESSURE_SCHEMA_VERSION,
+        "input_id": package.input_id,
+        "target_language": package.target_language,
+        "document": {
+            "format": package.document_format,
+            "fragment_count": package.fragment_count,
+            "character_count": package.character_count,
+        },
+        "unit": {
+            "sequence": package.unit_sequence,
+            "source_block_id_count": len(package.source_block_ids),
+            "source_character_count": len(package.source_text),
+            "protected_text_character_count": len(package.protected_text),
+            "protected_marker_count": _protected_marker_count(
+                package.required_markers
+            ),
+        },
+        "glossary": {
+            "retained_entry_count": package.glossary_entry_count,
+            "evidence_count": package.glossary_evidence_count,
+            "selected_entry_count": len(selected_entry_ids),
+            "prompt_context_included_entry_count": len(
+                package.prompt_context_metadata.get("included_entry_ids") or ()
+            ),
+            "prompt_context_omitted_entry_count": len(prompt_context_omitted),
+            "selection_dropped_entry_count": len(selection_dropped),
+            "reducer_diagnostic_count": package.reducer_metadata.get(
+                "diagnostic_count",
+                "Unknown",
+            ),
+            "reducer_dropped_count": package.reducer_metadata.get(
+                "dropped_count",
+                "Unknown",
+            ),
+        },
+        "tokens": {
+            "estimated_source_tokens": estimate_tokens(package.source_text),
+            "estimated_protected_text_tokens": estimate_tokens(
+                package.protected_text
+            ),
+            "prompt_context_estimated_tokens": package.prompt_context_metadata.get(
+                "estimated_prompt_tokens",
+                "Unknown",
+            ),
+            "selection_estimated_prompt_tokens": package.selection_metadata.get(
+                "estimated_prompt_tokens",
+                "Unknown",
+            ),
+            "estimated_request_prompt_tokens": _unknown_int(
+                estimated_prompt_tokens
+            ),
+            "reserved_request_tokens": _unknown_int(reserved_tokens),
+            "max_completion_tokens": config.max_completion_tokens,
+            "max_tokens_total": config.max_tokens_total,
+        },
+        "cache_policy": {
+            "behavior": cache_policy.get("behavior", "Unknown"),
+            "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
+            "cache_put_allowed": cache_policy.get("cache_put_allowed", "Unknown"),
+        },
+        "fallback": {
+            "glossary_plan_status": package.glossary_plan.get(
+                "status",
+                "Unknown",
+            ),
+            "glossary_plan_fallback_reason": package.glossary_plan.get(
+                "fallback_reason",
+                "Unknown",
+            ),
+            "work_unit_fallback_reason_codes": _work_unit_fallback_reason_codes(
+                package.glossary_plan,
+                package.unit_sequence,
+            ),
+            "selection_budget_exceeded": package.selection_metadata.get(
+                "budget_exceeded",
+                "Unknown",
+            ),
+            "prompt_context_omission_reasons": _prompt_context_omission_reasons(
+                prompt_context_omitted
+            ),
+        },
+        "output_contract": {
+            "expected_translation_block_count": 1,
+            "required_marker_group_count": len(package.required_markers),
+            "risk_category": _output_contract_risk_category(package),
+            "risk_reason_codes": _output_contract_risk_reasons(package),
+            "threshold_policy": "TBD",
+        },
+        "raw_payload_included": False,
+    }
+
+
+def _protected_marker_count(required_markers: Sequence[Sequence[str]]) -> int:
+    return sum(len(group) for group in required_markers)
+
+
+def _work_unit_fallback_reason_codes(
+    glossary_plan: Mapping[str, Any],
+    work_unit_sequence: int,
+) -> list[str]:
+    work_units = glossary_plan.get("work_unit_plans") or ()
+    for item in work_units:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("work_unit_sequence") != work_unit_sequence:
+            continue
+        reasons = item.get("fallback_reason_codes") or ()
+        return sorted(str(reason) for reason in reasons)
+    return []
+
+
+def _prompt_context_omission_reasons(
+    omitted_entries: Sequence[Any],
+) -> list[str]:
+    reasons: set[str] = set()
+    for item in omitted_entries:
+        if isinstance(item, Mapping):
+            reason = item.get("reason")
+            if reason:
+                reasons.add(str(reason))
+    return sorted(reasons)
+
+
+def _output_contract_risk_category(package: RuntimeSmokePackage) -> str:
+    source_block_count = len(package.source_block_ids)
+    marker_count = _protected_marker_count(package.required_markers)
+    is_epub = package.document_format == "epub"
+    if is_epub and source_block_count > 1 and marker_count > 0:
+        return "epub_multi_block_with_protected_markers"
+    if is_epub and source_block_count > 1:
+        return "epub_multi_block"
+    if source_block_count > 1 and marker_count > 0:
+        return "multi_block_with_protected_markers"
+    if marker_count > 0:
+        return "protected_marker"
+    return "single_block_low_structural_pressure"
+
+
+def _output_contract_risk_reasons(package: RuntimeSmokePackage) -> list[str]:
+    reasons: list[str] = []
+    if package.document_format == "epub":
+        reasons.append("epub_adapter_unit")
+    if len(package.source_block_ids) > 1:
+        reasons.append("multiple_source_blocks")
+    if _protected_marker_count(package.required_markers) > 0:
+        reasons.append("protected_markers_present")
+    if package.prompt_context_metadata.get("omitted_entries"):
+        reasons.append("prompt_context_omissions_present")
+    if package.selection_metadata.get("budget_exceeded"):
+        reasons.append("selection_budget_exceeded")
+    return reasons or ["single_source_block"]
+
+
 def render_metadata_report(report: Mapping[str, Any]) -> str:
     rows = "\n".join(_call_report_row(call) for call in report["calls"])
     if not rows:
         rows = (
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
             "| Unknown |\n"
+        )
+    pressure_rows = "\n".join(
+        _pressure_report_row(call) for call in report["calls"]
+    )
+    if not pressure_rows:
+        pressure_rows = (
+            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
+            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown |\n"
         )
     return (
         "# Glossary Runtime Provider Smoke Report\n\n"
@@ -635,6 +822,13 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         "| Validation issue codes |\n"
         "| --- | --- | ---: | --- | --- | ---: | --- |\n"
         f"{rows}\n\n"
+        "## Runtime Pressure Summary\n"
+        "| Input | Target | Format | Unit | Source blocks | Source chars "
+        "| Protected markers | Selected entries | Context tokens "
+        "| Prompt tokens | Completion cap | Risk category |\n"
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: "
+        "| ---: | ---: | --- |\n"
+        f"{pressure_rows}\n\n"
         "## Token And Latency Shape\n"
         f"- Mode: {report['mode']}\n"
         f"- Calls made: {report['calls_made']}\n"
@@ -1024,6 +1218,7 @@ def _aggregate_selection_signature(selection_signatures: Iterable[str]) -> str:
 def _call_summary(
     *,
     package: RuntimeSmokePackage,
+    config: SmokeConfig,
     call_index: int,
     estimated_prompt_tokens: int,
     reservation: int,
@@ -1051,6 +1246,12 @@ def _call_summary(
         "validation": dict(validation),
         "error_type": result.error_type,
         "error_message": result.error_message,
+        "pressure_summary": build_runtime_pressure_summary(
+            package,
+            config=config,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            reserved_tokens=reservation,
+        ),
         "adapter": {
             "status": package.adapter_metadata["status"],
             "cache_policy": package.adapter_metadata["cache_policy"],
@@ -1075,6 +1276,10 @@ def _call_summary(
 def _skipped_call_summary(
     package: RuntimeSmokePackage,
     status: str,
+    *,
+    config: SmokeConfig,
+    estimated_prompt_tokens: int | None = None,
+    reservation: int | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
     return {
@@ -1084,6 +1289,12 @@ def _skipped_call_summary(
         "document_format": package.document_format,
         "unit_sequence": package.unit_sequence,
         "status": status,
+        "pressure_summary": build_runtime_pressure_summary(
+            package,
+            config=config,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            reserved_tokens=reservation,
+        ),
         **extra,
     }
 
@@ -1097,6 +1308,7 @@ def _call_diagnostic(
     result: ChatCallResult,
     validation_summary: Mapping[str, Any],
     raw_text_capture: bool,
+    pressure_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": SMOKE_SCHEMA_VERSION,
@@ -1125,6 +1337,7 @@ def _call_diagnostic(
         "http_status": result.http_status,
         "finish_reason": result.finish_reason,
         "validation": validation_summary,
+        "pressure_summary": dict(pressure_summary),
         "adapter_metadata": dict(package.adapter_metadata),
         "prompt_context_metadata": dict(package.prompt_context_metadata),
         "selection_metadata": dict(package.selection_metadata),
@@ -1221,6 +1434,29 @@ def _call_report_row(call: Mapping[str, Any]) -> str:
         f"| {call.get('finish_reason', 'Unknown')} "
         f"| {usage.get('total_tokens', 'Unknown')} "
         f"| {', '.join(str(code) for code in issue_codes)} |"
+    )
+
+
+def _pressure_report_row(call: Mapping[str, Any]) -> str:
+    pressure = call.get("pressure_summary") or {}
+    document = pressure.get("document") or {}
+    unit = pressure.get("unit") or {}
+    glossary = pressure.get("glossary") or {}
+    tokens = pressure.get("tokens") or {}
+    output_contract = pressure.get("output_contract") or {}
+    return (
+        f"| {call.get('input_id', 'Unknown')} "
+        f"| {call.get('target_language', 'Unknown')} "
+        f"| {document.get('format', call.get('document_format', 'Unknown'))} "
+        f"| {unit.get('sequence', call.get('unit_sequence', 'Unknown'))} "
+        f"| {unit.get('source_block_id_count', 'Unknown')} "
+        f"| {unit.get('source_character_count', 'Unknown')} "
+        f"| {unit.get('protected_marker_count', 'Unknown')} "
+        f"| {glossary.get('selected_entry_count', 'Unknown')} "
+        f"| {tokens.get('prompt_context_estimated_tokens', 'Unknown')} "
+        f"| {tokens.get('estimated_request_prompt_tokens', 'Unknown')} "
+        f"| {tokens.get('max_completion_tokens', 'Unknown')} "
+        f"| {output_contract.get('risk_category', 'Unknown')} |"
     )
 
 
