@@ -8,9 +8,11 @@ from tools.glossary_runtime_provider_smoke import (
     DEFAULT_DIAGNOSTIC_ROOT,
     DEFAULT_MODEL,
     FakeRuntimeProvider,
+    RuntimePackageSelectionError,
     RuntimeSmokePackage,
     SmokeConfig,
     apply_runtime_pressure_fallback,
+    build_epub_runtime_unit_selection_decision,
     build_glossary_off_runtime_package,
     build_runtime_glossary_budget_plan,
     build_runtime_package,
@@ -20,6 +22,7 @@ from tools.glossary_runtime_provider_smoke import (
     format_runtime_glossary_prompt_context,
     run_fake_paired_epub_rehearsal,
     run_smoke,
+    select_epub_runtime_unit_for_rehearsal,
     validate_runtime_response,
 )
 
@@ -309,6 +312,151 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             kept.prompt_context_metadata["included_entry_ids"],
             ["entry-1", "entry-2"],
         )
+
+    def test_epub_unit_selector_selects_small_glossary_useful_unit(self):
+        package = _synthetic_runtime_package(
+            source_block_count=1,
+            raw_source="Darcy returns quietly.",
+            protected_text="Darcy returns quietly.",
+            required_markers=(),
+        )
+        useful_entry = _runtime_context_entry(
+            "entry-1",
+            source="Fitzwilliam Darcy",
+            target="Дарси",
+        )
+        useful_entry["aliases"] = ["Darcy"]
+        entries = [
+            useful_entry,
+            _runtime_context_entry("entry-2", source="Elizabeth", target="Элизабет"),
+        ]
+
+        selected = select_epub_runtime_unit_for_rehearsal(
+            [package],
+            config=SmokeConfig(fake=True),
+            entries=entries,
+            input_id="synthetic-epub-ru",
+            target_language="ru",
+        )
+
+        metadata = selected.prompt_context_metadata["epub_runtime_unit_selection"]
+        self.assertEqual(metadata["status"], "selected")
+        self.assertEqual(metadata["reason_codes"], [])
+        self.assertEqual(metadata["glossary"]["useful_entry_ids"], ["entry-1"])
+        self.assertEqual(
+            metadata["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        pressure = build_runtime_pressure_summary(
+            selected,
+            config=SmokeConfig(fake=True),
+        )
+        self.assertEqual(
+            pressure["epub_runtime_unit_selection"]["status"],
+            "selected",
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns quietly.", serialized)
+        self.assertNotIn("Дарси", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_epub_unit_selector_skips_missing_target_metadata(self):
+        package = _synthetic_runtime_package(
+            source_block_count=1,
+            raw_source="Darcy returns quietly.",
+            protected_text="Darcy returns quietly.",
+            required_markers=(),
+        )
+        entries = [
+            {
+                **_runtime_context_entry("entry-1", source="Darcy", target=""),
+                "target_canonical": "",
+                "target_variants": [],
+            }
+        ]
+
+        decision = build_epub_runtime_unit_selection_decision(
+            package,
+            config=SmokeConfig(fake=True),
+            entries=entries,
+        )
+
+        self.assertEqual(decision["status"], "skipped")
+        self.assertIn("target_metadata_missing", decision["reason_codes"])
+        self.assertEqual(decision["glossary"]["source_match_entry_count"], 1)
+        self.assertEqual(decision["glossary"]["useful_entry_count"], 0)
+        serialized = json.dumps(decision, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns quietly.", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_epub_unit_selector_skips_high_pressure_unit_metadata_only(self):
+        raw_source = "Darcy " + ("raw pressure text " * 50)
+        package = _synthetic_runtime_package(
+            source_block_count=58,
+            raw_source=raw_source,
+            protected_text="Darcy returns quietly.",
+            required_markers=(),
+        )
+        entries = [_runtime_context_entry("entry-1", source="Darcy", target="Дарси")]
+
+        decision = build_epub_runtime_unit_selection_decision(
+            package,
+            config=SmokeConfig(fake=True),
+            entries=entries,
+        )
+
+        self.assertEqual(decision["status"], "skipped")
+        self.assertIn(
+            "epub_source_block_count_exceeds_limit",
+            decision["reason_codes"],
+        )
+        self.assertEqual(
+            decision["pressure_fallback"]["action"],
+            "omit_glossary_prompt_context",
+        )
+        serialized = json.dumps(decision, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn("Дарси", serialized)
+        self.assertNotIn("<translation_batch>", serialized)
+
+    def test_epub_unit_selector_reports_no_eligible_fallback_metadata(self):
+        raw_source = "Darcy returns quietly."
+        package = _synthetic_runtime_package(
+            source_block_count=1,
+            raw_source=raw_source,
+            protected_text=raw_source,
+            required_markers=(),
+        )
+        entries = [_runtime_context_entry("entry-1", source="Wickham", target="Уикем")]
+
+        with self.assertRaises(RuntimePackageSelectionError) as raised:
+            select_epub_runtime_unit_for_rehearsal(
+                [package],
+                config=SmokeConfig(fake=True),
+                entries=entries,
+                input_id="synthetic-epub-ru",
+                target_language="ru",
+            )
+
+        error = raised.exception
+        self.assertEqual(error.code, "no_glossary_useful_pressure_safe_epub_unit")
+        self.assertEqual(error.metadata["status"], "skipped_selection")
+        self.assertEqual(
+            error.metadata["fallback_action"],
+            "use_glossary_off_local_rehearsal_metadata",
+        )
+        self.assertEqual(
+            error.metadata["fallback_cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
+        self.assertIn(
+            "source_term_or_alias_absent",
+            error.metadata["reason_codes"],
+        )
+        serialized = json.dumps(error.metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(raw_source, serialized)
+        self.assertNotIn("Уикем", serialized)
+        self.assertNotIn("<glossary_context", serialized)
 
     def test_epub_budget_plan_reduces_context_and_preserves_escaping(self):
         plan = build_runtime_glossary_budget_plan(

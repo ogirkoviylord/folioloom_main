@@ -1648,6 +1648,14 @@ core flow, release gates, operational visibility and documentation.
   metadata-only reason codes. This remains default-off and owner-only; no live
   provider calls, rollout, durable state/storage/admin/retention changes or
   release/privacy claims are approved;
+- treat issue #503 / #204AW as the local-only EPUB runtime unit/output-budget
+  selector before any fresh smoke approval: the smoke runner now selects only
+  EPUB units that are glossary-useful under #501-style source/target metadata
+  checks and pass conservative source-block, protected-marker and completion
+  pressure thresholds; ineligible units produce metadata-only skip/fallback
+  reasons. This still does not approve live calls, normal prompt rollout,
+  cache reuse, bot/server runtime runs, durable state/storage/admin/retention
+  changes or release/privacy claims;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2114,6 +2122,24 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #503 / #204AW adds a local-only EPUB runtime unit/output-budget
+  selector to `tools/glossary_runtime_provider_smoke.py`, with focused coverage
+  in `tests/test_glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover selecting a small glossary-useful EPUB unit,
+  skipping missing-target-metadata units, skipping high-pressure EPUB units,
+  metadata-only fallback when no unit is both useful and pressure-safe, cache
+  bypass metadata on glossary-on test-path units, and redaction of raw source
+  text, prompt bodies, provider bodies, translated text and API/auth material
+  from ordinary selector metadata. Required focused runner/smoke tests,
+  `compileall`, `git diff --check` and targeted `ruff` passed locally.
+- Follow-up: #503 is fake/local planning evidence only. It does not authorize a
+  fresh live provider smoke, normal runtime glossary rollout, bot/server battle
+  test, glossary-aware cache reuse, durable state/storage/admin/retention
+  changes, provider config changes, semantic-quality claims or release/privacy/
+  legal/support readiness. A future live EPUB paired smoke still needs exact
+  owner approval.
 
 - Date: 2026-06-13.
 - Change: Issue #501 / #204AV adds an owner-only local glossary-useful
