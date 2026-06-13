@@ -1510,9 +1510,20 @@ core flow, release gates, operational visibility and documentation.
   warning findings, `needs_review_rate=1.0` and EPUB reducer diagnostic/drop
   pressure `0.967801` against the default `0.95` threshold. This does not call
   providers, integrate runtime prompts/cache/storage/admin, mutate persistence,
-  prove semantic truth or claim release/privacy readiness. Under the current
-  #464 approval wording, #464 should not start until a follow-up local gate fix
-  or explicit owner gate deferral is recorded;
+  prove semantic truth or claim release/privacy readiness;
+- treat issue #464 / #204AF as the owner-approved bounded post-fix provider
+  retry:
+  `tools/deepseek_chunked_glossary_editor_spike.py` has an issue-specific
+  `--issue-464-reduced` boundary and diagnostics root, and
+  `docs/superpowers/specs/2026-06-13-reduced-glossary-editor-post-fix-retry-report.md`
+  records that the owner explicitly deferred the #463 failed local gates before
+  the run. The live retry validated all four approved reduced packets with
+  provider `finish_reason=stop`, provider-reported usage present and observed
+  tokens within the approved cap; merge/adjudication still produced warning-only
+  duplicate/low-confidence semantic findings. This is provider-boundary
+  evidence only and does not integrate runtime prompts, mutate cache/storage/
+  database/scheduler/admin/retention state, prove semantic truth or claim
+  release/privacy readiness;
 - treat issue #465 / #204AG as the owner-approved design-only glossary runtime
   cache policy decision:
   `docs/superpowers/specs/2026-06-13-glossary-runtime-cache-policy-decision.md`
@@ -1992,6 +2003,27 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-13.
+- Change: Issue #464 / #204AF adds issue-specific bounded post-fix reduced
+  provider retry support to
+  `tools/deepseek_chunked_glossary_editor_spike.py` and records the
+  metadata-only report at
+  `docs/superpowers/specs/2026-06-13-reduced-glossary-editor-post-fix-retry-report.md`.
+- Evidence: owner approval in GitHub issue #464/comment thread explicitly
+  defers the #463 failed local gates for this bounded retry. Fake/dry preflight
+  completed four calls with 12737 fake observed tokens. The live retry used
+  four calls, validated all four approved packets, had provider `finish_reason`
+  `stop` for every call, recorded provider usage for every call, used 21053 /
+  40000 observed tokens, reserved 31764 / 40000 local tokens and produced no
+  invalid chunks or merge blockers. Merge/adjudication still recorded warning-
+  only findings: one `duplicate_entry_output` and eight
+  `low_confidence_semantics`.
+- Follow-up: #466 may use this as metadata-only provider-boundary evidence
+  after #464 is merged and reviewed. Do not infer normal runtime prompt
+  integration, cache reuse, storage/admin diagnostics expansion, retention/
+  delete/export behavior, semantic truth or release/privacy/legal/support
+  readiness from #464.
+
+- Date: 2026-06-13.
 - Change: Issue #465 / #204AG records the owner-approved glossary runtime
   cache policy decision in `docs/DECISIONS.md` and
   `docs/superpowers/specs/2026-06-13-glossary-runtime-cache-policy-decision.md`.
@@ -2018,10 +2050,9 @@ Potential issues to verify:
   reducer decision coverage. Default local readiness still fails on warning
   findings, `needs_review_rate=1.0` and EPUB reducer diagnostic/drop pressure
   `0.967801` versus the default `0.95` threshold.
-- Follow-up: do not start #464 under the current approval wording until a
-  follow-up local hardening issue passes the gate or the owner explicitly
-  records a gate deferral. Do not infer runtime prompt/cache/storage/admin/
-  retention/release readiness from #463.
+- Follow-up: #464 later proceeded only after the owner explicitly recorded a
+  gate deferral for these failed metrics. Do not infer runtime prompt/cache/
+  storage/admin/retention/release readiness from #463.
 
 - Date: 2026-06-13.
 - Change: Issue #462 / #204AD adds local fake failure-mode coverage for
