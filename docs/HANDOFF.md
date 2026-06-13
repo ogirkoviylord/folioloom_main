@@ -1535,6 +1535,15 @@ core flow, release gates, operational visibility and documentation.
   not implement code, mutate cache/database/storage/scheduler/admin/retention
   state, run providers, integrate prompts or claim release/privacy readiness.
   Future glossary-aware cache keys require a separate approved issue;
+- treat issue #466 / #204AH as the disabled-by-default glossary prompt-policy
+  adapter decision contract: `src/translator_service/translation_policy.py`
+  now accepts compact reduced glossary shadow metadata in an enabled/test path,
+  emits compact policy signature context and selected entry ids when ready,
+  requires cache get/put bypass for glossary-injected enabled/test-path units,
+  and falls back for missing, disabled, invalid, low-confidence, empty or
+  over-budget glossary data. Default normal translation prompts, provider
+  calls, cache/storage/database/scheduler/admin/retention state, user-visible
+  behavior and release/privacy/legal/support claims remain unchanged;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2001,6 +2010,21 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-13.
+- Change: Issue #466 / #204AH adds a disabled-by-default glossary
+  prompt-policy adapter decision contract in
+  `src/translator_service/translation_policy.py`, with focused tests in
+  `tests/test_translation_policy.py` and `tests/test_glossary_runtime_shadow.py`.
+- Evidence: local tests cover default-off behavior, unchanged system prompt when
+  disabled, compact enabled/test-path policy signature and selected entry ids,
+  #465 cache-bypass semantics for glossary-injected enabled/test-path units,
+  fallback for missing/disabled/fallback/invalid/low-confidence/over-budget/
+  empty data and no raw diagnostic fields in adapter payloads.
+- Follow-up: this is still runtime-adjacent planning metadata only. Do not infer
+  normal runtime glossary prompt injection, glossary-aware cache reuse,
+  provider calls, durable state mutation, storage/admin/retention behavior,
+  semantic truth or release/privacy/legal/support readiness from #466.
 
 - Date: 2026-06-13.
 - Change: Issue #464 / #204AF adds issue-specific bounded post-fix reduced

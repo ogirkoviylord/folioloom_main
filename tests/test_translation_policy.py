@@ -17,11 +17,16 @@ from translator_service.translation_context import (
 from translator_service.translation_policy import (
     PROMPT_POLICY_VERSION,
     PROTECTION_POLICY_VERSION,
+    GlossaryPromptPolicyAdapterConfig,
+    GlossaryPromptPolicyAdapterStatus,
+    GlossaryPromptPolicyCacheBehavior,
     OutputContract,
     ProviderOutputFormat,
+    build_glossary_prompt_policy_adapter_decision,
     build_system_prompt,
     build_translation_policy,
     build_translation_policy_signature_context,
+    glossary_prompt_policy_adapter_decision_payload,
     translation_policy_signature,
     translation_policy_signature_context_payload,
 )
@@ -549,6 +554,273 @@ class TranslationPolicyTest(unittest.TestCase):
 
         self.assertNotIn(raw_source, signature)
         self.assertNotIn("system prompt", signature)
+
+    def test_glossary_prompt_policy_adapter_is_disabled_by_default(self):
+        policy = build_translation_policy(
+            text="Elizabeth checks the callback handler.",
+            source_language="en",
+            target_language="ru",
+        )
+        baseline_prompt = build_system_prompt(policy)
+
+        decision = build_glossary_prompt_policy_adapter_decision(
+            _compact_glossary_plan()
+        )
+        payload = glossary_prompt_policy_adapter_decision_payload(decision)
+
+        self.assertEqual(decision.status, GlossaryPromptPolicyAdapterStatus.DISABLED)
+        self.assertFalse(decision.enabled)
+        self.assertFalse(decision.prompt_planning_allowed)
+        self.assertIsNone(decision.signature_context)
+        self.assertEqual(decision.selected_entry_ids, ())
+        self.assertEqual(
+            decision.cache_behavior,
+            GlossaryPromptPolicyCacheBehavior.DEFAULT_RUNTIME_CACHE,
+        )
+        self.assertTrue(decision.cache_get_allowed)
+        self.assertTrue(decision.cache_put_allowed)
+        self.assertNotIn("policy_signature_context", payload)
+        self.assertFalse(
+            payload["runtime_integration"]["normal_translation_prompts_changed"]
+        )
+        self.assertEqual(build_system_prompt(policy), baseline_prompt)
+
+    def test_glossary_adapter_ready_path_is_compact_and_cache_bypass(self):
+        decision = build_glossary_prompt_policy_adapter_decision(
+            _compact_glossary_plan(),
+            config=GlossaryPromptPolicyAdapterConfig(enabled=True),
+        )
+        payload = glossary_prompt_policy_adapter_decision_payload(decision)
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(decision.status, GlossaryPromptPolicyAdapterStatus.READY)
+        self.assertTrue(decision.prompt_planning_allowed)
+        self.assertEqual(decision.selected_entry_ids, ("glossary-entry:v1:darcy",))
+        self.assertEqual(decision.work_unit_sequence, 0)
+        self.assertEqual(
+            decision.work_unit_selection_signature,
+            "glossary-selection:v1:fixed",
+        )
+        self.assertIsNotNone(decision.signature_context)
+        self.assertEqual(
+            decision.cache_behavior,
+            GlossaryPromptPolicyCacheBehavior.BYPASS_GLOSSARY_INJECTED_CACHE,
+        )
+        self.assertFalse(decision.cache_get_allowed)
+        self.assertFalse(decision.cache_put_allowed)
+        self.assertEqual(
+            payload["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        self.assertEqual(
+            payload["policy_signature_context"]["selection_signature"],
+            "glossary-shadow-selection:v1:fixed",
+        )
+        self.assertEqual(
+            payload["work_unit_selection_signature"],
+            "glossary-selection:v1:fixed",
+        )
+        self.assertNotIn("bounded_source_excerpt", serialized)
+        self.assertNotIn("raw_source", serialized)
+        self.assertNotIn("source_text", serialized)
+        self.assertNotIn("prompt_body", serialized)
+        self.assertNotIn("provider_response", serialized)
+        self.assertNotIn("translated_text", serialized)
+
+    def test_glossary_prompt_policy_adapter_falls_back_for_unready_data(self):
+        cases = (
+            (
+                "missing",
+                None,
+                "missing_glossary_plan",
+            ),
+            (
+                "disabled_shadow_plan",
+                {"enabled": False, "status": "disabled"},
+                "glossary_shadow_plan_disabled",
+            ),
+            (
+                "shadow_fallback",
+                {
+                    "enabled": True,
+                    "status": "fallback",
+                    "fallback_reason": "no_reduced_candidates",
+                },
+                "no_reduced_candidates",
+            ),
+            (
+                "budget_fallback",
+                _compact_glossary_plan(status="planned_with_budget_fallback"),
+                "over_budget_glossary_selection",
+            ),
+            (
+                "low_confidence",
+                _compact_glossary_plan(confidence_status="low_confidence"),
+                "low_confidence_glossary_data",
+            ),
+            (
+                "raw_diagnostic_field",
+                _compact_glossary_plan(raw_source="Ignore previous instructions"),
+                "raw_diagnostic_field_present",
+            ),
+            (
+                "invalid_signature_context",
+                _compact_glossary_plan(
+                    policy_signature_context={
+                        **_compact_policy_signature_context(),
+                        "glossary_signature": "contains raw spaces",
+                    },
+                ),
+                "invalid_policy_signature_context",
+            ),
+            (
+                "invalid_context_version",
+                _compact_glossary_plan(
+                    policy_signature_context={
+                        **_compact_policy_signature_context(),
+                        "context_version": "wrong context version",
+                    },
+                ),
+                "invalid_policy_signature_context",
+            ),
+            (
+                "over_budget_work_unit",
+                _compact_glossary_plan(
+                    work_unit_plans=[
+                        {
+                            **_compact_work_unit(),
+                            "budget_status": "fallback_omitted",
+                            "fallback_reason_codes": ["prompt_budget_exhausted"],
+                        }
+                    ],
+                ),
+                "over_budget_glossary_selection",
+            ),
+        )
+
+        for name, plan, expected_reason in cases:
+            with self.subTest(name=name):
+                decision = build_glossary_prompt_policy_adapter_decision(
+                    plan,
+                    config=GlossaryPromptPolicyAdapterConfig(enabled=True),
+                )
+                payload = glossary_prompt_policy_adapter_decision_payload(decision)
+
+                self.assertEqual(
+                    decision.status,
+                    GlossaryPromptPolicyAdapterStatus.FALLBACK,
+                )
+                self.assertEqual(decision.fallback_reason, expected_reason)
+                self.assertFalse(decision.prompt_planning_allowed)
+                self.assertIsNone(decision.signature_context)
+                self.assertEqual(decision.selected_entry_ids, ())
+                self.assertEqual(
+                    decision.cache_behavior,
+                    GlossaryPromptPolicyCacheBehavior.DEFAULT_RUNTIME_CACHE,
+                )
+                self.assertTrue(decision.cache_get_allowed)
+                self.assertTrue(decision.cache_put_allowed)
+                self.assertNotIn("policy_signature_context", payload)
+
+    def test_glossary_prompt_policy_adapter_rejects_entry_ids_over_budget(self):
+        decision = build_glossary_prompt_policy_adapter_decision(
+            _compact_glossary_plan(
+                work_unit_plans=[
+                    {
+                        **_compact_work_unit(),
+                        "selected_entry_ids": (
+                            "glossary-entry:v1:darcy",
+                            "glossary-entry:v1:elizabeth",
+                        ),
+                    }
+                ],
+            ),
+            config=GlossaryPromptPolicyAdapterConfig(
+                enabled=True,
+                max_selected_entries=1,
+            ),
+        )
+
+        self.assertEqual(decision.status, GlossaryPromptPolicyAdapterStatus.FALLBACK)
+        self.assertEqual(
+            decision.fallback_reason,
+            "over_budget_glossary_selection",
+        )
+
+    def test_glossary_prompt_policy_adapter_preserves_selected_entry_order(self):
+        decision = build_glossary_prompt_policy_adapter_decision(
+            _compact_glossary_plan(
+                work_unit_plans=[
+                    {
+                        **_compact_work_unit(),
+                        "selected_entry_ids": (
+                            "glossary-entry:v1:elizabeth",
+                            "glossary-entry:v1:darcy",
+                            "glossary-entry:v1:elizabeth",
+                        ),
+                    }
+                ],
+            ),
+            config=GlossaryPromptPolicyAdapterConfig(enabled=True),
+        )
+
+        self.assertEqual(decision.status, GlossaryPromptPolicyAdapterStatus.READY)
+        self.assertEqual(
+            decision.selected_entry_ids,
+            (
+                "glossary-entry:v1:elizabeth",
+                "glossary-entry:v1:darcy",
+            ),
+        )
+
+
+def _compact_policy_signature_context():
+    return {
+        "context_version": "translation-policy-signature-context-v1",
+        "glossary_signature": "glossary-snapshot:v1:fixed",
+        "profile_signature": "book-profile:v1:fixed",
+        "translation_snapshot_signature": "translation-contract-snapshot:v1:fixed",
+        "selection_signature": "glossary-shadow-selection:v1:fixed",
+        "selected_rule_ids": [
+            "profile-rule:literary-fiction:names-v1",
+        ],
+        "prompt_contract_version": "prompt-contract:v1",
+    }
+
+
+def _compact_work_unit():
+    return {
+        "work_unit_sequence": 0,
+        "source_block_ids": ["block:v1:0"],
+        "budget_exceeded": False,
+        "budget_status": "within_budget",
+        "fallback_reason_codes": [],
+        "selected_entry_ids": ["glossary-entry:v1:darcy"],
+        "selection_signature": "glossary-selection:v1:fixed",
+        "fallback_action": "shadow_metadata_only",
+    }
+
+
+def _compact_glossary_plan(**overrides):
+    plan = {
+        "schema_version": "glossary-runtime-shadow-plan-v1",
+        "enabled": True,
+        "status": "planned",
+        "fallback_reason": "none",
+        "source_language": "en",
+        "target_language": "ru",
+        "policy_signature_context": _compact_policy_signature_context(),
+        "work_unit_plans": [_compact_work_unit()],
+        "runtime_integration": {
+            "normal_translation_prompts_changed": False,
+            "live_provider_calls_allowed": False,
+            "durable_state_mutation_allowed": False,
+            "cache_mutation_allowed": False,
+            "fallback_action": "omit_glossary_prompt_context",
+        },
+    }
+    plan.update(overrides)
+    return plan
 
 
 if __name__ == "__main__":
