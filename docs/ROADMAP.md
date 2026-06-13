@@ -631,7 +631,13 @@ Acceptance criteria:
   stubs, and keep ordinary metadata redacted. It still does not approve normal
   runtime prompt rollout, live provider calls, cache reuse, durable state/
   storage/admin/retention changes, user-visible behavior or release/privacy
-  readiness.
+  readiness. Issue #477 / #204AM adds the first bounded provider smoke for that
+  runtime test path: fake preflight passed, the approved live run made 5 calls
+  within the 50,000-token cap, three TXT calls validated and the approved EPUB
+  RU/UK calls failed with provider `length` plus local `truncated_output`/
+  `external_text` validation issues. Runtime prompt rollout remains unapproved;
+  the next implementation direction is prompt/selection budget iteration before
+  any broader smoke or owner-only quality review.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

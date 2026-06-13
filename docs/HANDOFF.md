@@ -1572,6 +1572,17 @@ core flow, release gates, operational visibility and documentation.
   live provider calls, durable cache/storage/database/scheduler/admin/retention
   state, user-visible behavior and release/privacy/legal/support claims remain
   unchanged;
+- treat issue #477 / #204AM as the first bounded glossary runtime provider
+  smoke only: `tools/glossary_runtime_provider_smoke.py` now enforces the
+  approved #477 inputs/targets/call cap/token cap/model/diagnostics boundary,
+  runs fake preflight, and writes owner-only raw diagnostics under
+  `outputs/issue-477-bounded-glossary-runtime-provider-smoke/`. The metadata
+  report records that 3 approved TXT runtime smoke calls validated, while the
+  approved EPUB RU/UK calls ended with provider `length` and local
+  `truncated_output`/`external_text` validation failures. This is provider-
+  boundary evidence only; normal runtime prompt rollout, cache reuse, durable
+  state/storage/admin/retention behavior, user-visible behavior and release/
+  privacy/legal/support claims remain unapproved;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2081,6 +2092,24 @@ Potential issues to verify:
   reuse, durable state mutation, storage/admin/retention behavior, user-visible
   behavior, semantic truth or release/privacy/legal/support readiness from
   #476.
+
+- Date: 2026-06-13.
+- Change: Issue #477 / #204AM adds a standalone bounded glossary runtime
+  provider smoke runner in `tools/glossary_runtime_provider_smoke.py`, focused
+  tests in `tests/test_glossary_runtime_provider_smoke.py`, and a metadata-only
+  report at
+  `docs/superpowers/specs/2026-06-13-glossary-runtime-provider-smoke-report.md`.
+- Evidence: fake/dry preflight ran first with 5 fake calls. The approved live
+  run made 5 calls to `deepseek-v4-pro`, observed 18,710 provider tokens
+  against the approved 50,000 cap, validated the three approved TXT runtime
+  smoke calls, and failed the approved EPUB RU/UK runtime smoke calls with
+  provider `finish_reason=length` and local validation issue codes
+  `truncated_output` and `external_text`.
+- Follow-up: #477 recommends iterating the runtime prompt/selection budget
+  before rollout. Do not infer normal runtime glossary prompt rollout,
+  glossary-aware cache reuse, durable state mutation, storage/admin/retention
+  behavior, user-visible behavior, semantic truth or release/privacy/legal/
+  support readiness from #477.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
