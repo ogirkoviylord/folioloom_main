@@ -645,8 +645,14 @@ Acceptance criteria:
   local validation failures. Issue #492 records a metadata-only `FAIL` verdict
   for runtime rollout readiness, limited-beta readiness, owner-only battle-test
   candidacy and positive glossary quality claims from the current EPUB
-  evidence. The nearest safe next step is another local-only smaller EPUB unit
-  selection/output-budget issue before any fresh provider-smoke approval.
+  evidence. Issue #501 / #204AV adds the owner-only local battle-test preflight
+  for the in-process DOCX/EPUB runtime hook: bounded glossary context now
+  requires the owner battle-test switch, READY adapter decision, source term or
+  alias presence in the unit, target metadata and local pressure/budget pass;
+  otherwise the unit falls back to the existing non-glossary translation/cache
+  path with metadata-only reason codes. The nearest safe next step remains
+  local-only smaller EPUB unit selection/output-budget work before any fresh
+  provider-smoke approval.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
