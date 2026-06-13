@@ -68,6 +68,10 @@ from translator_service.translation_postprocess import clean_inline_formatting_a
 
 logger = logging.getLogger(__name__)
 
+_GLOSSARY_BATTLE_TEST_PREFLIGHT_VERSION = (
+    "glossary-runtime-battle-test-preflight-v1"
+)
+
 
 @dataclass(frozen=True)
 class TranslatedDocument:
@@ -86,6 +90,9 @@ class GlossaryRuntimeAdapterHookConfig:
     prompt_rehearsal_enabled: bool = False
     prompt_context_entries: Sequence[Mapping[str, Any]] = ()
     prompt_context_config: GlossaryPromptContextConfig | None = None
+    owner_battle_test_enabled: bool = False
+    battle_test_max_source_blocks: int = 12
+    battle_test_max_source_characters: int = 2_400
 
 
 def translate_txt_document(
@@ -1660,14 +1667,27 @@ def _translate_docx_units(
             glossary_runtime_hook,
             work_unit_sequence=unit_index,
         )
-        glossary_prompt_context = _glossary_runtime_prompt_context(
+        glossary_useful_preflight = _glossary_runtime_useful_preflight(
             glossary_runtime_hook,
             glossary_adapter_decision,
+            source_texts=[block.text for block in unit.blocks],
+        )
+        effective_glossary_adapter_decision = (
+            _effective_glossary_runtime_adapter_decision(
+                glossary_adapter_decision,
+                glossary_useful_preflight,
+            )
+        )
+        glossary_prompt_context = _glossary_runtime_prompt_context(
+            glossary_runtime_hook,
+            effective_glossary_adapter_decision,
+            preflight=glossary_useful_preflight,
         )
         _emit_glossary_adapter_metadata(
             glossary_adapter_decision,
             glossary_adapter_metadata_callback,
             prompt_context=glossary_prompt_context,
+            preflight=glossary_useful_preflight,
         )
         for subgroup_source_language, subgroup_blocks in _docx_translation_subgroups(
             unit.blocks,
@@ -1715,7 +1735,7 @@ def _translate_docx_units(
                 source_language=subgroup_source_language,
                 target_language=target_language,
                 prompt_tier=unit.prompt_tier,
-                glossary_adapter_decision=glossary_adapter_decision,
+                glossary_adapter_decision=effective_glossary_adapter_decision,
             )
             if cached is not None:
                 translated_blocks.extend(
@@ -1860,7 +1880,7 @@ def _translate_docx_units(
                 source_language=subgroup_source_language,
                 target_language=target_language,
                 prompt_tier=unit.prompt_tier,
-                glossary_adapter_decision=glossary_adapter_decision,
+                glossary_adapter_decision=effective_glossary_adapter_decision,
             )
             if subgroup_blocks and parsed:
                 last_source_text = subgroup_blocks[-1].text
@@ -2641,14 +2661,27 @@ def _translate_epub_units(
             glossary_runtime_hook,
             work_unit_sequence=unit_index,
         )
-        glossary_prompt_context = _glossary_runtime_prompt_context(
+        glossary_useful_preflight = _glossary_runtime_useful_preflight(
             glossary_runtime_hook,
             glossary_adapter_decision,
+            source_texts=[block.text for block in unit.blocks],
+        )
+        effective_glossary_adapter_decision = (
+            _effective_glossary_runtime_adapter_decision(
+                glossary_adapter_decision,
+                glossary_useful_preflight,
+            )
+        )
+        glossary_prompt_context = _glossary_runtime_prompt_context(
+            glossary_runtime_hook,
+            effective_glossary_adapter_decision,
+            preflight=glossary_useful_preflight,
         )
         _emit_glossary_adapter_metadata(
             glossary_adapter_decision,
             glossary_adapter_metadata_callback,
             prompt_context=glossary_prompt_context,
+            preflight=glossary_useful_preflight,
         )
         cached = _translation_cache_get(
             translation_cache,
@@ -2656,7 +2689,7 @@ def _translate_epub_units(
             source_language=source_language,
             target_language=target_language,
             prompt_tier=unit.prompt_tier,
-            glossary_adapter_decision=glossary_adapter_decision,
+            glossary_adapter_decision=effective_glossary_adapter_decision,
         )
         if cached is not None:
             translated_unit_blocks = [
@@ -2733,7 +2766,7 @@ def _translate_epub_units(
             source_language=source_language,
             target_language=target_language,
             prompt_tier=unit.prompt_tier,
-            glossary_adapter_decision=glossary_adapter_decision,
+            glossary_adapter_decision=effective_glossary_adapter_decision,
         )
         if progress_callback is not None:
             last_block = translated_unit_blocks[-1] if translated_unit_blocks else None
@@ -2916,10 +2949,30 @@ def _emit_glossary_adapter_metadata(
     callback: Callable[[dict[str, object]], None] | None,
     *,
     prompt_context: GlossaryPromptContextResult | None = None,
+    preflight: Mapping[str, object] | None = None,
 ) -> None:
     if decision is None or callback is None:
         return
     payload = glossary_prompt_policy_adapter_decision_payload(decision)
+    if preflight is not None:
+        payload["battle_test_preflight"] = dict(preflight)
+        if preflight.get("status") != "ready" and decision.status.value == "ready":
+            payload["status"] = "fallback"
+            payload["fallback_reason"] = str(
+                preflight.get(
+                    "fallback_reason",
+                    "battle_test_preflight_skipped",
+                )
+            )
+            payload["prompt_planning_allowed"] = False
+            payload["selected_entry_ids"] = []
+            payload["work_unit_selection_signature"] = None
+            payload["cache_policy"] = {
+                "behavior": "default_runtime_cache",
+                "cache_get_allowed": True,
+                "cache_put_allowed": True,
+            }
+            payload.pop("policy_signature_context", None)
     if prompt_context is not None:
         payload["prompt_context"] = glossary_prompt_context_metadata_payload(
             prompt_context,
@@ -2930,19 +2983,230 @@ def _emit_glossary_adapter_metadata(
 def _glossary_runtime_prompt_context(
     config: GlossaryRuntimeAdapterHookConfig | None,
     decision: GlossaryPromptPolicyAdapterDecision | None,
+    *,
+    preflight: Mapping[str, object] | None = None,
 ) -> GlossaryPromptContextResult | None:
     if config is None or decision is None:
         return None
-    if not config.prompt_rehearsal_enabled or not decision.prompt_planning_allowed:
+    if (
+        not config.prompt_rehearsal_enabled
+        or not config.owner_battle_test_enabled
+        or not decision.prompt_planning_allowed
+    ):
+        return None
+    if preflight is None or preflight.get("status") != "ready":
+        return None
+    selected_entry_ids = _glossary_preflight_useful_entry_ids(preflight)
+    if not selected_entry_ids:
         return None
     try:
         return format_glossary_prompt_context(
             config.prompt_context_entries,
-            selected_entry_ids=decision.selected_entry_ids,
+            selected_entry_ids=selected_entry_ids,
             config=config.prompt_context_config or GlossaryPromptContextConfig(),
         )
     except ValueError:
         return None
+
+
+def _effective_glossary_runtime_adapter_decision(
+    decision: GlossaryPromptPolicyAdapterDecision | None,
+    preflight: Mapping[str, object] | None,
+) -> GlossaryPromptPolicyAdapterDecision | None:
+    if decision is None or preflight is None:
+        return decision
+    if decision.status.value != "ready":
+        return decision
+    if preflight.get("status") == "ready":
+        return decision
+    return None
+
+
+def _glossary_runtime_useful_preflight(
+    config: GlossaryRuntimeAdapterHookConfig | None,
+    decision: GlossaryPromptPolicyAdapterDecision | None,
+    *,
+    source_texts: Sequence[str],
+) -> dict[str, object] | None:
+    if config is None or not config.owner_battle_test_enabled:
+        return None
+
+    source_text_tuple = tuple(text for text in source_texts if text)
+    source_block_count = len(source_text_tuple)
+    source_character_count = sum(len(text) for text in source_text_tuple)
+    selected_entry_ids = tuple(decision.selected_entry_ids if decision else ())
+    payload: dict[str, object] = {
+        "schema_version": _GLOSSARY_BATTLE_TEST_PREFLIGHT_VERSION,
+        "enabled": True,
+        "status": "skipped",
+        "fallback_reason": "none",
+        "reason_codes": [],
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "source_block_count": source_block_count,
+        "source_character_count": source_character_count,
+        "max_source_blocks": config.battle_test_max_source_blocks,
+        "max_source_characters": config.battle_test_max_source_characters,
+        "selected_entry_count": len(selected_entry_ids),
+        "target_metadata_entry_count": 0,
+        "source_match_entry_count": 0,
+        "useful_entry_count": 0,
+        "useful_entry_ids": [],
+    }
+
+    if decision is None or not decision.prompt_planning_allowed:
+        return _glossary_preflight_skipped(payload, "adapter_not_ready")
+    if not config.prompt_rehearsal_enabled:
+        return _glossary_preflight_skipped(payload, "prompt_rehearsal_disabled")
+    if config.battle_test_max_source_blocks < 1:
+        return _glossary_preflight_skipped(payload, "invalid_source_block_limit")
+    if config.battle_test_max_source_characters < 1:
+        return _glossary_preflight_skipped(payload, "invalid_source_character_limit")
+    if source_block_count > config.battle_test_max_source_blocks:
+        return _glossary_preflight_skipped(
+            payload,
+            "source_block_count_exceeds_limit",
+        )
+    if source_character_count > config.battle_test_max_source_characters:
+        return _glossary_preflight_skipped(
+            payload,
+            "source_character_count_exceeds_limit",
+        )
+
+    source_text = "\n\n".join(source_text_tuple)
+    entries_by_id = _glossary_prompt_entries_by_id(config.prompt_context_entries)
+    target_metadata_entry_count = 0
+    source_match_entry_count = 0
+    useful_entry_ids: list[str] = []
+    for entry_id in selected_entry_ids:
+        entry = entries_by_id.get(entry_id)
+        if entry is None:
+            continue
+        has_target_metadata = _glossary_entry_has_target_metadata(entry)
+        source_matches = _glossary_entry_source_matches(entry, source_text)
+        if has_target_metadata:
+            target_metadata_entry_count += 1
+        if source_matches:
+            source_match_entry_count += 1
+        if has_target_metadata and source_matches:
+            useful_entry_ids.append(entry_id)
+
+    payload["target_metadata_entry_count"] = target_metadata_entry_count
+    payload["source_match_entry_count"] = source_match_entry_count
+    payload["useful_entry_count"] = len(useful_entry_ids)
+    payload["useful_entry_ids"] = useful_entry_ids
+
+    if not useful_entry_ids:
+        reason_codes: list[str] = []
+        if target_metadata_entry_count == 0:
+            reason_codes.append("target_metadata_missing")
+        if source_match_entry_count == 0:
+            reason_codes.append("source_term_or_alias_absent")
+        if not reason_codes:
+            reason_codes.append("useful_glossary_entry_missing")
+        return _glossary_preflight_skipped(payload, *reason_codes)
+
+    try:
+        formatted_context = format_glossary_prompt_context(
+            config.prompt_context_entries,
+            selected_entry_ids=useful_entry_ids,
+            config=config.prompt_context_config or GlossaryPromptContextConfig(),
+        )
+    except ValueError:
+        return _glossary_preflight_skipped(payload, "prompt_context_config_invalid")
+    if not formatted_context.included_entries:
+        return _glossary_preflight_skipped(payload, "prompt_context_budget_exhausted")
+
+    payload["status"] = "ready"
+    payload["fallback_reason"] = "none"
+    payload["reason_codes"] = []
+    return payload
+
+
+def _glossary_preflight_skipped(
+    payload: Mapping[str, object],
+    *reason_codes: str,
+) -> dict[str, object]:
+    compact_reason_codes = [
+        reason_code for reason_code in reason_codes if reason_code.strip()
+    ] or ["battle_test_preflight_skipped"]
+    result = dict(payload)
+    result["status"] = "skipped"
+    result["fallback_reason"] = compact_reason_codes[0]
+    result["reason_codes"] = compact_reason_codes
+    return result
+
+
+def _glossary_preflight_useful_entry_ids(
+    preflight: Mapping[str, object],
+) -> tuple[str, ...]:
+    entry_ids = preflight.get("useful_entry_ids", ())
+    if isinstance(entry_ids, (str, bytes)) or not isinstance(entry_ids, Sequence):
+        return ()
+    return tuple(entry_id for entry_id in entry_ids if isinstance(entry_id, str))
+
+
+def _glossary_prompt_entries_by_id(
+    entries: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
+    for entry in entries:
+        entry_id = entry.get("entry_id")
+        if isinstance(entry_id, str) and entry_id.strip():
+            result.setdefault(entry_id, entry)
+    return result
+
+
+def _glossary_entry_has_target_metadata(entry: Mapping[str, Any]) -> bool:
+    target_canonical = entry.get("target_canonical")
+    if isinstance(target_canonical, str) and target_canonical.strip():
+        return True
+    target_variants = entry.get("target_variants")
+    if isinstance(target_variants, Sequence) and not isinstance(
+        target_variants,
+        (str, bytes),
+    ):
+        return any(
+            isinstance(variant, str) and variant.strip()
+            for variant in target_variants
+        )
+    return False
+
+
+def _glossary_entry_source_matches(entry: Mapping[str, Any], source_text: str) -> bool:
+    if not source_text:
+        return False
+    return any(
+        _glossary_source_term_present(term, source_text)
+        for term in _glossary_entry_source_terms(entry)
+    )
+
+
+def _glossary_source_term_present(term: str, source_text: str) -> bool:
+    normalized_term = term.strip()
+    if not normalized_term:
+        return False
+    pattern = re.escape(normalized_term)
+    if normalized_term[0].isalnum():
+        pattern = rf"(?<!\w){pattern}"
+    if normalized_term[-1].isalnum():
+        pattern = rf"{pattern}(?!\w)"
+    return re.search(pattern, source_text, flags=re.IGNORECASE) is not None
+
+
+def _glossary_entry_source_terms(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    terms: list[str] = []
+    source_canonical = entry.get("source_canonical")
+    if isinstance(source_canonical, str) and source_canonical.strip():
+        terms.append(source_canonical.strip())
+    aliases = entry.get("aliases")
+    if isinstance(aliases, Sequence) and not isinstance(aliases, (str, bytes)):
+        terms.extend(
+            alias.strip()
+            for alias in aliases
+            if isinstance(alias, str) and alias.strip()
+        )
+    return tuple(dict.fromkeys(terms))
 
 
 def _glossary_prompt_context_text(
