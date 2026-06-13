@@ -1638,6 +1638,16 @@ core flow, release gates, operational visibility and documentation.
   `Unknown`; final owner go/no-go remains `TBD`. Keep runtime glossary
   shadow-only and iterate smaller EPUB runtime unit selection/output-budget
   locally before requesting any fresh paired provider smoke approval;
+- treat issue #501 / #204AV as the owner-only local battle-test gate for the
+  in-process DOCX/EPUB glossary runtime hook: bounded glossary context is
+  injected only when the explicit owner battle-test switch and rehearsal flag
+  are enabled, the adapter decision is READY, the selected source term or alias
+  is present in the unit, the selected entry has target metadata, and the local
+  prompt-context/source-pressure checks pass. Non-useful or pressure-risky
+  units fall back to the existing non-glossary translation/cache path with
+  metadata-only reason codes. This remains default-off and owner-only; no live
+  provider calls, rollout, durable state/storage/admin/retention changes or
+  release/privacy claims are approved;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2106,6 +2116,24 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-13.
+- Change: Issue #501 / #204AV adds an owner-only local glossary-useful
+  preflight to the DOCX/EPUB runtime glossary test path in
+  `src/translator_service/translation_runner.py`, with focused coverage in
+  `tests/test_translation_runner.py`.
+- Evidence: local tests cover unchanged default/cache behavior, READY
+  cache-bypass metadata, owner-switch-required prompt rehearsal, bounded
+  glossary context only for useful READY units, and fallback to default cache
+  behavior when the selected source term/alias is absent, target metadata is
+  missing, source pressure exceeds the local cap or prompt-context config is
+  invalid. Metadata callbacks omit raw source text, prompt bodies, provider
+  bodies and translations.
+- Follow-up: #501 is still disabled/test-only local evidence. Do not infer
+  normal runtime glossary prompt rollout, live provider calls, glossary-aware
+  cache reuse, durable state mutation, storage/admin/retention behavior,
+  user-visible behavior, semantic truth or release/privacy/legal/support
+  readiness from #501.
+
+- Date: 2026-06-13.
 - Change: Issue #474 adds a default-off glossary runtime adapter hook in
   `src/translator_service/translation_runner.py`, with focused DOCX cache/
   prompt regression coverage in `tests/test_translation_runner.py`.
@@ -2138,10 +2166,10 @@ Potential issues to verify:
   prompt rehearsal path in `src/translator_service/translation_runner.py`, with
   focused DOCX/EPUB coverage in `tests/test_translation_runner.py`.
 - Evidence: local tests cover READY rehearsal prompts that include the bounded
-  #475 glossary context only when `prompt_rehearsal_enabled` is set, cache
-  get/put bypass for glossary-injected READY test units, disabled/fallback
-  behavior that keeps the existing prompt/cache path, and metadata callbacks
-  that omit raw prompt/source/translation bodies.
+  #475 glossary context only on the explicit disabled/test path, cache get/put
+  bypass for glossary-injected READY test units, disabled/fallback behavior
+  that keeps the existing prompt/cache path, and metadata callbacks that omit
+  raw prompt/source/translation bodies.
 - Follow-up: #476 is fake/local rehearsal evidence only. Do not infer normal
   runtime glossary prompt injection, live provider calls, glossary-aware cache
   reuse, durable state mutation, storage/admin/retention behavior, user-visible
