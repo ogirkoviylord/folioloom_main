@@ -4,10 +4,11 @@ import html
 import logging
 import re
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath, PurePosixPath
-from typing import Callable
+from typing import Any
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
@@ -51,6 +52,12 @@ from translator_service.translation_jobs import (
     TranslationProgress,
     translate_text_fragments,
 )
+from translator_service.translation_policy import (
+    GlossaryPromptPolicyAdapterConfig,
+    GlossaryPromptPolicyAdapterDecision,
+    build_glossary_prompt_policy_adapter_decision,
+    glossary_prompt_policy_adapter_decision_payload,
+)
 from translator_service.translation_postprocess import clean_inline_formatting_artifacts
 
 logger = logging.getLogger(__name__)
@@ -63,6 +70,13 @@ class TranslatedDocument:
     content: bytes
     fragment_count: int
     is_partial: bool = False
+
+
+@dataclass(frozen=True)
+class GlossaryRuntimeAdapterHookConfig:
+    enabled: bool = False
+    glossary_plan: Mapping[str, Any] | None = None
+    max_selected_entries: int = 32
 
 
 def translate_txt_document(
@@ -147,6 +161,9 @@ def translate_docx_document(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslatedDocument:
     blocks = _extract_docx_blocks(content)
     auto_source_language_fallback = _auto_source_language_fallback(
@@ -167,6 +184,8 @@ def translate_docx_document(
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
             translation_cache=translation_cache,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
         is_partial = False
     except TranslationCancelled as error:
@@ -203,6 +222,9 @@ def translate_epub_document(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslatedDocument:
     from translator_service.format_adapters.epub import (
         extract_epub_translation_blocks,
@@ -224,6 +246,8 @@ def translate_epub_document(
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
             translation_cache=translation_cache,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
         is_partial = False
     except TranslationCancelled as error:
@@ -1603,6 +1627,9 @@ def _translate_docx_units(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslationJobResult:
     translated_blocks: list[FragmentTranslation] = []
     total_units = len(units)
@@ -1620,6 +1647,14 @@ def _translate_docx_units(
         unit_cache_miss_tokens = 0
         last_source_text = ""
         last_translated_text = ""
+        glossary_adapter_decision = _glossary_runtime_adapter_decision(
+            glossary_runtime_hook,
+            work_unit_sequence=unit_index,
+        )
+        _emit_glossary_adapter_metadata(
+            glossary_adapter_decision,
+            glossary_adapter_metadata_callback,
+        )
         for subgroup_source_language, subgroup_blocks in _docx_translation_subgroups(
             unit.blocks,
             source_language=source_language,
@@ -1666,6 +1701,7 @@ def _translate_docx_units(
                 source_language=subgroup_source_language,
                 target_language=target_language,
                 prompt_tier=unit.prompt_tier,
+                glossary_adapter_decision=glossary_adapter_decision,
             )
             if cached is not None:
                 translated_blocks.extend(
@@ -1807,6 +1843,7 @@ def _translate_docx_units(
                 source_language=subgroup_source_language,
                 target_language=target_language,
                 prompt_tier=unit.prompt_tier,
+                glossary_adapter_decision=glossary_adapter_decision,
             )
             if subgroup_blocks and parsed:
                 last_source_text = subgroup_blocks[-1].text
@@ -2570,6 +2607,9 @@ def _translate_epub_units(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ):
     translated_blocks = []
     total_units = len(units)
@@ -2580,12 +2620,21 @@ def _translate_epub_units(
             raise TranslationCancelled(_build_epub_translation_result(translated_blocks))
 
         unit_started_at = time.monotonic()
+        glossary_adapter_decision = _glossary_runtime_adapter_decision(
+            glossary_runtime_hook,
+            work_unit_sequence=unit_index,
+        )
+        _emit_glossary_adapter_metadata(
+            glossary_adapter_decision,
+            glossary_adapter_metadata_callback,
+        )
         cached = _translation_cache_get(
             translation_cache,
             blocks=[block.text for block in unit.blocks],
             source_language=source_language,
             target_language=target_language,
             prompt_tier=unit.prompt_tier,
+            glossary_adapter_decision=glossary_adapter_decision,
         )
         if cached is not None:
             translated_unit_blocks = [
@@ -2659,6 +2708,7 @@ def _translate_epub_units(
             source_language=source_language,
             target_language=target_language,
             prompt_tier=unit.prompt_tier,
+            glossary_adapter_decision=glossary_adapter_decision,
         )
         if progress_callback is not None:
             last_block = translated_unit_blocks[-1] if translated_unit_blocks else None
@@ -2819,6 +2869,32 @@ def _updated_context_memory(
     )
 
 
+def _glossary_runtime_adapter_decision(
+    config: GlossaryRuntimeAdapterHookConfig | None,
+    *,
+    work_unit_sequence: int,
+) -> GlossaryPromptPolicyAdapterDecision | None:
+    if config is None:
+        return None
+    return build_glossary_prompt_policy_adapter_decision(
+        config.glossary_plan,
+        config=GlossaryPromptPolicyAdapterConfig(
+            enabled=config.enabled,
+            work_unit_sequence=work_unit_sequence,
+            max_selected_entries=config.max_selected_entries,
+        ),
+    )
+
+
+def _emit_glossary_adapter_metadata(
+    decision: GlossaryPromptPolicyAdapterDecision | None,
+    callback: Callable[[dict[str, object]], None] | None,
+) -> None:
+    if decision is None or callback is None:
+        return
+    callback(glossary_prompt_policy_adapter_decision_payload(decision))
+
+
 def _translation_cache_get(
     translation_cache: TranslationCache | None,
     *,
@@ -2826,14 +2902,25 @@ def _translation_cache_get(
     source_language: str,
     target_language: str,
     prompt_tier: PromptTier,
+    glossary_adapter_decision: GlossaryPromptPolicyAdapterDecision | None = None,
 ) -> tuple[str, ...] | None:
     if translation_cache is None:
+        return None
+    if (
+        glossary_adapter_decision is not None
+        and not glossary_adapter_decision.cache_get_allowed
+    ):
         return None
     return translation_cache.get(
         source_texts=tuple(blocks),
         source_language=source_language,
         target_language=target_language,
         prompt_tier=prompt_tier,
+        signature_context=(
+            glossary_adapter_decision.signature_context
+            if glossary_adapter_decision is not None
+            else None
+        ),
     )
 
 
@@ -2845,8 +2932,14 @@ def _translation_cache_put(
     source_language: str,
     target_language: str,
     prompt_tier: PromptTier,
+    glossary_adapter_decision: GlossaryPromptPolicyAdapterDecision | None = None,
 ) -> None:
     if translation_cache is None:
+        return
+    if (
+        glossary_adapter_decision is not None
+        and not glossary_adapter_decision.cache_put_allowed
+    ):
         return
     translation_cache.put(
         source_texts=source_texts,
@@ -2854,6 +2947,11 @@ def _translation_cache_put(
         source_language=source_language,
         target_language=target_language,
         prompt_tier=prompt_tier,
+        signature_context=(
+            glossary_adapter_decision.signature_context
+            if glossary_adapter_decision is not None
+            else None
+        ),
     )
 
 
