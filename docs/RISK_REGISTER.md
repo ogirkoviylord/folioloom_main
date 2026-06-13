@@ -364,10 +364,14 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   runtime hook in the DOCX/EPUB runner that can emit compact adapter metadata
   and request cache bypass for READY enabled/test-path units only. Issue #475 /
   #204AK adds only a local bounded glossary prompt-context formatter with
-  escaping, budget caps and metadata-only omission reporting. Normal translation
-  prompts, provider calls, glossary-aware cache reuse, database/scheduler/
-  work-unit state, storage/admin/retention behavior and release/privacy claims
-  remain unchanged.
+  escaping, budget caps and metadata-only omission reporting. Issue #476 /
+  #204AL adds a disabled/test-only fake runtime rehearsal that prefixes
+  DOCX/EPUB fake-provider requests with bounded glossary context only when an
+  explicit rehearsal flag is enabled and the adapter decision is READY, with
+  compact metadata-only callbacks. Normal/default translation prompts, live
+  provider calls, glossary-aware cache reuse, database/scheduler/work-unit
+  state, storage/admin/retention behavior, user-visible behavior and release/
+  privacy claims remain unchanged.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.

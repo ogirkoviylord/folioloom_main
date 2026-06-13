@@ -619,7 +619,14 @@ Acceptance criteria:
   deterministic ordering, escaping, budget/count limits and metadata-only
   omitted/trimmed reasons. It remains local only and does not integrate runtime
   prompts, call providers, change cache behavior, mutate durable state/storage/
-  admin/retention or claim release/privacy readiness.
+  admin/retention or claim release/privacy readiness. Issue #476 / #204AL adds
+  the disabled/test-only fake runtime rehearsal: the DOCX/EPUB runner can
+  combine the default-off hook, #466 adapter decision and #475 formatter only
+  under an explicit rehearsal flag, prove cache bypass/fallback with local
+  stubs, and keep ordinary metadata redacted. It still does not approve normal
+  runtime prompt rollout, live provider calls, cache reuse, durable state/
+  storage/admin/retention changes, user-visible behavior or release/privacy
+  readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
