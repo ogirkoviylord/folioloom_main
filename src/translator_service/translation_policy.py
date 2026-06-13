@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from translator_service.entity_ledger import (
     EntityLedger,
@@ -39,6 +40,7 @@ ADAPTER_POLICY_VERSION = "generic-adapter-v2"
 TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION = (
     "translation-policy-signature-context-v1"
 )
+GLOSSARY_PROMPT_POLICY_ADAPTER_VERSION = "glossary-prompt-policy-adapter-v1"
 DEFAULT_GLOSSARY_SIGNATURE = "glossary-snapshot:none"
 DEFAULT_BOOK_PROFILE_SIGNATURE = "book-profile:none"
 DEFAULT_TRANSLATION_SNAPSHOT_SIGNATURE = "translation-contract-snapshot:none"
@@ -46,6 +48,36 @@ DEFAULT_GLOSSARY_SELECTION_SIGNATURE = "glossary-selection:none"
 DEFAULT_PROMPT_CONTRACT_VERSION = "prompt-contract:none"
 
 _SAFE_SIGNATURE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{0,127}$")
+_READY_GLOSSARY_SHADOW_STATUSES = frozenset({"planned", "planned_with_drops"})
+_RAW_GLOSSARY_PROMPT_POLICY_KEYS = frozenset(
+    {
+        "api_key",
+        "auth_material",
+        "authorization",
+        "bounded_source_excerpt",
+        "prompt_body",
+        "provider_request",
+        "provider_response",
+        "raw_source",
+        "raw_source_text",
+        "request_body",
+        "response_body",
+        "source_text",
+        "target_text",
+        "translated_text",
+        "translation_text",
+    }
+)
+_LOW_CONFIDENCE_GLOSSARY_STATUSES = frozenset(
+    {
+        "blocked",
+        "low",
+        "low_confidence",
+        "needs_review",
+        "review_required",
+        "warning",
+    }
+)
 
 
 class OutputContract(StrEnum):
@@ -58,6 +90,17 @@ class ProviderOutputFormat(StrEnum):
     JSON_TRANSLATION_BATCH = "json_translation_batch"
 
 
+class GlossaryPromptPolicyAdapterStatus(StrEnum):
+    DISABLED = "disabled"
+    READY = "ready"
+    FALLBACK = "fallback"
+
+
+class GlossaryPromptPolicyCacheBehavior(StrEnum):
+    DEFAULT_RUNTIME_CACHE = "default_runtime_cache"
+    BYPASS_GLOSSARY_INJECTED_CACHE = "bypass_glossary_injected_cache"
+
+
 @dataclass(frozen=True)
 class TranslationPolicySignatureContext:
     glossary_signature: str = DEFAULT_GLOSSARY_SIGNATURE
@@ -67,6 +110,32 @@ class TranslationPolicySignatureContext:
     selected_rule_ids: tuple[str, ...] = ()
     prompt_contract_version: str = DEFAULT_PROMPT_CONTRACT_VERSION
     context_version: str = TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION
+
+
+@dataclass(frozen=True)
+class GlossaryPromptPolicyAdapterConfig:
+    enabled: bool = False
+    work_unit_sequence: int | None = None
+    max_selected_entries: int = 32
+
+
+@dataclass(frozen=True)
+class GlossaryPromptPolicyAdapterDecision:
+    adapter_version: str
+    enabled: bool
+    status: GlossaryPromptPolicyAdapterStatus
+    fallback_reason: str
+    prompt_planning_allowed: bool
+    signature_context: TranslationPolicySignatureContext | None
+    selected_entry_ids: tuple[str, ...]
+    work_unit_sequence: int | None
+    work_unit_selection_signature: str | None
+    cache_behavior: GlossaryPromptPolicyCacheBehavior
+    cache_get_allowed: bool
+    cache_put_allowed: bool
+    normal_translation_prompts_changed: bool = False
+    live_provider_calls_allowed: bool = False
+    durable_state_mutation_allowed: bool = False
 
 
 @dataclass(frozen=True)
@@ -265,6 +334,160 @@ def translation_policy_signature_context_payload(
     }
 
 
+def build_glossary_prompt_policy_adapter_decision(
+    glossary_plan: Mapping[str, Any] | None = None,
+    *,
+    config: GlossaryPromptPolicyAdapterConfig | None = None,
+) -> GlossaryPromptPolicyAdapterDecision:
+    config = config or GlossaryPromptPolicyAdapterConfig()
+    if not config.enabled:
+        return _glossary_adapter_disabled_decision()
+    if config.max_selected_entries < 0:
+        return _glossary_adapter_fallback_decision(
+            "invalid_adapter_config",
+            enabled=True,
+        )
+    if not isinstance(glossary_plan, Mapping):
+        return _glossary_adapter_fallback_decision(
+            "missing_glossary_plan",
+            enabled=True,
+        )
+    if _contains_raw_glossary_prompt_policy_field(glossary_plan):
+        return _glossary_adapter_fallback_decision(
+            "raw_diagnostic_field_present",
+            enabled=True,
+        )
+    if glossary_plan.get("enabled") is not True:
+        return _glossary_adapter_fallback_decision(
+            "glossary_shadow_plan_disabled",
+            enabled=True,
+        )
+    if _has_low_confidence_glossary_status(glossary_plan):
+        return _glossary_adapter_fallback_decision(
+            "low_confidence_glossary_data",
+            enabled=True,
+        )
+
+    plan_status = str(glossary_plan.get("status", "Unknown"))
+    if plan_status == "planned_with_budget_fallback":
+        return _glossary_adapter_fallback_decision(
+            "over_budget_glossary_selection",
+            enabled=True,
+        )
+    if plan_status not in _READY_GLOSSARY_SHADOW_STATUSES:
+        return _glossary_adapter_fallback_decision(
+            _compact_fallback_reason(
+                glossary_plan.get("fallback_reason"),
+                default="glossary_plan_not_ready",
+            ),
+            enabled=True,
+        )
+
+    try:
+        signature_context = _signature_context_from_glossary_plan(glossary_plan)
+    except (KeyError, TypeError, ValueError):
+        return _glossary_adapter_fallback_decision(
+            "invalid_policy_signature_context",
+            enabled=True,
+        )
+
+    work_unit = _select_glossary_prompt_work_unit(
+        glossary_plan,
+        work_unit_sequence=config.work_unit_sequence,
+    )
+    if work_unit is None:
+        return _glossary_adapter_fallback_decision(
+            "missing_work_unit_plan",
+            enabled=True,
+        )
+    if _glossary_work_unit_exceeds_budget(work_unit):
+        return _glossary_adapter_fallback_decision(
+            "over_budget_glossary_selection",
+            enabled=True,
+        )
+    if _has_low_confidence_glossary_status(work_unit):
+        return _glossary_adapter_fallback_decision(
+            "low_confidence_glossary_data",
+            enabled=True,
+        )
+
+    try:
+        selected_entry_ids = _selected_glossary_entry_ids(work_unit)
+    except (TypeError, ValueError):
+        return _glossary_adapter_fallback_decision(
+            "invalid_selected_entry_ids",
+            enabled=True,
+        )
+    if not selected_entry_ids:
+        return _glossary_adapter_fallback_decision(
+            "empty_glossary_selection",
+            enabled=True,
+        )
+    if len(selected_entry_ids) > config.max_selected_entries:
+        return _glossary_adapter_fallback_decision(
+            "over_budget_glossary_selection",
+            enabled=True,
+        )
+    try:
+        work_unit_selection_signature = _work_unit_selection_signature(work_unit)
+    except ValueError:
+        return _glossary_adapter_fallback_decision(
+            "invalid_work_unit_selection_signature",
+            enabled=True,
+        )
+
+    return GlossaryPromptPolicyAdapterDecision(
+        adapter_version=GLOSSARY_PROMPT_POLICY_ADAPTER_VERSION,
+        enabled=True,
+        status=GlossaryPromptPolicyAdapterStatus.READY,
+        fallback_reason="none",
+        prompt_planning_allowed=True,
+        signature_context=signature_context,
+        selected_entry_ids=selected_entry_ids,
+        work_unit_sequence=_work_unit_sequence(work_unit),
+        work_unit_selection_signature=work_unit_selection_signature,
+        cache_behavior=(
+            GlossaryPromptPolicyCacheBehavior.BYPASS_GLOSSARY_INJECTED_CACHE
+        ),
+        cache_get_allowed=False,
+        cache_put_allowed=False,
+    )
+
+
+def glossary_prompt_policy_adapter_decision_payload(
+    decision: GlossaryPromptPolicyAdapterDecision,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "adapter_version": decision.adapter_version,
+        "enabled": decision.enabled,
+        "status": decision.status.value,
+        "fallback_reason": decision.fallback_reason,
+        "prompt_planning_allowed": decision.prompt_planning_allowed,
+        "selected_entry_ids": list(decision.selected_entry_ids),
+        "work_unit_sequence": decision.work_unit_sequence,
+        "work_unit_selection_signature": decision.work_unit_selection_signature,
+        "cache_policy": {
+            "behavior": decision.cache_behavior.value,
+            "cache_get_allowed": decision.cache_get_allowed,
+            "cache_put_allowed": decision.cache_put_allowed,
+        },
+        "runtime_integration": {
+            "normal_translation_prompts_changed": (
+                decision.normal_translation_prompts_changed
+            ),
+            "live_provider_calls_allowed": decision.live_provider_calls_allowed,
+            "durable_state_mutation_allowed": (
+                decision.durable_state_mutation_allowed
+            ),
+        },
+    }
+    if decision.signature_context is not None:
+        payload["policy_signature_context"] = (
+            translation_policy_signature_context_payload(decision.signature_context)
+        )
+    return payload
+
+
 def translation_policy_signature(
     policy: TranslationPolicy,
     *,
@@ -337,6 +560,212 @@ def _normalize_signature_context(
             field_name="context_version",
         ),
     )
+
+
+def _glossary_adapter_disabled_decision() -> GlossaryPromptPolicyAdapterDecision:
+    return GlossaryPromptPolicyAdapterDecision(
+        adapter_version=GLOSSARY_PROMPT_POLICY_ADAPTER_VERSION,
+        enabled=False,
+        status=GlossaryPromptPolicyAdapterStatus.DISABLED,
+        fallback_reason="adapter_disabled_by_default",
+        prompt_planning_allowed=False,
+        signature_context=None,
+        selected_entry_ids=(),
+        work_unit_sequence=None,
+        work_unit_selection_signature=None,
+        cache_behavior=GlossaryPromptPolicyCacheBehavior.DEFAULT_RUNTIME_CACHE,
+        cache_get_allowed=True,
+        cache_put_allowed=True,
+    )
+
+
+def _glossary_adapter_fallback_decision(
+    fallback_reason: str,
+    *,
+    enabled: bool,
+) -> GlossaryPromptPolicyAdapterDecision:
+    return GlossaryPromptPolicyAdapterDecision(
+        adapter_version=GLOSSARY_PROMPT_POLICY_ADAPTER_VERSION,
+        enabled=enabled,
+        status=GlossaryPromptPolicyAdapterStatus.FALLBACK,
+        fallback_reason=_compact_fallback_reason(fallback_reason),
+        prompt_planning_allowed=False,
+        signature_context=None,
+        selected_entry_ids=(),
+        work_unit_sequence=None,
+        work_unit_selection_signature=None,
+        cache_behavior=GlossaryPromptPolicyCacheBehavior.DEFAULT_RUNTIME_CACHE,
+        cache_get_allowed=True,
+        cache_put_allowed=True,
+    )
+
+
+def _signature_context_from_glossary_plan(
+    glossary_plan: Mapping[str, Any],
+) -> TranslationPolicySignatureContext:
+    context_payload = glossary_plan["policy_signature_context"]
+    if not isinstance(context_payload, Mapping):
+        raise TypeError("policy_signature_context must be a mapping.")
+    context_version = context_payload.get(
+        "context_version",
+        TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION,
+    )
+    if context_version != TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION:
+        raise ValueError("policy_signature_context has an unsupported version.")
+    selected_rule_ids = context_payload.get("selected_rule_ids", ())
+    if isinstance(selected_rule_ids, (str, bytes)) or not isinstance(
+        selected_rule_ids,
+        Iterable,
+    ):
+        raise TypeError("selected_rule_ids must be a compact identifier sequence.")
+    return build_translation_policy_signature_context(
+        glossary_signature=_compact_payload_value(
+            context_payload,
+            "glossary_signature",
+        ),
+        profile_signature=_compact_payload_value(
+            context_payload,
+            "profile_signature",
+        ),
+        translation_snapshot_signature=_compact_payload_value(
+            context_payload,
+            "translation_snapshot_signature",
+        ),
+        selection_signature=_compact_payload_value(
+            context_payload,
+            "selection_signature",
+        ),
+        selected_rule_ids=tuple(str(item) for item in selected_rule_ids),
+        prompt_contract_version=_compact_payload_value(
+            context_payload,
+            "prompt_contract_version",
+        ),
+    )
+
+
+def _compact_payload_value(payload: Mapping[str, Any], field_name: str) -> str:
+    value = payload[field_name]
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a compact identifier.")
+    return value
+
+
+def _select_glossary_prompt_work_unit(
+    glossary_plan: Mapping[str, Any],
+    *,
+    work_unit_sequence: int | None,
+) -> Mapping[str, Any] | None:
+    work_units = glossary_plan.get("work_unit_plans")
+    if isinstance(work_units, (str, bytes)) or not isinstance(work_units, Iterable):
+        return None
+    candidates = tuple(item for item in work_units if isinstance(item, Mapping))
+    if not candidates:
+        return None
+    if work_unit_sequence is None:
+        return candidates[0]
+    for candidate in candidates:
+        if candidate.get("work_unit_sequence") == work_unit_sequence:
+            return candidate
+    return None
+
+
+def _glossary_work_unit_exceeds_budget(work_unit: Mapping[str, Any]) -> bool:
+    fallback_reasons = work_unit.get("fallback_reason_codes", ())
+    if isinstance(fallback_reasons, str):
+        fallback_reasons = (fallback_reasons,)
+    if work_unit.get("budget_exceeded") is True:
+        return True
+    if work_unit.get("budget_status") == "fallback_omitted":
+        return True
+    if any(
+        str(reason) in {"prompt_budget_exhausted", "selection_budget_exceeded"}
+        for reason in fallback_reasons
+    ):
+        return True
+    return work_unit.get("fallback_action") == "omit_glossary_prompt_context"
+
+
+def _selected_glossary_entry_ids(work_unit: Mapping[str, Any]) -> tuple[str, ...]:
+    selected_entry_ids = work_unit.get("selected_entry_ids")
+    if isinstance(selected_entry_ids, (str, bytes)) or not isinstance(
+        selected_entry_ids,
+        Iterable,
+    ):
+        raise TypeError("selected_entry_ids must be a compact identifier sequence.")
+    return _normalize_signature_identifier_sequence_ordered(
+        selected_entry_ids,
+        field_name="selected_entry_ids",
+    )
+
+
+def _work_unit_sequence(work_unit: Mapping[str, Any]) -> int | None:
+    value = work_unit.get("work_unit_sequence")
+    return value if isinstance(value, int) else None
+
+
+def _work_unit_selection_signature(work_unit: Mapping[str, Any]) -> str | None:
+    value = work_unit.get("selection_signature")
+    if value is None:
+        return None
+    return _normalize_signature_identifier(
+        str(value),
+        field_name="work_unit_selection_signature",
+    )
+
+
+def _contains_raw_glossary_prompt_policy_field(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key).lower() in _RAW_GLOSSARY_PROMPT_POLICY_KEYS:
+                return True
+            if _contains_raw_glossary_prompt_policy_field(child):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_raw_glossary_prompt_policy_field(child) for child in value)
+    return False
+
+
+def _has_low_confidence_glossary_status(value: Mapping[str, Any]) -> bool:
+    if value.get("needs_review") is True or value.get("low_confidence") is True:
+        return True
+    for field_name in (
+        "confidence_status",
+        "glossary_confidence",
+        "quality_status",
+        "readiness_status",
+    ):
+        if (
+            str(value.get(field_name, "")).strip().lower()
+            in _LOW_CONFIDENCE_GLOSSARY_STATUSES
+        ):
+            return True
+    return False
+
+
+def _compact_fallback_reason(value: object, *, default: str = "fallback") -> str:
+    if not isinstance(value, str) or not value.strip():
+        value = default
+    normalized = value.strip().lower().replace(" ", "_").replace("-", "_")
+    return re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")[:96] or default
+
+
+def _normalize_signature_identifier_sequence_ordered(
+    values: Iterable[str],
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = _normalize_signature_identifier(
+            str(value),
+            field_name=f"{field_name}[]",
+        )
+        if normalized not in seen:
+            normalized_values.append(normalized)
+            seen.add(normalized)
+    return tuple(normalized_values)
 
 
 def _normalize_signature_identifier_sequence(
