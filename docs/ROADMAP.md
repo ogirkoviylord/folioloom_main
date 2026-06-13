@@ -650,9 +650,12 @@ Acceptance criteria:
   requires the owner battle-test switch, READY adapter decision, source term or
   alias presence in the unit, target metadata and local pressure/budget pass;
   otherwise the unit falls back to the existing non-glossary translation/cache
-  path with metadata-only reason codes. The nearest safe next step remains
-  local-only smaller EPUB unit selection/output-budget work before any fresh
-  provider-smoke approval.
+  path with metadata-only reason codes. Issue #503 / #204AW adds the local-only
+  EPUB unit/output-budget selector before any fresh smoke approval: the smoke
+  runner now selects only #501-style glossary-useful, pressure-safe EPUB units
+  or emits metadata-only skip/fallback reasons. A fresh live paired EPUB smoke
+  still needs exact owner approval; rollout, cache reuse and release/privacy
+  claims remain unapproved.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
