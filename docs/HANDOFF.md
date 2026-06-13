@@ -1590,6 +1590,12 @@ core flow, release gates, operational visibility and documentation.
   glossary-off quality benefit remains `Unknown`; keep runtime glossary
   shadow-only and iterate EPUB prompt/selection budget before another bounded
   paired quality review;
+- treat issue #479 / #204AO as metadata-only decision preparation, not an owner
+  go/no-go decision: normal/default runtime glossary rollout and limited beta
+  rollout are rejected for now; the recommended path is to keep shadow-only,
+  create a local EPUB prompt/selection budget iteration issue only after owner
+  selection, then request fresh approval for a paired glossary-on/off smoke.
+  Final owner path remains `TBD`;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2131,6 +2137,19 @@ Potential issues to verify:
 - Follow-up: keep runtime glossary shadow-only, iterate EPUB prompt/selection
   budget and design a paired glossary-on/off bounded quality run before any
   rollout decision. Comparative glossary benefit remains `Unknown`.
+
+- Date: 2026-06-13.
+- Change: Issue #479 / #204AO adds a metadata-only controlled glossary runtime
+  decision-prep report at
+  `docs/superpowers/specs/2026-06-13-controlled-glossary-runtime-decision-prep.md`.
+- Evidence: #474-#476 local/default-off foundations are merged, #477 live smoke
+  validated three TXT calls and failed both approved EPUB calls, and #478
+  recorded `NEEDS REVIEW` because no paired non-glossary baseline was
+  available.
+- Follow-up: final owner go/no-go remains `TBD`. No follow-up issues were
+  created because no owner path has been selected. Recommended path is
+  shadow-only plus local EPUB prompt/selection budget iteration, then a fresh
+  owner-approved paired glossary-on/off provider smoke.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
