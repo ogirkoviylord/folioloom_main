@@ -381,9 +381,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   compact metadata-only callbacks. Issue #477 / #204AM adds the bounded live
   provider smoke runner/report; fake preflight passed, three approved TXT calls
   validated and the approved EPUB RU/UK calls failed on provider `length` plus
-  local `truncated_output`/`external_text` validation. Normal/default
-  translation prompts, live provider rollout, glossary-aware cache reuse,
-  database/scheduler/work-unit state, storage/admin/retention behavior,
+  local `truncated_output`/`external_text` validation. Issue #478 / #204AN
+  records a `NEEDS REVIEW` quality verdict because paired non-glossary
+  comparison outputs were unavailable, so comparative glossary benefit remains
+  `Unknown`. Normal/default translation prompts, live provider rollout,
+  glossary-aware cache reuse, database/scheduler/work-unit state,
+  storage/admin/retention behavior,
   user-visible behavior and release/privacy claims remain unchanged.
 
 - Task: Спроектировать TTL cleanup/delete verification.
