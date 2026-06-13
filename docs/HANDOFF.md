@@ -1614,6 +1614,12 @@ core flow, release gates, operational visibility and documentation.
   cache-bypass metadata and recording metadata-only fallback action/reason
   codes. Thresholds are local guardrails for bounded rehearsal/smoke only;
   release/runtime rollout thresholds remain `TBD`;
+- treat issue #489 / #204AR as the local completion-first EPUB glossary
+  selector/prompt-context budget tuning slice: the smoke runner now computes
+  per-unit selection/context budgets, reduces EPUB glossary context before
+  provider smoke when source-block or completion pressure is high, and records
+  compact budget policy/reason codes. This is still disabled/test-path
+  behavior only, not a normal runtime rollout or provider evidence;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2198,10 +2204,28 @@ Potential issues to verify:
   `tests.test_translation_runner.TranslationRunnerTest` runtime-hook tests and
   targeted `ruff` passed locally before final full-gate verification.
 - Follow-up: #488 is a local disabled/test-only guardrail. It does not implement
-  #489 selector/formatter tuning, #490 fake paired rehearsal, #491 live smoke,
-  default runtime glossary rollout, cache reuse, durable
-  state/storage/admin/retention mutation, provider config changes or
-  release/privacy/legal/support claims.
+  #490 fake paired rehearsal, #491 live smoke, default runtime glossary rollout,
+  cache reuse, durable state/storage/admin/retention mutation, provider config
+  changes or release/privacy/legal/support claims.
+
+- Date: 2026-06-13.
+- Change: Issue #489 / #204AR adds local completion-first EPUB glossary
+  selector and prompt-context budget tuning to
+  `tools/glossary_runtime_provider_smoke.py`, with focused tests in
+  `tests/test_glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover reduced high-pressure EPUB context budgets below
+  the #488 hard fallback threshold, omitted context under exhausted completion
+  headroom, formatter escaping, metadata-only budget reason codes, existing
+  selector/formatter contracts and default runtime-hook/cache behavior.
+  `PYTHONPATH=src python3 -m unittest tests.test_glossary_runtime_provider_smoke
+  tests.test_glossary_selection tests.test_glossary_prompt_context` plus
+  focused `tests.test_translation_runner.TranslationRunnerTest` runtime-hook
+  tests, targeted `ruff`, and `py_compile` passed locally before final
+  full-gate verification.
+- Follow-up: #489 is local tuning evidence only. It does not implement #490 fake
+  paired rehearsal, #491 live smoke, default runtime glossary rollout, cache
+  reuse, durable state/storage/admin/retention mutation, provider config
+  changes or release/privacy/legal/support claims.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary
