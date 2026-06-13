@@ -641,7 +641,10 @@ Acceptance criteria:
   verdict of `NEEDS REVIEW`: no paired non-glossary comparison outputs were
   available, so glossary-on/off quality benefit remains `Unknown`; keep
   runtime glossary shadow-only and design a paired bounded quality run after
-  EPUB prompt/selection iteration.
+  EPUB prompt/selection iteration. Issue #479 / #204AO prepares the owner
+  decision packet and rejects normal/default or limited-beta runtime glossary
+  rollout for now. Final owner path remains `TBD`; no follow-up issues are
+  created until the owner selects the path.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
