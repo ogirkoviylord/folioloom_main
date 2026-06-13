@@ -1554,6 +1554,14 @@ core flow, release gates, operational visibility and documentation.
   Normal prompts, provider calls, durable cache/storage/database/scheduler/
   admin/retention state, user-visible behavior and release/privacy/legal/
   support claims remain unchanged;
+- treat issue #475 / #204AK as the local glossary prompt-context formatter
+  contract only: `src/translator_service/glossary_prompt_context.py` formats
+  compact selected glossary entries as escaped, bounded, untrusted reference
+  data for future controlled tests, and returns metadata-only included/omitted
+  entry and field-trim information. It does not integrate with normal prompts,
+  call providers, change cache behavior, mutate durable state/storage/admin/
+  retention behavior, prove semantic glossary truth or claim release/privacy
+  readiness;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2035,6 +2043,19 @@ Potential issues to verify:
   cache reuse, durable state mutation, storage/admin/retention behavior,
   user-visible behavior, semantic truth or release/privacy/legal/support
   readiness from #474.
+
+- Date: 2026-06-13.
+- Change: Issue #475 / #204AK adds a local bounded glossary prompt-context
+  formatter in `src/translator_service/glossary_prompt_context.py`, with
+  focused tests in `tests/test_glossary_prompt_context.py`.
+- Evidence: local tests cover deterministic selected-entry ordering, escaping
+  of delimiter/injection-like text, untrusted-reference framing, entry/token/
+  character budget omissions, raw-capable mapping field rejection, field trim
+  metadata and invalid formatter config.
+- Follow-up: #475 is formatter-contract evidence only. Do not infer runtime
+  prompt integration, live provider calls, cache behavior changes, durable
+  state mutation, storage/admin/retention behavior, semantic truth or release/
+  privacy/legal/support readiness from #475.
 
 - Date: 2026-06-13.
 - Change: Issue #466 / #204AH adds a disabled-by-default glossary

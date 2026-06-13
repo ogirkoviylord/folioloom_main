@@ -370,14 +370,14 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   Decision status: issue #435 / #204S implemented a local helper and tests only.
   Issue #466 / #204AH implements a disabled-by-default prompt-policy adapter
   decision contract that accepts compact shadow metadata in an enabled/test path
-  and falls back for unready data. Normal translation prompts, provider calls,
-  glossary-aware cache reuse, database/scheduler/work-unit state, storage/admin/
-  retention behavior and release/privacy claims remain unchanged. Issue #474
-  adds a controlled default-off runtime hook in the DOCX/EPUB runner that can
-  emit compact adapter metadata and request cache bypass for READY enabled/
-  test-path units only; it does not add normal prompt injection, provider
-  calls, durable state mutation, user-visible behavior or release/privacy
-  claims.
+  and falls back for unready data. Issue #474 adds a controlled default-off
+  runtime hook in the DOCX/EPUB runner that can emit compact adapter metadata
+  and request cache bypass for READY enabled/test-path units only. Issue #475 /
+  #204AK adds only a local bounded glossary prompt-context formatter with
+  escaping, budget caps and metadata-only omission reporting. Normal translation
+  prompts, provider calls, glossary-aware cache reuse, database/scheduler/
+  work-unit state, storage/admin/retention behavior and release/privacy claims
+  remain unchanged.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.

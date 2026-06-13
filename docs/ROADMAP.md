@@ -619,7 +619,12 @@ Acceptance criteria:
   units request cache get/put bypass, while disabled/fallback paths keep
   existing cache behavior. #474 still does not inject glossary text into normal
   prompts, call providers, mutate durable state/storage/admin/retention, change
-  user-visible behavior or claim release/privacy readiness.
+  user-visible behavior or claim release/privacy readiness. Issue #475 /
+  #204AK adds the local formatter contract for future glossary prompt context:
+  deterministic ordering, escaping, budget/count limits and metadata-only
+  omitted/trimmed reasons. It remains local only and does not integrate runtime
+  prompts, call providers, change cache behavior, mutate durable state/storage/
+  admin/retention or claim release/privacy readiness.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
