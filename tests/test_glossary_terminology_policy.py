@@ -115,7 +115,7 @@ class GlossaryTerminologyPolicyTest(unittest.TestCase):
         self.assertFalse(payload["semantic_quality_claim_made"])
         self.assertFalse(payload["full_morphology_claim_made"])
 
-    def test_exact_matching_uses_configured_canonical_only(self):
+    def test_exact_matching_uses_configured_canonical_and_variants(self):
         policy = _policy(
             "terminology_policy.generic.exact",
             target_language="es",
@@ -134,6 +134,18 @@ class GlossaryTerminologyPolicyTest(unittest.TestCase):
             target_canonical="Casa Norte",
             target_variants=("Casa Septentrional",),
         )
+        canonical_only_policy = _policy(
+            "terminology_policy.generic.exact_canonical",
+            target_language="es",
+            match_mode=TerminologyMatchMode.EXACT,
+            allowed_variant_strategy=AllowedVariantStrategy.CANONICAL_ONLY,
+        )
+        canonical_only_variant = match_terminology_target(
+            canonical_only_policy,
+            translated_text="La Casa Septentrional aparece aqui.",
+            target_canonical="Casa Norte",
+            target_variants=("Casa Septentrional",),
+        )
         substring = match_terminology_target(
             policy,
             translated_text="Casa Norteno is a different token.",
@@ -144,7 +156,13 @@ class GlossaryTerminologyPolicyTest(unittest.TestCase):
         self.assertTrue(hit.local_form_match)
         self.assertEqual(hit.matched_form_kind, "canonical")
         self.assertIn(TerminologyPolicyReasonCode.POLICY_EXACT_MATCH, hit.reason_codes)
-        self.assertEqual(variant_only.status, TerminologyMatchStatus.NO_MATCH)
+        self.assertEqual(variant_only.status, TerminologyMatchStatus.MATCH)
+        self.assertEqual(variant_only.matched_form_kind, "variant")
+        self.assertIn(
+            TerminologyPolicyReasonCode.POLICY_VARIANT_MATCH,
+            variant_only.reason_codes,
+        )
+        self.assertEqual(canonical_only_variant.status, TerminologyMatchStatus.NO_MATCH)
         self.assertEqual(substring.status, TerminologyMatchStatus.NO_MATCH)
 
     def test_casefold_matching_is_unicode_casefold_only(self):
