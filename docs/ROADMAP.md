@@ -678,9 +678,11 @@ Acceptance criteria:
   for the package units, with structural validation passing and RU/UK
   glossary-off compliance findings to review. Issue #535 adds the no-code
   runtime rollout state machine and evidence gates; it keeps normal/default and
-  limited-beta rollout rejected for now. Normal runtime glossary rollout, cache
-  reuse, additional provider calls outside separately approved bounds and
-  release/privacy/legal/support readiness remain unapproved.
+  limited-beta rollout rejected for now. Issue #536 adds the no-code
+  glossary-aware cache-key design while preserving #465 bypass. Normal runtime
+  glossary rollout, cache reuse, additional provider calls outside separately
+  approved bounds and release/privacy/legal/support readiness remain
+  unapproved.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
@@ -693,8 +695,8 @@ Acceptance criteria:
   #532 add local policy package fixtures/tests, issue #533 records a
   metadata-only fake/dry provider-evidence preflight, and issue #534 records
   bounded live provider-boundary evidence. Issue #535 records the no-code
-  runtime rollout design. Remaining future work: cache-key design, #537
-  decision prep and release diagnostic policy.
+  runtime rollout design, and issue #536 records the no-code cache-key design.
+  Remaining future work: #537 decision prep and release diagnostic policy.
   Evidence: #517 recorded the architecture, #518 added the local registry,
   #519 added synthetic/authorized RU/UK fixture coverage, #520 added
   policy-aware metadata-only compliance summaries, #521 added opt-in compact

@@ -165,6 +165,28 @@ coverage, compliance-adapter payloads and prompt-context metadata boundary.
   cache reuse, provider calls, storage/admin/retention changes or
   release/privacy/legal/support claims.
 
+### Glossary-aware cache keys
+
+These gates apply to future glossary-aware cache reuse proposals. Issue #536
+records the current no-code design in
+`docs/superpowers/specs/2026-06-14-glossary-cache-key-design.md`.
+
+- Current approved behavior remains #465 cache bypass for glossary-injected
+  enabled/test-path units. This gate does not approve reuse.
+- Future reuse must key every output-affecting dimension or bypass: source and
+  target language, source text, prompt/protection/adapter/output contracts,
+  glossary/profile/snapshot/selection signatures, terminology policy/package
+  id/version/match mode, formatter contract, fallback/degrade state,
+  runtime/test-path state and any owner-approved provider/model dimension.
+- Missing, invalid, unsupported, stale, over-budget or `Unknown` dimensions
+  must force bypass or explicit non-glossary fallback, not reuse.
+- Test-path cache entries must not be reusable as normal runtime entries.
+- Durable cache migration/invalidation requires a separate approved issue and
+  rollback/forward-fix plan.
+- Cache diagnostics in ordinary artifacts must stay metadata-only and must not
+  include raw source text, prompt bodies, provider responses, translated text,
+  API keys or provider auth material.
+
 ### Glossary runtime rollout
 
 These gates apply to future glossary runtime rollout proposals. Issue #535

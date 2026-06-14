@@ -90,7 +90,11 @@ Evidence:
   rollout state machine that keeps normal/default and limited-beta rollout
   rejected for now, preserves #465 cache bypass, and requires separate owner
   approval before any owner-only battle-test, beta/default rollout, cache reuse
-  or release/privacy/legal/support claim.
+  or release/privacy/legal/support claim. Issue #536 / #204BN records the
+  no-code glossary-aware cache-key design: future reuse must key every
+  output-affecting glossary/profile/snapshot/selection/policy/formatter/
+  fallback dimension or bypass, and current glossary-injected units still
+  bypass cache under #465.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added
