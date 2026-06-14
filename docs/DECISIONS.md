@@ -83,7 +83,11 @@ Evidence:
   contrast language-policy package fixtures/tests behind the terminology
   policy registry. Issue #533 / #204BK adds a metadata-only fake/dry
   provider-evidence protocol and package-aware paired preflight report for
-  #534; live provider behavior and translation quality remain `Unknown`.
+  #534. Issue #534 / #204BL adds bounded live provider-boundary evidence for
+  the selected package units: 6 calls completed, structural validation passed,
+  RU/UK glossary-on compliance passed, RU/UK glossary-off reported target-form
+  missing findings, and DE glossary-on/off compliance passed. Translation
+  quality remains `Unknown`.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added
