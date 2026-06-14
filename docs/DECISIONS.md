@@ -17,6 +17,87 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-14 - Glossary core remains language-neutral; terminology morphology lives in target-language policies
+
+Status: Active architecture rule for glossary/runtime/QA work
+
+Decision:
+- Glossary core must stay language-neutral. Core modules may store and pass
+  `target_language`, `target_canonical`, `target_variants`,
+  `forbidden_variants`, `morphology_notes`, evidence refs, confidence,
+  signatures and policy ids, but must not embed target-language-specific
+  morphology, inflection, script, segmentation or QA rules directly in core
+  selection, snapshot, formatter, compliance or cache/signature logic.
+- Target-language behavior belongs in an explicit terminology policy layer or
+  registry keyed by target language / language family. Policies may declare
+  modes such as `exact`, `casefold`, `variant_list`, `inflection_aware`,
+  `script_or_segmentation_aware` or `manual_review_required`.
+- Prompt formatting should consume compact policy metadata and approved
+  glossary fields; it should not become the owner of language morphology.
+- Compliance validation should apply the selected terminology policy and
+  return metadata-only `pass` / `findings` / `skipped` / `needs_review` style
+  outcomes with reason codes. Unsupported language behavior must remain
+  `TBD`, `Unknown` or `manual_review_required`; local code must not pretend to
+  prove semantic truth, name identity, gender, literary quality or full
+  morphology correctness.
+- RU/UK are the first concrete morphology/variant pressure case because the
+  controlled post-#510 glossary QA found valid declined forms outside the
+  configured exact variants. RU/UK work may be implemented first, but it must
+  be done through the shared terminology-policy mechanism rather than hardcoded
+  `ru`/`uk` branches in glossary core.
+- Adding a new target language for glossary compliance should normally be a
+  small policy package: policy id/version, match strategy, allowed/forbidden
+  variant strategy, prompt wording impact, focused fixtures/tests,
+  fallback/needs-review behavior and docs note. It must not require rewriting
+  the glossary core.
+- This decision does not approve normal runtime glossary rollout, glossary-aware
+  cache reuse, database/schema/state changes, storage/admin/retention changes,
+  live provider calls, provider config changes, public/legal/privacy/support
+  claims or release readiness.
+
+Evidence:
+- The owner approved this direction in the current Codex thread on 2026-06-14
+  after the post-#510 adversarial glossary live smoke and owner-only QA review.
+- `src/translator_service/glossary_contracts.py` stores language-neutral
+  glossary fields and signatures, including target metadata and morphology
+  notes, without implementing language-specific inflection.
+- `src/translator_service/glossary_compliance.py` currently checks exact
+  configured target canonical/variant forms only and emits
+  `morphology_policy_tbd` uncertainty metadata instead of claiming semantic or
+  morphological proof.
+- Current RU/UK-specific evidence lives mostly in fixtures, tests, smoke
+  boundaries and diagnostic notes such as `ru_uk_morphology_tbd`; it is not a
+  completed terminology-policy implementation.
+- `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`
+  records the #517 / #204BA no-code policy-registry boundary, including policy
+  descriptor fields, match modes, reason-code families, fallback behavior and
+  #516 child-issue sequencing.
+- The post-#510 controlled adversarial live test showed glossary-on outputs
+  using owner-approved terminology families while strict exact-form compliance
+  reported misses for valid declined forms not present in the allowed variant
+  list. Glossary-off outputs did not use the approved terminology stems.
+
+Consequences:
+- Future implementers should introduce a `target_language -> terminology_policy`
+  layer before expanding glossary compliance beyond exact configured forms.
+- Reviewers should reject new language-specific glossary behavior if it is
+  scattered across core modules instead of isolated in a policy/adapter
+  boundary with tests.
+- RU/UK morphology/variant coverage remains a near-term implementation target,
+  but the architecture must remain reusable for languages with cases,
+  agreement, agglutination, script/segmentation differences, clitics or mostly
+  exact terminology.
+- Normal runtime glossary rollout remains blocked until separate approved
+  issues prove prompt behavior, cache policy, diagnostics/privacy boundaries,
+  target-language terminology policies, local tests and bounded provider
+  evidence.
+
+Human approval required to change:
+- yes; hardcoding language-specific glossary behavior into core modules,
+  changing compliance semantics, enabling normal runtime glossary prompts,
+  adding glossary-aware cache reuse or claiming release/beta readiness requires
+  explicit owner approval and focused review.
+
 ### 2026-06-13 - First glossary-injected runtime adapter must bypass cache
 
 Status: Active for the first disabled/default-off glossary prompt adapter

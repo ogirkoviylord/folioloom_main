@@ -2134,6 +2134,30 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #517 / #204BA records the owner-approved glossary architecture
+  rule that glossary core remains language-neutral and target-language
+  morphology/terminology behavior must live in explicit policy/adapter
+  boundaries.
+- Evidence: `docs/DECISIONS.md` now records the active
+  "Glossary core remains language-neutral; terminology morphology lives in
+  target-language policies" decision. The no-code architecture package
+  `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`
+  defines policy descriptor fields, match modes, reason-code families, fallback
+  behavior and #516 child-issue sequencing. Current code evidence shows
+  `glossary_contracts`, scanner/selector/snapshot/formatter/compliance
+  foundations store/pass `target_language`, target metadata, variants,
+  forbidden variants, morphology notes, evidence and signatures without a
+  completed language-specific morphology engine. Post-#510 owner-only QA found
+  that RU/UK exact-form misses can be valid declined forms outside configured
+  variants, so RU/UK should be the first policy package rather than hardcoded
+  glossary-core behavior.
+- Follow-up: create separate issues for a terminology policy registry and
+  RU/UK morphology/variant coverage. Do not add language-specific glossary
+  branches directly to core modules; do not treat this docs decision as runtime
+  rollout, cache reuse, provider-call, storage/admin/retention or release
+  approval.
+
+- Date: 2026-06-14.
 - Change: Issue #510 adds a local-only/default-off glossary compliance
   validator in `src/translator_service/glossary_compliance.py` and wires
   metadata-only compliance summaries into
