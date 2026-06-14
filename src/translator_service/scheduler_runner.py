@@ -50,6 +50,8 @@ from translator_service.worker import (
     _provider_slot_stale_release_reason,
     _release_provider_slot_lease,
     _safe_provider_failure_error_message,
+    _scheduled_glossary_adapter_metadata_callback,
+    _scheduled_glossary_runtime_hook,
     load_scheduled_work_unit_text,
     refresh_scheduled_provider_slot_inventory,
     run_next_scheduled_stored_text_work_unit,
@@ -90,6 +92,11 @@ def run_scheduler_once(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_runtime_hook_resolver: Callable[
+        [PersistentWorkUnit],
+        GlossaryRuntimeAdapterHookConfig | None,
+    ]
+    | None = None,
     glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
     | None = None,
 ) -> SchedulerRunOnceSummary:
@@ -138,6 +145,7 @@ def run_scheduler_once(
                 allowed_source_object_keys=allowed_source_object_keys,
                 require_upload_safety_policy=require_upload_safety_policy,
                 glossary_runtime_hook=glossary_runtime_hook,
+                glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
                 glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         if completed is not None:
@@ -172,6 +180,7 @@ def run_scheduler_once(
             require_upload_safety_policy=require_upload_safety_policy,
             beta_safety_guard=beta_safety_guard,
             glossary_runtime_hook=glossary_runtime_hook,
+            glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
             glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
@@ -206,6 +215,11 @@ def _run_scheduled_parallel_once(
     require_upload_safety_policy: bool,
     beta_safety_guard: BetaSafetyGuard | None,
     glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
+    glossary_runtime_hook_resolver: Callable[
+        [PersistentWorkUnit],
+        GlossaryRuntimeAdapterHookConfig | None,
+    ]
+    | None,
     glossary_adapter_metadata_callback: Callable[[dict[str, object]], None] | None,
 ) -> tuple[int, int]:
     refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
@@ -302,6 +316,22 @@ def _run_scheduled_parallel_once(
                 if work_unit_started_callback is not None:
                     work_unit_started_callback(work_unit)
 
+                resolved_glossary_runtime_hook = _scheduled_glossary_runtime_hook(
+                    store=store,
+                    work_unit=work_unit,
+                    glossary_runtime_hook=glossary_runtime_hook,
+                    glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
+                )
+                resolved_glossary_adapter_metadata_callback = (
+                    _scheduled_glossary_adapter_metadata_callback(
+                        translation_run_log_root=translation_run_log_root,
+                        work_unit=work_unit,
+                        glossary_runtime_hook=resolved_glossary_runtime_hook,
+                        glossary_adapter_metadata_callback=(
+                            glossary_adapter_metadata_callback
+                        ),
+                    )
+                )
                 future = executor.submit(
                     translate_claimed_scheduled_stored_text_work_unit,
                     work_unit=work_unit,
@@ -313,9 +343,9 @@ def _run_scheduled_parallel_once(
                         translation_run_log_root,
                         job_id=claim.job_id,
                     ),
-                    glossary_runtime_hook=glossary_runtime_hook,
+                    glossary_runtime_hook=resolved_glossary_runtime_hook,
                     glossary_adapter_metadata_callback=(
-                        glossary_adapter_metadata_callback
+                        resolved_glossary_adapter_metadata_callback
                     ),
                 )
                 active[future] = (claim, lease_attempt.lease)
