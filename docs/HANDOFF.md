@@ -323,6 +323,17 @@ batch text and provider output, but must not contain the `Authorization` header
 or API key and must stay out of telemetry, normal admin/API views, support
 notes, GitHub issues, PR descriptions and release artifacts.
 
+Translation diagnostic file update on 2026-06-14: the owner approved including
+the original uploaded file and the final or partial translated result file in
+downloaded owner-only full diagnostic archives so diagnostic handoff does not
+require sending those files separately. The archive now has
+`diagnostic_files/manifest.json`, `diagnostic_files/original_file/...` and
+`diagnostic_files/translated_result/...` entries when the persistent job and
+object storage files are available. `run.json`, `effective_run.json` and
+`work_units.json` remain metadata-oriented; normal admin/API views, telemetry,
+support notes, GitHub issues, PR descriptions and release artifacts remain out
+of scope for raw file bytes.
+
 Issue #167 implementation slice on 2026-06-04: branch
 `codex/issue-167-book-manuscript-policy-profile` generalizes
 `book_manuscript` policy/profile context across persistent TXT, EPUB and DOCX

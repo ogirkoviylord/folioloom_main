@@ -60,8 +60,10 @@ evidence, а не создание документов с нуля.
   diagnostic archives are accepted exceptions. Downloaded full diagnostic
   archives may also include run-scoped `provider_io_diagnostics.jsonl` with
   exact provider request/response bodies for incident debugging, excluding
-  provider `Authorization` headers and API keys. Telemetry, normal admin pages,
-  APIs and support artifacts remain metadata-only/redacted.
+  provider `Authorization` headers and API keys, plus `diagnostic_files/`
+  copies of the original uploaded file and final or partial translated result.
+  Telemetry, normal admin pages, APIs and support artifacts remain
+  metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.
 
 ## 4. Phase 0 - Documentation and agent readiness
