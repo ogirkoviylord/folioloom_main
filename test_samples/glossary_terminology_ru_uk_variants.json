@@ -1,0 +1,274 @@
+{
+  "schema_version": "glossary-terminology-policy-fixture-v1",
+  "fixture_id": "ru-uk-terminology-variant-policy-metadata-v1",
+  "source_language": "en",
+  "scope": "synthetic_authorized_local_fixture_only",
+  "owner_approved": true,
+  "rights_basis": "Synthetic controlled terminology metadata created for local tests; no book, user, provider, prompt, or translated passage text is included.",
+  "metadata_safety": {
+    "metadata_only": true,
+    "synthetic_or_authorized": true,
+    "contains_raw_source_passages": false,
+    "contains_translated_passages": false,
+    "contains_prompt_bodies": false,
+    "contains_provider_responses": false,
+    "contains_owner_only_diagnostics": false,
+    "contains_api_keys_or_auth_material": false,
+    "semantic_quality_claim_made": false
+  },
+  "contract_guardrails": {
+    "glossary_core_language_neutral": true,
+    "ru_uk_represented_as_policy_data": true,
+    "runtime_prompt_integration_approved": false,
+    "provider_calls_approved": false,
+    "cache_behavior_changes_approved": false,
+    "storage_admin_retention_changes_approved": false,
+    "release_privacy_legal_support_claims_approved": false,
+    "full_morphology_correctness_claimed": false
+  },
+  "policies": [
+    {
+      "policy_id": "terminology_policy.ru.variant_list.fixture_v1",
+      "policy_version": "v1",
+      "target_language": "ru",
+      "language_family": "slavic",
+      "match_mode": "variant_list",
+      "normalization_mode": "unicode_nfc_exact",
+      "allowed_variant_strategy": "explicit_fixture_variants_only",
+      "forbidden_variant_strategy": "explicit_forbidden_forms_only",
+      "unsupported_fallback": "manual_review_required",
+      "reason_codes": [
+        "policy_variant_match",
+        "policy_forbidden_variant_present",
+        "policy_target_form_missing",
+        "policy_manual_review_required",
+        "morphology_policy_tbd",
+        "semantic_truth_not_proven",
+        "needs_human_review"
+      ],
+      "entries": [
+        {
+          "entry_id": "ru-glass-market",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Зеркальный Торг",
+          "approved_variants": [
+            "Зеркального Торга",
+            "Зеркальному Торгу",
+            "Зеркальным Торгом",
+            "Зеркальном Торге"
+          ],
+          "forbidden_variants": ["Стеклянный рынок", "Рынок стекла"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "ru-glass-market-approved-genitive",
+              "form": "Зеркального Торга",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "ru-glass-market-forbidden-calque",
+              "form": "Стеклянный рынок",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        },
+        {
+          "entry_id": "ru-quiet-knife",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Молчальник",
+          "approved_variants": [
+            "Молчальника",
+            "Молчальнику",
+            "Молчальником"
+          ],
+          "forbidden_variants": ["Тихий нож", "Безмолвный нож"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "ru-quiet-knife-approved-instrumental",
+              "form": "Молчальником",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "ru-quiet-knife-forbidden-literal",
+              "form": "Тихий нож",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        },
+        {
+          "entry_id": "ru-salt-thread",
+          "source_canonical": "Salt Thread",
+          "aliases": ["The Salt Thread"],
+          "target_canonical": "Солевязь",
+          "approved_variants": ["Солевязи", "Солевязью"],
+          "forbidden_variants": ["Соляная нить", "Нить соли"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "ru-salt-thread-approved-instrumental",
+              "form": "Солевязью",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "ru-salt-thread-forbidden-calque",
+              "form": "Соляная нить",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "policy_id": "terminology_policy.uk.variant_list.fixture_v1",
+      "policy_version": "v1",
+      "target_language": "uk",
+      "language_family": "slavic",
+      "match_mode": "variant_list",
+      "normalization_mode": "unicode_nfc_exact",
+      "allowed_variant_strategy": "explicit_fixture_variants_only",
+      "forbidden_variant_strategy": "explicit_forbidden_forms_only",
+      "unsupported_fallback": "manual_review_required",
+      "reason_codes": [
+        "policy_variant_match",
+        "policy_forbidden_variant_present",
+        "policy_target_form_missing",
+        "policy_manual_review_required",
+        "morphology_policy_tbd",
+        "semantic_truth_not_proven",
+        "needs_human_review"
+      ],
+      "entries": [
+        {
+          "entry_id": "uk-glass-market",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Дзеркальний Торг",
+          "approved_variants": [
+            "Дзеркального Торгу",
+            "Дзеркальному Торзі",
+            "Дзеркальним Торгом"
+          ],
+          "forbidden_variants": ["Скляний ринок", "Ринок скла"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "uk-glass-market-approved-locative",
+              "form": "Дзеркальному Торзі",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "uk-glass-market-forbidden-calque",
+              "form": "Скляний ринок",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        },
+        {
+          "entry_id": "uk-quiet-knife",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Мовчун-клинок",
+          "approved_variants": [
+            "Мовчуна-клинка",
+            "Мовчуну-клинку",
+            "Мовчуном-клинком"
+          ],
+          "forbidden_variants": ["Тихий ніж", "Безмовний ніж"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "uk-quiet-knife-approved-dative",
+              "form": "Мовчуну-клинку",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "uk-quiet-knife-forbidden-literal",
+              "form": "Тихий ніж",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        },
+        {
+          "entry_id": "uk-salt-thread",
+          "source_canonical": "Salt Thread",
+          "aliases": ["The Salt Thread"],
+          "target_canonical": "Солев’язь",
+          "approved_variants": ["Солев’язі", "Солев’яззю"],
+          "forbidden_variants": ["Соляна нитка", "Нитка солі"],
+          "coverage": "approved_variant_list",
+          "expected_cases": [
+            {
+              "case_id": "uk-salt-thread-approved-instrumental",
+              "form": "Солев’яззю",
+              "expected_outcome": "approved_variant",
+              "reason_codes": ["policy_variant_match"]
+            },
+            {
+              "case_id": "uk-salt-thread-forbidden-calque",
+              "form": "Соляна нитка",
+              "expected_outcome": "forbidden_variant",
+              "reason_codes": ["policy_forbidden_variant_present"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "coverage_gaps": [
+    {
+      "case_id": "ru-glass-market-unlisted-plural-instrumental",
+      "target_language": "ru",
+      "entry_id": "ru-glass-market",
+      "unlisted_form": "Зеркальными Торгами",
+      "expected_outcome": "needs_review",
+      "reason_codes": ["morphology_policy_tbd", "needs_human_review"]
+    },
+    {
+      "case_id": "ru-missing-target-metadata",
+      "target_language": "ru",
+      "source_canonical": "Unmapped Bell",
+      "target_canonical": null,
+      "expected_outcome": "Unknown",
+      "reason_codes": ["target_metadata_missing"]
+    },
+    {
+      "case_id": "uk-quiet-knife-unlisted-vocative",
+      "target_language": "uk",
+      "entry_id": "uk-quiet-knife",
+      "unlisted_form": "Мовчуне-клинку",
+      "expected_outcome": "TBD",
+      "reason_codes": ["morphology_policy_tbd", "needs_human_review"]
+    },
+    {
+      "case_id": "uk-salt-thread-unlisted-plural-instrumental",
+      "target_language": "uk",
+      "entry_id": "uk-salt-thread",
+      "unlisted_form": "Солев’язями",
+      "expected_outcome": "needs_review",
+      "reason_codes": ["morphology_policy_tbd", "needs_human_review"]
+    },
+    {
+      "case_id": "unsupported-target-language-fallback",
+      "target_language": "pl",
+      "policy_id": null,
+      "expected_outcome": "manual_review_required",
+      "reason_codes": [
+        "policy_unsupported_language",
+        "policy_manual_review_required"
+      ]
+    }
+  ]
+}
