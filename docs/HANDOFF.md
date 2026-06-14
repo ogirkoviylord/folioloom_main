@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-14
+Last updated: 2026-06-15
 
 ## 1. Текущее состояние проекта
 
@@ -192,6 +192,30 @@ Glossary-off passed structural validation and compliance skipped with
 only: RU/UK morphology policy remains `TBD`, broader quality/corpus behavior
 remains `Unknown`, and default rollout/cache reuse/release/privacy/legal/support
 claims remain unapproved.
+
+Issue #574 owner-only QA update on 2026-06-15: metadata-only QA of the
+post-#571 Oz EPUB RU paired diagnostics recorded `PASS WITH NOTES` for the
+selected unit. Glossary-on and glossary-off both passed structural validation,
+glossary-on injected one explicit target-backed entry and passed configured-form
+compliance, and glossary-off had no glossary context. The paired outputs were
+different with no obvious structural/length regression, but glossary-off also
+happened to use an approved target-family form, so the sample proves
+provider-boundary non-regression and obedience rather than a unique quality lift.
+RU morphology remains `TBD`; broad corpus/quality and rollout readiness remain
+`Unknown`/unapproved.
+
+Issue #576 implementation slice on 2026-06-15: branch
+`codex/issue-576-adversarial-txt-smoke-boundary` adds an explicit
+`--issue-575-adversarial-txt` boundary to
+`tools/glossary_runtime_provider_smoke.py` for the post-#571 adversarial TXT
+glossary-on/off matrix. The boundary allowlists only
+`test_samples/glossary_adversarial_terms.en.txt` for `ru`/`uk`, requires the
+committed adversarial target-metadata fixture, pairs glossary-on/off calls,
+caps the run at 4 calls / 60k tokens and requires the issue #575 owner-only
+diagnostics root for live mode. Fake CLI preflight completed locally with 4
+fake calls; live provider behavior remains `Unknown` until a bounded #575 run
+is executed. This is not default rollout, cache reuse, provider-config change,
+durable state change or release/privacy/legal/support evidence.
 
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
