@@ -128,6 +128,31 @@ Provider retry -> runtime architecture-review gate:
   database/state, admin UI, retention policy, release/privacy claims or live
   provider work.
 
+### Glossary terminology policy
+
+These gates apply to future language-aware glossary compliance or morphology
+work. They are architecture and local-test gates, not release-readiness or
+semantic-quality proof. Issue #517 records the current no-code architecture in
+`docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`.
+
+- Glossary core modules must remain language-neutral. New target-language
+  morphology, inflection, script/segmentation or term-matching behavior must be
+  isolated behind an explicit policy/adapter boundary such as
+  `target_language -> terminology_policy`.
+- A terminology policy must declare its id/version, match mode, allowed and
+  forbidden variant strategy, unsupported-language fallback and metadata-only
+  reason codes.
+- Unsupported or unimplemented language behavior must produce `TBD`,
+  `Unknown`, `needs_review` or equivalent metadata-only outcomes; local code
+  must not pretend to prove semantic truth, gender/name identity or full
+  morphology correctness.
+- RU/UK morphology/variant coverage may be implemented first, but tests must
+  prove the same core contract can represent other target-language policies
+  without hardcoded RU/UK branches in glossary core.
+- This gate does not approve normal runtime glossary rollout, glossary-aware
+  cache reuse, provider calls, storage/admin/retention changes or
+  release/privacy/legal/support claims.
+
 ### Docker / infrastructure
 
 Commands found:
