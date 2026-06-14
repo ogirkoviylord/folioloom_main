@@ -3916,6 +3916,7 @@ def _internal_reader_report_html(
         mapping_path = _internal_reader_local_file(
             mapping_value,
             label="Translation mapping",
+            repo_only=False,
         )
         try:
             translations = load_translation_mapping(mapping_path)
@@ -3947,25 +3948,37 @@ def _internal_reader_report_html(
         raise ValueError("Source file could not be read.") from exc
 
 
-def _internal_reader_local_file(value: str, *, label: str) -> Path:
+def _internal_reader_local_file(
+    value: str,
+    *,
+    label: str,
+    repo_only: bool = True,
+) -> Path:
     stripped = value.strip()
     if not stripped:
         raise ValueError(f"{label} path is required.")
     path = Path(stripped)
-    if path.is_absolute():
-        raise ValueError(
-            f"{label} path must be relative to the repository root."
-        )
-    path = _REPO_ROOT / path
+    if repo_only:
+        if path.is_absolute():
+            raise ValueError(
+                f"{label} path must be relative to the repo root."
+            )
+        path = _REPO_ROOT / path
+    else:
+        if not path.is_absolute():
+            path = _REPO_ROOT / path
     try:
         resolved = path.resolve(strict=False)
-        repo_root_resolved = _REPO_ROOT.resolve()
-        inside_repo = (
-            resolved == repo_root_resolved
-            or repo_root_resolved in resolved.parents
-        )
-        if not inside_repo:
-            raise ValueError("path escapes the repository root")
+        if repo_only:
+            repo_root_resolved = _REPO_ROOT.resolve()
+            inside_repo = (
+                resolved == repo_root_resolved
+                or repo_root_resolved in resolved.parents
+            )
+            if not inside_repo:
+                raise ValueError(
+                    "path escapes the repository root"
+                )
         reject_runtime_var_path(resolved)
     except ValueError as exc:
         raise ValueError(f"{label} path is not allowed: {exc}") from exc
