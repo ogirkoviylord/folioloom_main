@@ -116,7 +116,10 @@ from translator_service.translation_run_logs import (
     TranslationRunMetadata,
     finish_running_translation_runs_for_job,
 )
-from translator_service.translation_runner import GlossaryRuntimeAdapterHookConfig
+from translator_service.translation_runner import (
+    GlossaryRuntimeAdapterHookConfig,
+    build_fallback_glossary_runtime_hook,
+)
 from translator_service.upload_safety_ledger import (
     InMemoryUploadSafetyLedger,
     UploadContainerVerdict,
@@ -4418,25 +4421,7 @@ def _safe_glossary_adapter_metadata(value):
 
 
 def _fallback_glossary_runtime_hook() -> GlossaryRuntimeAdapterHookConfig:
-    return GlossaryRuntimeAdapterHookConfig(
-        enabled=True,
-        glossary_plan={
-            "schema_version": "telegram-glossary-runtime-hook-v1",
-            "enabled": True,
-            "status": "fallback",
-            "fallback_reason": "runtime_glossary_data_unavailable",
-            "work_unit_plans": [],
-            "runtime_integration": {
-                "normal_translation_prompts_changed": False,
-                "live_provider_calls_allowed": False,
-                "durable_state_mutation_allowed": False,
-                "cache_mutation_allowed": False,
-                "fallback_action": "omit_glossary_prompt_context",
-            },
-        },
-        prompt_rehearsal_enabled=True,
-        owner_battle_test_enabled=True,
-    )
+    return build_fallback_glossary_runtime_hook()
 
 
 def _print_translation_cancel_requested(active: _ActiveTranslationCancellation) -> None:

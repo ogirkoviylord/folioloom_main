@@ -95,6 +95,31 @@ class GlossaryRuntimeAdapterHookConfig:
     battle_test_max_source_characters: int = 2_400
 
 
+def build_fallback_glossary_runtime_hook(
+    *,
+    fallback_reason: str = "runtime_glossary_data_unavailable",
+) -> GlossaryRuntimeAdapterHookConfig:
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=True,
+        glossary_plan={
+            "schema_version": "telegram-glossary-runtime-hook-v1",
+            "enabled": True,
+            "status": "fallback",
+            "fallback_reason": fallback_reason,
+            "work_unit_plans": [],
+            "runtime_integration": {
+                "normal_translation_prompts_changed": False,
+                "live_provider_calls_allowed": False,
+                "durable_state_mutation_allowed": False,
+                "cache_mutation_allowed": False,
+                "fallback_action": "omit_glossary_prompt_context",
+            },
+        },
+        prompt_rehearsal_enabled=True,
+        owner_battle_test_enabled=True,
+    )
+
+
 def translate_txt_document(
     *,
     file_name: str,
