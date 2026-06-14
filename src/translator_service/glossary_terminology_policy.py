@@ -545,11 +545,6 @@ def _allowed_forms(
     target_canonical: str | None,
     target_variants: Iterable[str],
 ) -> tuple[tuple[str, str], ...]:
-    match_mode = _enum_value(policy.match_mode, TerminologyMatchMode)
-    if match_mode in (TerminologyMatchMode.EXACT, TerminologyMatchMode.CASEFOLD):
-        canonical = _normalize_text(target_canonical, TerminologyNormalizationMode.NFC)
-        return ((canonical, "canonical"),) if canonical else ()
-
     strategy = _enum_value(policy.allowed_variant_strategy, AllowedVariantStrategy)
     if strategy is AllowedVariantStrategy.MANUAL_REVIEW_ONLY:
         return ()
