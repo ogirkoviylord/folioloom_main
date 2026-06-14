@@ -145,10 +145,12 @@
   beta/default rollout, cache reuse or release/privacy/legal/support claim;
   issue #536 records no-code cache-key dimensions and requires bypass when any
   output-affecting glossary/profile/snapshot/selection/policy/formatter/
-  fallback dimension is missing or `Unknown`. RU/UK full morphology remains
-  `TBD`; translation quality remains `Unknown` until approved owner-only review
-  evidence exists; future policy packages must stay behind the explicit
-  registry/adapter boundary, not hardcoded core behavior.
+  fallback dimension is missing or `Unknown`; issue #537 records a
+  metadata-only decision packet and keeps the recommended posture
+  shadow-only/default-off until the owner chooses the next issue. RU/UK full
+  morphology remains `TBD`; translation quality remains `Unknown` until
+  approved owner-only review evidence exists; future policy packages must stay
+  behind the explicit registry/adapter boundary, not hardcoded core behavior.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,
