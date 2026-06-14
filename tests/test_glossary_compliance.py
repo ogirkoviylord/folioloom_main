@@ -2,6 +2,16 @@ import json
 import unittest
 
 from translator_service.glossary_compliance import validate_glossary_compliance
+from translator_service.glossary_terminology_policy import (
+    DEFAULT_TERMINOLOGY_POLICY_REASON_CODES,
+    AllowedVariantStrategy,
+    ForbiddenVariantStrategy,
+    TerminologyMatchMode,
+    TerminologyNormalizationMode,
+    TerminologyPolicy,
+    TerminologyPolicyRegistry,
+    UnsupportedTerminologyFallback,
+)
 
 
 def _entry(
@@ -11,6 +21,7 @@ def _entry(
     target: str | None = None,
     aliases: tuple[str, ...] = (),
     target_variants: tuple[str, ...] = (),
+    forbidden_variants: tuple[str, ...] = (),
 ) -> dict[str, object]:
     return {
         "entry_id": entry_id,
@@ -18,6 +29,7 @@ def _entry(
         "aliases": aliases,
         "target_canonical": target,
         "target_variants": target_variants,
+        "forbidden_variants": forbidden_variants,
     }
 
 
@@ -44,9 +56,16 @@ class GlossaryComplianceTest(unittest.TestCase):
         self.assertEqual(result["target_form_present_count"], 2)
         self.assertEqual(result["target_form_missing_count"], 0)
         self.assertEqual(result["skipped_entry_count"], 0)
+        self.assertEqual(result["schema_version"], "glossary-compliance-v2")
+        self.assertEqual(result["reason_codes"], [])
         self.assertEqual(
             result["target_form_present_entry_ids"],
             ["entry-north", "entry-salt"],
+        )
+        self.assertFalse(result["terminology_policy"]["enabled"])
+        self.assertEqual(
+            result["policy"],
+            "exact_configured_target_forms_only_v1",
         )
         self.assertIn("morphology_policy_tbd", result["uncertainty_reason_codes"])
 
@@ -110,6 +129,158 @@ class GlossaryComplianceTest(unittest.TestCase):
         self.assertEqual(structural_fail["status"], "skipped")
         self.assertIn("structural_validation_failed", structural_fail["reason_codes"])
 
+    def test_policy_variant_hit_and_forbidden_variant_are_metadata_only_findings(self):
+        registry = TerminologyPolicyRegistry(
+            (
+                _policy(
+                    "terminology_policy.ru.variant_list.test",
+                    target_language="ru",
+                    match_mode=TerminologyMatchMode.VARIANT_LIST,
+                    allowed_variant_strategy=(
+                        AllowedVariantStrategy.CANONICAL_AND_VARIANTS
+                    ),
+                    forbidden_variant_strategy=(
+                        ForbiddenVariantStrategy.CONFIGURED_FORBIDDEN_VARIANTS
+                    ),
+                ),
+            )
+        )
+        entries = [
+            _entry(
+                "entry-glass-market",
+                source="Glass Market",
+                aliases=("The Glass Market",),
+                target="Зеркальный Торг",
+                target_variants=("Зеркального Торга",),
+                forbidden_variants=("Стеклянный рынок",),
+            )
+        ]
+
+        approved_variant = validate_glossary_compliance(
+            entries,
+            selected_entry_ids=("entry-glass-market",),
+            included_entry_ids=("entry-glass-market",),
+            source_text="The Glass Market opened at dusk.",
+            translated_text="У Зеркального Торга собрались все.",
+            target_language="ru",
+            terminology_policy_registry=registry,
+        )
+        forbidden_variant = validate_glossary_compliance(
+            entries,
+            selected_entry_ids=("entry-glass-market",),
+            included_entry_ids=("entry-glass-market",),
+            source_text="The Glass Market opened at dusk.",
+            translated_text="Стеклянный рынок открылся на закате.",
+            target_language="ru",
+            terminology_policy_registry=registry,
+        )
+
+        self.assertEqual(approved_variant["status"], "pass")
+        self.assertEqual(
+            approved_variant["policy"],
+            "terminology_policy_registry_adapter_v1",
+        )
+        self.assertTrue(approved_variant["terminology_policy"]["enabled"])
+        self.assertEqual(
+            approved_variant["terminology_policy"]["policy_id"],
+            "terminology_policy.ru.variant_list.test",
+        )
+        self.assertEqual(approved_variant["target_form_present_count"], 1)
+        self.assertEqual(
+            approved_variant["entries"][0]["terminology_match"]["matched_form_kind"],
+            "variant",
+        )
+        self.assertIn(
+            "policy_variant_match",
+            approved_variant["entries"][0]["reason_codes"],
+        )
+        self.assertEqual(forbidden_variant["status"], "findings")
+        self.assertEqual(forbidden_variant["forbidden_variant_count"], 1)
+        self.assertEqual(
+            forbidden_variant["forbidden_variant_entry_ids"],
+            ["entry-glass-market"],
+        )
+        self.assertIn(
+            "policy_forbidden_variant_present",
+            forbidden_variant["reason_codes"],
+        )
+        self.assertEqual(
+            forbidden_variant["entries"][0]["terminology_match"]["status"],
+            "forbidden_variant",
+        )
+
+        serialized = json.dumps(
+            {
+                "approved": approved_variant,
+                "forbidden": forbidden_variant,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertNotIn("The Glass Market opened at dusk.", serialized)
+        self.assertNotIn("Зеркального Торга", serialized)
+        self.assertNotIn("Стеклянный рынок", serialized)
+
+    def test_policy_unsupported_and_manual_review_do_not_claim_pass(self):
+        entry = _entry(
+            "entry-needle-house",
+            source="Needle House",
+            target="Dom Igły",
+        )
+        unsupported = validate_glossary_compliance(
+            [entry],
+            selected_entry_ids=("entry-needle-house",),
+            included_entry_ids=("entry-needle-house",),
+            source_text="Needle House is mentioned here.",
+            translated_text="Dom Igły appears here.",
+            target_language="pl",
+            terminology_policy_registry=TerminologyPolicyRegistry(()),
+        )
+        manual_review = validate_glossary_compliance(
+            [entry],
+            selected_entry_ids=("entry-needle-house",),
+            included_entry_ids=("entry-needle-house",),
+            source_text="Needle House is mentioned here.",
+            translated_text="Dom Igły appears here.",
+            target_language="pl",
+            terminology_policy_registry=TerminologyPolicyRegistry(
+                (
+                    _policy(
+                        "terminology_policy.pl.manual_review.test",
+                        target_language="pl",
+                        match_mode=TerminologyMatchMode.MANUAL_REVIEW_REQUIRED,
+                        allowed_variant_strategy=(
+                            AllowedVariantStrategy.MANUAL_REVIEW_ONLY
+                        ),
+                        forbidden_variant_strategy=(
+                            ForbiddenVariantStrategy.MANUAL_REVIEW_ONLY
+                        ),
+                    ),
+                )
+            ),
+        )
+
+        self.assertEqual(unsupported["status"], "findings")
+        self.assertEqual(unsupported["checked_entry_count"], 0)
+        self.assertEqual(unsupported["needs_review_entry_count"], 1)
+        self.assertIn("policy_unsupported_language", unsupported["reason_codes"])
+        self.assertEqual(
+            unsupported["entries"][0]["terminology_match"]["status"],
+            "needs_review",
+        )
+        self.assertEqual(manual_review["status"], "findings")
+        self.assertEqual(
+            manual_review["needs_review_entry_ids"],
+            ["entry-needle-house"],
+        )
+        self.assertIn("policy_manual_review_required", manual_review["reason_codes"])
+        self.assertFalse(manual_review["semantic_quality_claim_made"])
+        self.assertFalse(
+            manual_review["entries"][0]["terminology_match"][
+                "full_morphology_claim_made"
+            ]
+        )
+
     def test_metadata_payload_excludes_raw_source_target_and_translation_text(self):
         raw_source = "RAW SOURCE MUST NOT SERIALIZE"
         raw_target = "RAW TARGET MUST NOT SERIALIZE"
@@ -130,6 +301,30 @@ class GlossaryComplianceTest(unittest.TestCase):
         self.assertTrue(result["metadata_only"])
         self.assertFalse(result["raw_payload_included"])
         self.assertFalse(result["semantic_quality_claim_made"])
+
+
+def _policy(
+    policy_id: str,
+    *,
+    target_language: str | None,
+    match_mode: TerminologyMatchMode,
+    allowed_variant_strategy: AllowedVariantStrategy,
+    forbidden_variant_strategy: ForbiddenVariantStrategy = (
+        ForbiddenVariantStrategy.IGNORE
+    ),
+) -> TerminologyPolicy:
+    return TerminologyPolicy(
+        policy_id=policy_id,
+        policy_version="v1",
+        target_language=target_language,
+        language_family=None,
+        match_mode=match_mode,
+        normalization_mode=TerminologyNormalizationMode.NFC,
+        allowed_variant_strategy=allowed_variant_strategy,
+        forbidden_variant_strategy=forbidden_variant_strategy,
+        unsupported_fallback=UnsupportedTerminologyFallback.MANUAL_REVIEW_REQUIRED,
+        reason_codes=DEFAULT_TERMINOLOGY_POLICY_REASON_CODES,
+    )
 
 
 if __name__ == "__main__":
