@@ -51,6 +51,7 @@ class GlossaryPromptContextOmissionReason(StrEnum):
 class GlossaryPromptContextFieldOmissionReason(StrEnum):
     FIELD_LIMIT_EXHAUSTED = "field_limit_exhausted"
     FIELD_CHARACTER_LIMIT_EXHAUSTED = "field_character_limit_exhausted"
+    POLICY_METADATA_INVALID = "policy_metadata_invalid"
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class GlossaryPromptContextConfig:
     max_forbidden_variants: int = 4
     max_morphology_notes: int = 3
     max_profile_rule_ids: int = 6
+    include_terminology_policy_metadata: bool = False
 
 
 @dataclass(frozen=True)
@@ -272,6 +274,13 @@ class _EntryCandidate:
     field_omissions: tuple[GlossaryPromptContextFieldOmission, ...]
 
 
+@dataclass(frozen=True)
+class _TerminologyPolicyMetadata:
+    policy_id: str
+    policy_version: str
+    match_mode: str
+
+
 def _entry_candidate(
     item: GlossaryEntry | Mapping[str, Any],
     *,
@@ -395,6 +404,12 @@ def _entry_candidate(
         max_field_characters=config.max_field_characters,
         field_omissions=field_omissions,
     )
+    _append_terminology_policy_metadata_line(
+        lines,
+        payload,
+        config=config,
+        field_omissions=field_omissions,
+    )
     _append_sequence_line(
         lines,
         "profile_rule_ids",
@@ -412,6 +427,36 @@ def _entry_candidate(
         estimated_prompt_tokens=_estimate_prompt_tokens(lines),
         character_count=character_count,
         field_omissions=tuple(field_omissions),
+    )
+
+
+def _append_terminology_policy_metadata_line(
+    lines: list[str],
+    payload: Mapping[str, Any],
+    *,
+    config: GlossaryPromptContextConfig,
+    field_omissions: list[GlossaryPromptContextFieldOmission],
+) -> None:
+    if not config.include_terminology_policy_metadata:
+        return
+    metadata, invalid = _terminology_policy_metadata(payload)
+    if metadata is None:
+        if invalid:
+            field_omissions.append(
+                GlossaryPromptContextFieldOmission(
+                    field_name="terminology_policy",
+                    reason=(
+                        GlossaryPromptContextFieldOmissionReason
+                        .POLICY_METADATA_INVALID
+                    ),
+                )
+            )
+        return
+    lines.append(
+        "terminology_policy: "
+        f"policy_id={_escape_policy_metadata_value(metadata.policy_id)}; "
+        f"policy_version={_escape_policy_metadata_value(metadata.policy_version)}; "
+        f"match_mode={_escape_policy_metadata_value(metadata.match_mode)}"
     )
 
 
@@ -505,6 +550,93 @@ def _entry_payload(item: GlossaryEntry | Mapping[str, Any]) -> Mapping[str, Any]
             "profile_rule_ids": item.profile_rule_ids,
         }
     return item
+
+
+def _terminology_policy_metadata(
+    payload: Mapping[str, Any],
+) -> tuple[_TerminologyPolicyMetadata | None, bool]:
+    for source, dedicated_container in _terminology_policy_metadata_sources(payload):
+        if not _has_terminology_policy_metadata(
+            source,
+            dedicated_container=dedicated_container,
+        ):
+            continue
+        policy_id = _first_safe_identifier(
+            source,
+            ("policy_id", "terminology_policy_id"),
+        )
+        policy_version = _first_safe_identifier(
+            source,
+            ("policy_version", "terminology_policy_version"),
+        )
+        match_mode = _first_safe_identifier(source, ("match_mode", "mode"))
+        if policy_id is None or policy_version is None or match_mode is None:
+            return None, True
+        return (
+            _TerminologyPolicyMetadata(
+                policy_id=policy_id,
+                policy_version=policy_version,
+                match_mode=match_mode,
+            ),
+            False,
+        )
+    return None, False
+
+
+def _terminology_policy_metadata_sources(
+    payload: Mapping[str, Any],
+) -> tuple[tuple[Mapping[str, Any], bool], ...]:
+    sources: list[tuple[Mapping[str, Any], bool]] = []
+    for key in (
+        "terminology_policy_metadata",
+        "terminology_policy",
+        "prompt_metadata",
+    ):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            sources.append((value, key != "prompt_metadata"))
+    sources.append((payload, False))
+    return tuple(sources)
+
+
+def _has_terminology_policy_metadata(
+    source: Mapping[str, Any],
+    *,
+    dedicated_container: bool,
+) -> bool:
+    if not dedicated_container and not any(
+        key in source
+        for key in (
+            "policy_id",
+            "terminology_policy_id",
+            "match_mode",
+            "mode",
+        )
+    ):
+        return False
+    return any(
+        key in source
+        for key in (
+            "policy_id",
+            "terminology_policy_id",
+            "policy_version",
+            "terminology_policy_version",
+            "match_mode",
+            "mode",
+        )
+    )
+
+
+def _first_safe_identifier(
+    source: Mapping[str, Any],
+    keys: Sequence[str],
+) -> str | None:
+    for key in keys:
+        value = source.get(key)
+        safe = _safe_identifier_value(value)
+        if safe is not None:
+            return safe
+    return None
 
 
 def _base_context_lines() -> tuple[str, ...]:
@@ -674,6 +806,10 @@ def _escape_attr(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+def _escape_policy_metadata_value(value: str) -> str:
+    return html.escape(value, quote=False)
+
+
 def _estimate_prompt_tokens(lines: Sequence[str]) -> int:
     return max(1, math.ceil(_text_length(lines) / 4))
 
@@ -683,6 +819,8 @@ def _text_length(lines: Sequence[str]) -> int:
 
 
 def _validate_config(config: GlossaryPromptContextConfig) -> None:
+    if not isinstance(config.include_terminology_policy_metadata, bool):
+        raise ValueError("include_terminology_policy_metadata must be a bool.")
     values = {
         "max_entries": config.max_entries,
         "max_prompt_tokens": config.max_prompt_tokens,
