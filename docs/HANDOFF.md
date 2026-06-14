@@ -2134,6 +2134,22 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #534 / #204BL adds bounded paired live provider evidence for
+  the #529 language-policy package sequence.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-policy-provider-evidence-live-smoke-report.md`
+  records that #533 fake/dry preflight passed, 6 approved live calls completed
+  with observed provider tokens `8452`, all responses passed structural
+  validation, RU/UK glossary-on compliance passed, RU/UK glossary-off reported
+  target-form-missing findings, and DE glossary-on/off compliance passed.
+- Follow-up: review #534 compliance findings in #537 decision prep or a
+  separate owner-only quality review before any rollout or positive quality
+  claim. Runtime rollout, normal/default prompt integration, glossary-aware
+  cache reuse, provider config changes, storage/admin/retention changes,
+  release/privacy/legal/support readiness and translation-quality claims remain
+  unapproved. Translation quality remains `Unknown`.
+
+- Date: 2026-06-14.
 - Change: Issue #533 / #204BK adds a local-only provider-evidence protocol
   and fake/dry package-aware preflight for the #529 language-policy evidence
   sequence.

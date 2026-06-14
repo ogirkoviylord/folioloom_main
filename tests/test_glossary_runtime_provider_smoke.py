@@ -1,7 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.glossary_runtime_provider_smoke import (
     APPROVED_INPUT_TARGETS,
@@ -15,6 +17,7 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_534_MAX_CALLS,
     ISSUE_534_MAX_TOKENS_TOTAL,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
+    POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
     PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION,
     FakeRuntimeProvider,
@@ -32,8 +35,10 @@ from tools.glossary_runtime_provider_smoke import (
     build_runtime_prompt,
     format_runtime_glossary_prompt_context,
     provider_evidence_protocol_payload,
+    render_policy_provider_evidence_live_report,
     render_policy_provider_evidence_preflight_report,
     run_fake_paired_epub_rehearsal,
+    run_policy_provider_evidence_live_smoke,
     run_policy_provider_evidence_preflight,
     run_smoke,
     select_epub_runtime_unit_for_rehearsal,
@@ -494,6 +499,144 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             rendered = report_path.read_text(encoding="utf-8")
             self.assertIn("Live provider calls allowed here: False", rendered)
             self.assertNotIn("provider_response", rendered)
+
+    def test_issue_534_live_smoke_fake_provider_metadata_only_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report_path = tmp_path / "policy-live.md"
+            report = run_policy_provider_evidence_live_smoke(
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                metadata_report_path=report_path,
+                diagnostic_root=tmp_path / "diagnostics",
+            )
+            rendered = report_path.read_text(encoding="utf-8")
+
+        self.assertEqual(
+            report["schema_version"],
+            POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
+        )
+        self.assertEqual(report["issue_id"], ISSUE_534_ID)
+        self.assertEqual(report["fake_dry_preflight_status"], "passed")
+        self.assertEqual(report["calls_made"], 6)
+        self.assertEqual(report["max_calls"], ISSUE_534_MAX_CALLS)
+        self.assertEqual(report["max_tokens_total"], ISSUE_534_MAX_TOKENS_TOTAL)
+        self.assertEqual(report["provider_model"], DEFAULT_MODEL)
+        self.assertEqual(report["targets"], ["ru", "uk", "de"])
+        self.assertIn(
+            report["status"],
+            {"completed", "completed_with_failures", "completed_with_skips"},
+        )
+        self.assertTrue(report["ordinary_artifact_safety"]["metadata_only"])
+        self.assertFalse(
+            report["ordinary_artifact_safety"]["provider_response_bodies_included"]
+        )
+        self.assertEqual(
+            [call["side"] for call in report["calls"]],
+            [
+                "glossary_on",
+                "glossary_off",
+                "glossary_on",
+                "glossary_off",
+                "glossary_on",
+                "glossary_off",
+            ],
+        )
+        self.assertTrue(
+            all(call["validation"]["valid"] for call in report["calls"])
+        )
+        self.assertTrue(
+            all(
+                call["glossary_compliance"]["metadata_only"]
+                for call in report["calls"]
+            )
+        )
+        self.assertIn(
+            "review_glossary_compliance_findings",
+            report["recommendation"],
+        )
+
+        serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        for payload in (rendered, serialized):
+            self.assertNotIn("Glass Market", payload)
+            self.assertNotIn("Зеркального Торга", payload)
+            self.assertNotIn("Дзеркальному Торзі", payload)
+            self.assertNotIn("SPIEGELSTRASSE", payload)
+            self.assertNotIn("<translation_batch>", payload)
+            self.assertNotIn("<glossary_context", payload)
+            self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", payload)
+            self.assertNotIn("Authorization:", payload)
+            self.assertNotIn("Bearer ", payload)
+
+    def test_issue_534_live_smoke_writes_raw_only_to_owner_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report = run_policy_provider_evidence_live_smoke(
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                diagnostic_root=tmp_path / "diagnostics",
+            )
+            diagnostic_dir = Path(report["diagnostic_dir"])
+            manifest = json.loads(
+                (diagnostic_dir / "manifest.json").read_text(encoding="utf-8")
+            )
+            call_files = sorted(diagnostic_dir.glob("call-*.json"))
+            first_call = json.loads(call_files[0].read_text(encoding="utf-8"))
+
+        self.assertEqual(len(call_files), 6)
+        self.assertTrue(manifest["ordinary_artifact_safety"]["metadata_only"])
+        self.assertTrue(first_call["access_boundary"]["local_owner_only"])
+        self.assertFalse(first_call["access_boundary"]["git_tracked_allowed"])
+        self.assertFalse(first_call["access_boundary"]["github_issue_or_pr_allowed"])
+        self.assertIn("system_prompt", first_call)
+        self.assertIn("user_prompt", first_call)
+        self.assertIn("provider_response_text", first_call)
+        self.assertFalse(first_call["secrets_included"])
+        diagnostic_serialized = json.dumps(
+            first_call,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", diagnostic_serialized)
+        self.assertNotIn("Authorization:", diagnostic_serialized)
+        self.assertNotIn("Bearer ", diagnostic_serialized)
+
+    def test_issue_534_live_smoke_blocks_when_preflight_did_not_pass(self):
+        report = run_policy_provider_evidence_live_smoke(
+            provider=FakeRuntimeProvider(),
+            repo_root=Path.cwd(),
+            preflight_report={"status": "failed"},
+        )
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["calls_made"], 0)
+        self.assertIn("fake_dry_preflight_not_passed", report["reason_codes"])
+        self.assertTrue(report["metadata_only"])
+        self.assertFalse(report["raw_payload_included"])
+
+    def test_issue_534_live_cli_requires_temporary_process_env_key(self):
+        with patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "", "DEEPSEEK_API_KEYS": ""},
+            clear=False,
+        ):
+            with self.assertRaises(SystemExit):
+                smoke_main(["--policy-evidence-live"])
+
+    def test_issue_534_live_report_renderer_is_metadata_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_policy_provider_evidence_live_smoke(
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                diagnostic_root=Path(tmp) / "diagnostics",
+            )
+
+        rendered = render_policy_provider_evidence_live_report(report)
+        self.assertIn("Policy Provider Evidence Live Smoke Report", rendered)
+        self.assertIn("Fake/dry preflight status: passed", rendered)
+        self.assertNotIn("The Glass Market", rendered)
+        self.assertNotIn("Зеркального Торга", rendered)
+        self.assertNotIn("<translation_batch>", rendered)
 
     def test_pressure_summary_distinguishes_epub_shape_without_raw_text(self):
         raw_source = "RAW SOURCE SENTENCE MUST NOT SERIALIZE"
