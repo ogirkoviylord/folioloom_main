@@ -24,6 +24,7 @@ from translator_service.glossary_candidate_reducer import (
     glossary_candidate_reduction_payload,
     reduce_glossary_candidates,
 )
+from translator_service.glossary_compliance import validate_glossary_compliance
 from translator_service.glossary_contracts import (
     GlossaryEntry,
     GlossarySnapshot,
@@ -243,6 +244,7 @@ class RuntimeSmokePackage:
     glossary_entry_count: int
     glossary_evidence_count: int
     reducer_metadata: Mapping[str, Any]
+    glossary_entries: tuple[GlossaryEntry | Mapping[str, Any], ...] = ()
 
 
 class RuntimePackageSelectionError(ValueError):
@@ -574,6 +576,11 @@ def _run_smoke_call(
         observed_tokens += usage_tokens
         observed_over_cap = observed_tokens > config.max_tokens_total
     validation = validate_runtime_response(result, package=package)
+    glossary_compliance = _runtime_glossary_compliance_summary(
+        result,
+        package=package,
+        validation=validation,
+    )
     summary = _call_summary(
         package=package,
         side=side,
@@ -583,6 +590,7 @@ def _run_smoke_call(
         reservation=reservation,
         result=result,
         validation=validation,
+        glossary_compliance=glossary_compliance,
         observed_over_cap=observed_over_cap,
     )
     _write_json(
@@ -595,6 +603,7 @@ def _run_smoke_call(
             request_text=request_text,
             result=result,
             validation_summary=summary["validation"],
+            glossary_compliance=summary["glossary_compliance"],
             raw_text_capture=config.raw_text_capture,
             pressure_summary=summary["pressure_summary"],
         ),
@@ -809,6 +818,11 @@ def _fake_rehearsal_side_summary(
         max_completion_tokens=config.max_completion_tokens,
     )
     validation = validate_runtime_response(result, package=package)
+    glossary_compliance = _runtime_glossary_compliance_summary(
+        result,
+        package=package,
+        validation=validation,
+    )
     pressure_summary = build_runtime_pressure_summary(
         package,
         config=config,
@@ -825,6 +839,7 @@ def _fake_rehearsal_side_summary(
         "estimated_prompt_tokens": estimated_prompt_tokens,
         "reserved_tokens": reservation,
         "validation": dict(validation),
+        "glossary_compliance": glossary_compliance,
         "cache_policy": {
             "behavior": cache_policy.get("behavior", "Unknown"),
             "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
@@ -1089,6 +1104,7 @@ def build_runtime_package(
             glossary_entry_count=len(retained_snapshot.entries),
             glossary_evidence_count=len(retained_snapshot.evidence),
             reducer_metadata=reducer_metadata,
+            glossary_entries=tuple(retained_snapshot.entries),
         )
         if is_epub_plan:
             epub_candidate_packages.append(package)
@@ -2382,7 +2398,7 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
     if not rows:
         rows = (
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
-            "| Unknown | Unknown |\n"
+            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown |\n"
         )
     pressure_rows = "\n".join(
         _pressure_report_row(call) for call in report["calls"]
@@ -2411,8 +2427,10 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         f"- Raw-text capture: {report['approval']['raw_text_capture']}\n\n"
         "## Runtime Smoke Results\n"
         "| Input | Target | Side | Unit | Status | Finish reason | Usage tokens "
-        "| Validation issue codes |\n"
-        "| --- | --- | --- | ---: | --- | --- | ---: | --- |\n"
+        "| Validation issue codes | Glossary compliance | Target hits "
+        "| Target misses | Skipped entries | Compliance reason codes |\n"
+        "| --- | --- | --- | ---: | --- | --- | ---: | --- | --- | ---: "
+        "| ---: | ---: | --- |\n"
         f"{rows}\n\n"
         "## Runtime Pressure Summary\n"
         "| Input | Target | Format | Unit | Source blocks | Source chars "
@@ -2940,6 +2958,7 @@ def _call_summary(
     reservation: int,
     result: ChatCallResult,
     validation: Mapping[str, Any],
+    glossary_compliance: Mapping[str, Any],
     observed_over_cap: bool,
 ) -> dict[str, Any]:
     return {
@@ -2961,6 +2980,7 @@ def _call_summary(
         "observed_over_cap": observed_over_cap,
         "usage": dict(result.usage),
         "validation": dict(validation),
+        "glossary_compliance": dict(glossary_compliance),
         "error_type": result.error_type,
         "error_message": result.error_message,
         "pressure_summary": build_runtime_pressure_summary(
@@ -3027,6 +3047,7 @@ def _call_diagnostic(
     request_text: str,
     result: ChatCallResult,
     validation_summary: Mapping[str, Any],
+    glossary_compliance: Mapping[str, Any],
     raw_text_capture: bool,
     pressure_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -3058,6 +3079,7 @@ def _call_diagnostic(
         "http_status": result.http_status,
         "finish_reason": result.finish_reason,
         "validation": validation_summary,
+        "glossary_compliance": dict(glossary_compliance),
         "pressure_summary": dict(pressure_summary),
         "adapter_metadata": dict(package.adapter_metadata),
         "prompt_context_metadata": dict(package.prompt_context_metadata),
@@ -3076,6 +3098,34 @@ def _call_diagnostic(
 
 def _issue(code: str, path: str) -> dict[str, str]:
     return {"code": code, "path": path}
+
+
+def _runtime_glossary_compliance_summary(
+    result: ChatCallResult,
+    *,
+    package: RuntimeSmokePackage,
+    validation: Mapping[str, Any],
+) -> dict[str, Any]:
+    translated_text: str | None = None
+    if validation.get("valid") is True:
+        batch_validation = normalize_provider_translation_batch_contract(
+            result.content,
+            expected_count=1,
+            required_markers=package.required_markers,
+        )
+        if batch_validation.translated_texts is not None:
+            translated_text = "\n\n".join(batch_validation.translated_texts)
+    return validate_glossary_compliance(
+        package.glossary_entries,
+        selected_entry_ids=package.adapter_metadata.get("selected_entry_ids", ()),
+        source_text=package.source_text,
+        translated_text=translated_text,
+        included_entry_ids=package.prompt_context_metadata.get(
+            "included_entry_ids",
+            (),
+        ),
+        structural_validation_passed=validation.get("valid") is True,
+    )
 
 
 def _smoke_status(calls: Sequence[Mapping[str, Any]]) -> str:
@@ -3101,6 +3151,11 @@ def _confirmed_items(
         ),
         "runtime translation/cache/storage/admin behavior was not changed",
     ]
+    if any(call.get("glossary_compliance") for call in calls):
+        items.append(
+            "glossary compliance summaries are metadata-only and separate from "
+            "structural validation"
+        )
     if config.fake and any(call.get("status") == "validated" for call in calls):
         items.append("fake provider stub responses passed local validation")
     elif any(call.get("status") == "validated" for call in calls):
@@ -3149,15 +3204,23 @@ def _recommendation(
             "iterate_runtime_prompt_before_rollout: at least one response "
             "failed validation."
         )
-    if any(str(call.get("status", "")).startswith("skipped") for call in calls):
-        return (
-            "review_skips_before_next_gate: smoke completed with metadata-only "
-            "skips."
-        )
     if config.fake:
         return (
             "fake_preflight_passed_live_provider_behavior_unknown: request exact "
             "owner approval before live calls."
+        )
+    if any(
+        (call.get("glossary_compliance") or {}).get("status") == "findings"
+        for call in calls
+    ):
+        return (
+            "review_glossary_compliance_findings_before_rollout: structural "
+            "validation passed but target-form compliance has findings."
+        )
+    if any(str(call.get("status", "")).startswith("skipped") for call in calls):
+        return (
+            "review_skips_before_next_gate: smoke completed with metadata-only "
+            "skips."
         )
     return (
         "proceed_to_owner_only_quality_review_candidate: provider-boundary smoke "
@@ -3169,6 +3232,8 @@ def _call_report_row(call: Mapping[str, Any]) -> str:
     usage = call.get("usage") or {}
     validation = call.get("validation") or {}
     issue_codes = validation.get("issue_codes") or ["none"]
+    compliance = call.get("glossary_compliance") or {}
+    compliance_codes = compliance.get("reason_codes") or ["none"]
     return (
         f"| {call.get('input_id', 'Unknown')} "
         f"| {call.get('target_language', 'Unknown')} "
@@ -3177,7 +3242,12 @@ def _call_report_row(call: Mapping[str, Any]) -> str:
         f"| {call.get('status', 'Unknown')} "
         f"| {call.get('finish_reason', 'Unknown')} "
         f"| {usage.get('total_tokens', 'Unknown')} "
-        f"| {', '.join(str(code) for code in issue_codes)} |"
+        f"| {', '.join(str(code) for code in issue_codes)} "
+        f"| {compliance.get('status', 'Unknown')} "
+        f"| {compliance.get('target_form_present_count', 'Unknown')} "
+        f"| {compliance.get('target_form_missing_count', 'Unknown')} "
+        f"| {compliance.get('skipped_entry_count', 'Unknown')} "
+        f"| {', '.join(str(code) for code in compliance_codes)} |"
     )
 
 

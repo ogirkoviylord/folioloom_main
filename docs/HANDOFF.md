@@ -2134,6 +2134,24 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #510 adds a local-only/default-off glossary compliance
+  validator in `src/translator_service/glossary_compliance.py` and wires
+  metadata-only compliance summaries into
+  `tools/glossary_runtime_provider_smoke.py`.
+- Evidence: local tests cover full target-form hits, partial hits, zero hits,
+  source-absent skips, target-metadata-missing skips, prompt-context-omitted
+  skips, structural-validation-failed skips, alias source matches and
+  redaction of raw source/target/translation text from compliance payloads.
+  Runtime smoke metadata reports now keep structural `validation` separate
+  from `glossary_compliance` status, counts, entry ids and reason codes.
+- Follow-up: #510 does not change normal/default runtime behavior and does not
+  authorize live provider calls, prompt rollout, provider retry/repair loops,
+  glossary-aware cache reuse, database/storage/scheduler/admin/retention
+  changes, RU/UK morphology implementation, semantic-quality claims or
+  release/privacy/legal/support readiness. A separate approved issue is still
+  required for prompt strengthening or bounded live retry.
+
+- Date: 2026-06-14.
 - Change: Issue #507 / #204AY starts the post-#505 control-EPUB smoke path.
   `tools/glossary_runtime_provider_smoke.py` now has an explicit `--control-epub`
   boundary for `test_samples/gutenberg_time_machine_noimages.en.epub` with
