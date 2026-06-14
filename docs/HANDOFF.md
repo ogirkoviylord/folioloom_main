@@ -151,6 +151,19 @@ This proves the live prompt path can inject glossary context for an approved
 test unit, but does not prove glossary quality, rollout readiness, cache reuse,
 release/privacy/legal/support readiness or arbitrary-book preparation.
 
+Issue #567 implementation slice on 2026-06-14: branch
+`codex/issue-567-epub-useful-glossary-context` tightens the owner-only
+default-off EPUB glossary smoke path after #559. For EPUB smoke packages, the
+rendered glossary prompt context is filtered to entries that are both present
+in the selected work-unit source term/alias set and have target metadata; the
+glossary compliance summary checks the same included target-backed entries.
+Metadata still records selected/useful counts and reason codes without raw
+text. This reduces `target_metadata_missing` noise from non-useful selected
+entries, but remaining `target_form_missing` findings still require separate
+owner-only QA, policy/variant work or bounded provider rerun evidence. This is
+not a default rollout, cache reuse change, live provider call, durable state
+change or quality/readiness claim.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
