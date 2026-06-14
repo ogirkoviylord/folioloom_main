@@ -86,7 +86,11 @@ Evidence:
   the selected package units: 6 calls completed, structural validation passed,
   RU/UK glossary-on compliance passed, RU/UK glossary-off reported target-form
   missing findings, and DE glossary-on/off compliance passed. Translation
-  quality remains `Unknown`.
+  quality remains `Unknown`. Issue #535 / #204BM records a no-code runtime
+  rollout state machine that keeps normal/default and limited-beta rollout
+  rejected for now, preserves #465 cache bypass, and requires separate owner
+  approval before any owner-only battle-test, beta/default rollout, cache reuse
+  or release/privacy/legal/support claim.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added
