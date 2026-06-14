@@ -204,6 +204,10 @@
   post-filter live behavior remains `Unknown`. Issue #580 strengthens the
   default-off owner/test prompt-context terminology wording for included
   target-backed entries, but live provider behavior after that wording change
+  remains `Unknown` until bounded rerun evidence is recorded. Issue #582 adds an
+  explicit internal system-prompt acknowledgment for service-generated glossary
+  context and avoids trusting raw document `<glossary_context>` tags by
+  auto-detection; live provider behavior after that boundary clarification
   remains `Unknown` until bounded rerun evidence is recorded.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
