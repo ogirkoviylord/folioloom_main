@@ -129,8 +129,11 @@
   language-neutral and requires morphology, script/segmentation and
   target-language term matching to live in explicit terminology policy
   adapters; issue #517 records the no-code terminology policy registry
-  architecture; RU/UK morphology/variant work should be the first concrete
-  policy package, not hardcoded core behavior.
+  architecture; issues #518-#521 add the local-only registry foundation,
+  synthetic/authorized RU/UK fixture coverage, policy-aware metadata-only
+  compliance summaries and opt-in compact prompt-context policy metadata.
+  RU/UK full morphology remains `TBD`; future policy packages must stay behind
+  the explicit registry/adapter boundary, not hardcoded core behavior.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,
