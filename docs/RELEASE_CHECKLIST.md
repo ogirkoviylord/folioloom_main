@@ -196,8 +196,10 @@ Checklist:
 - [ ] No unnecessary logging of sensitive data.
 - [ ] Logs/admin do not expose raw document text, prompts, translations, raw
   provider request/response bodies or API keys outside the approved owner-only
-  diagnostic surfaces and full diagnostic downloads; telemetry, normal admin
-  pages, release artifacts and support artifacts remain redacted.
+  diagnostic surfaces and full diagnostic downloads; downloaded full diagnostic
+  archives may also contain original uploaded file bytes and final/partial
+  translated result file bytes under `diagnostic_files/`; telemetry, normal
+  admin pages, release artifacts and support artifacts remain redacted.
 - [ ] Access controls reviewed, if applicable.
 - [ ] Destructive operations reviewed and approved by human owner.
 - [ ] Retention or user-data behavior changes have explicit human approval.
@@ -234,8 +236,10 @@ Checklist:
   request/response bodies or API keys appear in telemetry, release artifacts or
   normal admin views. Approved owner-only diagnostic surfaces and downloaded
   full diagnostic archives may show raw source/translated work-unit text and
-  exact provider request/response bodies for incident debugging. Provider
-  `Authorization` headers and API keys must remain excluded.
+  exact provider request/response bodies for incident debugging, and may
+  include original uploaded file bytes plus final/partial translated result
+  file bytes under `diagnostic_files/`. Provider `Authorization` headers and
+  API keys must remain excluded.
 - [ ] Glossary/profile diagnostics, translation contract snapshots and
   DeepSeek Pro role traces do not expose secrets or provider auth material and
   are not treated as release telemetry/support artifacts without a later

@@ -1943,6 +1943,12 @@ Decision:
   The approved run-scoped file is `provider_io_diagnostics.jsonl`; it may
   contain full system/user prompt bodies, untrusted document batch text and raw
   provider output, but must not store the `Authorization` header or API key.
+- On 2026-06-14, the owner approved including copies of the original uploaded
+  file and the final or partial translated result file in downloaded
+  owner-only full diagnostic archives so diagnostic handoff does not require
+  sending those files separately. The approved archive area is
+  `diagnostic_files/` with `original_file/`, `translated_result/` and
+  `manifest.json` entries sourced from object storage.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model. Raw text remains allowed only inside dedicated owner/admin diagnostic
   surfaces, including the owner-only full diagnostic download sidecar, and must
@@ -1962,7 +1968,8 @@ Decision:
   admin detail, API, archive, telemetry or support artifact.
 - Normal admin log details, telemetry and JSON APIs remain metadata-only and
   redacted by default. Downloaded owner-only full diagnostic archives are the
-  approved exception and may include raw source/translated text.
+  approved exception and may include raw source/translated text plus original
+  and translated-result file bytes.
 - Removing this raw-text diagnostic path, hiding it from the owner, replacing it
   with a metadata-only workflow, or expanding raw-text access beyond the
   dedicated owner/admin diagnostic surface requires a follow-up owner decision.
@@ -1996,6 +2003,9 @@ Evidence:
   a run-log archive, after the previous diagnostics could identify
   `malformed_response` / `unexpected_attribute` but could not show the exact
   rejected provider payload.
+- Owner explicitly requested on 2026-06-14 that diagnostic logs sent for review
+  include the original file and translation result so those files do not need
+  to be sent separately.
 
 Reason:
 - The failed translation incident required comparing source work units,
@@ -2008,6 +2018,9 @@ Reason:
   contract failures such as `unexpected_attribute`, `broken_xml`,
   `external_text` and repair-loop failures without requiring SSH access or
   speculative reconstruction.
+- Full original and result files are sometimes necessary to inspect format-level
+  failures, assembly output, missing sections, EPUB/DOCX/TXT fidelity and
+  before/after differences without reconstructing files from work-unit rows.
 - Keeping the owner-only raw text view in admin avoids repeated archive
   downloads and duplicate local book files during development and incident
   triage.
@@ -2028,6 +2041,12 @@ Consequences:
   archives, not telemetry, normal admin/API views, GitHub issues, PR
   descriptions, support notes or release artifacts. It must exclude provider
   `Authorization` headers and API keys.
+- `diagnostic_files/` entries are sensitive owner-only diagnostic artifacts
+  containing original user-uploaded file bytes and final or partial translated
+  result bytes from object storage. They belong only in downloaded full
+  diagnostic archives and must not be copied into telemetry, normal admin/API
+  views, GitHub issues, PR descriptions, support notes, release artifacts or
+  public/legal/privacy claims without separate exact owner approval.
 - If implementation changes provider request logging beyond the run-scoped
   owner-only archive, storage/runtime data, database/state, auth/RBAC, JSON
   APIs, telemetry or dependencies, it needs the matching approval gate and

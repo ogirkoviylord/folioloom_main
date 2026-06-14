@@ -2666,8 +2666,19 @@ class AdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
+            names = set(archive.namelist())
             raw_run = json.loads(archive.read("run.json"))
             effective = json.loads(archive.read("effective_run.json"))
+            diagnostic_files = json.loads(
+                archive.read("diagnostic_files/manifest.json")
+            )
+            original_file_bytes = archive.read(
+                "diagnostic_files/original_file/book.epub"
+            )
+            translated_result_bytes = archive.read(
+                "diagnostic_files/translated_result/book.uk.partial.epub"
+            )
+            readme = archive.read("README.md").decode("utf-8")
             metadata_text = "\n".join(
                 archive.read(name).decode("utf-8", errors="ignore")
                 for name in {
@@ -2677,6 +2688,26 @@ class AdminRoutesTest(unittest.TestCase):
                 }
             )
 
+        self.assertIn("diagnostic_files/original_file/book.epub", names)
+        self.assertIn(
+            "diagnostic_files/translated_result/book.uk.partial.epub",
+            names,
+        )
+        self.assertEqual(original_file_bytes, b"synthetic source placeholder")
+        self.assertEqual(
+            translated_result_bytes,
+            b"synthetic partial placeholder",
+        )
+        self.assertTrue(diagnostic_files["contains_raw_file_bytes"])
+        self.assertEqual(
+            {
+                entry["role"]: entry["object_kind"]
+                for entry in diagnostic_files["files"]
+            },
+            {"original_file": "original", "translated_result": "partial"},
+        )
+        self.assertIn("original uploaded file", readme)
+        self.assertIn("final or partial", readme)
         self.assertIsNone(raw_run["result_file_name"])
         self.assertEqual(effective["summary"]["status"], "partial")
         self.assertEqual(
@@ -2684,6 +2715,8 @@ class AdminRoutesTest(unittest.TestCase):
             "book.uk.partial.epub",
         )
         self.assertNotIn("Translated text hidden from metadata export", metadata_text)
+        self.assertNotIn("synthetic source placeholder", metadata_text)
+        self.assertNotIn("synthetic partial placeholder", metadata_text)
 
     def test_translation_log_download_counts_ready_raw_fragments_completed(self):
         with TemporaryDirectory() as temp_dir:
