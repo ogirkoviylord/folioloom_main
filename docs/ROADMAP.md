@@ -721,8 +721,10 @@ Acceptance criteria:
   but glossary compliance reported target-form/target-metadata findings. Issue
   #567 narrows the owner-only EPUB smoke prompt context and compliance check to
   target-backed useful entries so the next rerun can distinguish model
-  obedience/morphology issues from selection noise. None of this approves
-  rollout, cache reuse, quality claims or release/privacy claims.
+  obedience/morphology issues from selection noise. Issue #569 hardens the
+  prompt-context shape with explicit escaped source/target contract tags before
+  the next bounded rerun. None of this approves rollout, cache reuse, quality
+  claims or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
