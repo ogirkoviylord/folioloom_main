@@ -661,9 +661,12 @@ Acceptance criteria:
   or emits metadata-only skip/fallback reasons. Issue #505 / #204AX adds a
   default-off owner-only approved target-metadata fixture bridge for the
   committed control EPUB fake/local path, so local rehearsal can get past
-  `target_metadata_missing` without local code inventing target facts. A fresh
-  live paired EPUB smoke still needs exact owner approval; rollout, cache reuse
-  and release/privacy claims remain unapproved.
+  `target_metadata_missing` without local code inventing target facts. Issue
+  #507 / #204AY adds an explicit post-#505 control-EPUB smoke boundary, fake
+  preflight and bounded live paired `ru`/`uk` glossary-on/off provider smoke.
+  The #507 live provider-boundary smoke passed for the bounded control EPUB
+  unit, while translation quality remains `Unknown`; rollout, cache reuse and
+  release/privacy claims remain unapproved.
 
 - Task: Produce Gate B evidence report.
   Phase: 1

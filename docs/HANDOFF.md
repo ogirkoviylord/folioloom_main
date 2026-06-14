@@ -2134,6 +2134,31 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #507 / #204AY starts the post-#505 control-EPUB smoke path.
+  `tools/glossary_runtime_provider_smoke.py` now has an explicit `--control-epub`
+  boundary for `test_samples/gutenberg_time_machine_noimages.en.epub` with
+  `ru`/`uk` targets, paired glossary-on/off calls, #507 diagnostics root,
+  max 4 calls and the approved local target-metadata fixture overlay.
+- Evidence: focused `tests.test_glossary_runtime_provider_smoke`, `compileall`,
+  `git diff --check` and targeted `ruff` passed locally. The owner approved
+  #507 preset A v1, the required fake/dry preflight immediately before live
+  calls completed with 4 validated fake provider-stub calls, and the bounded
+  live DeepSeek-compatible smoke completed under
+  `outputs/issue-507-post-505-control-epub-glossary-live/20260614T110106Z/`.
+  The live run made 4 calls: `ru` glossary-on, `ru` glossary-off, `uk`
+  glossary-on and `uk` glossary-off. All 4 locally validated with
+  `finish_reason=stop`, no validation issue codes, one translated block per
+  call and provider-reported usage totaling 11,951 tokens. The metadata-only
+  live report is
+  `outputs/issue-507-post-505-control-epub-glossary-live/live-metadata-report.md`.
+- Follow-up: #507 provider-boundary smoke passed for this bounded control EPUB
+  unit, but translation quality comparison remains `Unknown` until a separate
+  owner-only quality review. This does not authorize runtime rollout, normal
+  prompt integration, cache reuse, database/storage/scheduler/admin/retention
+  changes, provider config changes, semantic-quality claims or release/privacy/
+  legal/support readiness.
+
+- Date: 2026-06-14.
 - Change: Issue #505 / #204AX adds a default-off owner-only approved
   target-metadata fixture overlay to `tools/glossary_runtime_provider_smoke.py`
   for `test_samples/gutenberg_time_machine_noimages.en.epub`.

@@ -5,9 +5,12 @@ from pathlib import Path
 
 from tools.glossary_runtime_provider_smoke import (
     APPROVED_INPUT_TARGETS,
+    APPROVED_OWNER_TEST_INPUT_TARGETS,
     DEFAULT_DIAGNOSTIC_ROOT,
     DEFAULT_MODEL,
     DEFAULT_TARGET_METADATA_FIXTURE_PATH,
+    ISSUE_507_ID,
+    ISSUE_507_MAX_CALLS,
     FakeRuntimeProvider,
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
@@ -208,6 +211,119 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertEqual(config.max_calls, 5)
         self.assertEqual(config.max_tokens_total, 50_000)
         self.assertTrue(config.raw_text_capture)
+
+    def test_issue_507_control_epub_fake_smoke_runs_paired_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report_path = tmp_path / "issue-507-report.md"
+            config = SmokeConfig(
+                issue_id=ISSUE_507_ID,
+                input_targets=APPROVED_OWNER_TEST_INPUT_TARGETS,
+                diagnostic_root=tmp_path / "diagnostics",
+                max_calls=ISSUE_507_MAX_CALLS,
+                fake=True,
+                target_metadata_fixture_path=DEFAULT_TARGET_METADATA_FIXTURE_PATH,
+                paired_glossary_off=True,
+            )
+
+            report = run_smoke(
+                config,
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                metadata_report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], "507")
+            self.assertEqual(report["approval"]["max_calls"], 4)
+            self.assertTrue(report["approval"]["paired_glossary_off"])
+            self.assertEqual(report["calls_made"], 4)
+            self.assertIn(
+                "live_provider_behavior_unknown",
+                report["recommendation"],
+            )
+            self.assertIn(
+                "live provider behavior is Unknown",
+                " ".join(report["unknown"]),
+            )
+            self.assertIn(
+                "fake provider stub responses passed local validation",
+                report["confirmed"],
+            )
+            self.assertEqual(
+                [call["side"] for call in report["calls"]],
+                [
+                    "glossary_on",
+                    "glossary_off",
+                    "glossary_on",
+                    "glossary_off",
+                ],
+            )
+            self.assertEqual(
+                [call["target_language"] for call in report["calls"]],
+                ["ru", "ru", "uk", "uk"],
+            )
+            self.assertTrue(
+                all(call["status"] == "validated" for call in report["calls"])
+            )
+            self.assertEqual(
+                report["calls"][0]["adapter"]["cache_policy"]["behavior"],
+                "bypass_glossary_injected_cache",
+            )
+            self.assertEqual(
+                report["calls"][1]["adapter"]["cache_policy"]["behavior"],
+                "default_runtime_cache",
+            )
+            rendered = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("<translation_batch>", rendered)
+            self.assertNotIn("<glossary_context", rendered)
+            self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", rendered)
+
+    def test_issue_507_boundary_rejects_missing_pairing_or_wrong_live_root(self):
+        base_config = {
+            "issue_id": ISSUE_507_ID,
+            "input_targets": APPROVED_OWNER_TEST_INPUT_TARGETS,
+            "max_calls": ISSUE_507_MAX_CALLS,
+            "target_metadata_fixture_path": DEFAULT_TARGET_METADATA_FIXTURE_PATH,
+            "paired_glossary_off": True,
+        }
+
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "paired_glossary_off": False,
+                        "fake": True,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "max_calls": ISSUE_507_MAX_CALLS + 1,
+                        "fake": True,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "diagnostic_root": DEFAULT_DIAGNOSTIC_ROOT,
+                        "fake": False,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
 
     def test_pressure_summary_distinguishes_epub_shape_without_raw_text(self):
         raw_source = "RAW SOURCE SENTENCE MUST NOT SERIALIZE"
