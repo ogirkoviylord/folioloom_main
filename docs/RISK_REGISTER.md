@@ -163,7 +163,10 @@
   Issue #557 adds a default-off persistent EPUB resolver that reuses existing
   worker hook/preflight/cache-bypass boundaries and falls back with metadata
   reasons unless target metadata, source term/alias presence and prompt-context
-  budgets pass for an explicitly enabled owner/test path.
+  budgets pass for an explicitly enabled owner/test path. Issue #558 adds
+  fake/local scheduled-worker and owner-only archive evidence for injected,
+  fallback and `without_glossary` paths; this reduces wiring uncertainty but
+  remains non-provider evidence.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
