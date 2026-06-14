@@ -715,7 +715,10 @@ Acceptance criteria:
   the default-off persistent EPUB work-unit resolver that can produce existing
   runtime glossary hook data only for explicitly enabled owner/test paths when
   overlay metadata, source term/alias presence and prompt-context budgets pass.
-  None of this approves rollout, cache reuse or release/privacy claims.
+  Issue #558 adds local/fake scheduled-worker rehearsal coverage proving
+  injected prompt context, fallback metadata, `without_glossary` omission and
+  owner-only archive sidecar evidence before any live provider test. None of
+  this approves rollout, cache reuse or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
