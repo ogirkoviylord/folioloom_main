@@ -61,8 +61,15 @@ from translator_service.translation_run_logs import (
     append_provider_io_diagnostic_for_job,
 )
 from translator_service.translation_runner import (
+    GlossaryRuntimeAdapterHookConfig,
     _clean_translated_text,
-    _format_translation_batch,
+    _effective_glossary_runtime_adapter_decision,
+    _emit_glossary_adapter_metadata,
+    _format_translation_request_text,
+    _glossary_prompt_context_text,
+    _glossary_runtime_adapter_decision,
+    _glossary_runtime_prompt_context,
+    _glossary_runtime_useful_preflight,
     _has_untranslated_cjk_text,
     _has_untranslated_rtl_text,
     _parse_translation_batch,
@@ -143,6 +150,9 @@ def run_next_persistent_work_unit(
     work_unit_started_callback: Callable[[PersistentWorkUnit], None] | None = None,
     usage_completed_callback: Callable[[PersistentWorkUnit], None] | None = None,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> PersistentWorkUnit | None:
     work_unit = store.claim_next_work_unit(job_id, worker_id=worker_id)
     if work_unit is None:
@@ -159,6 +169,8 @@ def run_next_persistent_work_unit(
             translator=translator,
             job_context=job_context,
             provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
     except Exception as error:
         logger.exception(
@@ -221,6 +233,9 @@ def run_stored_text_job_until_idle(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     total_units = len(store.list_work_units(job_id))
@@ -238,6 +253,8 @@ def run_stored_text_job_until_idle(
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
             provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             encoding=encoding,
         )
         if completed is None:
@@ -279,6 +296,9 @@ def run_stored_text_job_parallel_until_idle(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
     encoding: str = "utf-8",
 ) -> PersistentJobExecutionSummary:
     if max_parallel_units <= 1:
@@ -294,6 +314,8 @@ def run_stored_text_job_parallel_until_idle(
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
             provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             encoding=encoding,
         )
 
@@ -333,6 +355,10 @@ def run_stored_text_job_parallel_until_idle(
                     allowed_source_object_keys=allowed_source_object_keys,
                     require_upload_safety_policy=require_upload_safety_policy,
                     provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+                    glossary_runtime_hook=glossary_runtime_hook,
+                    glossary_adapter_metadata_callback=(
+                        glossary_adapter_metadata_callback
+                    ),
                     store=store,
                 )
                 active[future] = (claimed, time.monotonic())
@@ -433,6 +459,9 @@ def run_next_stored_text_work_unit(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     return run_next_persistent_work_unit(
@@ -454,6 +483,8 @@ def run_next_stored_text_work_unit(
         work_unit_started_callback=work_unit_started_callback,
         usage_completed_callback=usage_completed_callback,
         provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+        glossary_runtime_hook=glossary_runtime_hook,
+        glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
     )
 
 
@@ -637,6 +668,9 @@ def run_next_scheduled_stored_text_work_unit(
     translation_run_log_root: str | Path | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
@@ -711,6 +745,8 @@ def run_next_scheduled_stored_text_work_unit(
                     translation_run_log_root,
                     job_id=claim.job_id,
                 ),
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         except Exception as error:
             release_reason = "retryable_failure"
@@ -784,6 +820,9 @@ def translate_claimed_scheduled_stored_text_work_unit(
     job_context: TranslationContextMemory | None = None,
     provider_slot_lease: ProviderSlotLease | None = None,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> _WorkUnitTranslationResult:
     with _provider_slot_channel_context(translator, provider_slot_lease):
         return _translate_work_unit_text_with_provider_io(
@@ -792,6 +831,8 @@ def translate_claimed_scheduled_stored_text_work_unit(
             translator=translator,
             job_context=job_context,
             provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
 
@@ -903,6 +944,9 @@ def _translate_stored_text_work_unit(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
     store: SQLiteTranslationJobStore | None = None,
 ) -> _WorkUnitTranslationResult:
     source_text = _load_work_unit_text(
@@ -922,6 +966,8 @@ def _translate_stored_text_work_unit(
         translator=translator,
         job_context=job_context,
         provider_io_diagnostic_sink=provider_io_diagnostic_sink,
+        glossary_runtime_hook=glossary_runtime_hook,
+        glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
     )
 
 
@@ -932,6 +978,9 @@ def _translate_work_unit_text_with_provider_io(
     translator: PersistentWorkUnitTranslator,
     job_context: TranslationContextMemory | None = None,
     provider_io_diagnostic_sink: ProviderIODiagnosticSink | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> _WorkUnitTranslationResult:
     with capture_provider_io(
         provider_io_diagnostic_sink,
@@ -944,6 +993,8 @@ def _translate_work_unit_text_with_provider_io(
             source_text=source_text,
             translator=translator,
             job_context=job_context,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
 
@@ -985,22 +1036,57 @@ def _translate_work_unit_text(
     source_text: str,
     translator: PersistentWorkUnitTranslator,
     job_context: TranslationContextMemory | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> _WorkUnitTranslationResult:
     source_blocks = _source_blocks_for_work_unit(work_unit, source_text)
     context_memory = job_context or TranslationContextMemory()
+    glossary_prompt_context = _persistent_work_unit_glossary_prompt_context(
+        work_unit=work_unit,
+        source_blocks=source_blocks,
+        glossary_runtime_hook=glossary_runtime_hook,
+        glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
+    )
     if len(source_blocks) <= 1:
         protected_source = _protect_work_unit_text(
             text=source_text,
             work_unit=work_unit,
         )
-        translated_text = translate_with_context(
-            translator,
-            text=protected_source.text,
-            source_language=work_unit.source_language,
-            target_language=work_unit.target_language,
-            translation_context=context_memory,
-        )
-        usage = _provider_usage(translator)
+        usage = ProviderUsage()
+        translated_text = ""
+        if glossary_prompt_context:
+            translated_text = translate_with_context(
+                translator,
+                text=_format_translation_request_text(
+                    [protected_source.text],
+                    source_language_hints=_source_language_hints(
+                        [source_text],
+                        source_language=work_unit.source_language,
+                    ),
+                    glossary_prompt_context=glossary_prompt_context,
+                ),
+                source_language=work_unit.source_language,
+                target_language=work_unit.target_language,
+                translation_context=context_memory,
+            )
+            usage = _add_provider_usage(usage, _provider_usage(translator))
+            parsed = _parse_translation_batch(
+                translated_text,
+                expected_count=1,
+                required_markers=_required_protected_markers([protected_source]),
+            )
+            if parsed is not None:
+                translated_text = parsed[0]
+        if not translated_text or "<translation_block" in translated_text:
+            translated_text = translate_with_context(
+                translator,
+                text=protected_source.text,
+                source_language=work_unit.source_language,
+                target_language=work_unit.target_language,
+                translation_context=context_memory,
+            )
+            usage = _add_provider_usage(usage, _provider_usage(translator))
         translated_text = restore_protected_text(
             _clean_translated_text(translated_text),
             protected_source.replacements,
@@ -1060,9 +1146,10 @@ def _translate_work_unit_text(
     )
     translated_text = translate_with_context(
         translator,
-        text=_format_translation_batch(
+        text=_format_translation_request_text(
             [protected.text for protected in protected_blocks],
             source_language_hints=source_language_hints,
+            glossary_prompt_context=glossary_prompt_context,
         ),
         source_language=work_unit.source_language,
         target_language=work_unit.target_language,
@@ -1116,6 +1203,40 @@ def _translate_work_unit_text(
         translated_text=format_translation_batch_contract(parsed),
         usage=total_usage,
     )
+
+
+def _persistent_work_unit_glossary_prompt_context(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_blocks: list[str],
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None] | None,
+) -> str | None:
+    glossary_adapter_decision = _glossary_runtime_adapter_decision(
+        glossary_runtime_hook,
+        work_unit_sequence=work_unit.sequence,
+    )
+    glossary_useful_preflight = _glossary_runtime_useful_preflight(
+        glossary_runtime_hook,
+        glossary_adapter_decision,
+        source_texts=source_blocks,
+    )
+    effective_glossary_adapter_decision = _effective_glossary_runtime_adapter_decision(
+        glossary_adapter_decision,
+        glossary_useful_preflight,
+    )
+    glossary_prompt_context = _glossary_runtime_prompt_context(
+        glossary_runtime_hook,
+        effective_glossary_adapter_decision,
+        preflight=glossary_useful_preflight,
+    )
+    _emit_glossary_adapter_metadata(
+        glossary_adapter_decision,
+        glossary_adapter_metadata_callback,
+        prompt_context=glossary_prompt_context,
+        preflight=glossary_useful_preflight,
+    )
+    return _glossary_prompt_context_text(glossary_prompt_context)
 
 
 def _source_blocks_for_work_unit(

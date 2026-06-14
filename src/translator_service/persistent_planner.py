@@ -63,6 +63,7 @@ def create_persistent_txt_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    glossary_mode: str | None = None,
     upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
@@ -92,6 +93,7 @@ def create_persistent_txt_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            glossary_mode=glossary_mode,
             translation_mode_profile=_translation_mode_profile_for_document_kind(
                 translation_mode,
                 document_kind="txt",
@@ -137,6 +139,7 @@ def create_persistent_docx_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    glossary_mode: str | None = None,
     upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
@@ -167,6 +170,7 @@ def create_persistent_docx_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            glossary_mode=glossary_mode,
             translation_mode_profile=_translation_mode_profile_for_document_kind(
                 translation_mode,
                 document_kind="docx",
@@ -209,6 +213,7 @@ def create_persistent_epub_job_plan(
     pricing_snapshot_id: str = "prototype-pricing-v1",
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    glossary_mode: str | None = None,
     upload_safety_id: str | None = None,
 ) -> PersistentJobPlan:
     content = storage.get_bytes(source_object_key)
@@ -238,6 +243,7 @@ def create_persistent_epub_job_plan(
             target_language=target_language,
             rights_confirmation=rights_confirmation,
             translation_mode=translation_mode,
+            glossary_mode=glossary_mode,
             translation_mode_profile=_translation_mode_profile_for_document_kind(
                 translation_mode,
                 document_kind="epub",
@@ -293,6 +299,7 @@ def _translation_policy_snapshot(
     target_language: str,
     rights_confirmation: dict | None = None,
     translation_mode: str | None = None,
+    glossary_mode: str | None = None,
     translation_mode_profile: "_TranslationModeProfile | None" = None,
     upload_safety_id: str | None = None,
     accepted_source_object_key: str | None = None,
@@ -321,6 +328,8 @@ def _translation_policy_snapshot(
         snapshot["rights_confirmation"] = rights_confirmation
     if translation_mode is not None:
         snapshot["translation_mode"] = translation_mode
+    if glossary_mode is not None:
+        snapshot["glossary_mode"] = glossary_mode
     if translation_mode_profile is not None:
         snapshot["translation_mode_profile"] = translation_mode_profile.signature
     if upload_safety_id is not None:
