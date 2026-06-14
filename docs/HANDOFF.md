@@ -39,7 +39,9 @@ This is not a default glossary rollout, not automatic on/off sampling, not
 glossary-aware cache reuse, not a provider/config/storage/admin/retention
 change and not a release/privacy/legal/support or quality-proof claim. TXT
 direct runtime prompt injection and deferred/external worker runtime config
-plumbing remain future/Unknown unless separately implemented and approved.
+plumbing remains limited to the #551 evidence-repair path described below:
+with-glossary jobs must inject only when approved READY hook data exists or
+record deterministic metadata-only fallback/omission diagnostics.
 
 Issue #549 implementation slice on 2026-06-14: branch
 `codex/issue-549-glossary-archive-diagnostics` adds
@@ -53,6 +55,22 @@ surfaces, GitHub/docs/PR/support/release artifacts and JSON APIs remain
 metadata-only/redacted. Provider auth material, API keys, tokens, passwords,
 DSNs and real `.env*` values are rejected/redacted; release-version retention,
 export and delete policy remains `TBD`.
+
+Issue #551 implementation slice on 2026-06-14: branch
+`codex/issue-551-glossary-evidence-repair` repairs the controlled glossary
+battle-test evidence path for scheduled/external worker execution. For jobs
+whose persisted translation policy says `glossary_mode=with_glossary`, the
+worker now resolves glossary runtime behavior per claimed work unit: an
+explicit READY hook/resolver can inject bounded glossary context, while missing
+runtime glossary data produces a deterministic metadata-only fallback event
+instead of silently looking like a glossary run. `without_glossary` blocks even
+a provided hook and preserves the existing non-glossary path. The fallback and
+injected events feed the existing owner-only archive sidecar from #549, while
+ordinary events remain metadata-only/redacted and raw source/prompt/provider
+material stays confined to approved owner-only diagnostic boundaries. This is
+not a default glossary rollout, not live provider evidence, not arbitrary
+real-book glossary generation, not glossary-aware cache reuse and not a
+quality/readiness claim.
 
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)

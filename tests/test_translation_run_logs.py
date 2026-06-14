@@ -8,6 +8,7 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
     append_provider_io_diagnostic_for_job,
+    append_translation_run_event_for_job,
     finish_running_translation_runs_for_job,
     record_book_mode_audit_fragment_for_job,
     record_book_mode_audit_gate_for_job,
@@ -144,6 +145,56 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertEqual(record["run_id"], running.run_dir.name)
             self.assertIn("RAW PROMPT", record["request_body"]["text"])
             self.assertIn("RAW RESPONSE", record["response_body"]["text"])
+
+    def test_appends_glossary_runtime_event_with_recursive_redaction(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-event",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+
+            appended = append_translation_run_event_for_job(
+                temp_dir,
+                job_id="job-glossary-event",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "fallback",
+                    "fallback_reason": "runtime_glossary_data_unavailable",
+                    "diagnostic": {
+                        "authorization_header": "Bearer SECRET",
+                        "prompt_body": "RAW PROMPT",
+                        "provider_response_body": "RAW PROVIDER RESPONSE",
+                        "response_body": "RAW RESPONSE",
+                        "source_text": "RAW SOURCE",
+                    },
+                    "prompt_context": {"included_entry_ids": ["entry:v1:test"]},
+                },
+            )
+
+            self.assertEqual(appended, 1)
+            events = [
+                json.loads(line)
+                for line in logger.run_dir.joinpath("events.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            payload = events[-1]["payload"]
+            serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            self.assertEqual(payload["status"], "fallback")
+            self.assertEqual(payload["prompt_context"], "[redacted]")
+            self.assertNotIn("Bearer SECRET", serialized)
+            self.assertNotIn("RAW PROMPT", serialized)
+            self.assertNotIn("RAW PROVIDER RESPONSE", serialized)
+            self.assertNotIn("RAW RESPONSE", serialized)
+            self.assertNotIn("RAW SOURCE", serialized)
 
     def test_appends_provider_io_diagnostics_to_latest_run_after_failure(self):
         with TemporaryDirectory() as temp_dir:
