@@ -720,7 +720,11 @@ Acceptance criteria:
   owner-only archive sidecar evidence before any live provider test. Issue #560
   records the no-code provider-backed glossary preparation design required for
   arbitrary books before target metadata can be generated beyond owner-approved
-  overlays. None of this approves rollout, cache reuse or release/privacy
+  overlays. Issue #559 adds the explicit real-EPUB paired RU smoke boundary and
+  records a bounded Gutenberg/Oz live run: both glossary-on/off responses passed
+  structural validation, glossary-on used cache bypass and real prompt context,
+  but glossary compliance reported target-form/target-metadata findings. None
+  of this approves rollout, cache reuse, quality claims or release/privacy
   claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.

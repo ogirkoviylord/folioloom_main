@@ -16,6 +16,9 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_534_ID,
     ISSUE_534_MAX_CALLS,
     ISSUE_534_MAX_TOKENS_TOTAL,
+    ISSUE_559_EFFECTIVE_MAX_CALLS,
+    ISSUE_559_ID,
+    ISSUE_559_MAX_TOKENS_TOTAL,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
     POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
@@ -357,6 +360,104 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 provider=FakeRuntimeProvider(),
                 repo_root=Path.cwd(),
             )
+
+    def test_issue_559_real_epub_boundary_runs_fake_pair_with_approved_fixture(self):
+        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report_path = tmp_path / "issue-559-report.md"
+            with patch(
+                "tools.glossary_runtime_provider_smoke.ISSUE_559_INPUT_TARGETS",
+                ((fixture, "ru"),),
+            ):
+                report = run_smoke(
+                    SmokeConfig(
+                        issue_id=ISSUE_559_ID,
+                        input_targets=((fixture, "ru"),),
+                        diagnostic_root=tmp_path / "diagnostics",
+                        max_calls=ISSUE_559_EFFECTIVE_MAX_CALLS,
+                        max_tokens_total=ISSUE_559_MAX_TOKENS_TOTAL,
+                        fake=True,
+                        target_metadata_fixture_path=(
+                            DEFAULT_TARGET_METADATA_FIXTURE_PATH
+                        ),
+                        paired_glossary_off=True,
+                    ),
+                    provider=FakeRuntimeProvider(),
+                    repo_root=Path.cwd(),
+                    metadata_report_path=report_path,
+                )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], ISSUE_559_ID)
+            self.assertEqual(
+                report["approval"]["max_calls"],
+                ISSUE_559_EFFECTIVE_MAX_CALLS,
+            )
+            self.assertEqual(
+                report["approval"]["max_tokens_total"],
+                ISSUE_559_MAX_TOKENS_TOTAL,
+            )
+            self.assertEqual(report["calls_made"], 2)
+            self.assertEqual(
+                [call["side"] for call in report["calls"]],
+                ["glossary_on", "glossary_off"],
+            )
+            self.assertTrue(
+                all(call["status"] == "validated" for call in report["calls"])
+            )
+            self.assertEqual(
+                report["calls"][0]["adapter"]["cache_policy"]["behavior"],
+                "bypass_glossary_injected_cache",
+            )
+            self.assertEqual(
+                report["calls"][1]["adapter"]["cache_policy"]["behavior"],
+                "default_runtime_cache",
+            )
+
+            rendered = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("<glossary_context", rendered)
+            self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", rendered)
+            self.assertNotIn("provider_response", rendered)
+
+    def test_issue_559_boundary_rejects_unapproved_targets_and_extra_calls(self):
+        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        with patch(
+            "tools.glossary_runtime_provider_smoke.ISSUE_559_INPUT_TARGETS",
+            ((fixture, "ru"),),
+        ):
+            with self.assertRaises(ValueError):
+                run_smoke(
+                    SmokeConfig(
+                        issue_id=ISSUE_559_ID,
+                        input_targets=((fixture, "uk"),),
+                        max_calls=ISSUE_559_EFFECTIVE_MAX_CALLS,
+                        max_tokens_total=ISSUE_559_MAX_TOKENS_TOTAL,
+                        fake=True,
+                        target_metadata_fixture_path=(
+                            DEFAULT_TARGET_METADATA_FIXTURE_PATH
+                        ),
+                        paired_glossary_off=True,
+                    ),
+                    provider=FakeRuntimeProvider(),
+                    repo_root=Path.cwd(),
+                )
+            with self.assertRaises(ValueError):
+                run_smoke(
+                    SmokeConfig(
+                        issue_id=ISSUE_559_ID,
+                        input_targets=((fixture, "ru"),),
+                        max_calls=ISSUE_559_EFFECTIVE_MAX_CALLS + 1,
+                        max_tokens_total=ISSUE_559_MAX_TOKENS_TOTAL,
+                        fake=True,
+                        target_metadata_fixture_path=(
+                            DEFAULT_TARGET_METADATA_FIXTURE_PATH
+                        ),
+                        paired_glossary_off=True,
+                    ),
+                    provider=FakeRuntimeProvider(),
+                    repo_root=Path.cwd(),
+                )
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()

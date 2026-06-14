@@ -176,7 +176,10 @@
   fallback and `without_glossary` paths; this reduces wiring uncertainty but
   remains non-provider evidence. Issue #560 records a no-code provider-backed
   preparation design for arbitrary books, with durable storage,
-  retention/export/delete, admin visibility and rollout still `TBD`.
+  retention/export/delete, admin visibility and rollout still `TBD`. Issue #559
+  records bounded provider-boundary evidence that glossary context can be
+  injected into a real EPUB test prompt, while compliance findings show target
+  metadata/selection quality still needs iteration before any rollout claim.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
