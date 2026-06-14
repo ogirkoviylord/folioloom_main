@@ -443,6 +443,71 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn("glossary_runtime_diagnostics.json", readme)
         self.assertIn("provider_io_diagnostics.jsonl", sidecar_text)
 
+    def test_effective_archive_includes_glossary_fallback_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-fallback-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "fallback",
+                    "fallback_reason": "runtime_glossary_data_unavailable",
+                    "work_unit_sequence": None,
+                    "selected_entry_ids": [],
+                    "cache_policy": {
+                        "behavior": "default_runtime_cache",
+                        "cache_get_allowed": True,
+                        "cache_put_allowed": True,
+                    },
+                    "battle_test_preflight": {
+                        "status": "skipped",
+                        "fallback_reason": "adapter_not_ready",
+                        "reason_codes": ["adapter_not_ready"],
+                    },
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertFalse(sidecar["contains_raw_glossary_diagnostics"])
+        self.assertTrue(sidecar["metadata_only"])
+        self.assertEqual(sidecar["glossary_mode"], "with_glossary")
+        self.assertEqual(sidecar["rendered_prompt_contexts"], [])
+        self.assertEqual(
+            sidecar["adapter_events"][0]["fallback_reason"],
+            "runtime_glossary_data_unavailable",
+        )
+        self.assertEqual(
+            sidecar["adapter_events"][0]["cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
+
     def test_effective_archive_omits_glossary_diagnostics_without_glossary_data(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(

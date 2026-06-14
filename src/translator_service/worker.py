@@ -59,6 +59,7 @@ from translator_service.translation_context import (
 from translator_service.translation_postprocess import clean_inline_formatting_artifacts
 from translator_service.translation_run_logs import (
     append_provider_io_diagnostic_for_job,
+    append_translation_run_event_for_job,
 )
 from translator_service.translation_runner import (
     GlossaryRuntimeAdapterHookConfig,
@@ -77,9 +78,14 @@ from translator_service.translation_runner import (
     _restore_protected_texts,
     _source_language_hints,
     _target_language_uses_cjk,
+    build_fallback_glossary_runtime_hook,
 )
 
 logger = logging.getLogger(__name__)
+
+_GLOSSARY_MODE_WITH = "with_glossary"
+_GLOSSARY_MODE_WITHOUT = "without_glossary"
+_GLOSSARY_RUNTIME_ADAPTER_EVENT = "glossary_runtime_adapter"
 
 
 def _is_stale_work_unit_claim(error: ValueError) -> bool:
@@ -669,6 +675,11 @@ def run_next_scheduled_stored_text_work_unit(
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
     glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_runtime_hook_resolver: Callable[
+        [PersistentWorkUnit],
+        GlossaryRuntimeAdapterHookConfig | None,
+    ]
+    | None = None,
     glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
     | None = None,
     encoding: str = "utf-8",
@@ -735,6 +746,22 @@ def run_next_scheduled_stored_text_work_unit(
     try:
         try:
             job_context = _job_translation_context(store, claim.job_id)
+            resolved_glossary_runtime_hook = _scheduled_glossary_runtime_hook(
+                store=store,
+                work_unit=work_unit,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
+            )
+            resolved_glossary_adapter_metadata_callback = (
+                _scheduled_glossary_adapter_metadata_callback(
+                    translation_run_log_root=translation_run_log_root,
+                    work_unit=work_unit,
+                    glossary_runtime_hook=resolved_glossary_runtime_hook,
+                    glossary_adapter_metadata_callback=(
+                        glossary_adapter_metadata_callback
+                    ),
+                )
+            )
             translation_result = translate_claimed_scheduled_stored_text_work_unit(
                 work_unit=work_unit,
                 source_text=source_text,
@@ -745,8 +772,10 @@ def run_next_scheduled_stored_text_work_unit(
                     translation_run_log_root,
                     job_id=claim.job_id,
                 ),
-                glossary_runtime_hook=glossary_runtime_hook,
-                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
+                glossary_runtime_hook=resolved_glossary_runtime_hook,
+                glossary_adapter_metadata_callback=(
+                    resolved_glossary_adapter_metadata_callback
+                ),
             )
         except Exception as error:
             release_reason = "retryable_failure"
@@ -852,6 +881,56 @@ def _provider_io_diagnostic_sink(
         )
 
     return append
+
+
+def _scheduled_glossary_runtime_hook(
+    *,
+    store: SQLiteTranslationJobStore,
+    work_unit: PersistentWorkUnit,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
+    glossary_runtime_hook_resolver: Callable[
+        [PersistentWorkUnit],
+        GlossaryRuntimeAdapterHookConfig | None,
+    ]
+    | None = None,
+) -> GlossaryRuntimeAdapterHookConfig | None:
+    glossary_mode = _job_glossary_mode_for_work_unit(store, work_unit)
+    if glossary_mode == _GLOSSARY_MODE_WITHOUT:
+        return None
+    if glossary_mode == _GLOSSARY_MODE_WITH:
+        if glossary_runtime_hook_resolver is not None:
+            resolved = glossary_runtime_hook_resolver(work_unit)
+            if resolved is not None:
+                return resolved
+        return glossary_runtime_hook or build_fallback_glossary_runtime_hook()
+    if glossary_mode is None:
+        return glossary_runtime_hook
+    return None
+
+
+def _scheduled_glossary_adapter_metadata_callback(
+    *,
+    translation_run_log_root: str | Path | None,
+    work_unit: PersistentWorkUnit,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None] | None,
+) -> Callable[[dict[str, object]], None] | None:
+    if glossary_runtime_hook is None:
+        return None
+    if glossary_adapter_metadata_callback is not None:
+        return glossary_adapter_metadata_callback
+    if translation_run_log_root is None:
+        return None
+
+    def record(payload: dict[str, object]) -> None:
+        append_translation_run_event_for_job(
+            translation_run_log_root,
+            job_id=work_unit.job_id,
+            event_type=_GLOSSARY_RUNTIME_ADAPTER_EVENT,
+            payload=payload,
+        )
+
+    return record
 
 
 def load_scheduled_work_unit_text(
@@ -1797,6 +1876,29 @@ def _job_translation_context(
         logger.warning("Ignoring unreadable translation policy: job_id=%s", job_id)
         return None
     return translation_context_from_payload(payload.get("translation_context_memory"))
+
+
+def _job_glossary_mode_for_work_unit(
+    store: SQLiteTranslationJobStore,
+    work_unit: PersistentWorkUnit,
+) -> str | None:
+    job = store.get_job(work_unit.job_id)
+    if job is None or not job.translation_policy:
+        return None
+    try:
+        payload = json.loads(job.translation_policy)
+    except json.JSONDecodeError:
+        logger.warning(
+            "Ignoring unreadable glossary translation policy: job_id=%s",
+            work_unit.job_id,
+        )
+        return None
+    if not isinstance(payload, dict):
+        return None
+    glossary_mode = payload.get("glossary_mode")
+    if not isinstance(glossary_mode, str):
+        return None
+    return glossary_mode.strip().lower() or None
 
 
 def open_scheduler_store(settings):

@@ -160,9 +160,14 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
 - Назначение: persistent jobs/work units, leases, retries, worker loop, scheduler fairness/capacity, partial/final assembly.
 - Glossary note: #546 threads the default-off selected glossary hook and
   metadata-only adapter events through persistent DOCX/EPUB worker execution,
-  including EPUB and scheduler-backed work-unit execution. This does not
-  approve external/deferred worker runtime config plumbing, cache reuse,
-  durable state changes or provider/config changes.
+  including EPUB and scheduler-backed work-unit execution. #551 repairs the
+  external/scheduled worker evidence path so `with_glossary` is resolved per
+  claimed work unit: READY hook data can inject bounded context, while missing
+  runtime glossary data records metadata-only fallback/omission diagnostics for
+  the owner-only archive sidecar. This does not approve default glossary
+  rollout, live provider calls, arbitrary real-book glossary generation,
+  glossary-aware cache reuse, durable state changes or provider/config
+  changes.
 - Важные файлы: listed above plus `translation_jobs.py`, `translation_runner.py`, `translation_run_logs.py`, `translation_metrics.py`.
 - Связанные тесты: `tests/test_worker.py`, `tests/test_scheduler*.py`, `tests/test_postgres_scheduler.py`, `tests/test_persistent_*`, `tests/test_job_runner.py`, `tests/test_translation_*`.
 

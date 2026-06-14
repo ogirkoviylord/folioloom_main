@@ -350,6 +350,46 @@ def append_provider_io_diagnostic_for_job(
     return appended
 
 
+def append_translation_run_event_for_job(
+    root: str | Path | None,
+    *,
+    job_id: str,
+    event_type: str,
+    payload: dict[str, object] | None = None,
+) -> int:
+    if root is None or not job_id:
+        return 0
+    root_path = Path(root)
+    if not root_path.exists():
+        return 0
+
+    matching: list[tuple[Path, dict]] = []
+    for run_json in root_path.glob("*/run.json"):
+        try:
+            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
+            continue
+        matching.append((run_json, snapshot))
+
+    running = [item for item in matching if item[1].get("status") == "running"]
+    targets = running or _latest_matching_run(matching)
+
+    appended = 0
+    for run_json, _snapshot in targets:
+        _append_run_event(
+            run_json.parent,
+            event_type,
+            job_id=job_id,
+            payload=safe_glossary_adapter_metadata(payload or {})
+            if event_type == "glossary_runtime_adapter"
+            else payload,
+        )
+        appended += 1
+    return appended
+
+
 def _latest_matching_run(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
     if not items:
         return []
@@ -530,6 +570,64 @@ _SENSITIVE_PAYLOAD_KEY_MARKERS = (
     "stack_trace",
     "traceback",
 )
+
+_GLOSSARY_METADATA_RAW_KEYS = {
+    "api_key",
+    "auth",
+    "auth_material",
+    "authorization",
+    "dsn",
+    "password",
+    "prompt",
+    "prompt_body",
+    "provider_auth",
+    "provider_response",
+    "provider_response_body",
+    "raw",
+    "raw_provider_response_body",
+    "request_body",
+    "response_body",
+    "raw_prompt",
+    "raw_response",
+    "raw_source",
+    "source_text",
+    "source_texts",
+    "token",
+    "translated_text",
+    "translation",
+}
+
+_GLOSSARY_METADATA_RAW_KEY_MARKERS = (
+    ".env",
+    "api_key",
+    "auth_material",
+    "authorization",
+    "dsn",
+    "password",
+    "provider_auth",
+    "provider_response",
+    "secret",
+    "token",
+)
+
+
+def safe_glossary_adapter_metadata(value):
+    if isinstance(value, dict):
+        safe_payload = {}
+        for key, item in value.items():
+            key_lower = str(key).lower()
+            if key_lower in _GLOSSARY_METADATA_RAW_KEYS or any(
+                marker in key_lower for marker in _GLOSSARY_METADATA_RAW_KEY_MARKERS
+            ):
+                safe_payload[key] = "[redacted]"
+                continue
+            safe_payload[key] = safe_glossary_adapter_metadata(item)
+        return safe_payload
+    if isinstance(value, list):
+        return [safe_glossary_adapter_metadata(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(safe_glossary_adapter_metadata(item) for item in value)
+    return value
 
 
 def _safe_event_payload(payload: dict) -> dict:
