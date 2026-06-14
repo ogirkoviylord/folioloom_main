@@ -24,11 +24,14 @@ from translator_service.beta_safety import (
     estimate_cost_usd,
 )
 from translator_service.bot_translation_service import (
+    GLOSSARY_MODE_WITH,
+    GLOSSARY_MODE_WITHOUT,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
     BotTranslationService,
     DocumentScanRejectedError,
     DuplicatePreviewError,
+    GlossaryModeRequired,
     PendingTranslation,
     PendingUpload,
     PreviewAcceptanceRequired,
@@ -80,6 +83,7 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
 )
+from translator_service.translation_runner import GlossaryRuntimeAdapterHookConfig
 from translator_service.upload_safety_ledger import (
     InMemoryUploadSafetyLedger,
     UploadSafetyMetadata,
@@ -1485,6 +1489,81 @@ class BotTranslationServiceTest(unittest.TestCase):
                 user_telegram_id=42,
                 translation_mode="provider_magic",
             )
+
+    def test_glossary_mode_is_required_before_preview_when_unselected(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+        )
+        service.store_uploaded_document(
+            user_telegram_id=42,
+            file_name="notes.txt",
+            content=b"One meaningful paragraph for preview.",
+            source_language="en",
+        )
+        service.confirm_pending_upload_rights(user_telegram_id=42)
+        self._select_default_translation_mode(service)
+        service.prepare_pending_upload(
+            user_telegram_id=42,
+            target_language="uk",
+            glossary_mode=None,
+        )
+
+        with self.assertRaises(GlossaryModeRequired):
+            service.generate_preview_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+    def test_select_pending_translation_glossary_mode_records_safe_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            activity_store = SQLiteUserActivityStore(
+                Path(temp_dir) / "activity.sqlite3"
+            )
+            self.addCleanup(activity_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                activity_store=activity_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One meaningful paragraph for preview.",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+                glossary_mode=None,
+            )
+
+            selected = service.select_pending_translation_glossary_mode(
+                user_telegram_id=42,
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+
+            self.assertEqual(selected.glossary_mode, GLOSSARY_MODE_WITH)
+            self.assertFalse(selected.preview_shown)
+            self.assertFalse(selected.preview_accepted)
+            events = activity_store.list_events(actor_id="telegram:42")
+            glossary_events = [
+                event
+                for event in events
+                if event.event_type == "translation.glossary_mode.selected"
+            ]
+            self.assertEqual(len(glossary_events), 1)
+            metadata = glossary_events[0].metadata
+            self.assertEqual(metadata["glossary_mode"], GLOSSARY_MODE_WITH)
+            serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+            self.assertNotIn("One meaningful paragraph", serialized)
+            self.assertNotIn("translation_batch", serialized)
 
     def test_can_restore_pending_translation_to_language_selection(self):
         service = BotTranslationService(
@@ -4419,6 +4498,69 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             self.assertEqual(guard.consumed, [job.id])
 
+    def test_epub_with_glossary_scheduler_runner_uses_hook_metadata_only(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            run_log_root = root / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                glossary_runtime_hook_builder=lambda pending, document_kind: (
+                    _ready_glossary_hook()
+                ),
+            )
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(
+                extract_text_from_epub(job.result_content),
+                "[ru] Darcy returns.",
+            )
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            run_dir = next(run_log_root.iterdir())
+            event_lines = run_dir.joinpath("events.jsonl").read_text()
+            self.assertIn("glossary_runtime_adapter", event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+
     def test_persistent_confirmation_records_provider_io_without_scheduler_runner(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -6108,6 +6250,174 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(second_job.status, TranslationJobStatus.READY)
         self.assertEqual(len(translator.requests), 1)
 
+    def test_epub_without_glossary_does_not_build_runtime_hook(self):
+        hook_calls: list[tuple[str, str]] = []
+
+        def hook_builder(pending: PendingTranslation, document_kind: DocumentKind):
+            hook_calls.append((pending.file_name, document_kind.value))
+            return _ready_glossary_hook()
+
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+            glossary_runtime_hook_builder=hook_builder,
+        )
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Darcy returns.</p></body>
+                </html>
+                """
+            }
+        )
+        service.prepare_document(
+            user_telegram_id=42,
+            file_name="without.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            glossary_mode=GLOSSARY_MODE_WITHOUT,
+        )
+        self._accept_pending_preview(service)
+        translator = RecordingTranslator()
+
+        job = service.confirm_pending_translation(
+            user_telegram_id=42,
+            translator=translator,
+        )
+
+        self.assertEqual(job.status, TranslationJobStatus.READY)
+        self.assertEqual(hook_calls, [])
+        self.assertEqual(len(translator.requests), 1)
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+
+    def test_epub_with_glossary_in_memory_uses_hook_and_bypasses_cache(self):
+        service = BotTranslationService(
+            job_repository=InMemoryTranslationJobRepository(),
+            pricing_rules=_pricing_rules(),
+            max_upload_mb=50,
+            max_fragment_chars=200,
+            glossary_runtime_hook_builder=lambda pending, document_kind: (
+                _ready_glossary_hook()
+            ),
+        )
+        translator = RecordingTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Darcy returns.</p></body>
+                </html>
+                """
+            }
+        )
+
+        for file_name in ("first.epub", "second.epub"):
+            service.prepare_document(
+                user_telegram_id=42,
+                file_name=file_name,
+                content=content,
+                source_language="en",
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(
+                extract_text_from_epub(job.result_content),
+                "[ru] Darcy returns.",
+            )
+
+        self.assertEqual(len(translator.requests), 2)
+        self.assertTrue(
+            all("<glossary_context" in request[0] for request in translator.requests)
+        )
+        self.assertTrue(
+            all(
+                "role=\"untrusted_reference_data\"" in request[0]
+                for request in translator.requests
+            )
+        )
+
+    def test_epub_with_glossary_persistent_worker_uses_hook_metadata_only(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            run_log_root = Path(temp_dir) / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                glossary_runtime_hook_builder=lambda pending, document_kind: (
+                    _ready_glossary_hook()
+                ),
+            )
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(
+                extract_text_from_epub(job.result_content),
+                "[ru] Darcy returns.",
+            )
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            persisted = persistent_store.get_job(job.id)
+            self.assertIsNotNone(persisted)
+            policy = json.loads(persisted.translation_policy)
+            self.assertEqual(policy["glossary_mode"], GLOSSARY_MODE_WITH)
+            run_dir = next(run_log_root.iterdir())
+            run_snapshot = json.loads(run_dir.joinpath("run.json").read_text())
+            serialized = json.dumps(run_snapshot, ensure_ascii=False, sort_keys=True)
+            event_lines = run_dir.joinpath("events.jsonl").read_text()
+            self.assertIn("glossary_runtime_adapter", event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", serialized)
+            self.assertNotIn("<translation_batch", serialized)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("<translation_batch", event_lines)
+
 
 def _pricing_rules() -> PricingRules:
     return PricingRules(
@@ -6115,6 +6425,71 @@ def _pricing_rules() -> PricingRules:
         expected_output_multiplier=1.2,
         service_markup_multiplier=3.0,
         minimum_price_usd=0.10,
+    )
+
+
+def _ready_glossary_hook() -> GlossaryRuntimeAdapterHookConfig:
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=True,
+        glossary_plan={
+            "schema_version": "glossary-runtime-shadow-plan-v1",
+            "enabled": True,
+            "status": "planned",
+            "fallback_reason": "none",
+            "source_language": "en",
+            "target_language": "ru",
+            "policy_signature_context": {
+                "context_version": "translation-policy-signature-context-v1",
+                "glossary_signature": "glossary-snapshot:v1:test",
+                "profile_signature": "book-profile:v1:test",
+                "translation_snapshot_signature": (
+                    "translation-contract-snapshot:v1:test"
+                ),
+                "selection_signature": "glossary-shadow-selection:v1:test",
+                "selected_rule_ids": ["profile-rule:literary-fiction:names-v1"],
+                "prompt_contract_version": "prompt-contract:v1",
+            },
+            "work_unit_plans": [
+                {
+                    "work_unit_sequence": sequence,
+                    "source_block_ids": ["block:v1:0"],
+                    "budget_exceeded": False,
+                    "budget_status": "within_budget",
+                    "fallback_reason_codes": [],
+                    "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                    "selection_signature": f"glossary-selection:v1:{sequence}",
+                    "fallback_action": "shadow_metadata_only",
+                }
+                for sequence in (0, 1)
+            ],
+            "runtime_integration": {
+                "normal_translation_prompts_changed": False,
+                "live_provider_calls_allowed": False,
+                "durable_state_mutation_allowed": False,
+                "cache_mutation_allowed": False,
+                "fallback_action": "omit_glossary_prompt_context",
+            },
+        },
+        prompt_rehearsal_enabled=True,
+        prompt_context_entries=(
+            {
+                "entry_id": "glossary-entry:v1:darcy",
+                "category": "name",
+                "layer": "hard",
+                "status": "validator_accepted",
+                "source_canonical": "Darcy",
+                "target_canonical": "Дарси",
+                "aliases": ["Mr. Darcy"],
+                "target_variants": [],
+                "forbidden_variants": ["Дэрси"],
+                "confidence": 0.98,
+                "strategy": "transcribe",
+                "grammatical_gender": "unknown",
+                "morphology_notes": [],
+                "profile_rule_ids": ["profile-rule:literary-fiction:names-v1"],
+            },
+        ),
+        owner_battle_test_enabled=True,
     )
 
 

@@ -17,6 +17,50 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-14 - Temporary Telegram glossary mode selector for battle-test comparison
+
+Status: Active temporary battle-test UX
+
+Decision:
+- The Telegram bot may temporarily ask the user to choose one of two modes for
+  a translation attempt: translate with glossary or translate without glossary.
+- `without glossary` must preserve the existing non-glossary translation path.
+- `with glossary` may enable the existing default-off glossary runtime path only
+  for that job/attempt, with local useful/READY/target-metadata/budget gates and
+  safe fallback to the existing non-glossary path when glossary data is missing,
+  invalid, unsupported, over budget or locally unsafe.
+- Glossary-injected enabled/test-path units must keep the #465 cache bypass.
+- The selector is temporary battle-test UX, not final product UX and not a
+  default glossary rollout.
+- Ordinary logs, GitHub/docs/PR/support/release artifacts and normal
+  user/admin surfaces must stay metadata-only/redacted. Raw source text, prompt
+  bodies, translated text, provider responses, glossary diagnostics, API keys
+  and auth material must not be copied into ordinary artifacts.
+- This decision does not approve automatic paired/sampled double translation,
+  default glossary rollout, glossary-aware cache reuse, provider config/key
+  changes, database/schema/state/scheduler/storage/admin/retention changes,
+  release/privacy/legal/support claims or a claim that glossary quality is
+  proven or production-ready.
+
+Evidence:
+- The owner approved issue #546 implementation on 2026-06-14 with explicit
+  scope for the temporary Telegram selector and guardrails.
+- The implementation keeps the selector as per-attempt metadata and preserves
+  rights confirmation, beta allowlist, cost/cap guard, confirmation,
+  progress/cancel/status/history and My Books flows.
+
+Consequences:
+- Future work can compare manual `with glossary` and `without glossary` bot
+  runs without automatic duplicate provider calls.
+- Any removal of the temporary selector, promotion to default glossary
+  behavior, cache reuse, storage/admin/retention change or release/beta claim
+  needs a separate approved issue and review.
+
+Human approval required to change:
+- yes; changing rollout state, cache behavior, provider config, durable state,
+  retention/admin surfaces, raw diagnostic boundaries or release/privacy claims
+  requires explicit owner approval.
+
 ### 2026-06-14 - Glossary core remains language-neutral; terminology morphology lives in target-language policies
 
 Status: Active architecture rule for glossary/runtime/QA work

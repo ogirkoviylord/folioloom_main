@@ -35,6 +35,7 @@ from translator_service.translation_run_logs import (
     record_book_mode_audit_fragment_for_job,
     record_book_mode_audit_gate_for_job,
 )
+from translator_service.translation_runner import GlossaryRuntimeAdapterHookConfig
 from translator_service.worker import (
     PersistentWorkUnitTranslator,
     _acquire_provider_slot_lease_for_claim,
@@ -88,6 +89,9 @@ def run_scheduler_once(
     translation_run_log_root: str | Path | None = None,
     allowed_source_object_keys: Container[str] | None = None,
     require_upload_safety_policy: bool = False,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> SchedulerRunOnceSummary:
     if beta_safety_guard is not None:
         decision = beta_safety_guard.can_start_new_work()
@@ -133,6 +137,8 @@ def run_scheduler_once(
                 translation_run_log_root=translation_run_log_root,
                 allowed_source_object_keys=allowed_source_object_keys,
                 require_upload_safety_policy=require_upload_safety_policy,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         if completed is not None:
             if completed.status.value in {"translated", "cached"}:
@@ -165,6 +171,8 @@ def run_scheduler_once(
             allowed_source_object_keys=allowed_source_object_keys,
             require_upload_safety_policy=require_upload_safety_policy,
             beta_safety_guard=beta_safety_guard,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
     assembled_jobs = assemble_due_jobs(
@@ -197,6 +205,8 @@ def _run_scheduled_parallel_once(
     allowed_source_object_keys: Container[str] | None,
     require_upload_safety_policy: bool,
     beta_safety_guard: BetaSafetyGuard | None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None] | None,
 ) -> tuple[int, int]:
     refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
 
@@ -302,6 +312,10 @@ def _run_scheduled_parallel_once(
                     provider_io_diagnostic_sink=_provider_io_diagnostic_sink(
                         translation_run_log_root,
                         job_id=claim.job_id,
+                    ),
+                    glossary_runtime_hook=glossary_runtime_hook,
+                    glossary_adapter_metadata_callback=(
+                        glossary_adapter_metadata_callback
                     ),
                 )
                 active[future] = (claim, lease_attempt.lease)

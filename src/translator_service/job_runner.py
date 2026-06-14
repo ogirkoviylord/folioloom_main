@@ -1,6 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Callable
 
 from translator_service.translation_cache import TranslationCache
 from translator_service.translation_jobs import (
@@ -9,6 +9,7 @@ from translator_service.translation_jobs import (
     TranslationProgress,
 )
 from translator_service.translation_runner import (
+    GlossaryRuntimeAdapterHookConfig,
     TranslatedDocument,
     translate_docx_document,
     translate_epub_document,
@@ -112,6 +113,9 @@ def run_txt_translation_job(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslatedDocument:
     return run_translation_job(
         repository=repository,
@@ -121,6 +125,8 @@ def run_txt_translation_job(
         progress_callback=progress_callback,
         cancellation_token=cancellation_token,
         translation_cache=translation_cache,
+        glossary_runtime_hook=glossary_runtime_hook,
+        glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
     )
 
 
@@ -133,6 +139,9 @@ def run_translation_job(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslatedDocument:
     job = repository.get(job_id)
     repository.save(replace(job, status=TranslationJobStatus.TRANSLATING))
@@ -145,6 +154,8 @@ def run_translation_job(
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
             translation_cache=translation_cache,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
     except Exception as error:
         repository.save(
@@ -180,6 +191,9 @@ def _translate_job(
     progress_callback: Callable[[TranslationProgress], None] | None = None,
     cancellation_token: CancellationToken | None = None,
     translation_cache: TranslationCache | None = None,
+    glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+    glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+    | None = None,
 ) -> TranslatedDocument:
     if job.document_kind is DocumentKind.TXT:
         return translate_txt_document(
@@ -204,6 +218,8 @@ def _translate_job(
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
             translation_cache=translation_cache,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
     if job.document_kind is DocumentKind.EPUB:
@@ -217,6 +233,8 @@ def _translate_job(
             progress_callback=progress_callback,
             cancellation_token=cancellation_token,
             translation_cache=translation_cache,
+            glossary_runtime_hook=glossary_runtime_hook,
+            glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
         )
 
     raise ValueError(f"Unsupported document kind: {job.document_kind}")

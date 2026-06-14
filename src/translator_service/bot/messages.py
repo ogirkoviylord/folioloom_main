@@ -4,6 +4,8 @@ from pathlib import PurePath
 from translator_service.beta_access import BetaAccessDenied
 from translator_service.bot.activity_phrases import get_activity_phrases
 from translator_service.bot_translation_service import (
+    GLOSSARY_MODE_WITH,
+    GLOSSARY_MODE_WITHOUT,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
     TRANSLATION_MODE_DOCUMENT_FORM,
     DuplicatePreviewError,
@@ -178,6 +180,28 @@ MESSAGES = {
         "translation_mode_required": (
             "Choose how to translate this document before selecting the "
             "target language."
+        ),
+        "glossary_mode_prompt": (
+            "File received.\n\n"
+            "Title: {file_name}\n"
+            "Format: {file_format}\n"
+            "{source_language_line}"
+            "To: {target_language}\n\n"
+            "Choose whether to translate this attempt with the glossary."
+        ),
+        "glossary_mode_required": (
+            "Choose whether to translate with the glossary or without it before "
+            "starting the preview."
+        ),
+        "glossary": "Glossary",
+        "glossary_mode_with": "Translate with glossary",
+        "glossary_mode_without": "Translate without glossary",
+        "glossary_mode_with_summary": (
+            "Glossary mode: on for this attempt. If glossary data is missing or "
+            "unsafe, I’ll use the normal translation path."
+        ),
+        "glossary_mode_without_summary": (
+            "Glossary mode: off for this attempt."
         ),
         "delete_book": "Delete Book",
         "confirm_delete_book": "Yes, Delete Book",
@@ -447,6 +471,26 @@ MESSAGES = {
             "Выберите, как переводить этот документ, прежде чем выбирать "
             "язык перевода."
         ),
+        "glossary_mode_prompt": (
+            "Файл получен.\n\n"
+            "Название: {file_name}\n"
+            "Формат: {file_format}\n"
+            "{source_language_line}"
+            "На: {target_language}\n\n"
+            "Выберите, переводить эту попытку с глоссарием или без."
+        ),
+        "glossary_mode_required": (
+            "Выберите, переводить с глоссарием или без, прежде чем запускать "
+            "предпросмотр."
+        ),
+        "glossary": "Глоссарий",
+        "glossary_mode_with": "Перевести с глоссарием",
+        "glossary_mode_without": "Перевести без глоссария",
+        "glossary_mode_with_summary": (
+            "Глоссарий: включен для этой попытки. Если данные глоссария не "
+            "подойдут или будут небезопасны, я использую обычный путь перевода."
+        ),
+        "glossary_mode_without_summary": "Глоссарий: выключен для этой попытки.",
         "delete_book": "Удалить книгу",
         "confirm_delete_book": "Да, удалить книгу",
         "keep_book": "Оставить книгу",
@@ -1528,6 +1572,32 @@ def build_translation_mode_selection_message(
     )
 
 
+def build_translation_glossary_mode_selection_message(
+    pending: PendingTranslation,
+    interface_language: str = "en",
+) -> str:
+    messages = _messages(interface_language)
+    source_language_line = ""
+    if pending.source_language_display:
+        localized_source_language = _localized_source_language_display_text(
+            pending.source_language_display,
+            pending.source_language,
+            interface_language,
+        )
+        source_language_line = (
+            f"{messages['original_language']}: {localized_source_language}\n"
+        )
+    return messages["glossary_mode_prompt"].format(
+        file_name=pending.file_name,
+        file_format=_file_format_label(pending.file_name),
+        source_language_line=source_language_line,
+        target_language=localized_language_name_for_code(
+            pending.target_language,
+            interface_language,
+        ),
+    )
+
+
 def build_rights_confirmation_message(
     file_name: str,
     interface_language: str = "en",
@@ -1589,6 +1659,18 @@ def build_pending_translation_message(
             [
                 f"{messages['mode']}: {mode_label}",
                 mode_summary,
+            ]
+        )
+    glossary_display = _glossary_mode_display(
+        pending.glossary_mode,
+        interface_language,
+    )
+    if glossary_display is not None:
+        glossary_label, glossary_summary = glossary_display
+        lines.extend(
+            [
+                f"{messages['glossary']}: {glossary_label}",
+                glossary_summary,
             ]
         )
     lines.extend(
@@ -1666,12 +1748,24 @@ def build_translation_mode_required_message(interface_language: str = "en") -> s
     return _messages(interface_language)["translation_mode_required"]
 
 
+def build_glossary_mode_required_message(interface_language: str = "en") -> str:
+    return _messages(interface_language)["glossary_mode_required"]
+
+
 def get_translation_mode_document_form_text(interface_language: str = "en") -> str:
     return _messages(interface_language)["translation_mode_document_form"]
 
 
 def get_translation_mode_book_manuscript_text(interface_language: str = "en") -> str:
     return _messages(interface_language)["translation_mode_book_manuscript"]
+
+
+def get_translate_with_glossary_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["glossary_mode_with"]
+
+
+def get_translate_without_glossary_text(interface_language: str = "en") -> str:
+    return _messages(interface_language)["glossary_mode_without"]
 
 
 def _translation_mode_display(
@@ -1692,6 +1786,24 @@ def _translation_mode_display(
     return None
 
 
+def _glossary_mode_display(
+    glossary_mode: str | None,
+    interface_language: str,
+) -> tuple[str, str] | None:
+    messages = _messages(interface_language)
+    if glossary_mode == GLOSSARY_MODE_WITH:
+        return (
+            messages["glossary_mode_with"],
+            messages["glossary_mode_with_summary"],
+        )
+    if glossary_mode == GLOSSARY_MODE_WITHOUT:
+        return (
+            messages["glossary_mode_without"],
+            messages["glossary_mode_without_summary"],
+        )
+    return None
+
+
 def translation_mode_for_button_text(text: str | None) -> str | None:
     normalized = _normalize_text(text)
     if not normalized:
@@ -1707,6 +1819,23 @@ def translation_mode_for_button_text(text: str | None) -> str | None:
 
 def is_translation_mode_button_text(text: str | None) -> bool:
     return translation_mode_for_button_text(text) is not None
+
+
+def glossary_mode_for_button_text(text: str | None) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    for messages in _all_localized_messages():
+        if normalized == messages["glossary_mode_with"].lower():
+            return GLOSSARY_MODE_WITH
+        if normalized == messages["glossary_mode_without"].lower():
+            return GLOSSARY_MODE_WITHOUT
+    return None
+
+
+def is_glossary_mode_button_text(text: str | None) -> bool:
+    return glossary_mode_for_button_text(text) is not None
 
 
 def is_confirm_translation_text(text: str | None) -> bool:
@@ -2034,7 +2163,15 @@ def build_upload_error_message(error: Exception, interface_language: str = "en")
 
 
 def _messages(interface_language: str) -> dict:
-    return MESSAGES.get(interface_language, MESSAGES["en"])
+    if interface_language == "en":
+        return MESSAGES["en"]
+    messages = dict(MESSAGES["en"])
+    messages.update(MESSAGES.get(interface_language, {}))
+    return messages
+
+
+def _all_localized_messages() -> tuple[dict, ...]:
+    return tuple(_messages(language_code) for language_code in MESSAGES)
 
 
 def _book_value(book, key: str | None = None):
