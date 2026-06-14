@@ -1,0 +1,130 @@
+{
+  "schema_version": "language-policy-package-v1",
+  "package_id": "language_policy.de.casefold.contrast_v1",
+  "package_version": "v1",
+  "readiness_label": "package_ready_local",
+  "target_language": "de",
+  "match_mode": "casefold",
+  "normalization_mode": "nfc_casefold",
+  "fixture_basis": "synthetic",
+  "evidence_level": "L1_synthetic_local",
+  "rights_basis": "Synthetic local contrast terminology metadata created for issue #532; no book, user, provider, prompt, or translated passage text is included.",
+  "raw_material_policy": "ordinary_artifacts_metadata_only",
+  "metadata_safety": {
+    "metadata_only": true,
+    "synthetic_or_authorized": true,
+    "contains_raw_source_passages": false,
+    "contains_translated_passages": false,
+    "contains_prompt_bodies": false,
+    "contains_provider_responses": false,
+    "contains_owner_only_diagnostics": false,
+    "contains_api_keys_or_auth_material": false,
+    "semantic_quality_claim_made": false,
+    "full_morphology_correctness_claimed": false
+  },
+  "local_thresholds": {
+    "descriptor_validation_required": true,
+    "terminology_policy_validation_required": true,
+    "registry_resolution_required": true,
+    "positive_match_cases_min": 1,
+    "safe_fallback_cases_min": 1,
+    "forbidden_variant_findings_min": 1,
+    "raw_payload_allowed": false,
+    "semantic_quality_claim_allowed": false,
+    "full_morphology_claim_allowed": false,
+    "core_language_branches_allowed": false
+  },
+  "core_neutrality_check": {
+    "non_ru_uk_target_language": "de",
+    "selected_through_registry": true,
+    "target_language_specific_data_lives_in_package": true,
+    "glossary_core_language_neutral": true,
+    "no_target_language_branch_in_core_required": true,
+    "compliance_structural_validation_separate": true,
+    "prompt_metadata_compact_only": true,
+    "cache_reuse_approved": false,
+    "runtime_rollout_approved": false,
+    "provider_calls_approved": false,
+    "release_privacy_legal_support_claims_approved": false
+  },
+  "policy": {
+    "policy_id": "terminology_policy.de.casefold.contrast_v1",
+    "policy_version": "v1",
+    "target_language": "de",
+    "language_family": null,
+    "match_mode": "casefold",
+    "normalization_mode": "nfc_casefold",
+    "allowed_variant_strategy": "canonical_only",
+    "forbidden_variant_strategy": "configured_forbidden_variants",
+    "unsupported_fallback": "manual_review_required",
+    "reason_codes": [
+      "source_term_absent",
+      "missing_selected_entry",
+      "glossary_context_omitted",
+      "target_metadata_missing",
+      "policy_casefold_match",
+      "policy_forbidden_variant_present",
+      "policy_target_form_missing",
+      "policy_manual_review_required",
+      "policy_unsupported_language",
+      "policy_data_invalid",
+      "semantic_truth_not_proven",
+      "needs_human_review"
+    ]
+  },
+  "entries": [
+    {
+      "entry_id": "de-mirror-street",
+      "source_canonical": "Mirror Street",
+      "aliases": [
+        "The Mirror Street"
+      ],
+      "target_canonical": "Spiegelstraße",
+      "target_variants": [],
+      "forbidden_variants": [
+        "Spiegelweg"
+      ],
+      "coverage": "unicode_nfc_casefold_canonical_only",
+      "expected_cases": [
+        {
+          "case_id": "de-mirror-street-uppercase-ss-casefold",
+          "form": "SPIEGELSTRASSE",
+          "expected_outcome": "casefold_match",
+          "reason_codes": [
+            "policy_casefold_match"
+          ]
+        },
+        {
+          "case_id": "de-mirror-street-forbidden-road",
+          "form": "SPIEGELWEG",
+          "expected_outcome": "forbidden_variant",
+          "reason_codes": [
+            "policy_forbidden_variant_present"
+          ]
+        }
+      ]
+    }
+  ],
+  "fallback_cases": [
+    {
+      "case_id": "unsupported-target-language-fallback",
+      "target_language": "nl",
+      "policy_id": null,
+      "expected_outcome": "manual_review_required",
+      "reason_codes": [
+        "policy_unsupported_language",
+        "policy_manual_review_required",
+        "needs_human_review"
+      ]
+    },
+    {
+      "case_id": "missing-target-metadata",
+      "target_language": "de",
+      "entry_id": "de-missing-target",
+      "expected_outcome": "Unknown",
+      "reason_codes": [
+        "target_metadata_missing"
+      ]
+    }
+  ]
+}
