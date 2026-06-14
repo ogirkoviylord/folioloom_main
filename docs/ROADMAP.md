@@ -685,7 +685,14 @@ Acceptance criteria:
   records the metadata-only decision packet and recommends closing #529 with
   runtime glossary still shadow-only/default-off. Normal runtime glossary
   rollout, cache reuse, additional provider calls outside separately approved
-  bounds and release/privacy/legal/support readiness remain unapproved.
+  bounds and release/privacy/legal/support readiness remain unapproved. Issue
+  #546 adds a temporary Telegram battle-test selector so the owner can manually
+  run the same file with or without glossary. This is a per-attempt opt-in
+  battle-test UX only: it preserves the existing non-glossary path, enables the
+  default-off glossary runtime hook only for the selected attempt, keeps #465
+  cache bypass for glossary-injected units, and does not approve default
+  rollout, cache reuse, automatic paired translation, provider/config changes,
+  durable state changes or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1

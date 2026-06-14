@@ -116,6 +116,7 @@ from translator_service.translation_run_logs import (
     TranslationRunMetadata,
     finish_running_translation_runs_for_job,
 )
+from translator_service.translation_runner import GlossaryRuntimeAdapterHookConfig
 from translator_service.upload_safety_ledger import (
     InMemoryUploadSafetyLedger,
     UploadContainerVerdict,
@@ -152,6 +153,12 @@ SUPPORTED_TRANSLATION_MODES = (
     TRANSLATION_MODE_DOCUMENT_FORM,
     TRANSLATION_MODE_BOOK_MANUSCRIPT,
 )
+GLOSSARY_MODE_WITH = "with_glossary"
+GLOSSARY_MODE_WITHOUT = "without_glossary"
+SUPPORTED_GLOSSARY_MODES = (
+    GLOSSARY_MODE_WITH,
+    GLOSSARY_MODE_WITHOUT,
+)
 _LANGUAGE_NAME_TO_CODE = {
     language_name.casefold(): language_code
     for language_code, language_name in LANGUAGE_NAMES.items()
@@ -180,6 +187,10 @@ class PreviewAcceptanceRequired(ValueError):
 
 class TranslationModeRequired(ValueError):
     """Raised when a translation mode is required before continuing."""
+
+
+class GlossaryModeRequired(ValueError):
+    """Raised when the temporary glossary battle-test mode is required."""
 
 
 class SameLanguageTranslationBlocked(ValueError):
@@ -253,6 +264,7 @@ class PendingTranslation:
     preview_accepted: bool = False
     preview_accepted_at: str | None = None
     translation_mode: str | None = None
+    glossary_mode: str | None = GLOSSARY_MODE_WITHOUT
     scan_result: ScanResult | None = None
     upload_safety_id: str | None = None
     attempt_id: str | None = None
@@ -266,6 +278,7 @@ class PreviewCandidate:
     source_language: str
     target_language: str
     translation_mode: str | None
+    glossary_mode: str | None
     source_text: str
     source_block_ids: tuple[str, ...]
     selected_block_count: int
@@ -421,6 +434,11 @@ class BotTranslationService:
         beta_safety_guard: BetaSafetyGuard | None = None,
         beta_safety_rates: BetaSafetyRates | None = None,
         beta_safety_guard_owned: bool = False,
+        glossary_runtime_hook_builder: Callable[
+            [PendingTranslation, DocumentKind],
+            GlossaryRuntimeAdapterHookConfig | None,
+        ]
+        | None = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -463,6 +481,7 @@ class BotTranslationService:
         self._beta_safety_guard = beta_safety_guard
         self._beta_safety_rates = beta_safety_rates or BetaSafetyRates()
         self._beta_safety_guard_owned = beta_safety_guard_owned
+        self._glossary_runtime_hook_builder = glossary_runtime_hook_builder
         self._beta_safety_denied_job_ids: set[str] = set()
         self._generated_preview_ids: set[str] = set()
         self._automatic_result_delivered_keys: set[AutomaticResultDeliveryKey] = set()
@@ -1118,6 +1137,7 @@ class BotTranslationService:
         *,
         user_telegram_id: int,
         target_language: str,
+        glossary_mode: str | None = GLOSSARY_MODE_WITHOUT,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -1151,6 +1171,7 @@ class BotTranslationService:
             rights_confirmation_version=pending_upload.rights_confirmation_version,
             rights_confirmation_source=pending_upload.rights_confirmation_source,
             translation_mode=pending_upload.translation_mode,
+            glossary_mode=glossary_mode,
             scan_result=pending_upload.scan_result,
             upload_safety_id=pending_upload.upload_safety_id,
             attempt_id=pending_upload.attempt_id,
@@ -1174,6 +1195,7 @@ class BotTranslationService:
         rights_confirmation_version: str | None = None,
         rights_confirmation_source: str | None = None,
         translation_mode: str | None = None,
+        glossary_mode: str | None = GLOSSARY_MODE_WITHOUT,
         scan_result: ScanResult | None = None,
         upload_safety_id: str | None = None,
         attempt_id: str | None = None,
@@ -1183,6 +1205,11 @@ class BotTranslationService:
         normalized_mode = (
             _normalize_translation_mode(translation_mode)
             if translation_mode is not None
+            else None
+        )
+        normalized_glossary_mode = (
+            _normalize_glossary_mode(glossary_mode)
+            if glossary_mode is not None
             else None
         )
         upload = validate_document_upload(
@@ -1265,6 +1292,7 @@ class BotTranslationService:
                 or (RIGHTS_CONFIRMATION_SOURCE_TELEGRAM if rights_confirmed else None)
             ),
             translation_mode=normalized_mode,
+            glossary_mode=normalized_glossary_mode,
             scan_result=resolved_scan_result,
             upload_safety_id=upload_safety_id,
             attempt_id=attempt_id or _translation_attempt_id(user_telegram_id),
@@ -1282,6 +1310,7 @@ class BotTranslationService:
                 "file_name": file_name,
                 "source_language": source_language,
                 "translation_mode": normalized_mode,
+                "glossary_mode": normalized_glossary_mode or "unselected",
             },
         )
         self._record_activity_for_user(
@@ -1298,6 +1327,7 @@ class BotTranslationService:
                 "source_language": source_language,
                 "target_language": target_language,
                 "translation_mode": pending.translation_mode,
+                "glossary_mode": pending.glossary_mode or "unselected",
                 "source_language_display": pending.source_language_display,
                 "fragment_count": pending.fragment_count,
                 "price_usd": pending.price_usd,
@@ -1309,6 +1339,55 @@ class BotTranslationService:
     def get_pending(self, user_telegram_id: int) -> PendingTranslation | None:
         with self._state_lock:
             return self._pending.get(user_telegram_id)
+
+    def select_pending_translation_glossary_mode(
+        self,
+        *,
+        user_telegram_id: int,
+        glossary_mode: str,
+    ) -> PendingTranslation:
+        self._assert_beta_access_allows(user_telegram_id)
+        self._assert_security_cooldown_allows(user_telegram_id)
+        normalized_mode = _normalize_glossary_mode(glossary_mode)
+        with self._state_lock:
+            pending = self._pending.get(user_telegram_id)
+            if pending is None:
+                raise ValueError("No pending translation is waiting for glossary mode")
+            if not pending.rights_confirmed:
+                raise RightsConfirmationRequired(
+                    "Document rights must be confirmed before choosing glossary mode"
+                )
+            if pending.translation_mode is None:
+                raise TranslationModeRequired(
+                    "Choose how this document should be translated before "
+                    "choosing glossary mode"
+                )
+            if pending.glossary_mode == normalized_mode:
+                return pending
+            selected = replace(
+                pending,
+                glossary_mode=normalized_mode,
+                preview_id=None,
+                preview_shown=False,
+                preview_accepted=False,
+                preview_accepted_at=None,
+            )
+            self._pending[user_telegram_id] = selected
+
+        self._record_activity_for_user(
+            user_telegram_id=user_telegram_id,
+            event_type="translation.glossary_mode.selected",
+            action="selected",
+            target_type="glossary_mode",
+            target_id=normalized_mode,
+            metadata={
+                "glossary_mode": normalized_mode,
+                "file_name": selected.file_name,
+                "target_language": selected.target_language,
+                "translation_mode": selected.translation_mode,
+            },
+        )
+        return selected
 
     def select_preview_candidate(self, *, user_telegram_id: int) -> PreviewCandidate:
         self._assert_beta_access_allows(user_telegram_id)
@@ -1322,6 +1401,10 @@ class BotTranslationService:
             if not pending.rights_confirmed:
                 raise RightsConfirmationRequired(
                     "Document rights must be confirmed before preview selection"
+                )
+            if pending.glossary_mode is None:
+                raise GlossaryModeRequired(
+                    "Choose whether to translate with glossary or without glossary."
                 )
             self._assert_parser_access_allowed(
                 upload_safety_id=pending.upload_safety_id,
@@ -1378,6 +1461,7 @@ class BotTranslationService:
                 translation_mode=pending.translation_mode,
             )
         )
+        metadata["glossary_mode"] = pending.glossary_mode
         return PreviewCandidate(
             user_telegram_id=user_telegram_id,
             file_name=pending.file_name,
@@ -1385,6 +1469,7 @@ class BotTranslationService:
             source_language=pending.source_language,
             target_language=pending.target_language,
             translation_mode=pending.translation_mode,
+            glossary_mode=pending.glossary_mode,
             source_text=source_text,
             source_block_ids=source_block_ids,
             selected_block_count=len(selected),
@@ -1523,6 +1608,10 @@ class BotTranslationService:
                 raise TranslationModeRequired(
                     "Choose how this document should be translated before "
                     "translation starts"
+                )
+            if pending.glossary_mode is None:
+                raise GlossaryModeRequired(
+                    "Choose whether to translate with glossary or without glossary."
                 )
             if not pending.preview_id or not pending.preview_shown:
                 raise PreviewAcceptanceRequired(
@@ -1951,6 +2040,7 @@ class BotTranslationService:
         upload_safety_id = self._upload_safety_id_for_accepted_source(
             job.source_object_key
         )
+        policy_payload = _translation_policy_payload(job.translation_policy)
 
         document_kind = DocumentKind(job.document_kind)
         source_content = (
@@ -1968,6 +2058,16 @@ class BotTranslationService:
             fragment_count=len(self._persistent_job_store.list_work_units(job_id)),
             source_object_key=job.source_object_key,
             upload_safety_id=upload_safety_id,
+            translation_mode=(
+                str(policy_payload.get("translation_mode"))
+                if policy_payload.get("translation_mode")
+                else None
+            ),
+            glossary_mode=(
+                str(policy_payload.get("glossary_mode"))
+                if policy_payload.get("glossary_mode")
+                else GLOSSARY_MODE_WITHOUT
+            ),
         )
         resumed = self._persistent_job_store.resume_job(job_id)
         work_units = self._persistent_job_store.list_work_units(job_id)
@@ -2026,6 +2126,13 @@ class BotTranslationService:
             translator=translator,
             security_limiter=security_limiter,
         )
+        glossary_runtime_hook = self._glossary_runtime_hook_for_pending(
+            pending=pending,
+            document_kind=document_kind,
+        )
+        glossary_adapter_metadata_callback = _glossary_adapter_metadata_callback(
+            run_logger,
+        )
         cancellation_token = CancellationToken()
         self._set_active_translation(
             user_telegram_id=user_telegram_id,
@@ -2049,6 +2156,8 @@ class BotTranslationService:
                     run_logger=run_logger,
                     security_limiter=security_limiter,
                     allowed_source_object_keys=allowed_source_object_keys,
+                    glossary_runtime_hook=glossary_runtime_hook,
+                    glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
                 )
 
             return self._run_parallel_persistent_translation(
@@ -2065,6 +2174,8 @@ class BotTranslationService:
                 run_logger=run_logger,
                 security_limiter=security_limiter,
                 allowed_source_object_keys=allowed_source_object_keys,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         except Exception as error:
             logger.exception(
@@ -2750,6 +2861,10 @@ class BotTranslationService:
                     "Choose how this document should be translated before "
                     "translation starts"
                 )
+            if pending.glossary_mode is None:
+                raise GlossaryModeRequired(
+                    "Choose whether to translate with glossary or without glossary."
+                )
             if not pending.preview_accepted:
                 raise PreviewAcceptanceRequired(
                     "Review the translation preview before continuing."
@@ -2778,6 +2893,7 @@ class BotTranslationService:
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
                 "translation_mode": pending.translation_mode,
+                "glossary_mode": pending.glossary_mode,
                 "fragment_count": pending.fragment_count,
                 "rights_confirmation": _rights_confirmation_payload(pending),
             },
@@ -2883,6 +2999,8 @@ class BotTranslationService:
                     "document_kind": document_kind.value,
                     "source_language": pending.source_language,
                     "target_language": pending.target_language,
+                    "translation_mode": pending.translation_mode,
+                    "glossary_mode": pending.glossary_mode,
                     "result_file_name": job.result_file_name,
                     "status": job.status.value,
                     "error_message": job.error_message,
@@ -2920,6 +3038,8 @@ class BotTranslationService:
                 "document_kind": document_kind.value,
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
+                "translation_mode": pending.translation_mode,
+                "glossary_mode": pending.glossary_mode,
                 "fragment_count": pending.fragment_count,
             },
         )
@@ -2929,6 +3049,13 @@ class BotTranslationService:
             progress_callback=progress_callback,
             translator=translator,
             security_limiter=security_limiter,
+        )
+        glossary_runtime_hook = self._glossary_runtime_hook_for_pending(
+            pending=pending,
+            document_kind=document_kind,
+        )
+        glossary_adapter_metadata_callback = _glossary_adapter_metadata_callback(
+            run_logger,
         )
         cancellation_token = CancellationToken()
         self._set_active_translation(
@@ -2949,6 +3076,10 @@ class BotTranslationService:
                 ),
                 cancellation_token=cancellation_token,
                 translation_cache=self._translation_cache,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=(
+                    glossary_adapter_metadata_callback
+                ),
             )
         except Exception as error:
             failed_job = self._job_repository.get(queued_job.id)
@@ -3007,6 +3138,8 @@ class BotTranslationService:
                     "document_kind": document_kind.value,
                     "source_language": pending.source_language,
                     "target_language": pending.target_language,
+                    "translation_mode": pending.translation_mode,
+                    "glossary_mode": pending.glossary_mode,
                     "error_type": error.__class__.__name__,
                     "error_message": failed_job.error_message,
                 },
@@ -3045,6 +3178,8 @@ class BotTranslationService:
                 "document_kind": document_kind.value,
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
+                "translation_mode": pending.translation_mode,
+                "glossary_mode": pending.glossary_mode,
                 "result_file_name": completed_job.result_file_name,
                 "status": completed_job.status.value,
                 "error_message": completed_job.error_message,
@@ -3129,6 +3264,29 @@ class BotTranslationService:
                 rates=self._beta_safety_rates,
             ),
         )
+
+    def _glossary_runtime_hook_for_pending(
+        self,
+        *,
+        pending: PendingTranslation,
+        document_kind: DocumentKind,
+    ) -> GlossaryRuntimeAdapterHookConfig | None:
+        if pending.glossary_mode != GLOSSARY_MODE_WITH:
+            return None
+        if self._glossary_runtime_hook_builder is None:
+            return _fallback_glossary_runtime_hook()
+        try:
+            hook = self._glossary_runtime_hook_builder(pending, document_kind)
+        except Exception:
+            logger.exception(
+                "Glossary runtime hook builder failed safely: "
+                "file_name=%s document_kind=%s user_telegram_id=%s",
+                pending.file_name,
+                document_kind.value,
+                pending.user_telegram_id,
+            )
+            return _fallback_glossary_runtime_hook()
+        return hook or _fallback_glossary_runtime_hook()
 
     def _release_beta_safety_reservation(self, *, job_id: str, reason: str) -> None:
         if self._beta_safety_guard is None:
@@ -3292,8 +3450,17 @@ class BotTranslationService:
                     "job_id": plan.job.id,
                     "fragment_count": total_fragments,
                     "source_object_key": plan.job.source_object_key,
+                    "translation_mode": pending.translation_mode,
+                    "glossary_mode": pending.glossary_mode,
                 },
             )
+        glossary_runtime_hook = self._glossary_runtime_hook_for_pending(
+            pending=pending,
+            document_kind=document_kind,
+        )
+        glossary_adapter_metadata_callback = _glossary_adapter_metadata_callback(
+            run_logger,
+        )
         if pending.upload_safety_id is not None:
             self._record_upload_safety_activity(
                 user_telegram_id=pending.user_telegram_id,
@@ -3325,6 +3492,8 @@ class BotTranslationService:
                     "document_kind": document_kind.value,
                     "source_language": pending.source_language,
                     "target_language": pending.target_language,
+                    "translation_mode": pending.translation_mode,
+                    "glossary_mode": pending.glossary_mode,
                     "fragment_count": total_fragments,
                     "persistent": True,
                 },
@@ -3347,6 +3516,8 @@ class BotTranslationService:
                 "document_kind": document_kind.value,
                 "source_language": pending.source_language,
                 "target_language": pending.target_language,
+                "translation_mode": pending.translation_mode,
+                "glossary_mode": pending.glossary_mode,
                 "fragment_count": total_fragments,
                 "persistent": True,
             },
@@ -3371,6 +3542,8 @@ class BotTranslationService:
                 run_logger=run_logger,
                 security_limiter=security_limiter,
                 allowed_source_object_keys=allowed_source_object_keys,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
 
         if self._max_parallel_work_units > 1:
@@ -3385,6 +3558,10 @@ class BotTranslationService:
                 run_logger=run_logger,
                 security_limiter=security_limiter,
                 allowed_source_object_keys=allowed_source_object_keys,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=(
+                    glossary_adapter_metadata_callback
+                ),
             )
 
         while True:
@@ -3425,6 +3602,8 @@ class BotTranslationService:
                     self._translation_run_log_root,
                     job_id=plan.job.id,
                 ),
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
             if completed_unit is None:
                 break
@@ -3535,6 +3714,9 @@ class BotTranslationService:
         run_logger: TranslationRunLogger | None,
         security_limiter: SecurityEventLimiter,
         allowed_source_object_keys: frozenset[str] | None,
+        glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+        glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+        | None = None,
     ) -> TranslationJob:
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
@@ -3565,6 +3747,8 @@ class BotTranslationService:
                 beta_safety_guard=self._beta_safety_guard,
                 translation_run_log_root=self._translation_run_log_root,
                 allowed_source_object_keys=allowed_source_object_keys,
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
             try:
                 _record_translator_security_events(
@@ -3645,6 +3829,9 @@ class BotTranslationService:
         run_logger: TranslationRunLogger | None,
         security_limiter: SecurityEventLimiter,
         allowed_source_object_keys: frozenset[str] | None,
+        glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None = None,
+        glossary_adapter_metadata_callback: Callable[[dict[str, object]], None]
+        | None = None,
     ) -> TranslationJob:
         assert self._file_storage is not None
         assert self._persistent_job_store is not None
@@ -3693,6 +3880,8 @@ class BotTranslationService:
                     self._translation_run_log_root,
                     job_id=job_id,
                 ),
+                glossary_runtime_hook=glossary_runtime_hook,
+                glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         except SecurityThresholdExceeded as error:
             return self._fail_persistent_translation_after_security_threshold(
@@ -3934,6 +4123,7 @@ def _create_persistent_job_plan(
         "max_fragment_chars": max_fragment_chars,
         "rights_confirmation": _rights_confirmation_payload(pending),
         "translation_mode": pending.translation_mode,
+        "glossary_mode": pending.glossary_mode,
         "upload_safety_id": pending.upload_safety_id,
     }
     if document_kind is DocumentKind.TXT:
@@ -4178,6 +4368,77 @@ def _work_unit_started_callback(
     return record
 
 
+def _glossary_adapter_metadata_callback(
+    run_logger: TranslationRunLogger | None,
+) -> Callable[[dict[str, object]], None] | None:
+    if run_logger is None:
+        return None
+
+    def record(payload: dict[str, object]) -> None:
+        run_logger.record_event(
+            "glossary_runtime_adapter",
+            _safe_glossary_adapter_metadata(payload),
+        )
+
+    return record
+
+
+_GLOSSARY_METADATA_RAW_KEYS = {
+    "api_key",
+    "auth",
+    "auth_material",
+    "prompt",
+    "prompt_body",
+    "provider_response",
+    "raw",
+    "raw_prompt",
+    "raw_response",
+    "raw_source",
+    "source_text",
+    "source_texts",
+    "translated_text",
+    "translation",
+}
+
+
+def _safe_glossary_adapter_metadata(value):
+    if isinstance(value, dict):
+        safe_payload = {}
+        for key, item in value.items():
+            if str(key).lower() in _GLOSSARY_METADATA_RAW_KEYS:
+                safe_payload[key] = "[redacted]"
+                continue
+            safe_payload[key] = _safe_glossary_adapter_metadata(item)
+        return safe_payload
+    if isinstance(value, list):
+        return [_safe_glossary_adapter_metadata(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_safe_glossary_adapter_metadata(item) for item in value)
+    return value
+
+
+def _fallback_glossary_runtime_hook() -> GlossaryRuntimeAdapterHookConfig:
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=True,
+        glossary_plan={
+            "schema_version": "telegram-glossary-runtime-hook-v1",
+            "enabled": True,
+            "status": "fallback",
+            "fallback_reason": "runtime_glossary_data_unavailable",
+            "work_unit_plans": [],
+            "runtime_integration": {
+                "normal_translation_prompts_changed": False,
+                "live_provider_calls_allowed": False,
+                "durable_state_mutation_allowed": False,
+                "cache_mutation_allowed": False,
+                "fallback_action": "omit_glossary_prompt_context",
+            },
+        },
+        prompt_rehearsal_enabled=True,
+        owner_battle_test_enabled=True,
+    )
+
+
 def _print_translation_cancel_requested(active: _ActiveTranslationCancellation) -> None:
     total = active.total_fragments if active.total_fragments > 0 else "?"
     message = (
@@ -4313,6 +4574,7 @@ def _translation_policy_snapshot_for_pending(
         translation_policy_signature(policy),
         rights_confirmation=_rights_confirmation_payload(pending),
         translation_mode=pending.translation_mode,
+        glossary_mode=pending.glossary_mode,
         translation_mode_profile=translation_mode_profile.signature
         if translation_mode_profile is not None
         else None,
@@ -4379,6 +4641,7 @@ def _translation_policy_with_rights_confirmation(
     *,
     rights_confirmation: dict,
     translation_mode: str | None = None,
+    glossary_mode: str | None = None,
     translation_mode_profile: str | None = None,
     upload_safety: dict | None = None,
 ) -> str | None:
@@ -4390,6 +4653,8 @@ def _translation_policy_with_rights_confirmation(
     payload["rights_confirmation"] = rights_confirmation
     if translation_mode is not None:
         payload["translation_mode"] = translation_mode
+    if glossary_mode is not None:
+        payload["glossary_mode"] = glossary_mode
     if translation_mode_profile is not None:
         payload["translation_mode_profile"] = translation_mode_profile
     if upload_safety is not None:
@@ -4427,6 +4692,13 @@ def _normalize_translation_mode(translation_mode: str) -> str:
     normalized = translation_mode.strip().lower()
     if normalized not in SUPPORTED_TRANSLATION_MODES:
         raise ValueError("Unsupported translation mode")
+    return normalized
+
+
+def _normalize_glossary_mode(glossary_mode: str) -> str:
+    normalized = glossary_mode.strip().lower()
+    if normalized not in SUPPORTED_GLOSSARY_MODES:
+        raise ValueError("Unsupported glossary mode")
     return normalized
 
 
@@ -4634,6 +4906,8 @@ def _preview_id(candidate: PreviewCandidate) -> str:
     digest.update(b"\0")
     digest.update((candidate.translation_mode or "").encode("utf-8", errors="replace"))
     digest.update(b"\0")
+    digest.update((candidate.glossary_mode or "").encode("utf-8", errors="replace"))
+    digest.update(b"\0")
     digest.update(candidate.source_text.encode("utf-8", errors="replace"))
     return f"preview:{candidate.user_telegram_id}:{digest.hexdigest()[:24]}"
 
@@ -4649,6 +4923,7 @@ class _DuplicateIdentity:
     source_language: str
     target_language: str
     translation_mode: str | None
+    glossary_mode: str | None
     adapter_version: str
     prompt_version: str
     policy_signature: str
@@ -4708,6 +4983,7 @@ def _duplicate_identity_for_pending(
         source_language=pending.source_language,
         target_language=pending.target_language,
         translation_mode=pending.translation_mode,
+        glossary_mode=pending.glossary_mode,
         document_kind=document_kind,
     )
     return _DuplicateIdentity(
@@ -4716,6 +4992,7 @@ def _duplicate_identity_for_pending(
         source_language=pending.source_language,
         target_language=pending.target_language,
         translation_mode=pending.translation_mode,
+        glossary_mode=pending.glossary_mode,
         adapter_version=plan.adapter_version,
         prompt_version="plain-v1",
         policy_signature=policy_signature,
@@ -4734,6 +5011,11 @@ def _duplicate_identity_for_job(*, job, source_sha256: str) -> _DuplicateIdentit
             if policy_payload is not None and policy_payload.get("translation_mode")
             else None
         ),
+        glossary_mode=(
+            str(policy_payload.get("glossary_mode"))
+            if policy_payload is not None and policy_payload.get("glossary_mode")
+            else None
+        ),
         adapter_version=job.adapter_version,
         prompt_version=job.prompt_version,
         policy_signature=_normalized_duplicate_policy_signature(
@@ -4748,6 +5030,7 @@ def _duplicate_policy_signature_for_units(
     source_language: str,
     target_language: str,
     translation_mode: str | None,
+    glossary_mode: str | None,
     document_kind: DocumentKind,
 ) -> str:
     source_text = "\n\n".join(unit.source_text for unit in units if unit.source_text)
@@ -4773,6 +5056,8 @@ def _duplicate_policy_signature_for_units(
     payload = json.loads(translation_policy_signature(policy))
     if translation_mode is not None:
         payload["translation_mode"] = translation_mode
+    if glossary_mode is not None:
+        payload["glossary_mode"] = glossary_mode
     if translation_mode_profile is not None:
         payload["translation_mode_profile"] = translation_mode_profile.signature
     return _safe_duplicate_policy_signature(payload)
@@ -4808,6 +5093,7 @@ def _safe_duplicate_policy_signature(payload: dict) -> str:
         "prompt_tier",
         "output_contract",
         "translation_mode",
+        "glossary_mode",
         "translation_mode_profile",
     )
     safe_payload = {key: payload.get(key) for key in safe_keys if key in payload}
