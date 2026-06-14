@@ -698,6 +698,13 @@ Acceptance criteria:
   scheduled/external worker evidence path so `with_glossary` either uses
   per-work-unit READY hook data or records metadata-only fallback/omission
   diagnostics; this is still evidence repair, not quality proof or rollout.
+  Issue #555 records the no-code real-book runtime glossary resolver contract:
+  the latest real EPUB run selected `with_glossary` but had no READY runtime
+  glossary data, so provider prompts contained no glossary context; the next
+  implementation path is #556 target-metadata overlay, #557 worker resolver,
+  #558 fake/local bot-worker rehearsal, #559 bounded live RU paired test only
+  after prerequisites, and #560 provider-backed arbitrary-book preparation
+  design. None of this approves rollout, cache reuse or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
