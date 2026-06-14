@@ -2151,11 +2151,37 @@ Potential issues to verify:
   that RU/UK exact-form misses can be valid declined forms outside configured
   variants, so RU/UK should be the first policy package rather than hardcoded
   glossary-core behavior.
-- Follow-up: create separate issues for a terminology policy registry and
-  RU/UK morphology/variant coverage. Do not add language-specific glossary
-  branches directly to core modules; do not treat this docs decision as runtime
-  rollout, cache reuse, provider-call, storage/admin/retention or release
-  approval.
+- Follow-up: issues #518-#522 now provide the first local-only registry,
+  RU/UK fixture, compliance-adapter, prompt-metadata and docs-sync foundation.
+  Do not add language-specific glossary branches directly to core modules; do
+  not treat this docs decision as runtime rollout, cache reuse, provider-call,
+  storage/admin/retention or release approval.
+
+- Date: 2026-06-14.
+- Change: Issues #518-#522 / #204BB-#204BF complete the safe local #516
+  terminology policy foundation. #518 adds
+  `src/translator_service/glossary_terminology_policy.py`; #519 adds
+  `test_samples/glossary_terminology_ru_uk_variants.json`; #520 upgrades
+  `src/translator_service/glossary_compliance.py` to schema
+  `glossary-compliance-v2` with optional terminology-policy-aware
+  metadata-only outcomes; #521 adds opt-in compact terminology policy metadata
+  to `src/translator_service/glossary_prompt_context.py`; #522 syncs active
+  docs.
+- Evidence: PRs #524-#527 were merged after focused tests, compileall,
+  targeted ruff where applicable, `git diff --check`, repo-level `pr-review`
+  and visible GitHub `Python checks` passing. Coverage includes registry
+  validation/resolution, exact/casefold/variant/manual-review matching,
+  synthetic/authorized RU/UK approved/forbidden variant fixture checks,
+  policy-aware compliance full/partial/zero/forbidden/needs-review outcomes,
+  redaction of raw source/target/translation text from ordinary summaries and
+  prompt-context omission of invalid policy metadata.
+- Follow-up: this is local/test-path foundation only. It does not approve live
+  provider calls, normal/default runtime glossary rollout, normal prompt
+  integration, glossary-aware cache reuse, database/storage/scheduler/admin/
+  retention changes, provider-config changes, release/privacy/legal/support
+  claims or a full RU/UK morphology engine. Future language packages,
+  provider evidence, runtime rollout and cache-key design need separate
+  approved issues.
 
 - Date: 2026-06-14.
 - Change: Issue #510 adds a local-only/default-off glossary compliance

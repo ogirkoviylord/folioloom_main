@@ -134,6 +134,8 @@ These gates apply to future language-aware glossary compliance or morphology
 work. They are architecture and local-test gates, not release-readiness or
 semantic-quality proof. Issue #517 records the current no-code architecture in
 `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`.
+Issues #518-#521 add the first local-only registry, RU/UK synthetic fixture
+coverage, compliance-adapter payloads and prompt-context metadata boundary.
 
 - Glossary core modules must remain language-neutral. New target-language
   morphology, inflection, script/segmentation or term-matching behavior must be
@@ -142,6 +144,10 @@ semantic-quality proof. Issue #517 records the current no-code architecture in
 - A terminology policy must declare its id/version, match mode, allowed and
   forbidden variant strategy, unsupported-language fallback and metadata-only
   reason codes.
+- Compliance summaries must preserve structural validation as a separate field
+  from glossary compliance status, keep the default exact configured-form path
+  compatible, and serialize only metadata-only policy ids, match status, entry
+  ids, counts and reason codes.
 - Unsupported or unimplemented language behavior must produce `TBD`,
   `Unknown`, `needs_review` or equivalent metadata-only outcomes; local code
   must not pretend to prove semantic truth, gender/name identity or full
@@ -149,6 +155,9 @@ semantic-quality proof. Issue #517 records the current no-code architecture in
 - RU/UK morphology/variant coverage may be implemented first, but tests must
   prove the same core contract can represent other target-language policies
   without hardcoded RU/UK branches in glossary core.
+- Prompt-context policy metadata must stay opt-in and compact: policy id,
+  policy version and match mode only, with invalid or oversized metadata
+  omitted through metadata-only reasons.
 - This gate does not approve normal runtime glossary rollout, glossary-aware
   cache reuse, provider calls, storage/admin/retention changes or
   release/privacy/legal/support claims.

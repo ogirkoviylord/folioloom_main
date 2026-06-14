@@ -61,32 +61,40 @@ Evidence:
 - `src/translator_service/glossary_contracts.py` stores language-neutral
   glossary fields and signatures, including target metadata and morphology
   notes, without implementing language-specific inflection.
-- `src/translator_service/glossary_compliance.py` currently checks exact
-  configured target canonical/variant forms only and emits
-  `morphology_policy_tbd` uncertainty metadata instead of claiming semantic or
-  morphological proof.
-- Current RU/UK-specific evidence lives mostly in fixtures, tests, smoke
-  boundaries and diagnostic notes such as `ru_uk_morphology_tbd`; it is not a
-  completed terminology-policy implementation.
+- `src/translator_service/glossary_compliance.py` now preserves the default
+  exact configured target-form compliance path and can optionally apply a
+  terminology policy registry for metadata-only variant, forbidden-variant and
+  needs-review outcomes. It still emits uncertainty metadata instead of
+  claiming semantic or morphological proof.
+- Current RU/UK-specific evidence includes the synthetic/authorized
+  metadata-only fixture coverage from issue #519 / #204BC and the policy-aware
+  local compliance coverage from issue #520 / #204BD. This is not a completed
+  RU/UK morphology engine.
 - `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`
   records the #517 / #204BA no-code policy-registry boundary, including policy
   descriptor fields, match modes, reason-code families, fallback behavior and
   #516 child-issue sequencing.
+- Issue #518 / #204BB added
+  `src/translator_service/glossary_terminology_policy.py` as a local-only
+  terminology policy registry foundation. Issue #521 / #204BE added
+  default-off compact terminology policy metadata in glossary prompt-context
+  formatting.
 - The post-#510 controlled adversarial live test showed glossary-on outputs
   using owner-approved terminology families while strict exact-form compliance
   reported misses for valid declined forms not present in the allowed variant
   list. Glossary-off outputs did not use the approved terminology stems.
 
 Consequences:
-- Future implementers should introduce a `target_language -> terminology_policy`
-  layer before expanding glossary compliance beyond exact configured forms.
+- Future implementers should use the existing `target_language ->
+  terminology_policy` layer before expanding glossary compliance beyond exact
+  configured forms.
 - Reviewers should reject new language-specific glossary behavior if it is
   scattered across core modules instead of isolated in a policy/adapter
   boundary with tests.
-- RU/UK morphology/variant coverage remains a near-term implementation target,
-  but the architecture must remain reusable for languages with cases,
-  agreement, agglutination, script/segmentation differences, clitics or mostly
-  exact terminology.
+- RU/UK variant-list coverage now has local fixture and compliance tests, but
+  full RU/UK morphology remains `TBD`. The architecture must remain reusable
+  for languages with cases, agreement, agglutination, script/segmentation
+  differences, clitics or mostly exact terminology.
 - Normal runtime glossary rollout remains blocked until separate approved
   issues prove prompt behavior, cache policy, diagnostics/privacy boundaries,
   target-language terminology policies, local tests and bounded provider
