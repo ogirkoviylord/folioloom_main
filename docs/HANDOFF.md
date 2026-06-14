@@ -229,6 +229,20 @@ provider behavior after this filter remains `Unknown` until a bounded #575
 rerun is executed. This is not default rollout, cache reuse, provider-config
 change, durable state change or release/privacy/legal/support evidence.
 
+Issue #580 implementation slice on 2026-06-15: branch
+`codex/issue-580-stronger-glossary-contract` strengthens the default-off
+owner/test glossary prompt-context wording for included target-backed entries.
+The context now tells the provider to use configured `target_canonical` /
+`target_variant` forms when listed source terms or aliases appear, and not to
+freely translate, paraphrase, rename or omit listed terms, while preserving the
+untrusted-reference-data and higher-priority conflict framing. Fake #575
+preflight completed with 4 fake calls; glossary-on requests contained the new
+mandatory-use wording and 5 entry tags, while glossary-off requests had no
+glossary context. Live provider behavior after this wording change remains
+`Unknown` until a bounded #575 rerun is executed. This is not default rollout,
+cache reuse, provider-config change, durable state change or release/privacy/
+legal/support evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
