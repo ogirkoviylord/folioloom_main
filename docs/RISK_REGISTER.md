@@ -124,7 +124,13 @@
   architecture must rely on evidence/confidence/review flags, role contracts
   and release-version policy review before implementation or launch claims.
   Issue #436 keeps release-version glossary/profile diagnostic consent,
-  retention, deletion, support and legal/privacy policy `TBD`/blocking.
+  retention, deletion, support and legal/privacy policy `TBD`/blocking. The
+  owner-approved 2026-06-14 glossary architecture rule keeps glossary core
+  language-neutral and requires morphology, script/segmentation and
+  target-language term matching to live in explicit terminology policy
+  adapters; issue #517 records the no-code terminology policy registry
+  architecture; RU/UK morphology/variant work should be the first concrete
+  policy package, not hardcoded core behavior.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,

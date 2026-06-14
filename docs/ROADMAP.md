@@ -661,7 +661,25 @@ Acceptance criteria:
   preflight and bounded live paired `ru`/`uk` glossary-on/off provider smoke.
   The #507 live provider-boundary smoke passed for the bounded control EPUB
   unit, while translation quality remains `Unknown`; rollout, cache reuse and
-  release/privacy claims remain unapproved.
+  release/privacy claims remain unapproved. The 2026-06-14 owner decision keeps
+  glossary core language-neutral and requires target-language terminology
+  behavior, including RU/UK morphology and future languages, to live behind an
+  explicit policy/adapter boundary rather than scattered core-module branches.
+  Issue #517 / #204BA records the no-code terminology policy registry
+  architecture and merge order for #518, #519, #520, #521 and #522.
+
+- Task: Add glossary terminology policy registry and RU/UK variant coverage.
+  Phase: 1
+  Priority: High
+  Risk: Medium/High
+  Agent suitability: Architect first, then small implementation issues
+  Suggested acceptance criteria: a language-neutral
+  `target_language -> terminology_policy` contract exists; RU/UK exact-form
+  compliance can distinguish true term misses from approved declined variants;
+  unsupported languages produce metadata-only `TBD` / `Unknown` /
+  `manual_review_required` style outcomes; no normal runtime glossary rollout,
+  cache reuse, provider calls, storage/admin/retention changes or release
+  claims are introduced.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
