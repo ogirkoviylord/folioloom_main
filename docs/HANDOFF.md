@@ -85,6 +85,20 @@ codes, diagnostics boundaries, provider gates and #465 cache-bypass boundary.
 It is no-code architecture only: no rollout, live provider calls, cache reuse,
 storage/admin/retention changes or release/privacy claims are approved.
 
+Issue #556 implementation slice on 2026-06-14: branch
+`codex/issue-556-glossary-target-metadata-overlay` adds
+`src/translator_service/glossary_target_metadata_overlay.py`, a local-only,
+default-off owner-approved target-metadata overlay contract for real-book
+glossary battle-test planning. The overlay validates a versioned compact
+payload, rejects raw/source/prompt/provider/translation/secret/auth material,
+matches only by retained source term or alias, applies target metadata to
+matching `GlossaryEntry` values, and returns metadata-only status/reason
+payloads. Focused tests cover disabled default behavior, alias matching,
+target-language mismatch, entry-limit fallback, raw/secret rejection,
+entry-id-only non-matching and missing-file metadata. This does not call
+providers, inject runtime prompts, change cache reuse, mutate durable state or
+make release/privacy claims.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
