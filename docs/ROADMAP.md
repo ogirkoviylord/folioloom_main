@@ -675,7 +675,9 @@ Acceptance criteria:
   #518-#521 are now merged as local-only foundations: registry contract,
   synthetic RU/UK policy fixture coverage, policy-aware compliance summaries
   and prompt-context policy metadata boundary. Issue #522 records this docs
-  sync. Normal runtime glossary rollout, cache reuse, provider calls and
+  sync. Issue #530 / #204BH adds the no-code real language-policy package
+  acceptance matrix for #531/#532/#533. Normal runtime glossary rollout, cache
+  reuse, provider calls outside the separately approved #534 bounds and
   release/privacy/legal/support readiness remain unapproved.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
@@ -684,9 +686,11 @@ Acceptance criteria:
   Risk: Medium/High
   Agent suitability: completed local foundation; future language packages need
   focused issues
-  Status: Done for #516 local foundation via #517-#522. Remaining future work:
-  actual language-policy packages beyond synthetic fixture coverage, provider
-  evidence, runtime rollout, cache-key design and release diagnostic policy.
+  Status: Done for #516 local foundation via #517-#522. Issue #530 now records
+  the no-code acceptance matrix for real language-policy packages. Remaining
+  future work: #531/#532 package implementation, #533 fake/dry provider
+  evidence protocol, conditional #534 live evidence, runtime rollout,
+  cache-key design and release diagnostic policy.
   Evidence: #517 recorded the architecture, #518 added the local registry,
   #519 added synthetic/authorized RU/UK fixture coverage, #520 added
   policy-aware metadata-only compliance summaries, #521 added opt-in compact

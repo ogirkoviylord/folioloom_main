@@ -2134,6 +2134,21 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #530 / #204BH records the no-code real language-policy package
+  acceptance matrix for the next glossary step under #529.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-language-policy-package-acceptance-matrix.md`
+  defines package contract fields, evidence levels, local acceptance
+  thresholds, fixture/evidence rules, failure/fallback behavior, core-neutrality
+  proof requirements and subagent file-ownership boundaries for #531/#532/#533.
+- Follow-up: proceed to #531/#532 package implementation only after #530 is
+  merged/reviewed. #530 does not approve live provider calls, runtime rollout,
+  normal/default prompt integration, glossary-aware cache reuse, provider
+  config/key changes, durable state/storage/admin/retention changes, new
+  production dependencies, release/privacy/legal/support claims or full RU/UK
+  morphology.
+
+- Date: 2026-06-14.
 - Change: Issue #517 / #204BA records the owner-approved glossary architecture
   rule that glossary core remains language-neutral and target-language
   morphology/terminology behavior must live in explicit policy/adapter
