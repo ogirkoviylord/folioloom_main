@@ -117,6 +117,8 @@ Issue #536 records the no-code glossary-aware cache-key design in
 `docs/superpowers/specs/2026-06-14-glossary-cache-key-design.md`.
 Issue #537 records the metadata-only decision packet in
 `docs/superpowers/specs/2026-06-14-glossary-language-policy-decision-packet.md`.
+Issue #555 records the no-code real-book runtime glossary resolver contract in
+`docs/superpowers/specs/2026-06-14-real-book-runtime-glossary-resolver-contract.md`.
 Target-language terminology behavior must be isolated behind explicit
 policy/adapter boundaries such as `target_language -> terminology_policy`; do
 not add scattered RU/UK or other language-specific morphology branches to
@@ -164,10 +166,13 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   external/scheduled worker evidence path so `with_glossary` is resolved per
   claimed work unit: READY hook data can inject bounded context, while missing
   runtime glossary data records metadata-only fallback/omission diagnostics for
-  the owner-only archive sidecar. This does not approve default glossary
-  rollout, live provider calls, arbitrary real-book glossary generation,
-  glossary-aware cache reuse, durable state changes or provider/config
-  changes.
+  the owner-only archive sidecar. #555 defines the next resolver contract for
+  real-book persistent EPUB jobs: approved target metadata plus local
+  source-match/budget gates may produce READY hooks, while missing or invalid
+  data must fall back with metadata-only reason codes. This does not approve
+  default glossary rollout, live provider calls, arbitrary real-book glossary
+  generation, glossary-aware cache reuse, durable state changes or
+  provider/config changes.
 - Важные файлы: listed above plus `translation_jobs.py`, `translation_runner.py`, `translation_run_logs.py`, `translation_metrics.py`.
 - Связанные тесты: `tests/test_worker.py`, `tests/test_scheduler*.py`, `tests/test_postgres_scheduler.py`, `tests/test_persistent_*`, `tests/test_job_runner.py`, `tests/test_translation_*`.
 

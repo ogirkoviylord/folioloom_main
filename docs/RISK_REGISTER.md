@@ -159,6 +159,12 @@
   adds a temporary Telegram per-attempt battle-test selector for manual
   with-glossary/without-glossary comparison while preserving default-off
   glossary hook gates, #465 cache bypass and metadata-only ordinary artifacts.
+  Issue #555 records a no-code real-book runtime glossary resolver contract
+  after the latest real EPUB `with_glossary` run showed only fallback
+  diagnostics and no provider glossary context; future implementation must
+  split target-metadata overlay, worker resolver, fake/local rehearsal,
+  bounded live test and provider-backed preparation design into separate
+  approved issues.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
