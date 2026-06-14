@@ -187,6 +187,11 @@
   default-off prompt-context formatter with explicit escaped source/target
   terminology contract tags for included entries, reducing prompt-shape
   ambiguity without approving rollout or proving provider obedience.
+  Issue #571 records bounded owner-only evidence that, after local target
+  variant adjudication, the selected Gutenberg/Oz RU EPUB glossary-on smoke
+  passed structural validation and exact configured-form compliance for one
+  useful entry; this reduces one provider-boundary risk but remains a narrow
+  smoke result, not broad quality, morphology or rollout proof.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
