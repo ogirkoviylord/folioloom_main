@@ -3951,11 +3951,21 @@ def _internal_reader_local_file(value: str, *, label: str) -> Path:
     stripped = value.strip()
     if not stripped:
         raise ValueError(f"{label} path is required.")
-    path = Path(stripped).expanduser()
-    if not path.is_absolute():
-        path = _REPO_ROOT / path
+    path = Path(stripped)
+    if path.is_absolute():
+        raise ValueError(
+            f"{label} path must be relative to the repository root."
+        )
+    path = _REPO_ROOT / path
     try:
         resolved = path.resolve(strict=False)
+        repo_root_resolved = _REPO_ROOT.resolve()
+        inside_repo = (
+            resolved == repo_root_resolved
+            or repo_root_resolved in resolved.parents
+        )
+        if not inside_repo:
+            raise ValueError("path escapes the repository root")
         reject_runtime_var_path(resolved)
     except ValueError as exc:
         raise ValueError(f"{label} path is not allowed: {exc}") from exc

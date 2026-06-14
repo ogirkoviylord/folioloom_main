@@ -344,7 +344,9 @@ class Settings:
         default_factory=lambda: os.getenv("ADMIN_SECRET_MASTER_KEY", "")
     )
     admin_cookie_secure: bool = field(
-        default_factory=lambda: _env_bool("ADMIN_COOKIE_SECURE", False)
+        default_factory=lambda: _env_bool(
+            "ADMIN_COOKIE_SECURE", _production_like_runtime()
+        )
     )
     admin_provider_probe_timeout_seconds: float = field(
         default_factory=lambda: max(

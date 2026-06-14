@@ -4,11 +4,16 @@ import base64
 import hmac
 import json
 import secrets
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 from translator_service.admin.rbac import AdminRole
+
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_LOCKOUT_SECONDS = 300.0
 
 
 class AdminAuthError(RuntimeError):
@@ -34,12 +39,24 @@ class AdminSessionManager:
         self._owner_password = owner_password
         self._session_secret = session_secret.encode("utf-8")
         self._ttl_seconds = ttl_seconds
+        self._failed_attempts = 0
+        self._lockout_until = 0.0
+        self._lock = threading.Lock()
 
     def login(self, password: str) -> str:
         if not self._owner_password or not self._session_secret:
             raise AdminAuthError("Admin authentication is not configured")
-        if not hmac.compare_digest(password, self._owner_password):
-            raise AdminAuthError("Invalid admin password")
+        with self._lock:
+            now = time.monotonic()
+            if self._lockout_until > now:
+                raise AdminAuthError("Too many failed login attempts")
+            if not hmac.compare_digest(password, self._owner_password):
+                self._failed_attempts += 1
+                if self._failed_attempts >= _LOGIN_MAX_ATTEMPTS:
+                    self._lockout_until = now + _LOGIN_LOCKOUT_SECONDS
+                raise AdminAuthError("Invalid admin password")
+            self._failed_attempts = 0
+            self._lockout_until = 0.0
         session = AdminSession(
             actor_id="bootstrap-owner",
             role=AdminRole.OWNER,
