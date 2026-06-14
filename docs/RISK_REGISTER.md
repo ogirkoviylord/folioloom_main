@@ -198,7 +198,10 @@
   unproven. Issue #576 adds only an explicit #575 adversarial TXT paired-matrix
   smoke boundary with fixed allowlist, caps and diagnostics root; live provider
   behavior and broader quality remain `Unknown` until the bounded matrix is run
-  and reviewed.
+  and reviewed. Issue #578 tightens the #575 TXT path so prompt context and
+  compliance use the same target-backed source-present useful entries, removing
+  local `target_metadata_missing` / `source_term_absent` noise in fake preflight;
+  post-filter live behavior remains `Unknown`.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core

@@ -523,10 +523,27 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 report["calls"][0]["prompt_context"]["included_entry_count"],
                 0,
             )
+            self.assertEqual(
+                report["calls"][0]["prompt_context"]["included_entry_count"],
+                5,
+            )
             self.assertGreater(
                 report["calls"][2]["prompt_context"]["included_entry_count"],
                 0,
             )
+            self.assertEqual(
+                report["calls"][2]["prompt_context"]["included_entry_count"],
+                5,
+            )
+            for call in (report["calls"][0], report["calls"][2]):
+                compliance = call["glossary_compliance"]
+                self.assertEqual(compliance["selected_entry_count"], 5)
+                self.assertEqual(compliance["checked_entry_count"], 5)
+                self.assertNotIn(
+                    "target_metadata_missing",
+                    compliance["reason_codes"],
+                )
+                self.assertNotIn("source_term_absent", compliance["reason_codes"])
 
             rendered = report_path.read_text(encoding="utf-8")
             self.assertNotIn("<glossary_context", rendered)
