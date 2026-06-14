@@ -29,6 +29,61 @@ _FAILED_FRAGMENT_STATUSES = {
 READER_REVIEW_MARKS_FILE = "reader_review_marks.json"
 _READER_REVIEW_MARKS_VERSION = 1
 _READER_REVIEW_ALLOWED_MARKS = frozenset({"needs_review", "ok", "ignore"})
+GLOSSARY_RUNTIME_DIAGNOSTICS_FILE = "glossary_runtime_diagnostics.json"
+_GLOSSARY_RUNTIME_DIAGNOSTICS_SCHEMA_VERSION = (
+    "glossary-runtime-archive-diagnostics-v1"
+)
+_GLOSSARY_RUNTIME_EVENT_TYPE = "glossary_runtime_adapter"
+_GLOSSARY_CONTEXT_RE = re.compile(
+    r"<glossary_context\b.*?</glossary_context>",
+    re.DOTALL,
+)
+_SECRET_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "bot_token",
+    "dsn",
+    "password",
+    "refresh_token",
+    "secret",
+    "token",
+)
+_SECRET_DIAGNOSTIC_KEYS = frozenset(
+    {
+        "secret_exclusion_policy",
+        "secret_material_rejected",
+        "secret_redaction_count",
+        "secret_redactions",
+    }
+)
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"(?m)^[A-Z_][A-Z0-9_]{2,}=[^\s].+$"),
+)
+_RAW_GLOSSARY_EVENT_KEYS = frozenset(
+    {
+        "bounded_source_excerpt",
+        "prompt",
+        "prompt_body",
+        "provider_request",
+        "provider_response",
+        "raw_prompt",
+        "raw_response",
+        "raw_source",
+        "raw_source_text",
+        "request_body",
+        "response_body",
+        "source_text",
+        "source_texts",
+        "target_text",
+        "translated_text",
+        "translation_text",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -251,12 +306,18 @@ def build_effective_translation_run_archive(
     archive_name = f"{run_dir.name}.zip"
     effective = _effective_run_payload(details)
     work_units = _work_units_payload(details)
+    glossary_runtime_diagnostics = _glossary_runtime_diagnostics_payload(
+        details,
+        run_dir=run_dir,
+        raw_text_diagnostics_present=raw_text_diagnostics is not None,
+    )
     buffer = BytesIO()
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
         written_paths: set[str] = set()
         for path in sorted(run_dir.rglob("*")):
             if path.is_file() and path.name not in {
                 "summary.md",
+                GLOSSARY_RUNTIME_DIAGNOSTICS_FILE,
                 READER_REVIEW_MARKS_FILE,
             }:
                 member_path = path.relative_to(run_dir).as_posix()
@@ -278,6 +339,12 @@ def build_effective_translation_run_archive(
                 _json_dumps(raw_text_diagnostics),
             )
             written_paths.add("raw_text_diagnostics.json")
+        if glossary_runtime_diagnostics is not None:
+            archive.writestr(
+                GLOSSARY_RUNTIME_DIAGNOSTICS_FILE,
+                _json_dumps(glossary_runtime_diagnostics),
+            )
+            written_paths.add(GLOSSARY_RUNTIME_DIAGNOSTICS_FILE)
         diagnostic_file_entries = _write_diagnostic_files(
             archive,
             raw_diagnostic_files,
@@ -314,6 +381,12 @@ def build_effective_translation_run_archive(
                     "owner-only provider IO diagnostic log that may contain exact",
                     "provider request JSON bodies, prompt/source batch text, and",
                     "raw provider response bodies.",
+                    f"`{GLOSSARY_RUNTIME_DIAGNOSTICS_FILE}`, when present, is an",
+                    "owner-only glossary runtime diagnostic sidecar for",
+                    "battle-test analysis. It may contain rendered glossary",
+                    "prompt context extracted from provider IO, selected-entry",
+                    "metadata, adapter/preflight/fallback decisions, cache policy",
+                    "metadata and compliance diagnostics.",
                     "`diagnostic_files/`, when present, contains owner-only",
                     "copies of the original uploaded file and the final or partial",
                     "translated result file from object storage.",
@@ -460,6 +533,346 @@ def _work_units_payload(details: TranslationRunDetails) -> dict[str, Any]:
         "attention_unit": _json_safe(details.work_unit_diagnostic),
         "units": tuple(_json_safe(fragment) for fragment in details.fragments),
     }
+
+
+def _glossary_runtime_diagnostics_payload(
+    details: TranslationRunDetails,
+    *,
+    run_dir: Path,
+    raw_text_diagnostics_present: bool,
+) -> dict[str, Any] | None:
+    adapter_events = tuple(
+        event
+        for event in details.events
+        if event.event_type == _GLOSSARY_RUNTIME_EVENT_TYPE
+    )
+    if not adapter_events:
+        return None
+    rendered_contexts, rejected_contexts = _provider_io_glossary_contexts(
+        run_dir / "provider_io_diagnostics.jsonl",
+    )
+
+    adapter_payloads = tuple(
+        _glossary_adapter_event_payload(event) for event in adapter_events
+    )
+    selected_entry_ids = sorted(
+        {
+            entry_id
+            for payload in adapter_payloads
+            for entry_id in _glossary_selected_entry_ids(payload)
+        }
+    )
+    cache_behaviors = sorted(
+        {
+            str(cache_policy.get("behavior"))
+            for payload in adapter_payloads
+            if isinstance(cache_policy := payload.get("cache_policy"), dict)
+            and cache_policy.get("behavior")
+        }
+    )
+    payload: dict[str, Any] = {
+        "schema_version": _GLOSSARY_RUNTIME_DIAGNOSTICS_SCHEMA_VERSION,
+        "diagnostic_scope": "owner_only_admin_download",
+        "access_boundary": {
+            "visibility": "owner_only",
+            "ordinary_logs_allowed": False,
+            "telemetry_allowed": False,
+            "normal_admin_surface_allowed": False,
+            "telegram_user_surface_allowed": False,
+            "json_api_allowed": False,
+            "github_issue_or_pr_allowed": False,
+            "support_artifact_allowed": False,
+            "release_artifact_allowed": False,
+            "cache_control": "no-store",
+        },
+        "contains_raw_glossary_diagnostics": bool(rendered_contexts),
+        "metadata_only": not bool(rendered_contexts),
+        "secret_exclusion_policy": (
+            "Provider Authorization headers, API keys, tokens, passwords, DSNs "
+            "and real .env* values are forbidden in this sidecar."
+        ),
+        "retention_policy": "TBD",
+        "export_policy": "TBD",
+        "deletion_policy": "TBD",
+        "job_id": details.summary.job_id,
+        "run_id": Path(details.run_dir).name,
+        "file_name": details.summary.file_name,
+        "document_kind": details.summary.document_kind,
+        "source_language": details.summary.source_language,
+        "target_language": details.summary.target_language,
+        "glossary_mode": _translation_policy_value(details, "glossary_mode"),
+        "summary": {
+            "adapter_event_count": len(adapter_payloads),
+            "rendered_prompt_context_count": len(rendered_contexts),
+            "rejected_prompt_context_count": len(rejected_contexts),
+            "selected_entry_ids": selected_entry_ids,
+            "cache_policy_behaviors": cache_behaviors,
+            "related_diagnostic_files": _glossary_related_diagnostic_files(
+                run_dir,
+                raw_text_diagnostics_present=raw_text_diagnostics_present,
+            ),
+        },
+        "adapter_events": list(adapter_payloads),
+        "rendered_prompt_contexts": list(rendered_contexts),
+        "rejected_prompt_contexts": list(rejected_contexts),
+    }
+    redacted_payload, redactions = _redact_secret_material(payload)
+    redacted_payload["secret_material_rejected"] = bool(redactions)
+    redacted_payload["secret_redaction_count"] = len(redactions)
+    redacted_payload["secret_redactions"] = redactions
+    return redacted_payload
+
+
+def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any]:
+    payload, raw_event_redactions = _redact_glossary_event_raw_fields(
+        dict(event.payload),
+    )
+    return {
+        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+        "event_type": event.event_type,
+        "status": payload.get("status", "Unknown"),
+        "fallback_reason": payload.get("fallback_reason", "Unknown"),
+        "work_unit_sequence": payload.get("work_unit_sequence"),
+        "selected_entry_ids": _string_sequence(payload.get("selected_entry_ids")),
+        "cache_policy": _safe_dict(payload.get("cache_policy")),
+        "battle_test_preflight": _safe_dict(payload.get("battle_test_preflight")),
+        "prompt_context": payload.get("prompt_context"),
+        "policy_signature_context": _safe_dict(payload.get("policy_signature_context")),
+        "work_unit_selection_signature": payload.get("work_unit_selection_signature"),
+        "raw_event_redactions": raw_event_redactions,
+        "payload": payload,
+    }
+
+
+def _glossary_selected_entry_ids(payload: dict[str, Any]) -> tuple[str, ...]:
+    selected = list(_string_sequence(payload.get("selected_entry_ids")))
+    preflight = payload.get("battle_test_preflight")
+    if isinstance(preflight, dict):
+        selected.extend(_string_sequence(preflight.get("useful_entry_ids")))
+    prompt_context = payload.get("prompt_context")
+    if isinstance(prompt_context, dict):
+        selected.extend(_string_sequence(prompt_context.get("included_entry_ids")))
+    return tuple(dict.fromkeys(selected))
+
+
+def _provider_io_glossary_contexts(
+    provider_io_path: Path,
+) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+    if not provider_io_path.exists():
+        return (), ()
+    rendered: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    try:
+        lines = provider_io_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return (), ()
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        request_text = _provider_io_request_text(record)
+        if request_text is None:
+            continue
+        for string_path, text in _provider_request_strings(request_text):
+            for context_index, context_text in enumerate(
+                _extract_glossary_contexts(text),
+                start=1,
+            ):
+                if _contains_secret_material(context_text):
+                    rejected.append(
+                        {
+                            "source_file": "provider_io_diagnostics.jsonl",
+                            "line_number": line_number,
+                            "string_path": string_path,
+                            "context_index": context_index,
+                            "reason": "secret_material_detected",
+                        }
+                    )
+                    continue
+                rendered.append(
+                    {
+                        "source_file": "provider_io_diagnostics.jsonl",
+                        "line_number": line_number,
+                        "string_path": string_path,
+                        "context_index": context_index,
+                        "character_count": len(context_text),
+                        "text": context_text,
+                    }
+                )
+    return tuple(rendered), tuple(rejected)
+
+
+def _provider_io_request_text(record: dict[str, Any]) -> str | None:
+    request_body = record.get("request_body")
+    if not isinstance(request_body, dict):
+        return None
+    text = request_body.get("text")
+    return text if isinstance(text, str) and text else None
+
+
+def _provider_request_strings(request_text: str) -> tuple[tuple[str, str], ...]:
+    try:
+        parsed = json.loads(request_text)
+    except json.JSONDecodeError:
+        return (("$.request_body.text", request_text),)
+    strings = tuple(_iter_json_strings(parsed, "$.request_body.json"))
+    return strings or (("$.request_body.text", request_text),)
+
+
+def _iter_json_strings(value: Any, path: str) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, str):
+        return ((path, value),)
+    if isinstance(value, dict):
+        strings: list[tuple[str, str]] = []
+        for key, item in value.items():
+            strings.extend(_iter_json_strings(item, f"{path}.{key}"))
+        return tuple(strings)
+    if isinstance(value, list):
+        strings = []
+        for index, item in enumerate(value):
+            strings.extend(_iter_json_strings(item, f"{path}[{index}]"))
+        return tuple(strings)
+    return ()
+
+
+def _extract_glossary_contexts(text: str) -> tuple[str, ...]:
+    return tuple(match.group(0) for match in _GLOSSARY_CONTEXT_RE.finditer(text))
+
+
+def _glossary_related_diagnostic_files(
+    run_dir: Path,
+    *,
+    raw_text_diagnostics_present: bool,
+) -> list[str]:
+    related: list[str] = []
+    if raw_text_diagnostics_present:
+        related.append("raw_text_diagnostics.json")
+    if (run_dir / "provider_io_diagnostics.jsonl").exists():
+        related.append("provider_io_diagnostics.jsonl")
+    return related
+
+
+def _translation_policy_value(
+    details: TranslationRunDetails,
+    key: str,
+) -> str:
+    policy = details.metadata.get("translation_policy")
+    if not isinstance(policy, str):
+        return "Unknown"
+    try:
+        payload = json.loads(policy)
+    except json.JSONDecodeError:
+        return "Unknown"
+    if not isinstance(payload, dict):
+        return "Unknown"
+    value = payload.get(key)
+    return str(value) if value else "Unknown"
+
+
+def _string_sequence(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value if str(item))
+
+
+def _redact_secret_material(
+    value: Any,
+    *,
+    path: str = "$",
+) -> tuple[Any, list[dict[str, str]]]:
+    if isinstance(value, dict):
+        redactions: list[dict[str, str]] = []
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if _is_secret_key(key_text):
+                safe[key_text] = "[redacted]"
+                redactions.append(
+                    {"path": child_path, "reason": "secret_key_rejected"}
+                )
+                continue
+            child, child_redactions = _redact_secret_material(
+                item,
+                path=child_path,
+            )
+            safe[key_text] = child
+            redactions.extend(child_redactions)
+        return safe, redactions
+    if isinstance(value, list):
+        redactions = []
+        safe_list = []
+        for index, item in enumerate(value):
+            child, child_redactions = _redact_secret_material(
+                item,
+                path=f"{path}[{index}]",
+            )
+            safe_list.append(child)
+            redactions.extend(child_redactions)
+        return safe_list, redactions
+    if isinstance(value, tuple):
+        safe, redactions = _redact_secret_material(list(value), path=path)
+        return safe, redactions
+    if isinstance(value, str) and _contains_secret_material(value):
+        return "[redacted]", [{"path": path, "reason": "secret_value_rejected"}]
+    return value, []
+
+
+def _redact_glossary_event_raw_fields(
+    value: Any,
+    *,
+    path: str = "$",
+) -> tuple[Any, list[dict[str, str]]]:
+    if isinstance(value, dict):
+        redactions: list[dict[str, str]] = []
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if key_text.lower() in _RAW_GLOSSARY_EVENT_KEYS:
+                safe[key_text] = "[redacted]"
+                redactions.append(
+                    {"path": child_path, "reason": "raw_event_field_rejected"}
+                )
+                continue
+            child, child_redactions = _redact_glossary_event_raw_fields(
+                item,
+                path=child_path,
+            )
+            safe[key_text] = child
+            redactions.extend(child_redactions)
+        return safe, redactions
+    if isinstance(value, list):
+        redactions = []
+        safe_list = []
+        for index, item in enumerate(value):
+            child, child_redactions = _redact_glossary_event_raw_fields(
+                item,
+                path=f"{path}[{index}]",
+            )
+            safe_list.append(child)
+            redactions.extend(child_redactions)
+        return safe_list, redactions
+    if isinstance(value, tuple):
+        safe, redactions = _redact_glossary_event_raw_fields(list(value), path=path)
+        return safe, redactions
+    return value, []
+
+
+def _is_secret_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in _SECRET_DIAGNOSTIC_KEYS:
+        return False
+    return any(marker in lowered for marker in _SECRET_KEY_MARKERS)
+
+
+def _contains_secret_material(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
 
 
 def _write_diagnostic_files(

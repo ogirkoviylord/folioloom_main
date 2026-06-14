@@ -61,7 +61,9 @@ evidence, а не создание документов с нуля.
   archives may also include run-scoped `provider_io_diagnostics.jsonl` with
   exact provider request/response bodies for incident debugging, excluding
   provider `Authorization` headers and API keys, plus `diagnostic_files/`
-  copies of the original uploaded file and final or partial translated result.
+  copies of the original uploaded file and final or partial translated result,
+  and issue #549 `glossary_runtime_diagnostics.json` for glossary battle-test
+  diagnostics when glossary runtime diagnostic data exists.
   Telemetry, normal admin pages, APIs and support artifacts remain
   metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.

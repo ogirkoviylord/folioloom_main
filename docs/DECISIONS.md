@@ -2078,6 +2078,14 @@ Decision:
   sending those files separately. The approved archive area is
   `diagnostic_files/` with `original_file/`, `translated_result/` and
   `manifest.json` entries sourced from object storage.
+- On 2026-06-14, the owner approved issue #549 so downloaded owner-only full
+  diagnostic archives may include `glossary_runtime_diagnostics.json` when
+  glossary runtime diagnostic data exists. The sidecar may contain glossary
+  mode, adapter/preflight/fallback decisions, selected-entry metadata, cache
+  policy metadata, compliance diagnostics and rendered glossary prompt context
+  extracted from the approved provider IO diagnostic boundary. It must reject
+  provider auth material, API keys, tokens, passwords, DSNs and real `.env*`
+  values. Release-version retention/export/delete policy remains `TBD`.
 - The diagnostic path must stay behind the existing SSH-tunneled admin session
   model. Raw text remains allowed only inside dedicated owner/admin diagnostic
   surfaces, including the owner-only full diagnostic download sidecar, and must
@@ -2172,6 +2180,12 @@ Consequences:
   archives, not telemetry, normal admin/API views, GitHub issues, PR
   descriptions, support notes or release artifacts. It must exclude provider
   `Authorization` headers and API keys.
+- `glossary_runtime_diagnostics.json` is a sensitive owner-only archive
+  sidecar for glossary battle-test analysis. It belongs only in downloaded full
+  diagnostic archives, not ordinary logs, telemetry, normal admin/API views,
+  Telegram/user surfaces, GitHub issues, PR descriptions, docs, support notes
+  or release artifacts. It does not approve default glossary rollout,
+  glossary-aware cache reuse or release/privacy/legal/support claims.
 - `diagnostic_files/` entries are sensitive owner-only diagnostic artifacts
   containing original user-uploaded file bytes and final or partial translated
   result bytes from object storage. They belong only in downloaded full
