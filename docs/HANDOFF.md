@@ -99,6 +99,21 @@ entry-id-only non-matching and missing-file metadata. This does not call
 providers, inject runtime prompts, change cache reuse, mutate durable state or
 make release/privacy claims.
 
+Issue #557 implementation slice on 2026-06-14: branch
+`codex/issue-557-persistent-epub-glossary-resolver` adds
+`src/translator_service/glossary_persistent_runtime_resolver.py`, a default-off
+owner/test persistent EPUB work-unit resolver. When explicitly enabled it reads
+the claimed unit source through an injected loader, builds local scanner,
+profile, reducer and selector metadata, applies the #556 target-metadata
+overlay, and returns a `GlossaryRuntimeAdapterHookConfig` only when the unit is
+EPUB, target metadata applies, source term/alias is present and bounded prompt
+context can be rendered. Existing scheduled worker hooks are reused; default
+and `without_glossary` paths remain unchanged. Focused tests cover default-off
+fallback, READY hook construction, target-metadata fallback, non-EPUB fallback
+and scheduled worker injection/cache-bypass/redaction behavior. This does not
+call providers, roll out glossary by default, enable cache reuse, mutate
+DB/schema/state/storage/admin/retention or make release/privacy claims.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
