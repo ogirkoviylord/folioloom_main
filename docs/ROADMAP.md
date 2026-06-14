@@ -712,8 +712,11 @@ Acceptance criteria:
   overlay metadata, source term/alias presence and prompt-context budgets pass.
   Issue #558 adds local/fake scheduled-worker rehearsal coverage proving
   injected prompt context, fallback metadata, `without_glossary` omission and
-  owner-only archive sidecar evidence before any live provider test. None of
-  this approves rollout, cache reuse or release/privacy claims.
+  owner-only archive sidecar evidence before any live provider test. Issue #560
+  records the no-code provider-backed glossary preparation design required for
+  arbitrary books before target metadata can be generated beyond owner-approved
+  overlays. None of this approves rollout, cache reuse or release/privacy
+  claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1

@@ -166,7 +166,9 @@
   budgets pass for an explicitly enabled owner/test path. Issue #558 adds
   fake/local scheduled-worker and owner-only archive evidence for injected,
   fallback and `without_glossary` paths; this reduces wiring uncertainty but
-  remains non-provider evidence.
+  remains non-provider evidence. Issue #560 records a no-code provider-backed
+  preparation design for arbitrary books, with durable storage,
+  retention/export/delete, admin visibility and rollout still `TBD`.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
