@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, date, datetime
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -60,6 +61,18 @@ class TranslationRunSummary:
 @dataclass(frozen=True)
 class TranslationRunArchive:
     file_name: str
+    content: bytes
+
+
+@dataclass(frozen=True)
+class TranslationRunDiagnosticFile:
+    role: str
+    object_kind: str
+    object_key: str
+    file_name: str
+    content_type: str
+    size_bytes: int
+    sha256: str
     content: bytes
 
 
@@ -230,6 +243,7 @@ def build_effective_translation_run_archive(
     *,
     details: TranslationRunDetails,
     raw_text_diagnostics: dict[str, Any] | None = None,
+    raw_diagnostic_files: tuple[TranslationRunDiagnosticFile, ...] = (),
 ) -> TranslationRunArchive | None:
     run_dir = _resolve_run_dir(root, run_id)
     if run_dir is None:
@@ -239,29 +253,47 @@ def build_effective_translation_run_archive(
     work_units = _work_units_payload(details)
     buffer = BytesIO()
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+        written_paths: set[str] = set()
         for path in sorted(run_dir.rglob("*")):
             if path.is_file() and path.name not in {
                 "summary.md",
                 READER_REVIEW_MARKS_FILE,
             }:
-                archive.write(path, path.relative_to(run_dir).as_posix())
+                member_path = path.relative_to(run_dir).as_posix()
+                archive.write(path, member_path)
+                written_paths.add(member_path)
         archive.writestr(
             "effective_run.json",
             _json_dumps(effective),
         )
+        written_paths.add("effective_run.json")
         archive.writestr(
             "work_units.json",
             _json_dumps(work_units),
         )
+        written_paths.add("work_units.json")
         if raw_text_diagnostics is not None:
             archive.writestr(
                 "raw_text_diagnostics.json",
                 _json_dumps(raw_text_diagnostics),
             )
+            written_paths.add("raw_text_diagnostics.json")
+        diagnostic_file_entries = _write_diagnostic_files(
+            archive,
+            raw_diagnostic_files,
+            written_paths=written_paths,
+        )
+        if diagnostic_file_entries:
+            archive.writestr(
+                "diagnostic_files/manifest.json",
+                _json_dumps(_diagnostic_files_manifest(diagnostic_file_entries)),
+            )
+            written_paths.add("diagnostic_files/manifest.json")
         archive.writestr(
             "summary.md",
             _render_effective_summary(details, work_units=work_units),
         )
+        written_paths.add("summary.md")
         archive.writestr(
             "README.md",
             "\n".join(
@@ -282,11 +314,14 @@ def build_effective_translation_run_archive(
                     "owner-only provider IO diagnostic log that may contain exact",
                     "provider request JSON bodies, prompt/source batch text, and",
                     "raw provider response bodies.",
+                    "`diagnostic_files/`, when present, contains owner-only",
+                    "copies of the original uploaded file and the final or partial",
+                    "translated result file from object storage.",
                     "",
                     "This archive intentionally excludes provider Authorization",
                     "headers and API keys.",
                     "Treat archives with raw diagnostic files as sensitive",
-                    "user-document and provider-IO diagnostic data.",
+                    "user-document, translated-output and provider-IO diagnostic data.",
                     "",
                 ]
             ),
@@ -425,6 +460,79 @@ def _work_units_payload(details: TranslationRunDetails) -> dict[str, Any]:
         "attention_unit": _json_safe(details.work_unit_diagnostic),
         "units": tuple(_json_safe(fragment) for fragment in details.fragments),
     }
+
+
+def _write_diagnostic_files(
+    archive: ZipFile,
+    files: tuple[TranslationRunDiagnosticFile, ...],
+    *,
+    written_paths: set[str],
+) -> tuple[dict[str, Any], ...]:
+    entries: list[dict[str, Any]] = []
+    for file in files:
+        member_path = _unique_archive_path(
+            _diagnostic_file_archive_path(file),
+            written_paths=written_paths,
+        )
+        archive.writestr(member_path, file.content)
+        written_paths.add(member_path)
+        entries.append(
+            {
+                "role": file.role,
+                "object_kind": file.object_kind,
+                "object_key": file.object_key,
+                "file_name": file.file_name,
+                "archive_path": member_path,
+                "content_type": file.content_type,
+                "size_bytes": file.size_bytes,
+                "sha256": file.sha256,
+            }
+        )
+    return tuple(entries)
+
+
+def _diagnostic_files_manifest(
+    entries: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "translation-diagnostic-files-v1",
+        "contains_raw_file_bytes": True,
+        "diagnostic_scope": "owner_only_admin_download",
+        "files": entries,
+    }
+
+
+def _diagnostic_file_archive_path(file: TranslationRunDiagnosticFile) -> str:
+    role = _safe_archive_segment(file.role, fallback="file")
+    file_name = _safe_archive_file_name(file.file_name, fallback=role)
+    return f"diagnostic_files/{role}/{file_name}"
+
+
+def _unique_archive_path(path: str, *, written_paths: set[str]) -> str:
+    if path not in written_paths:
+        return path
+    pure_path = PurePosixPath(path)
+    parent = pure_path.parent.as_posix()
+    suffix = pure_path.suffix
+    stem = pure_path.name[: -len(suffix)] if suffix else pure_path.name
+    counter = 2
+    while True:
+        candidate_name = f"{stem}-{counter}{suffix}"
+        candidate = f"{parent}/{candidate_name}" if parent != "." else candidate_name
+        if candidate not in written_paths:
+            return candidate
+        counter += 1
+
+
+def _safe_archive_segment(value: str, *, fallback: str) -> str:
+    segment = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "")).strip("._")
+    return segment or fallback
+
+
+def _safe_archive_file_name(value: str, *, fallback: str) -> str:
+    raw_name = PurePosixPath(str(value or "").replace("\\", "/")).name
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_name).strip("._")
+    return name or f"{fallback}.bin"
 
 
 def _render_effective_summary(

@@ -81,6 +81,7 @@ from translator_service.admin.settings import SettingValueType, SQLiteAdminSetti
 from translator_service.admin.translation_logs import (
     TranslationProviderFailureAttempt,
     TranslationRunDetails,
+    TranslationRunDiagnosticFile,
     TranslationRunFragmentDetail,
     TranslationRunSummary,
     TranslationWorkUnitDiagnostic,
@@ -933,6 +934,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             run_id,
             details=details,
             raw_text_diagnostics=_translation_raw_text_diagnostics_payload(
+                settings,
+                details,
+            ),
+            raw_diagnostic_files=_translation_raw_diagnostic_files(
                 settings,
                 details,
             ),
@@ -3212,6 +3217,71 @@ def _translation_raw_text_diagnostics_payload(
             job_id=job_id,
         ),
     }
+
+
+def _translation_raw_diagnostic_files(
+    settings: Settings,
+    details: TranslationRunDetails,
+) -> tuple[TranslationRunDiagnosticFile, ...]:
+    job_id = details.summary.job_id
+    if not job_id or not _persistent_job_store_readable(settings):
+        return ()
+    store = open_persistent_job_store(settings)
+    try:
+        job = store.get_job(job_id)
+    finally:
+        store.close()
+    if job is None:
+        return ()
+    storage = LocalObjectStorage(settings.object_storage_root)
+    files: list[TranslationRunDiagnosticFile] = []
+    original = _translation_raw_diagnostic_file(
+        storage,
+        role="original_file",
+        object_kind="original",
+        object_key=getattr(job, "source_object_key", None),
+    )
+    if original is not None:
+        files.append(original)
+    result_object_kind = (
+        "final" if getattr(job, "final_object_key", None) else "partial"
+    )
+    result = _translation_raw_diagnostic_file(
+        storage,
+        role="translated_result",
+        object_kind=result_object_kind,
+        object_key=getattr(job, "final_object_key", None)
+        or getattr(job, "partial_object_key", None),
+    )
+    if result is not None:
+        files.append(result)
+    return tuple(files)
+
+
+def _translation_raw_diagnostic_file(
+    storage: LocalObjectStorage,
+    *,
+    role: str,
+    object_kind: str,
+    object_key: str | None,
+) -> TranslationRunDiagnosticFile | None:
+    if not object_key:
+        return None
+    try:
+        metadata = storage.get_metadata(object_key)
+        content = storage.get_bytes(object_key)
+    except (FileNotFoundError, OSError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+    return TranslationRunDiagnosticFile(
+        role=role,
+        object_kind=object_kind,
+        object_key=metadata.object_key,
+        file_name=metadata.file_name,
+        content_type=metadata.content_type,
+        size_bytes=metadata.size_bytes,
+        sha256=metadata.sha256,
+        content=content,
+    )
 
 
 def _translation_work_unit_count(
