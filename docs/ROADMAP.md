@@ -728,8 +728,10 @@ Acceptance criteria:
   target-backed useful entries so the next rerun can distinguish model
   obedience/morphology issues from selection noise. Issue #569 hardens the
   prompt-context shape with explicit escaped source/target contract tags before
-  the next bounded rerun. None of this approves rollout, cache reuse, quality
-  claims or release/privacy claims.
+  the next bounded rerun. Issue #571 records a post-adjudication owner-only
+  bounded Oz EPUB RU rerun where glossary-on structural validation and exact
+  configured-form compliance passed for one useful entry. None of this approves
+  rollout, cache reuse, broad quality claims or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1

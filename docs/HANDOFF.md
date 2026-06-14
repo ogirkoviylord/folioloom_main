@@ -177,6 +177,22 @@ issues from weak prompt-context formatting. It does not approve rollout, cache
 reuse, live provider calls by itself, durable state changes or quality/readiness
 claims.
 
+Issue #571 owner-only evidence update on 2026-06-14: after #567 and #569, the
+local ignored Gutenberg/Oz target-metadata fixture under `outputs/` was
+adjudicated from owner-only raw QA to add one missing RU case/morphology target
+variant for the selected bounded unit. Fake preflight completed with 2 fake
+calls. The bounded live paired RU rerun completed with 2 live calls, 5,810
+observed provider-reported tokens and 13,590 reserved tokens under
+`outputs/issue-559-real-epub-glossary-live/20260614T220635Z/`. Glossary-on had
+explicit context present, structural validation passed, 1 useful included
+entry, compliance `pass`, target_form_present_count=1,
+target_form_missing_count=0, forbidden_variant_count=0 and skipped_entry_count=0.
+Glossary-off passed structural validation and compliance skipped with
+`no_selected_entries`. This is bounded owner-only provider-boundary evidence
+only: RU/UK morphology policy remains `TBD`, broader quality/corpus behavior
+remains `Unknown`, and default rollout/cache reuse/release/privacy/legal/support
+claims remain unapproved.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
