@@ -254,11 +254,15 @@ applied while preserving safety, output structure, higher-priority policy and
 source meaning. The flag is not auto-detected from raw document text, so a user
 document containing a literal `<glossary_context>` tag does not receive the
 trusted clause. Fake #575 preflight completed with 4 fake calls; glossary-on
-system prompts contained the new clause and glossary-off prompts did not. Live
-provider behavior after this system prompt change remains `Unknown` until a
-bounded #575 rerun is executed. This is not default rollout, cache reuse,
-provider-config change, durable state change or release/privacy/legal/support
-evidence.
+system prompts contained the new clause and glossary-off prompts did not.
+Post-merge bounded #575 live rerun on 2026-06-15 used 4 calls and 8871 observed
+tokens with no secret-pattern findings in the owner-only diagnostics directory.
+Structural validation passed for all calls and the service clause was present
+only on glossary-on prompts, but exact configured target-form compliance
+remained partial: `ru` 2/5, `uk` 4/5. Issue #584 was opened to strengthen the
+owner/test terminology contract shape before another provider rerun. This is
+not default rollout, cache reuse, provider-config change, durable state change
+or release/privacy/legal/support evidence.
 
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
