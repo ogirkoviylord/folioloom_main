@@ -3,8 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from translator_service.format_adapters.txt import plan_txt_translation
-from translator_service.glossary_scanner import scan_glossary_candidates
 from tools.glossary_runtime_provider_smoke import (
     APPROVED_INPUT_TARGETS,
     APPROVED_OWNER_TEST_INPUT_TARGETS,
@@ -17,8 +15,8 @@ from tools.glossary_runtime_provider_smoke import (
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
     SmokeConfig,
-    apply_target_metadata_fixture_overlay,
     apply_runtime_pressure_fallback,
+    apply_target_metadata_fixture_overlay,
     build_epub_runtime_unit_selection_decision,
     build_glossary_off_runtime_package,
     build_runtime_glossary_budget_plan,
@@ -32,6 +30,8 @@ from tools.glossary_runtime_provider_smoke import (
     select_epub_runtime_unit_for_rehearsal,
     validate_runtime_response,
 )
+from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_scanner import scan_glossary_candidates
 
 
 def _synthetic_runtime_package(
@@ -167,9 +167,21 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 pressure["cache_policy"]["behavior"],
                 "bypass_glossary_injected_cache",
             )
+            compliance = report["calls"][0]["glossary_compliance"]
+            self.assertTrue(compliance["metadata_only"])
+            self.assertFalse(compliance["raw_payload_included"])
+            self.assertIn(
+                compliance["status"],
+                {"pass", "findings", "skipped"},
+            )
+            self.assertIn("Glossary compliance", rendered)
             self.assertNotIn(
                 source_text[:40],
                 json.dumps(pressure, ensure_ascii=False, sort_keys=True),
+            )
+            self.assertNotIn(
+                source_text[:40],
+                json.dumps(compliance, ensure_ascii=False, sort_keys=True),
             )
             diagnostic_dir = Path(report["diagnostic_dir"])
             self.assertTrue((diagnostic_dir / "manifest.json").is_file())
