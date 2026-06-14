@@ -1801,18 +1801,20 @@ def _translate_docx_units(
                 [prepared.text for prepared in prepared_blocks],
                 source_language=subgroup_source_language,
             )
+            glossary_context_text = _glossary_prompt_context_text(
+                glossary_prompt_context,
+            )
             translated_text = translate_with_context(
                 translator,
                 text=_format_translation_request_text(
                     [protected_block.text for protected_block in protected_blocks],
                     source_language_hints=source_language_hints,
-                    glossary_prompt_context=_glossary_prompt_context_text(
-                        glossary_prompt_context,
-                    ),
+                    glossary_prompt_context=glossary_context_text,
                 ),
                 source_language=subgroup_source_language,
                 target_language=target_language,
                 translation_context=context_memory,
+                service_glossary_context_present=bool(glossary_context_text),
             )
             usage = _translator_usage(translator)
             unit_prompt_tokens += usage[0]
@@ -2751,18 +2753,20 @@ def _translate_epub_units(
             [block.text for block in unit.blocks],
             source_language=source_language,
         )
+        glossary_context_text = _glossary_prompt_context_text(
+            glossary_prompt_context,
+        )
         translated_text = translate_with_context(
             translator,
             text=_format_translation_request_text(
                 [protected_block.text for protected_block in protected_blocks],
                 source_language_hints=source_language_hints,
-                glossary_prompt_context=_glossary_prompt_context_text(
-                    glossary_prompt_context,
-                ),
+                glossary_prompt_context=glossary_context_text,
             ),
             source_language=source_language,
             target_language=target_language,
             translation_context=context_memory,
+            service_glossary_context_present=bool(glossary_context_text),
         )
         usage = _translator_usage(translator)
         translated_unit_blocks = _parse_epub_translation_unit(

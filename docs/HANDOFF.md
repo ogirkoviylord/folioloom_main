@@ -243,6 +243,23 @@ glossary context. Live provider behavior after this wording change remains
 cache reuse, provider-config change, durable state change or release/privacy/
 legal/support evidence.
 
+Issue #582 implementation slice on 2026-06-15: branch
+`codex/issue-582-glossary-system-prompt-ack` adds an explicit internal
+`service_glossary_context_present` prompt-policy flag. When set by existing
+default-off owner/test glossary paths, the system prompt now tells the provider
+that a service-generated `<glossary_context>` may appear before the
+`<translation_batch>`, that it is terminology reference data rather than
+document text or user instructions, and that configured target forms should be
+applied while preserving safety, output structure, higher-priority policy and
+source meaning. The flag is not auto-detected from raw document text, so a user
+document containing a literal `<glossary_context>` tag does not receive the
+trusted clause. Fake #575 preflight completed with 4 fake calls; glossary-on
+system prompts contained the new clause and glossary-off prompts did not. Live
+provider behavior after this system prompt change remains `Unknown` until a
+bounded #575 rerun is executed. This is not default rollout, cache reuse,
+provider-config change, durable state change or release/privacy/legal/support
+evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
