@@ -125,6 +125,16 @@ context evidence, fallback metadata remains metadata-only, and
 provider quality, live stability, runtime rollout and release/privacy readiness
 remain `Unknown`/not approved.
 
+Issue #560 architecture slice on 2026-06-14: branch
+`codex/issue-560-provider-glossary-prep-design` adds
+`docs/superpowers/specs/2026-06-14-provider-backed-real-book-glossary-preparation.md`.
+It defines the no-code provider-backed glossary preparation stage needed for
+arbitrary books: state machine, inputs/outputs, role JSON contract,
+validation/readiness gates, fallback matrix, privacy/cache boundaries and a
+future approval packet. Durable storage, retention/export/delete, admin
+visibility, legal/privacy/support copy and rollout remain `TBD`; provider
+quality/cost/latency remain `Unknown`.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
