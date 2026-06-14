@@ -184,6 +184,13 @@
   passed structural validation and exact configured-form compliance for one
   useful entry; this reduces one provider-boundary risk but remains a narrow
   smoke result, not broad quality, morphology or rollout proof.
+  Issue #574 records metadata-only owner QA for that paired Oz unit: glossary-on
+  did not regress structurally and passed compliance, but glossary-off also
+  happened to use an approved target-family form, so unique quality lift remains
+  unproven. Issue #576 adds only an explicit #575 adversarial TXT paired-matrix
+  smoke boundary with fixed allowlist, caps and diagnostics root; live provider
+  behavior and broader quality remain `Unknown` until the bounded matrix is run
+  and reviewed.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
