@@ -345,6 +345,237 @@ class AdminTranslationLogsTest(unittest.TestCase):
         with ZipFile(BytesIO(effective_archive.content)) as archive:
             self.assertIn("provider_io_diagnostics.jsonl", archive.namelist())
 
+    def test_effective_archive_includes_glossary_runtime_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "ready",
+                    "fallback_reason": "none",
+                    "work_unit_sequence": 1,
+                    "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                    "cache_policy": {
+                        "behavior": "bypass_glossary_injected_cache",
+                        "cache_get_allowed": False,
+                        "cache_put_allowed": False,
+                    },
+                    "battle_test_preflight": {
+                        "status": "ready",
+                        "useful_entry_ids": ["glossary-entry:v1:darcy"],
+                    },
+                    "prompt_context": {
+                        "included_entry_ids": ["glossary-entry:v1:darcy"],
+                    },
+                },
+            )
+            _write_provider_io(
+                logger.run_dir,
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Before prompt.\n"
+                                '<glossary_context role="untrusted_reference_data">\n'
+                                "- source: Darcy\n"
+                                "- target: Дарси\n"
+                                "</glossary_context>\n"
+                                "<translation_batch>Darcy returns.</translation_batch>"
+                            ),
+                        }
+                    ]
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            names = set(archive.namelist())
+            self.assertIn("glossary_runtime_diagnostics.json", names)
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+            readme = archive.read("README.md").decode("utf-8")
+
+        self.assertEqual(
+            sidecar["schema_version"],
+            "glossary-runtime-archive-diagnostics-v1",
+        )
+        self.assertEqual(sidecar["diagnostic_scope"], "owner_only_admin_download")
+        self.assertTrue(sidecar["contains_raw_glossary_diagnostics"])
+        self.assertEqual(sidecar["glossary_mode"], "with_glossary")
+        self.assertEqual(
+            sidecar["summary"]["selected_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
+        self.assertEqual(
+            sidecar["adapter_events"][0]["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        context_text = sidecar["rendered_prompt_contexts"][0]["text"]
+        self.assertIn("source: Darcy", context_text)
+        self.assertIn("target: Дарси", context_text)
+        sidecar_text = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns.", sidecar_text)
+        self.assertIn("glossary_runtime_diagnostics.json", readme)
+        self.assertIn("provider_io_diagnostics.jsonl", sidecar_text)
+
+    def test_effective_archive_omits_glossary_diagnostics_without_glossary_data(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-no-glossary-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "without_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event("work_unit_finished", {"sequence": 1})
+            _write_provider_io(
+                logger.run_dir,
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "<translation_batch>"
+                                "<glossary_context>"
+                                "literal source text"
+                                "</glossary_context>"
+                                "</translation_batch>"
+                            ),
+                        }
+                    ]
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            self.assertNotIn(
+                "glossary_runtime_diagnostics.json",
+                archive.namelist(),
+            )
+
+    def test_glossary_archive_diagnostics_reject_secret_material(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-secret-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "ready",
+                    "selected_entry_ids": ["glossary-entry:v1:secret"],
+                    "api_key": "sk-event-secret-value",
+                    "authorization": "Bearer event-secret-value",
+                    "diagnostic": {
+                        "prompt_body": "RAW PROMPT BODY MUST NOT COPY",
+                        "source_text": "RAW SOURCE TEXT MUST NOT COPY",
+                    },
+                },
+            )
+            _write_provider_io(
+                logger.run_dir,
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                '<glossary_context role="untrusted_reference_data">\n'
+                                "- source: Secret\n"
+                                "- target: sk-context-secret-value\n"
+                                "</glossary_context>"
+                            ),
+                        }
+                    ]
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        sidecar_text = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("sk-event-secret-value", sidecar_text)
+        self.assertNotIn("Bearer event-secret-value", sidecar_text)
+        self.assertNotIn("sk-context-secret-value", sidecar_text)
+        self.assertNotIn("RAW PROMPT BODY MUST NOT COPY", sidecar_text)
+        self.assertNotIn("RAW SOURCE TEXT MUST NOT COPY", sidecar_text)
+        self.assertEqual(sidecar["rendered_prompt_contexts"], [])
+        self.assertEqual(
+            sidecar["rejected_prompt_contexts"][0]["reason"],
+            "secret_material_detected",
+        )
+        self.assertTrue(sidecar["secret_material_rejected"])
+        self.assertEqual(
+            sidecar["adapter_events"][0]["raw_event_redactions"][0]["reason"],
+            "raw_event_field_rejected",
+        )
+
 
 def _archive_text(content: bytes) -> str:
     from io import BytesIO
@@ -355,6 +586,30 @@ def _archive_text(content: bytes) -> str:
             archive.read(name).decode("utf-8", errors="ignore")
             for name in archive.namelist()
         )
+
+
+def _write_provider_io(run_dir, request_payload: dict) -> None:
+    (run_dir / "provider_io_diagnostics.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "provider-io-diagnostics-v1",
+                "diagnostic_scope": "owner_only_translation_run_archive",
+                "provider_id": "deepseek",
+                "request_body": {
+                    "encoding": "utf-8",
+                    "text": json.dumps(request_payload, ensure_ascii=False),
+                },
+                "response_body": {
+                    "encoding": "utf-8",
+                    "text": '{"choices":[{"message":{"content":"OK"}}]}',
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

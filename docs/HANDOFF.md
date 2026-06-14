@@ -41,6 +41,19 @@ change and not a release/privacy/legal/support or quality-proof claim. TXT
 direct runtime prompt injection and deferred/external worker runtime config
 plumbing remain future/Unknown unless separately implemented and approved.
 
+Issue #549 implementation slice on 2026-06-14: branch
+`codex/issue-549-glossary-archive-diagnostics` adds
+`glossary_runtime_diagnostics.json` to owner-only admin `Download archive`
+exports when glossary runtime diagnostic data exists. The sidecar is generated
+at archive-download time from existing safe glossary adapter events plus
+rendered `<glossary_context>` sections extracted from the existing
+`provider_io_diagnostics.jsonl` boundary. Non-glossary and `without glossary`
+runs omit the sidecar. Ordinary logs, telemetry, normal admin pages, Telegram
+surfaces, GitHub/docs/PR/support/release artifacts and JSON APIs remain
+metadata-only/redacted. Provider auth material, API keys, tokens, passwords,
+DSNs and real `.env*` values are rejected/redacted; release-version retention,
+export and delete policy remains `TBD`.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
