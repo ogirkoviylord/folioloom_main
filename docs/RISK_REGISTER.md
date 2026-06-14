@@ -156,7 +156,10 @@
   diagnostics and no provider glossary context; future implementation must
   split target-metadata overlay, worker resolver, fake/local rehearsal,
   bounded live test and provider-backed preparation design into separate
-  approved issues.
+  approved issues. Issue #556 adds the local-only/default-off target-metadata
+  overlay contract with raw/secret rejection and source-term/alias-only
+  matching; it remains a planning foundation, not arbitrary glossary
+  generation, runtime rollout, provider work, cache reuse or quality proof.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core

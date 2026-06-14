@@ -704,7 +704,10 @@ Acceptance criteria:
   implementation path is #556 target-metadata overlay, #557 worker resolver,
   #558 fake/local bot-worker rehearsal, #559 bounded live RU paired test only
   after prerequisites, and #560 provider-backed arbitrary-book preparation
-  design. None of this approves rollout, cache reuse or release/privacy claims.
+  design. Issue #556 adds the local-only/default-off owner-approved compact
+  target-metadata overlay contract and tests, so future resolver work can get
+  target metadata without local code inventing semantic facts. None of this
+  approves rollout, cache reuse or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
