@@ -2134,6 +2134,21 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #535 / #204BM adds a no-code runtime glossary rollout design
+  for the #529 language-policy package sequence.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-glossary-runtime-rollout-design.md`
+  defines the rollout state machine from `off` and `shadow_only` through
+  owner-only smoke/review and future battle-test/beta/default candidates, with
+  entry gates, stop conditions, fallback behavior, cache bypass, diagnostics
+  privacy boundaries and owner approval points.
+- Follow-up: normal/default runtime glossary rollout and limited beta rollout
+  remain rejected for now. Owner-only battle-test implementation, cache reuse,
+  live provider reruns, diagnostics retention/export/delete behavior,
+  release/privacy/legal/support claims and final go/no-go all require separate
+  owner approval. Translation quality remains `Unknown`.
+
+- Date: 2026-06-14.
 - Change: Issue #534 / #204BL adds bounded paired live provider evidence for
   the #529 language-policy package sequence.
 - Evidence:
