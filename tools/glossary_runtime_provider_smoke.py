@@ -102,6 +102,11 @@ DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS = 80
 DEFAULT_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-477-bounded-glossary-runtime-provider-smoke"
 )
+ISSUE_507_ID = "507"
+ISSUE_507_MAX_CALLS = 4
+ISSUE_507_DIAGNOSTIC_ROOT = Path(
+    "outputs/issue-507-post-505-control-epub-glossary-live"
+)
 DEFAULT_TARGET_METADATA_FIXTURE_PATH = Path(
     "test_samples/glossary_targets/"
     "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
@@ -184,6 +189,7 @@ class ChatProvider(Protocol):
 
 @dataclass(frozen=True)
 class SmokeConfig:
+    issue_id: str = "477"
     input_targets: tuple[tuple[Path, str], ...] = APPROVED_INPUT_TARGETS
     diagnostic_root: Path = DEFAULT_DIAGNOSTIC_ROOT
     provider_model: str = DEFAULT_MODEL
@@ -198,6 +204,7 @@ class SmokeConfig:
     raw_text_capture: bool = True
     fake: bool = False
     target_metadata_fixture_path: Path | None = None
+    paired_glossary_off: bool = False
 
 
 @dataclass(frozen=True)
@@ -413,87 +420,30 @@ def run_smoke(
         if isinstance(package_result, Mapping):
             call_summaries.append(dict(package_result))
             continue
-        package = package_result
-        system_prompt, user_prompt, request_text = build_runtime_prompt(package)
-        estimated_prompt_tokens = estimate_tokens(system_prompt + user_prompt)
-        reservation = reserve_tokens(
-            estimated_prompt_tokens=estimated_prompt_tokens,
-            max_completion_tokens=config.max_completion_tokens,
-            prompt_token_multiplier=config.prompt_token_reservation_multiplier,
-        )
-        if calls_made >= config.max_calls:
-            call_summaries.append(
-                _skipped_call_summary(
-                    package,
-                    "skipped_max_calls",
-                    config=config,
-                    estimated_prompt_tokens=estimated_prompt_tokens,
-                    reservation=reservation,
-                )
+        package_pairs = [(package_result, "glossary_on")]
+        if config.paired_glossary_off:
+            package_pairs.append(
+                (build_glossary_off_runtime_package(package_result), "glossary_off")
             )
-            continue
-        if (
-            reserved_tokens + reservation > config.max_tokens_total
-            or (
-                observed_tokens is not None
-                and observed_tokens + reservation > config.max_tokens_total
-            )
-        ):
-            call_summaries.append(
-                _skipped_call_summary(
-                    package,
-                    "skipped_token_budget",
-                    config=config,
-                    estimated_prompt_tokens=estimated_prompt_tokens,
-                    reservation=reservation,
-                    reserved_tokens=reserved_tokens,
-                    observed_tokens_before_call=_unknown_int(observed_tokens),
-                )
-            )
-            continue
 
-        calls_made += 1
-        reserved_tokens += reservation
-        call_index = calls_made
-        result = provider.chat(
-            model=config.provider_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_completion_tokens=config.max_completion_tokens,
-        )
-        usage_tokens = _usage_total_tokens(result.usage)
-        observed_over_cap = False
-        if usage_tokens is None:
-            observed_tokens = None
-        elif observed_tokens is not None:
-            observed_tokens += usage_tokens
-            observed_over_cap = observed_tokens > config.max_tokens_total
-        validation = validate_runtime_response(result, package=package)
-        summary = _call_summary(
-            package=package,
-            config=config,
-            call_index=call_index,
-            estimated_prompt_tokens=estimated_prompt_tokens,
-            reservation=reservation,
-            result=result,
-            validation=validation,
-            observed_over_cap=observed_over_cap,
-        )
-        call_summaries.append(summary)
-        _write_json(
-            diagnostic_dir / f"call-{call_index:02d}-{package.input_id}.json",
-            _call_diagnostic(
+        for package, side in package_pairs:
+            call_state = _run_smoke_call(
                 package=package,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                request_text=request_text,
-                result=result,
-                validation_summary=summary["validation"],
-                raw_text_capture=config.raw_text_capture,
-                pressure_summary=summary["pressure_summary"],
-            ),
-        )
-        if observed_over_cap:
+                side=side,
+                config=config,
+                provider=provider,
+                diagnostic_dir=diagnostic_dir,
+                calls_made=calls_made,
+                reserved_tokens=reserved_tokens,
+                observed_tokens=observed_tokens,
+            )
+            call_summaries.append(call_state.summary)
+            calls_made = call_state.calls_made
+            reserved_tokens = call_state.reserved_tokens
+            observed_tokens = call_state.observed_tokens
+            if call_state.stop:
+                break
+        if call_summaries and call_summaries[-1].get("observed_over_cap") is True:
             break
 
     report = {
@@ -509,7 +459,7 @@ def run_smoke(
         "observed_tokens": _unknown_int(observed_tokens),
         "calls": call_summaries,
         "confirmed": _confirmed_items(config, call_summaries),
-        "unknown": _unknown_items(call_summaries),
+        "unknown": _unknown_items(config, call_summaries),
         "tbd": [
             "runtime glossary rollout remains TBD",
             "glossary-aware cache reuse remains TBD",
@@ -517,7 +467,7 @@ def run_smoke(
             "semantic truth such as gender/name identity remains evidence-driven",
             "RU/UK morphology strategy remains TBD",
         ],
-        "recommendation": _recommendation(call_summaries),
+        "recommendation": _recommendation(config, call_summaries),
     }
     _write_json(diagnostic_dir / "manifest.json", report)
     if metadata_report_path is not None:
@@ -541,6 +491,121 @@ def run_smoke(
         )
     )
     return report
+
+
+@dataclass(frozen=True)
+class SmokeCallState:
+    summary: dict[str, Any]
+    calls_made: int
+    reserved_tokens: int
+    observed_tokens: int | None
+    stop: bool = False
+
+
+def _run_smoke_call(
+    *,
+    package: RuntimeSmokePackage,
+    side: str,
+    config: SmokeConfig,
+    provider: ChatProvider,
+    diagnostic_dir: Path,
+    calls_made: int,
+    reserved_tokens: int,
+    observed_tokens: int | None,
+) -> SmokeCallState:
+    system_prompt, user_prompt, request_text = build_runtime_prompt(package)
+    estimated_prompt_tokens = estimate_tokens(system_prompt + user_prompt)
+    reservation = reserve_tokens(
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        max_completion_tokens=config.max_completion_tokens,
+        prompt_token_multiplier=config.prompt_token_reservation_multiplier,
+    )
+    if calls_made >= config.max_calls:
+        return SmokeCallState(
+            _skipped_call_summary(
+                package,
+                "skipped_max_calls",
+                side=side,
+                config=config,
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                reservation=reservation,
+            ),
+            calls_made,
+            reserved_tokens,
+            observed_tokens,
+        )
+    if (
+        reserved_tokens + reservation > config.max_tokens_total
+        or (
+            observed_tokens is not None
+            and observed_tokens + reservation > config.max_tokens_total
+        )
+    ):
+        return SmokeCallState(
+            _skipped_call_summary(
+                package,
+                "skipped_token_budget",
+                side=side,
+                config=config,
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                reservation=reservation,
+                reserved_tokens=reserved_tokens,
+                observed_tokens_before_call=_unknown_int(observed_tokens),
+            ),
+            calls_made,
+            reserved_tokens,
+            observed_tokens,
+        )
+
+    calls_made += 1
+    reserved_tokens += reservation
+    call_index = calls_made
+    result = provider.chat(
+        model=config.provider_model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_completion_tokens=config.max_completion_tokens,
+    )
+    usage_tokens = _usage_total_tokens(result.usage)
+    observed_over_cap = False
+    if usage_tokens is None:
+        observed_tokens = None
+    elif observed_tokens is not None:
+        observed_tokens += usage_tokens
+        observed_over_cap = observed_tokens > config.max_tokens_total
+    validation = validate_runtime_response(result, package=package)
+    summary = _call_summary(
+        package=package,
+        side=side,
+        config=config,
+        call_index=call_index,
+        estimated_prompt_tokens=estimated_prompt_tokens,
+        reservation=reservation,
+        result=result,
+        validation=validation,
+        observed_over_cap=observed_over_cap,
+    )
+    _write_json(
+        diagnostic_dir / f"call-{call_index:02d}-{package.input_id}-{side}.json",
+        _call_diagnostic(
+            package=package,
+            side=side,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            request_text=request_text,
+            result=result,
+            validation_summary=summary["validation"],
+            raw_text_capture=config.raw_text_capture,
+            pressure_summary=summary["pressure_summary"],
+        ),
+    )
+    return SmokeCallState(
+        summary,
+        calls_made,
+        reserved_tokens,
+        observed_tokens,
+        stop=observed_over_cap,
+    )
 
 
 def build_runtime_prompt(package: RuntimeSmokePackage) -> tuple[str, str, str]:
@@ -853,7 +918,7 @@ def build_runtime_package(
         glossary,
         profile_detection=profile,
         pressure_context={
-            "issue": "477",
+            "issue": config.issue_id,
             "fixture_id": _input_id(path, target_language),
             "document_format": plan.document_format.value,
             "fragment_count": plan.fragment_count,
@@ -2317,7 +2382,7 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
     if not rows:
         rows = (
             "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
-            "| Unknown |\n"
+            "| Unknown | Unknown |\n"
         )
     pressure_rows = "\n".join(
         _pressure_report_row(call) for call in report["calls"]
@@ -2345,9 +2410,9 @@ def render_metadata_report(report: Mapping[str, Any]) -> str:
         f"- Diagnostic storage: {report['approval']['diagnostic_storage']}\n"
         f"- Raw-text capture: {report['approval']['raw_text_capture']}\n\n"
         "## Runtime Smoke Results\n"
-        "| Input | Target | Unit | Status | Finish reason | Usage tokens "
+        "| Input | Target | Side | Unit | Status | Finish reason | Usage tokens "
         "| Validation issue codes |\n"
-        "| --- | --- | ---: | --- | --- | ---: | --- |\n"
+        "| --- | --- | --- | ---: | --- | --- | ---: | --- |\n"
         f"{rows}\n\n"
         "## Runtime Pressure Summary\n"
         "| Input | Target | Format | Unit | Source blocks | Source chars "
@@ -2394,17 +2459,17 @@ def load_env_api_key() -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--diagnostic-root", default=str(DEFAULT_DIAGNOSTIC_ROOT))
+    parser.add_argument("--diagnostic-root", default="")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
         "--base-url",
         default=os.getenv("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL),
     )
-    parser.add_argument("--max-calls", type=int, default=DEFAULT_MAX_CALLS)
+    parser.add_argument("--max-calls", type=int, default=None)
     parser.add_argument(
         "--max-tokens-total",
         type=int,
-        default=DEFAULT_MAX_TOKENS_TOTAL,
+        default=None,
     )
     parser.add_argument(
         "--max-completion-tokens",
@@ -2419,23 +2484,58 @@ def main(argv: Sequence[str] | None = None) -> int:
             "default-off controlled EPUB glossary smoke path."
         ),
     )
+    parser.add_argument(
+        "--control-epub",
+        action="store_true",
+        help=(
+            "Use the issue #507 committed control EPUB boundary: ru/uk targets, "
+            "paired glossary-on/off calls, max 4 calls, and the approved local "
+            "target-metadata fixture overlay."
+        ),
+    )
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
     args = parser.parse_args(argv)
+    issue_id = ISSUE_507_ID if args.control_epub else "477"
+    diagnostic_root = (
+        ISSUE_507_DIAGNOSTIC_ROOT
+        if args.control_epub
+        else DEFAULT_DIAGNOSTIC_ROOT
+    )
+    target_metadata_fixture_path = (
+        DEFAULT_TARGET_METADATA_FIXTURE_PATH if args.control_epub else None
+    )
+    if args.diagnostic_root:
+        diagnostic_root = Path(args.diagnostic_root)
+    if args.target_metadata_fixture:
+        target_metadata_fixture_path = Path(args.target_metadata_fixture)
+    max_calls = (
+        args.max_calls
+        if args.max_calls is not None
+        else (ISSUE_507_MAX_CALLS if args.control_epub else DEFAULT_MAX_CALLS)
+    )
+    max_tokens_total = (
+        args.max_tokens_total
+        if args.max_tokens_total is not None
+        else DEFAULT_MAX_TOKENS_TOTAL
+    )
     config = SmokeConfig(
-        diagnostic_root=Path(args.diagnostic_root),
+        issue_id=issue_id,
+        input_targets=(
+            APPROVED_OWNER_TEST_INPUT_TARGETS
+            if args.control_epub
+            else APPROVED_INPUT_TARGETS
+        ),
+        diagnostic_root=diagnostic_root,
         provider_model=args.model,
         provider_base_url=args.base_url,
-        max_calls=args.max_calls,
-        max_tokens_total=args.max_tokens_total,
+        max_calls=max_calls,
+        max_tokens_total=max_tokens_total,
         max_completion_tokens=args.max_completion_tokens,
         raw_text_capture=True,
         fake=args.fake,
-        target_metadata_fixture_path=(
-            Path(args.target_metadata_fixture)
-            if args.target_metadata_fixture
-            else None
-        ),
+        target_metadata_fixture_path=target_metadata_fixture_path,
+        paired_glossary_off=args.control_epub,
     )
     provider: ChatProvider
     if args.fake:
@@ -2501,14 +2601,38 @@ def _build_package_or_skip(
 
 
 def _validate_config(config: SmokeConfig) -> None:
+    if config.issue_id not in {"477", ISSUE_507_ID}:
+        raise ValueError("issue_id does not match an approved smoke boundary.")
     if config.provider_model != DEFAULT_MODEL:
         raise ValueError("provider_model does not match approved model.")
     if config.provider_base_url.rstrip("/") != DEFAULT_BASE_URL:
         raise ValueError("provider_base_url does not match approved provider boundary.")
-    if not config.fake and config.diagnostic_root != DEFAULT_DIAGNOSTIC_ROOT:
-        raise ValueError("diagnostic_root does not match approved boundary.")
-    if config.max_calls > DEFAULT_MAX_CALLS:
-        raise ValueError("max_calls exceeds approved cap.")
+    if config.issue_id == ISSUE_507_ID:
+        if config.target_metadata_fixture_path is None:
+            raise ValueError("issue 507 requires target metadata fixture overlay.")
+        if any(
+            item not in APPROVED_OWNER_TEST_INPUT_TARGETS
+            for item in config.input_targets
+        ):
+            raise ValueError("issue 507 input_targets must use the control EPUB only.")
+        if not config.paired_glossary_off:
+            raise ValueError("issue 507 requires paired glossary-off calls.")
+        if config.max_calls > ISSUE_507_MAX_CALLS:
+            raise ValueError("max_calls exceeds issue 507 approved cap.")
+        if not config.fake and config.diagnostic_root != ISSUE_507_DIAGNOSTIC_ROOT:
+            raise ValueError("diagnostic_root does not match issue 507 boundary.")
+    else:
+        if any(
+            item in APPROVED_OWNER_TEST_INPUT_TARGETS
+            for item in config.input_targets
+        ):
+            raise ValueError("control EPUB targets require issue 507 boundary.")
+        if config.paired_glossary_off:
+            raise ValueError("paired glossary-off calls require issue 507 boundary.")
+        if not config.fake and config.diagnostic_root != DEFAULT_DIAGNOSTIC_ROOT:
+            raise ValueError("diagnostic_root does not match approved boundary.")
+        if config.max_calls > DEFAULT_MAX_CALLS:
+            raise ValueError("max_calls exceeds approved cap.")
     if config.max_tokens_total > DEFAULT_MAX_TOKENS_TOTAL:
         raise ValueError("max_tokens_total exceeds approved cap.")
     if not config.raw_text_capture:
@@ -2520,9 +2644,9 @@ def _validate_config(config: SmokeConfig) -> None:
 
 def _approval_payload(config: SmokeConfig) -> dict[str, Any]:
     return {
-        "issue_id": "477",
+        "issue_id": config.issue_id,
         "input_targets": [f"{path}::{target}" for path, target in config.input_targets],
-        "selection": "first READY glossary-injected runtime test-path unit",
+        "selection": _selection_description(config),
         "max_calls": config.max_calls,
         "max_tokens_total": config.max_tokens_total,
         "provider_model": config.provider_model,
@@ -2536,14 +2660,26 @@ def _approval_payload(config: SmokeConfig) -> dict[str, Any]:
             if config.target_metadata_fixture_path is not None
             else "disabled"
         ),
+        "paired_glossary_off": config.paired_glossary_off,
     }
 
 
 def _approved_input_targets_for_config(config: SmokeConfig) -> set[tuple[Path, str]]:
+    if config.issue_id == ISSUE_507_ID:
+        return set(APPROVED_OWNER_TEST_INPUT_TARGETS)
     approved = set(APPROVED_INPUT_TARGETS)
     if config.target_metadata_fixture_path is not None:
         approved.update(APPROVED_OWNER_TEST_INPUT_TARGETS)
     return approved
+
+
+def _selection_description(config: SmokeConfig) -> str:
+    if config.issue_id == ISSUE_507_ID:
+        return (
+            "first #505-selected glossary-useful, pressure-safe EPUB runtime "
+            "unit per target; paired glossary-on and glossary-off"
+        )
+    return "first READY glossary-injected runtime test-path unit"
 
 
 def _approved_input_path(
@@ -2797,6 +2933,7 @@ def _aggregate_selection_signature(selection_signatures: Iterable[str]) -> str:
 def _call_summary(
     *,
     package: RuntimeSmokePackage,
+    side: str,
     config: SmokeConfig,
     call_index: int,
     estimated_prompt_tokens: int,
@@ -2807,6 +2944,7 @@ def _call_summary(
 ) -> dict[str, Any]:
     return {
         "call_index": call_index,
+        "side": side,
         "input_id": package.input_id,
         "input_path": str(package.input_path),
         "target_language": package.target_language,
@@ -2856,6 +2994,7 @@ def _skipped_call_summary(
     package: RuntimeSmokePackage,
     status: str,
     *,
+    side: str = "glossary_on",
     config: SmokeConfig,
     estimated_prompt_tokens: int | None = None,
     reservation: int | None = None,
@@ -2863,6 +3002,7 @@ def _skipped_call_summary(
 ) -> dict[str, Any]:
     return {
         "input_id": package.input_id,
+        "side": side,
         "input_path": str(package.input_path),
         "target_language": package.target_language,
         "document_format": package.document_format,
@@ -2881,6 +3021,7 @@ def _skipped_call_summary(
 def _call_diagnostic(
     *,
     package: RuntimeSmokePackage,
+    side: str,
     system_prompt: str,
     user_prompt: str,
     request_text: str,
@@ -2893,6 +3034,7 @@ def _call_diagnostic(
         "schema_version": SMOKE_SCHEMA_VERSION,
         "diagnostic_scope": "owner_only_glossary_runtime_provider_smoke",
         "input_id": package.input_id,
+        "side": side,
         "input_path": str(package.input_path),
         "target_language": package.target_language,
         "unit_sequence": package.unit_sequence,
@@ -2959,7 +3101,9 @@ def _confirmed_items(
         ),
         "runtime translation/cache/storage/admin behavior was not changed",
     ]
-    if any(call.get("status") == "validated" for call in calls):
+    if config.fake and any(call.get("status") == "validated" for call in calls):
+        items.append("fake provider stub responses passed local validation")
+    elif any(call.get("status") == "validated" for call in calls):
         items.append("at least one runtime smoke provider response passed validation")
     if not config.fake:
         items.append(
@@ -2968,8 +3112,20 @@ def _confirmed_items(
     return items
 
 
-def _unknown_items(calls: Sequence[Mapping[str, Any]]) -> list[str]:
+def _unknown_items(
+    config: SmokeConfig,
+    calls: Sequence[Mapping[str, Any]],
+) -> list[str]:
     unknown: list[str] = []
+    if config.fake:
+        unknown.append(
+            "live provider behavior is Unknown because only fake provider "
+            "stub calls were made"
+        )
+        unknown.append(
+            "translation quality is Unknown because fake outputs are not "
+            "quality evidence"
+        )
     if not calls:
         unknown.append("provider behavior is Unknown because no calls were made")
     if any(
@@ -2982,7 +3138,10 @@ def _unknown_items(calls: Sequence[Mapping[str, Any]]) -> list[str]:
     return unknown
 
 
-def _recommendation(calls: Sequence[Mapping[str, Any]]) -> str:
+def _recommendation(
+    config: SmokeConfig,
+    calls: Sequence[Mapping[str, Any]],
+) -> str:
     if any(call.get("observed_over_cap") is True for call in calls):
         return "stop: observed provider usage exceeded the approved token cap."
     if any(call.get("status") == "failed" for call in calls):
@@ -2994,6 +3153,11 @@ def _recommendation(calls: Sequence[Mapping[str, Any]]) -> str:
         return (
             "review_skips_before_next_gate: smoke completed with metadata-only "
             "skips."
+        )
+    if config.fake:
+        return (
+            "fake_preflight_passed_live_provider_behavior_unknown: request exact "
+            "owner approval before live calls."
         )
     return (
         "proceed_to_owner_only_quality_review_candidate: provider-boundary smoke "
@@ -3008,6 +3172,7 @@ def _call_report_row(call: Mapping[str, Any]) -> str:
     return (
         f"| {call.get('input_id', 'Unknown')} "
         f"| {call.get('target_language', 'Unknown')} "
+        f"| {call.get('side', 'Unknown')} "
         f"| {call.get('unit_sequence', 'Unknown')} "
         f"| {call.get('status', 'Unknown')} "
         f"| {call.get('finish_reason', 'Unknown')} "
