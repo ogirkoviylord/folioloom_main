@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 ## 1. Текущее состояние проекта
 
@@ -1656,6 +1656,16 @@ core flow, release gates, operational visibility and documentation.
   reasons. This still does not approve live calls, normal prompt rollout,
   cache reuse, bot/server runtime runs, durable state/storage/admin/retention
   changes or release/privacy claims;
+- treat issue #505 / #204AX as the default-off owner-only target-metadata
+  fixture bridge for the committed control EPUB fake/local smoke path: the
+  smoke runner can overlay an explicitly approved compact target-metadata
+  fixture onto matching retained source entries by source term/alias, validate
+  the fixture schema against raw/prompt/provider/key fields, and select a
+  #501-useful/#503-pressure-safe EPUB unit for local paired rehearsal. This is
+  metadata-only local planning evidence; it does not approve live calls,
+  normal runtime rollout, cache reuse, bot/server battle tests, durable
+  state/storage/admin/retention changes or release/privacy/legal/support
+  claims;
 - prepare the owner-approved internal/dev before-after reader in scoped issues,
   continuing after the locally verified #181 TXT report slice with #182 generic
   DOCX/EPUB block model and #183/#184 renderer spikes;
@@ -2122,6 +2132,23 @@ Potential issues to verify:
   image.
 
 ## 9. Последние изменения
+
+- Date: 2026-06-14.
+- Change: Issue #505 / #204AX adds a default-off owner-only approved
+  target-metadata fixture overlay to `tools/glossary_runtime_provider_smoke.py`
+  for `test_samples/gutenberg_time_machine_noimages.en.epub`.
+- Evidence: local tests cover the compact fixture schema, raw-field rejection,
+  missing/invalid fixture fallback, `ru`/`uk` fake/local control-EPUB selection
+  of at least one #501-useful/#503-pressure-safe unit, glossary-on cache-bypass
+  metadata and glossary-off default-cache metadata. Required focused smoke /
+  translation-runner tests, `compileall`, `git diff --check` and targeted
+  `ruff` passed locally.
+- Follow-up: #505 is fake/local planning evidence only. It does not authorize a
+  fresh live provider smoke, normal runtime glossary rollout, bot/server battle
+  test, glossary-aware cache reuse, durable state/storage/admin/retention
+  changes, provider config changes, semantic-quality claims or release/privacy/
+  legal/support readiness. A future live paired EPUB smoke still needs exact
+  owner approval.
 
 - Date: 2026-06-13.
 - Change: Issue #503 / #204AW adds a local-only EPUB runtime unit/output-budget
