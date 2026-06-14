@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
@@ -170,6 +171,7 @@ from translator_service.user_activity import (
     UserActivityEventInput,
 )
 
+logger = logging.getLogger(__name__)
 SESSION_COOKIE = "folioloom_admin_session"
 _UPLOAD_SAFETY_EVENT_PAGE_SIZE = 500
 _FAILED_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
@@ -2115,6 +2117,7 @@ def _active_translation_metadata(settings: Settings) -> tuple[int, str]:
         )
         return (snapshot.active_translations, "known")
     except Exception:
+        logger.warning("Failed to read active translation metadata", exc_info=True)
         return 0, "unknown"
 
 
@@ -2306,6 +2309,7 @@ def _ai_provider_capacity_diagnostics(
             )
         return tuple(diagnostics)
     except Exception:
+        logger.warning("Failed to read provider capacity diagnostics", exc_info=True)
         return ()
     finally:
         if store is not None:
@@ -3010,10 +3014,15 @@ def _translation_result_file_name(
     try:
         store = open_persistent_job_store(settings)
     except Exception:
+        logger.warning("Failed to open job store for result file name", exc_info=True)
         return None
     try:
         job = store.get_job(job_id)
     except Exception:
+        logger.warning(
+            "Failed to read job for result file name: "
+            "job_id=%s", job_id, exc_info=True,
+        )
         return None
     finally:
         store.close()
@@ -3052,6 +3061,7 @@ def _translation_progress_snapshots(
     try:
         store = open_persistent_job_store(settings)
     except Exception:
+        logger.warning("Failed to open job store for progress snapshots", exc_info=True)
         return {}
     try:
         snapshots = {
@@ -3692,6 +3702,10 @@ def _upload_safety_read_postgres_job_rows(
                 params,
             ).fetchall()
     except Exception:
+        logger.warning(
+            "Failed to query translation job metadata",
+            exc_info=True,
+        )
         return {}
     return {
         str(row["id"]): (str(row["user_id"]), str(row["file_name"]))

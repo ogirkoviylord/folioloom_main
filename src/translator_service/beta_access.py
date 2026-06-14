@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -10,6 +11,8 @@ from translator_service.admin.settings import (
     SQLiteAdminSettingsStore,
 )
 from translator_service.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 BETA_ALLOWLIST_SETTING = AdminSettingDefinition(
@@ -105,6 +108,7 @@ class SQLiteBackedBetaAccessPolicy:
                 saved = store.get_optional_value(BETA_ALLOWLIST_SETTING)
                 saved_enabled = store.get_optional_value(BETA_ALLOWLIST_ENABLED_SETTING)
         except Exception:
+            logger.warning("Failed to read beta allowlist from admin DB", exc_info=True)
             saved = None
             saved_enabled = None
         if saved is not None:

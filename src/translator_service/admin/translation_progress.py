@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -18,6 +19,8 @@ from translator_service.admin.translation_logs import (
     TranslationRunDetails,
     TranslationRunSummary,
 )
+
+logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUSES = {
     "active",
@@ -72,6 +75,10 @@ def build_durable_translation_progress_snapshot(
     try:
         job = store.get_job(safe_job_id)
     except Exception:
+        logger.warning(
+            "Failed to read job from store: job_id=%s",
+            safe_job_id, exc_info=True,
+        )
         return _unavailable_progress_snapshot(safe_job_id, "store_error")
     if job is None:
         return _unavailable_progress_snapshot(safe_job_id, "job_not_found")
@@ -79,6 +86,10 @@ def build_durable_translation_progress_snapshot(
     try:
         units = tuple(store.list_work_units(safe_job_id))
     except Exception:
+        logger.warning(
+            "Failed to list work units: job_id=%s",
+            safe_job_id, exc_info=True,
+        )
         return _unavailable_progress_snapshot(
             safe_job_id,
             "work_units_unavailable",

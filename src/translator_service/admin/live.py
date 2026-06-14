@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -16,6 +17,8 @@ from translator_service.admin.translation_progress import (
     DurableTranslationProgressSnapshot,
     overlay_translation_run_summaries,
 )
+
+logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUSES = {
     "active",
@@ -359,6 +362,7 @@ def collect_local_server_health(
         try:
             cpu_percent = _round_metric(psutil.cpu_percent(interval=None))
         except Exception:
+            logger.debug("Failed to read CPU percent", exc_info=True)
             cpu_percent = None
         try:
             memory = psutil.virtual_memory()
@@ -366,6 +370,7 @@ def collect_local_server_health(
             memory_used_mb = _bytes_to_mb(memory.used)
             memory_total_mb = _bytes_to_mb(memory.total)
         except Exception:
+            logger.debug("Failed to read memory metrics", exc_info=True)
             memory_percent = None
             memory_used_mb = None
             memory_total_mb = None
@@ -377,6 +382,7 @@ def collect_local_server_health(
                 (_aware_utc(current_time) - boot_time).total_seconds(),
             )
         except Exception:
+            logger.debug("Failed to read uptime", exc_info=True)
             uptime_seconds = None
 
     try:
@@ -385,6 +391,7 @@ def collect_local_server_health(
         disk_used_gb = _bytes_to_gb(disk.used)
         disk_total_gb = _bytes_to_gb(disk.total)
     except Exception:
+        logger.debug("Failed to read disk metrics", exc_info=True)
         disk_percent = None
         disk_used_gb = None
         disk_total_gb = None
