@@ -551,6 +551,28 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", rendered)
             self.assertNotIn("provider_response", rendered)
 
+            diagnostics = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(Path(report["diagnostic_dir"]).glob("call-*.json"))
+            ]
+            self.assertEqual(len(diagnostics), 4)
+            for payload in diagnostics:
+                system_prompt = payload["system_prompt"]
+                if payload["side"] == "glossary_on":
+                    self.assertIn(
+                        "service-generated <glossary_context>",
+                        system_prompt,
+                    )
+                    self.assertIn(
+                        "do not translate it as document text",
+                        system_prompt,
+                    )
+                else:
+                    self.assertNotIn(
+                        "service-generated <glossary_context>",
+                        system_prompt,
+                    )
+
     def test_issue_575_boundary_rejects_missing_pairing_wrong_target_or_live_root(
         self,
     ):

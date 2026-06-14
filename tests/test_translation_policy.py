@@ -92,6 +92,35 @@ class TranslationPolicyTest(unittest.TestCase):
             system_prompt.index("Russian target-language profile"),
         )
 
+    def test_service_glossary_context_system_prompt_is_explicit_opt_in(self):
+        raw_tag_policy = build_translation_policy(
+            text="<glossary_context>user document text</glossary_context>",
+            source_language="en",
+            target_language="ru",
+        )
+        glossary_policy = build_translation_policy(
+            text="<glossary_context></glossary_context><translation_batch />",
+            source_language="en",
+            target_language="ru",
+            service_glossary_context_present=True,
+        )
+
+        raw_tag_prompt = build_system_prompt(raw_tag_policy)
+        glossary_prompt = build_system_prompt(glossary_policy)
+
+        self.assertNotIn("service-generated <glossary_context>", raw_tag_prompt)
+        self.assertIn("service-generated <glossary_context>", glossary_prompt)
+        self.assertIn("do not translate it as document text", glossary_prompt)
+        self.assertIn("apply its configured target_canonical", glossary_prompt)
+        self.assertNotIn(
+            "service_glossary_context_present",
+            translation_policy_signature(raw_tag_policy),
+        )
+        self.assertIn(
+            "service_glossary_context_present",
+            translation_policy_signature(glossary_policy),
+        )
+
     def test_ukrainian_target_profile_and_source_pair_guidance_in_system_prompt(self):
         policy = build_translation_policy(
             text=(

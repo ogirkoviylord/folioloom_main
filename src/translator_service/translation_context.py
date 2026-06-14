@@ -190,19 +190,21 @@ def translate_with_context(
     source_language: str,
     target_language: str,
     translation_context: TranslationContextMemory | None,
+    service_glossary_context_present: bool = False,
 ) -> str:
     translate = translator.translate
+    kwargs: dict[str, Any] = {}
     if _translate_accepts_context(translate):
-        return translate(
-            text=text,
-            source_language=source_language,
-            target_language=target_language,
-            translation_context=translation_context,
+        kwargs["translation_context"] = translation_context
+    if _translate_accepts_parameter(translate, "service_glossary_context_present"):
+        kwargs["service_glossary_context_present"] = (
+            service_glossary_context_present
         )
     return translate(
         text=text,
         source_language=source_language,
         target_language=target_language,
+        **kwargs,
     )
 
 
@@ -363,11 +365,15 @@ def _target_name_hint(name: str, *, target_language: str) -> str:
 
 
 def _translate_accepts_context(translate: Any) -> bool:
+    return _translate_accepts_parameter(translate, "translation_context")
+
+
+def _translate_accepts_parameter(translate: Any, name: str) -> bool:
     try:
         signature = inspect.signature(translate)
     except (TypeError, ValueError):
         return False
-    return "translation_context" in signature.parameters or any(
+    return name in signature.parameters or any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in signature.parameters.values()
     )
