@@ -1,0 +1,290 @@
+{
+  "schema_version": "language-policy-package-v1",
+  "package_id": "language_policy.ru_uk.variant_list.v1",
+  "package_version": "v1",
+  "package_status": "package_ready_local",
+  "target_languages": ["ru", "uk"],
+  "language_family": "east_slavic",
+  "match_mode": "variant_list",
+  "normalization_mode": "nfc",
+  "fixture_basis": "synthetic",
+  "evidence_basis": "owner-approved synthetic local terminology package fixture; no private, user, provider, prompt, or translated passage text is included",
+  "evidence_level": "L1_synthetic_local",
+  "raw_material_policy": "ordinary_artifacts_metadata_only",
+  "full_morphology_engine": "TBD",
+  "quality_evidence": "Unknown",
+  "provider_behavior": "Unknown",
+  "core_neutrality_check": {
+    "registry_boundary": "target_language -> terminology_policy",
+    "target_language_specific_core_branches": false,
+    "target_language_specific_data_location": "test_samples/language_policy_packages/ru_uk_v1.json",
+    "core_modules_changed_by_package": false,
+    "prompt_context_default_enabled": false,
+    "cache_reuse_enabled": false,
+    "semantic_truth_claim_made": false,
+    "full_morphology_claim_made": false
+  },
+  "local_thresholds": {
+    "descriptor_validation_required": true,
+    "registry_resolution_required": true,
+    "min_approved_variant_cases_per_language": 2,
+    "min_forbidden_variant_cases_per_language": 2,
+    "missing_target_metadata_required": true,
+    "source_absent_required": true,
+    "unlisted_morphology_review_required": true,
+    "default_exact_compatibility_required": true,
+    "ordinary_payload_metadata_only_required": true
+  },
+  "ordinary_artifact_safety": {
+    "metadata_only": true,
+    "contains_raw_source_passages": false,
+    "contains_translated_passages": false,
+    "contains_prompt_bodies": false,
+    "contains_provider_requests": false,
+    "contains_provider_responses": false,
+    "contains_api_keys_or_auth_material": false,
+    "release_privacy_legal_support_claim_made": false,
+    "runtime_rollout_approved": false,
+    "provider_calls_approved": false,
+    "cache_reuse_approved": false,
+    "storage_admin_retention_changes_approved": false
+  },
+  "policies": [
+    {
+      "policy_id": "terminology_policy.ru_uk.ru.variant_list.v1",
+      "policy_version": "v1",
+      "target_language": "ru",
+      "language_family": "east_slavic_ru",
+      "match_mode": "variant_list",
+      "normalization_mode": "nfc",
+      "allowed_variant_strategy": "canonical_and_variants",
+      "forbidden_variant_strategy": "configured_forbidden_variants",
+      "unsupported_fallback": "manual_review_required",
+      "fixture_basis": "synthetic",
+      "raw_material_policy": "ordinary_artifacts_metadata_only",
+      "variant_basis": "explicit_package_variants_only",
+      "forbidden_variant_basis": "explicit_package_forbidden_variants_only",
+      "full_morphology_engine": "TBD",
+      "manual_review_reason_codes": [
+        "morphology_policy_tbd",
+        "needs_human_review",
+        "semantic_truth_not_proven"
+      ],
+      "reason_codes": [
+        "source_term_absent",
+        "target_metadata_missing",
+        "policy_variant_match",
+        "policy_forbidden_variant_present",
+        "policy_target_form_missing",
+        "policy_manual_review_required",
+        "policy_unsupported_language",
+        "policy_unimplemented_match_mode",
+        "policy_data_invalid",
+        "morphology_policy_tbd",
+        "semantic_truth_not_proven",
+        "needs_human_review"
+      ],
+      "entries": [
+        {
+          "entry_id": "ru-glass-market",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Зеркальный Торг",
+          "approved_variants": [
+            "Зеркального Торга",
+            "Зеркальному Торгу",
+            "Зеркальным Торгом",
+            "Зеркальном Торге"
+          ],
+          "forbidden_variants": ["Стеклянный рынок", "Рынок стекла"],
+          "needs_review_unlisted_forms": ["Зеркальными Торгами"],
+          "morphology_notes": "TBD explicit variants only; no full Russian inflection engine is claimed",
+          "evidence_refs": ["fixture:ru_uk_v1:ru-glass-market"]
+        },
+        {
+          "entry_id": "ru-quiet-knife",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Молчальник",
+          "approved_variants": [
+            "Молчальника",
+            "Молчальнику",
+            "Молчальником"
+          ],
+          "forbidden_variants": ["Тихий нож", "Безмолвный нож"],
+          "needs_review_unlisted_forms": ["Молчальники"],
+          "morphology_notes": "TBD explicit variants only; no semantic identity or gender truth is claimed",
+          "evidence_refs": ["fixture:ru_uk_v1:ru-quiet-knife"]
+        }
+      ],
+      "expected_cases": [
+        {
+          "case_id": "ru-glass-market-approved-genitive",
+          "entry_id": "ru-glass-market",
+          "form": "Зеркального Торга",
+          "expected_outcome": "approved_variant",
+          "reason_codes": ["policy_variant_match"]
+        },
+        {
+          "case_id": "ru-quiet-knife-approved-instrumental",
+          "entry_id": "ru-quiet-knife",
+          "form": "Молчальником",
+          "expected_outcome": "approved_variant",
+          "reason_codes": ["policy_variant_match"]
+        },
+        {
+          "case_id": "ru-glass-market-forbidden-calque",
+          "entry_id": "ru-glass-market",
+          "form": "Стеклянный рынок",
+          "expected_outcome": "forbidden_variant",
+          "reason_codes": ["policy_forbidden_variant_present"]
+        },
+        {
+          "case_id": "ru-quiet-knife-forbidden-literal",
+          "entry_id": "ru-quiet-knife",
+          "form": "Тихий нож",
+          "expected_outcome": "forbidden_variant",
+          "reason_codes": ["policy_forbidden_variant_present"]
+        }
+      ]
+    },
+    {
+      "policy_id": "terminology_policy.ru_uk.uk.variant_list.v1",
+      "policy_version": "v1",
+      "target_language": "uk",
+      "language_family": "east_slavic_uk",
+      "match_mode": "variant_list",
+      "normalization_mode": "nfc",
+      "allowed_variant_strategy": "canonical_and_variants",
+      "forbidden_variant_strategy": "configured_forbidden_variants",
+      "unsupported_fallback": "manual_review_required",
+      "fixture_basis": "synthetic",
+      "raw_material_policy": "ordinary_artifacts_metadata_only",
+      "variant_basis": "explicit_package_variants_only",
+      "forbidden_variant_basis": "explicit_package_forbidden_variants_only",
+      "full_morphology_engine": "TBD",
+      "manual_review_reason_codes": [
+        "morphology_policy_tbd",
+        "needs_human_review",
+        "semantic_truth_not_proven"
+      ],
+      "reason_codes": [
+        "source_term_absent",
+        "target_metadata_missing",
+        "policy_variant_match",
+        "policy_forbidden_variant_present",
+        "policy_target_form_missing",
+        "policy_manual_review_required",
+        "policy_unsupported_language",
+        "policy_unimplemented_match_mode",
+        "policy_data_invalid",
+        "morphology_policy_tbd",
+        "semantic_truth_not_proven",
+        "needs_human_review"
+      ],
+      "entries": [
+        {
+          "entry_id": "uk-glass-market",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Дзеркальний Торг",
+          "approved_variants": [
+            "Дзеркального Торгу",
+            "Дзеркальному Торзі",
+            "Дзеркальним Торгом"
+          ],
+          "forbidden_variants": ["Скляний ринок", "Ринок скла"],
+          "needs_review_unlisted_forms": ["Дзеркальними Торгами"],
+          "morphology_notes": "TBD explicit variants only; no full Ukrainian inflection engine is claimed",
+          "evidence_refs": ["fixture:ru_uk_v1:uk-glass-market"]
+        },
+        {
+          "entry_id": "uk-quiet-knife",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Мовчун-клинок",
+          "approved_variants": [
+            "Мовчуна-клинка",
+            "Мовчуну-клинку",
+            "Мовчуном-клинком"
+          ],
+          "forbidden_variants": ["Тихий ніж", "Безмовний ніж"],
+          "needs_review_unlisted_forms": ["Мовчуне-клинку"],
+          "morphology_notes": "TBD explicit variants only; no semantic identity or gender truth is claimed",
+          "evidence_refs": ["fixture:ru_uk_v1:uk-quiet-knife"]
+        }
+      ],
+      "expected_cases": [
+        {
+          "case_id": "uk-glass-market-approved-locative",
+          "entry_id": "uk-glass-market",
+          "form": "Дзеркальному Торзі",
+          "expected_outcome": "approved_variant",
+          "reason_codes": ["policy_variant_match"]
+        },
+        {
+          "case_id": "uk-quiet-knife-approved-dative",
+          "entry_id": "uk-quiet-knife",
+          "form": "Мовчуну-клинку",
+          "expected_outcome": "approved_variant",
+          "reason_codes": ["policy_variant_match"]
+        },
+        {
+          "case_id": "uk-glass-market-forbidden-calque",
+          "entry_id": "uk-glass-market",
+          "form": "Скляний ринок",
+          "expected_outcome": "forbidden_variant",
+          "reason_codes": ["policy_forbidden_variant_present"]
+        },
+        {
+          "case_id": "uk-quiet-knife-forbidden-literal",
+          "entry_id": "uk-quiet-knife",
+          "form": "Тихий ніж",
+          "expected_outcome": "forbidden_variant",
+          "reason_codes": ["policy_forbidden_variant_present"]
+        }
+      ]
+    }
+  ],
+  "source_absent_cases": [
+    {
+      "case_id": "ru-source-term-absent",
+      "target_language": "ru",
+      "entry_id": "ru-glass-market",
+      "expected_outcome": "skipped",
+      "reason_codes": ["source_term_absent"]
+    }
+  ],
+  "missing_target_metadata_cases": [
+    {
+      "case_id": "ru-unmapped-bell-target-metadata-missing",
+      "target_language": "ru",
+      "entry_id": "ru-unmapped-bell",
+      "source_canonical": "Unmapped Bell",
+      "aliases": [],
+      "target_canonical": null,
+      "approved_variants": [],
+      "forbidden_variants": [],
+      "expected_outcome": "Unknown",
+      "reason_codes": ["target_metadata_missing"]
+    }
+  ],
+  "unlisted_morphology_cases": [
+    {
+      "case_id": "ru-glass-market-unlisted-plural-instrumental",
+      "target_language": "ru",
+      "entry_id": "ru-glass-market",
+      "unlisted_form": "Зеркальными Торгами",
+      "expected_outcome": "needs_review",
+      "reason_codes": ["morphology_policy_tbd", "needs_human_review"]
+    },
+    {
+      "case_id": "uk-quiet-knife-unlisted-vocative",
+      "target_language": "uk",
+      "entry_id": "uk-quiet-knife",
+      "unlisted_form": "Мовчуне-клинку",
+      "expected_outcome": "TBD",
+      "reason_codes": ["morphology_policy_tbd", "needs_human_review"]
+    }
+  ]
+}
