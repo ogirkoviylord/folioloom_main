@@ -35,6 +35,7 @@
 | `docs/superpowers/specs/2026-06-12-chunked-deepseek-pro-glossary-editor-spike-report.md` | Metadata-only #416 bounded chunked DeepSeek Pro glossary-editor spike report with validation outcomes, merge findings, token/latency shape and pivot-before-runtime recommendation. | Перед follow-up chunked glossary editor prompt design, further live spike planning, runtime integration review or glossary diagnostics planning. |
 | `docs/superpowers/specs/2026-06-12-runtime-glossary-integration-architecture.md` | No-code #433 runtime glossary integration architecture with job/work-unit/prompt/cache/diagnostics touchpoints, fallback matrix, readiness gates and follow-up order. | Перед runtime glossary shadow work, prompt/cache integration proposals, glossary diagnostics implementation and release/privacy policy decisions. |
 | `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md` | No-code #517 glossary terminology policy registry architecture: language-neutral core boundary, policy descriptor, match modes, reason codes, fallback matrix and #516 child-issue sequencing. | Перед #518 terminology policy registry foundation, #519 RU/UK variant fixtures, #520 compliance adapter, #521 prompt-context policy metadata work and future language-policy proposals. |
+| `docs/superpowers/specs/2026-06-14-language-policy-package-acceptance-matrix.md` | No-code #530 real language-policy package acceptance matrix: package contract, evidence levels, local acceptance thresholds, fixture rules, core-neutrality proof and subagent file ownership. | Перед #531 RU/UK package v1, #532 contrast package v1, #533 fake/dry provider evidence protocol and any future real language-policy package implementation. |
 | `docs/superpowers/specs/2026-06-12-bounded-chunked-deepseek-pro-glossary-editor-retry-report.md` | Metadata-only #431 bounded chunked DeepSeek Pro glossary-editor retry report with validation outcomes, token/latency shape and pivot-before-runtime recommendation. | Перед further provider prompt retries, glossary editor runtime planning, glossary diagnostics implementation and release/privacy policy decisions. |
 | `docs/superpowers/specs/2026-06-12-reduced-glossary-runtime-go-no-go.md` | No-code #451 reduced glossary runtime go/no-go review after #444-#450, with boundary verdicts for prompts, cache, diagnostics, storage/admin, provider retry and release policy. | Перед runtime glossary prompt/cache/storage/admin proposals, reduced provider retry follow-ups and glossary release-policy decisions. |
 | `docs/superpowers/specs/2026-06-13-reduced-glossary-readiness-after-packet-fixes.md` | Metadata-only #463 local/fake reduced glossary readiness report after #461/#462, recording structural passes but default local readiness failures for fake low-confidence outputs and EPUB reducer diagnostic/drop pressure. | Перед #464 provider retry, reduced packet/reducer threshold decisions, runtime glossary prompt/cache proposals and glossary release-policy decisions. |
@@ -97,14 +98,16 @@ Glossary architecture boundary: `docs/DECISIONS.md` records the active
 2026-06-14 rule that glossary core stays language-neutral. Issue #517 records
 the policy-registry contract in
 `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`.
+Issue #530 records the real language-policy package acceptance matrix in
+`docs/superpowers/specs/2026-06-14-language-policy-package-acceptance-matrix.md`.
 Target-language terminology behavior must be isolated behind explicit
 policy/adapter boundaries such as `target_language -> terminology_policy`; do
 not add scattered RU/UK or other language-specific morphology branches to
 glossary contracts, scanner, selection, snapshots, prompt formatter, compliance
 or cache/signature core. Issues #518-#521 implemented the first local-only
 registry, RU/UK synthetic fixture, compliance-adapter and prompt-metadata
-foundations; they do not approve runtime rollout, provider calls, cache reuse
-or release/privacy claims.
+foundations; #530 defines package acceptance only. None of these approve
+runtime rollout, provider calls, cache reuse or release/privacy claims.
 
 ## 4. Основные зоны продукта
 
