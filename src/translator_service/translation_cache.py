@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from translator_service.digest_utils import payload_digest
 from translator_service.structure_optimizer import PromptTier
 from translator_service.translation_policy import (
     TranslationPolicySignatureContext,
@@ -121,8 +121,7 @@ def _cache_key(
         payload["translation_signature_context"] = (
             translation_policy_signature_context_payload(signature_context)
         )
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return payload_digest(payload, compact=False, length=None)
 
 
 def _translation_policy_signatures(

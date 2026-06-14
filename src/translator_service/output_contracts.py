@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from xml.etree import ElementTree
 
+from translator_service.json_utils import (
+    DuplicateJsonKeyError,
+    json_object_without_duplicate_keys,
+)
 from translator_service.model_output_safety import validate_model_output_safety
 
 
@@ -120,9 +124,9 @@ def validate_json_translation_batch_contract(
     try:
         document = json.loads(
             translated_text,
-            object_pairs_hook=_json_object_without_duplicate_keys,
+            object_pairs_hook=json_object_without_duplicate_keys,
         )
-    except _DuplicateJsonKeyError:
+    except DuplicateJsonKeyError:
         return TranslationBatchValidationResult(
             translated_texts=None,
             rejection_reason=TranslationBatchRejectionReason.UNEXPECTED_KEY,
@@ -447,10 +451,6 @@ def _local_name(tag: str) -> str:
     return tag
 
 
-class _DuplicateJsonKeyError(ValueError):
-    pass
-
-
 def _escape_json_string_control_chars(value: str) -> str:
     result: list[str] = []
     in_string = False
@@ -494,17 +494,6 @@ def _json_control_char_escape(char: str) -> str:
         "\t": "\\t",
     }
     return escapes.get(char, f"\\u{ord(char):04x}")
-
-
-def _json_object_without_duplicate_keys(
-    pairs: Sequence[tuple[str, object]],
-) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise _DuplicateJsonKeyError(key)
-        result[key] = value
-    return result
 
 
 _XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"

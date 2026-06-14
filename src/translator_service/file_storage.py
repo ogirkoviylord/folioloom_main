@@ -6,6 +6,8 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path, PurePath
 
+from translator_service.json_utils import read_json_file
+
 
 class StoredFileKind(StrEnum):
     QUARANTINE = "quarantine"
@@ -86,7 +88,7 @@ class LocalObjectStorage:
         if not metadata_path.exists():
             raise FileNotFoundError(object_key)
 
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata = read_json_file(metadata_path)
         return StoredFile(
             object_key=metadata["object_key"],
             kind=StoredFileKind(metadata["kind"]),

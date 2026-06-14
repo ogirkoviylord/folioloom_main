@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -9,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from translator_service.book_profile import BookProfileDetection
+from translator_service.digest_utils import payload_digest, text_digest
 from translator_service.glossary_contracts import (
     GlossaryEntry,
     GlossaryEntryCategory,
@@ -202,7 +202,7 @@ def reduce_glossary_candidates(
         reduced_glossary_signature=payload["reduced_glossary_signature"],
         profile_signature=profile_signature,
         pressure_signature=pressure_signature,
-        reducer_signature=f"glossary-candidate-reducer:v1:{_payload_digest(payload)}",
+        reducer_signature=f"glossary-candidate-reducer:v1:{payload_digest(payload)}",
         retained_snapshot=retained_snapshot,
         decisions=tuple(decisions),
         caps=caps,
@@ -436,7 +436,7 @@ def _decision(
         layer=_enum_value(entry.layer),
         original_status=_enum_value(entry.status),
         confidence=round(_confidence(entry.confidence), 4),
-        source_digest=_text_digest(entry.source_canonical),
+        source_digest=text_digest(entry.source_canonical),
         source_char_count=len(entry.source_canonical),
     )
 
@@ -464,7 +464,7 @@ def _retained_snapshot(
         "policy_version": GLOSSARY_CANDIDATE_REDUCER_POLICY_VERSION,
     }
     return GlossarySnapshot(
-        snapshot_id=f"glossary-reduced-snapshot:v1:{_payload_digest(retained_payload)}",
+        snapshot_id=f"glossary-reduced-snapshot:v1:{payload_digest(retained_payload)}",
         source_language=glossary_snapshot.source_language,
         target_language=glossary_snapshot.target_language,
         entries=tuple(sorted(retained_entries, key=lambda entry: entry.entry_id)),
@@ -640,7 +640,7 @@ def _pressure_context_signature(
 ) -> str:
     if not pressure_context:
         return "glossary-pressure:none"
-    pressure_digest = _payload_digest(_metadata_digest_payload(pressure_context))
+    pressure_digest = payload_digest(_metadata_digest_payload(pressure_context))
     return f"glossary-pressure:v1:{pressure_digest}"
 
 
@@ -655,12 +655,12 @@ def _metadata_digest_payload(value: Any) -> Any:
     if isinstance(value, set):
         return sorted(_metadata_digest_payload(item) for item in value)
     if isinstance(value, str):
-        return {"text_digest": _text_digest(value), "text_char_count": len(value)}
+        return {"text_digest": text_digest(value), "text_char_count": len(value)}
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, float):
         return f"{value:.6f}" if math.isfinite(value) else str(value)
-    return {"repr_digest": _text_digest(repr(value)), "type": type(value).__name__}
+    return {"repr_digest": text_digest(repr(value)), "type": type(value).__name__}
 
 
 def _confidence(value: Any) -> float:
@@ -676,15 +676,4 @@ def _enum_value(value: Any) -> str:
     return str(value)
 
 
-def _text_digest(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
-
-def _payload_digest(payload: Any) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:24]

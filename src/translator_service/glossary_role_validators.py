@@ -15,6 +15,10 @@ from translator_service.glossary_contracts import (
     GlossaryLayer,
     GlossaryStrategy,
 )
+from translator_service.json_utils import (
+    DuplicateJsonKeyError,
+    json_object_without_duplicate_keys,
+)
 from translator_service.model_output_safety import validate_model_output_safety
 
 GLOSSARY_ROLE_OUTPUT_SCHEMA_VERSION = "glossary-role-output-v1"
@@ -88,10 +92,6 @@ class GlossaryRoleValidationResult:
     @property
     def valid(self) -> bool:
         return not self.issues
-
-
-class _DuplicateJsonKeyError(ValueError):
-    pass
 
 
 _ROOT_KEYS = {
@@ -1220,9 +1220,9 @@ def _load_json_document(
     try:
         document = json.loads(
             raw_json,
-            object_pairs_hook=_json_object_without_duplicate_keys,
+            object_pairs_hook=json_object_without_duplicate_keys,
         )
-    except _DuplicateJsonKeyError as exc:
+    except DuplicateJsonKeyError as exc:
         _add_issue(
             issues,
             GlossaryRoleValidationCode.UNEXPECTED_KEY,
@@ -1247,17 +1247,6 @@ def _load_json_document(
         )
         return None
     return document
-
-
-def _json_object_without_duplicate_keys(
-    pairs: Sequence[tuple[str, Any]],
-) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise _DuplicateJsonKeyError(f"duplicate JSON key: {key}")
-        result[key] = value
-    return result
 
 
 def _prefixed_issues(

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import hashlib
 import inspect
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
+from translator_service.digest_utils import payload_digest
 from translator_service.entity_ledger import EntityLedger
 from translator_service.russian_quality import RussianQualityTrack
 
@@ -116,8 +116,7 @@ def translation_context_signature(memory: TranslationContextMemory | None) -> st
         "entity_choices": _sorted_choice_payload(memory.entity_choices),
         "recent_quality_issues": sorted(memory.recent_quality_issues),
     }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    digest = hashlib.sha256(encoded).hexdigest()[:24]
+    digest = payload_digest(payload, compact=False)
     return f"translation-context:v1:{digest}"
 
 

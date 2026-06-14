@@ -17,6 +17,10 @@ from translator_service.glossary_contracts import (
 )
 from translator_service.glossary_editor_packets import GlossaryEditorPacket
 from translator_service.glossary_role_validators import GlossaryRoleId
+from translator_service.json_utils import (
+    DuplicateJsonKeyError,
+    json_object_without_duplicate_keys,
+)
 from translator_service.model_output_safety import validate_model_output_safety
 
 CHUNKED_GLOSSARY_EDITOR_OUTPUT_SCHEMA_VERSION = "chunked-glossary-editor-output-v1"
@@ -130,10 +134,6 @@ class ChunkedGlossaryEditorMergeResult:
             finding.severity is ChunkedGlossaryEditorFindingSeverity.BLOCKER
             for finding in self.findings
         )
-
-
-class _DuplicateJsonKeyError(ValueError):
-    pass
 
 
 _ROOT_KEYS = {
@@ -937,8 +937,8 @@ def _load_json_document(
     issues: list[ChunkedGlossaryEditorValidationIssue],
 ) -> Mapping[str, Any] | None:
     try:
-        document = json.loads(raw_json, object_pairs_hook=_reject_duplicate_keys)
-    except _DuplicateJsonKeyError as exc:
+        document = json.loads(raw_json, object_pairs_hook=json_object_without_duplicate_keys)
+    except DuplicateJsonKeyError as exc:
         _add_issue(
             issues,
             ChunkedGlossaryEditorValidationCode.DUPLICATE_ID,
@@ -963,15 +963,6 @@ def _load_json_document(
         )
         return None
     return document
-
-
-def _reject_duplicate_keys(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise _DuplicateJsonKeyError(f"duplicate JSON key: {key}")
-        result[key] = value
-    return result
 
 
 def _validate_keys(

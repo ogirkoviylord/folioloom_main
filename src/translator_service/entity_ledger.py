@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import hashlib
 import json
 import re
+from dataclasses import dataclass
+
+from translator_service.digest_utils import payload_digest
 
 
 @dataclass(frozen=True)
@@ -128,8 +129,7 @@ def entity_ledger_signature(ledger: EntityLedger | None) -> str:
             record["confidence"],
         ),
     )
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    digest = hashlib.sha256(encoded).hexdigest()[:24]
+    digest = payload_digest(payload, compact=False)
     return f"entity-ledger:v1:{digest}"
 
 
