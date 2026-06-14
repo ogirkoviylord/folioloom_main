@@ -2134,6 +2134,19 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #536 / #204BN adds a no-code glossary-aware cache-key design
+  for the #529 language-policy package sequence.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-glossary-cache-key-design.md` enumerates
+  output-affecting dimensions, missing/Unknown bypass rules, stale-cache
+  failure modes, future validation tests and owner approval gates.
+- Follow-up: #465 cache bypass remains active for glossary-injected enabled/
+  test-path units. Glossary-aware cache reuse, durable cache migration,
+  runtime rollout, provider/model cache stance changes, storage/admin/
+  retention behavior and release/privacy/legal/support claims remain
+  unapproved.
+
+- Date: 2026-06-14.
 - Change: Issue #535 / #204BM adds a no-code runtime glossary rollout design
   for the #529 language-policy package sequence.
 - Evidence:
