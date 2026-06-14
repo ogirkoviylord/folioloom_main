@@ -7,6 +7,7 @@ from tools.glossary_runtime_provider_smoke import (
     APPROVED_INPUT_TARGETS,
     DEFAULT_DIAGNOSTIC_ROOT,
     DEFAULT_MODEL,
+    DEFAULT_TARGET_METADATA_FIXTURE_PATH,
     FakeRuntimeProvider,
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
@@ -456,6 +457,175 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         serialized = json.dumps(error.metadata, ensure_ascii=False, sort_keys=True)
         self.assertNotIn(raw_source, serialized)
         self.assertNotIn("Уикем", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_control_epub_target_metadata_fixture_enables_ru_uk_rehearsal(self):
+        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        target_strings = {
+            "ru": (
+                "\u0442\u0440\u0438 "
+                "\u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f"
+            ),
+            "uk": "\u0442\u0440\u0438 \u0432\u0438\u043c\u0456\u0440\u0438",
+        }
+
+        for target_language in ("ru", "uk"):
+            with self.subTest(target_language=target_language):
+                package = build_runtime_package(
+                    fixture,
+                    target_language,
+                    config=SmokeConfig(
+                        input_targets=((fixture, target_language),),
+                        fake=True,
+                        target_metadata_fixture_path=(
+                            DEFAULT_TARGET_METADATA_FIXTURE_PATH
+                        ),
+                    ),
+                    repo_root=Path.cwd(),
+                )
+
+                metadata = package.prompt_context_metadata[
+                    "epub_runtime_unit_selection"
+                ]
+                fixture_metadata = metadata["target_metadata_fixture"]
+                self.assertEqual(metadata["status"], "selected")
+                self.assertEqual(metadata["reason_codes"], [])
+                self.assertEqual(fixture_metadata["status"], "applied")
+                self.assertEqual(fixture_metadata["fixture_entry_count"], 1)
+                self.assertEqual(fixture_metadata["matched_entry_count"], 1)
+                self.assertEqual(metadata["glossary"]["useful_entry_count"], 1)
+                self.assertEqual(
+                    package.adapter_metadata["cache_policy"]["behavior"],
+                    "bypass_glossary_injected_cache",
+                )
+                self.assertIn(
+                    target_strings[target_language],
+                    package.prompt_context_text,
+                )
+
+                report = run_fake_paired_epub_rehearsal(
+                    package,
+                    config=SmokeConfig(
+                        input_targets=((fixture, target_language),),
+                        fake=True,
+                        target_metadata_fixture_path=(
+                            DEFAULT_TARGET_METADATA_FIXTURE_PATH
+                        ),
+                    ),
+                    provider=FakeRuntimeProvider(),
+                )
+                self.assertEqual(report["status"], "completed")
+                self.assertEqual(
+                    report["pairs"]["glossary_on"]["cache_policy"]["behavior"],
+                    "bypass_glossary_injected_cache",
+                )
+                self.assertEqual(
+                    report["pairs"]["glossary_off"]["cache_policy"]["behavior"],
+                    "default_runtime_cache",
+                )
+
+                serialized = json.dumps(
+                    {
+                        "selection": metadata,
+                        "report": report,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                self.assertNotIn(target_strings[target_language], serialized)
+                self.assertNotIn("three dimensions", serialized)
+                self.assertNotIn("<glossary_context", serialized)
+                self.assertNotIn("<translation_batch>", serialized)
+
+    def test_control_epub_missing_target_metadata_fixture_falls_back_safely(self):
+        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+
+        with self.assertRaises(RuntimePackageSelectionError) as raised:
+            build_runtime_package(
+                fixture,
+                "ru",
+                config=SmokeConfig(
+                    input_targets=((fixture, "ru"),),
+                    fake=True,
+                    target_metadata_fixture_path=Path(
+                        "test_samples/glossary_targets/missing-fixture.json"
+                    ),
+                ),
+                repo_root=Path.cwd(),
+            )
+
+        metadata = raised.exception.metadata
+        self.assertIn("target_metadata_missing", metadata["reason_codes"])
+        fixture_metadata = metadata["target_metadata_fixture"]
+        self.assertEqual(fixture_metadata["status"], "missing")
+        self.assertIn(
+            "target_metadata_fixture_missing",
+            fixture_metadata["reason_codes"],
+        )
+        self.assertEqual(
+            metadata["fallback_cache_policy"]["behavior"],
+            "default_runtime_cache",
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("<glossary_context", serialized)
+        self.assertNotIn("<translation_batch>", serialized)
+
+    def test_control_epub_invalid_target_fixture_raw_field_is_rejected(self):
+        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture_path = Path(tmp) / "invalid-target-fixture.json"
+            fixture_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": (
+                            "glossary-runtime-target-metadata-fixture-v1"
+                        ),
+                        "fixture_id": "invalid-raw-field-fixture",
+                        "input_path": str(fixture),
+                        "source_language": "en",
+                        "scope": "local_owner_only_epub_runtime_smoke",
+                        "owner_approved": True,
+                        "targets": {
+                            "ru": {
+                                "entries": [
+                                    {
+                                        "source_canonical": "three dimensions",
+                                        "target_canonical": "RAW TARGET",
+                                        "raw_source": (
+                                            "RAW SOURCE MUST NOT SERIALIZE"
+                                        ),
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(RuntimePackageSelectionError) as raised:
+                build_runtime_package(
+                    fixture,
+                    "ru",
+                    config=SmokeConfig(
+                        input_targets=((fixture, "ru"),),
+                        fake=True,
+                        target_metadata_fixture_path=fixture_path,
+                    ),
+                    repo_root=Path.cwd(),
+                )
+
+        metadata = raised.exception.metadata
+        fixture_metadata = metadata["target_metadata_fixture"]
+        self.assertEqual(fixture_metadata["status"], "invalid")
+        self.assertIn(
+            "target_metadata_fixture_raw_field_present",
+            fixture_metadata["reason_codes"],
+        )
+        self.assertIn("target_metadata_missing", metadata["reason_codes"])
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("RAW SOURCE MUST NOT SERIALIZE", serialized)
+        self.assertNotIn("RAW TARGET", serialized)
         self.assertNotIn("<glossary_context", serialized)
 
     def test_epub_budget_plan_reduces_context_and_preserves_escaping(self):

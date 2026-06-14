@@ -1,0 +1,38 @@
+{
+  "schema_version": "glossary-runtime-target-metadata-fixture-v1",
+  "fixture_id": "gutenberg-time-machine-noimages-owner-target-metadata-v1",
+  "input_path": "test_samples/gutenberg_time_machine_noimages.en.epub",
+  "source_language": "en",
+  "scope": "local_owner_only_epub_runtime_smoke",
+  "owner_approved": true,
+  "targets": {
+    "ru": {
+      "entries": [
+        {
+          "entry_id": "time-machine-three-dimensions-ru",
+          "source_canonical": "three dimensions",
+          "aliases": [],
+          "target_canonical": "\u0442\u0440\u0438 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f",
+          "target_variants": [],
+          "strategy": "translate_meaning",
+          "status": "owner_approved_fixture",
+          "confidence": 1.0
+        }
+      ]
+    },
+    "uk": {
+      "entries": [
+        {
+          "entry_id": "time-machine-three-dimensions-uk",
+          "source_canonical": "three dimensions",
+          "aliases": [],
+          "target_canonical": "\u0442\u0440\u0438 \u0432\u0438\u043c\u0456\u0440\u0438",
+          "target_variants": [],
+          "strategy": "translate_meaning",
+          "status": "owner_approved_fixture",
+          "confidence": 1.0
+        }
+      ]
+    }
+  }
+}

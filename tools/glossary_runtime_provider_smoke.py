@@ -24,6 +24,11 @@ from translator_service.glossary_candidate_reducer import (
     glossary_candidate_reduction_payload,
     reduce_glossary_candidates,
 )
+from translator_service.glossary_contracts import (
+    GlossaryEntry,
+    GlossarySnapshot,
+    glossary_snapshot_signature,
+)
 from translator_service.glossary_prompt_context import (
     GlossaryPromptContextConfig,
     format_glossary_prompt_context,
@@ -67,6 +72,12 @@ EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION = (
 EPUB_RUNTIME_UNIT_SELECTION_POLICY = (
     "local_owner_only_first_glossary_useful_pressure_safe_epub_unit_v1"
 )
+TARGET_METADATA_FIXTURE_SCHEMA_VERSION = (
+    "glossary-runtime-target-metadata-fixture-v1"
+)
+TARGET_METADATA_FIXTURE_POLICY = (
+    "local_owner_only_approved_epub_target_metadata_overlay_v1"
+)
 PRESSURE_FALLBACK_THRESHOLD_POLICY = (
     "conservative_local_test_path;runtime_rollout_thresholds=TBD"
 )
@@ -91,12 +102,71 @@ DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_PROTECTED_MARKERS = 80
 DEFAULT_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-477-bounded-glossary-runtime-provider-smoke"
 )
+DEFAULT_TARGET_METADATA_FIXTURE_PATH = Path(
+    "test_samples/glossary_targets/"
+    "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+)
 APPROVED_INPUT_TARGETS = (
     (Path("test_samples/russian_profile_regression.en-ru.txt"), "ru"),
     (Path("test_samples/ukrainian_profile_regression.en-uk.txt"), "uk"),
     (Path("test_samples/sample_book.en.txt"), "ru"),
     (Path("private_fixtures/pg78824-images-3.epub"), "ru"),
     (Path("private_fixtures/pg78824-images-3.epub"), "uk"),
+)
+APPROVED_OWNER_TEST_INPUT_TARGETS = (
+    (Path("test_samples/gutenberg_time_machine_noimages.en.epub"), "ru"),
+    (Path("test_samples/gutenberg_time_machine_noimages.en.epub"), "uk"),
+)
+TARGET_METADATA_FIXTURE_MAX_ENTRIES_PER_TARGET = 16
+TARGET_METADATA_FIXTURE_MAX_ALIASES = 8
+TARGET_METADATA_FIXTURE_MAX_TARGET_VARIANTS = 8
+TARGET_METADATA_FIXTURE_MAX_FIELD_CHARS = 120
+TARGET_METADATA_FIXTURE_RAW_KEYS = frozenset(
+    {
+        "api_key",
+        "auth_material",
+        "authorization",
+        "bounded_source_excerpt",
+        "prompt",
+        "prompt_body",
+        "provider_request",
+        "provider_response",
+        "raw_passage",
+        "raw_source",
+        "raw_source_text",
+        "request_body",
+        "response_body",
+        "source_excerpt",
+        "source_text",
+        "target_text",
+        "translated_excerpt",
+        "translated_text",
+        "translation_text",
+    }
+)
+TARGET_METADATA_FIXTURE_TOP_LEVEL_KEYS = frozenset(
+    {
+        "schema_version",
+        "fixture_id",
+        "input_path",
+        "source_language",
+        "scope",
+        "owner_approved",
+        "targets",
+    }
+)
+TARGET_METADATA_FIXTURE_TARGET_KEYS = frozenset({"entries"})
+TARGET_METADATA_FIXTURE_ENTRY_KEYS = frozenset(
+    {
+        "entry_id",
+        "source_canonical",
+        "aliases",
+        "target_canonical",
+        "target_variants",
+        "strategy",
+        "status",
+        "confidence",
+    }
 )
 
 
@@ -127,6 +197,7 @@ class SmokeConfig:
     )
     raw_text_capture: bool = True
     fake: bool = False
+    target_metadata_fixture_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -760,7 +831,12 @@ def build_runtime_package(
     config: SmokeConfig,
     repo_root: Path,
 ) -> RuntimeSmokePackage:
-    path = _approved_input_path(input_path, target_language, repo_root=repo_root)
+    path = _approved_input_path(
+        input_path,
+        target_language,
+        repo_root=repo_root,
+        config=config,
+    )
     plan = _plan_input(path, max_fragment_chars=config.max_fragment_chars)
     glossary = scan_glossary_candidates(
         plan,
@@ -788,6 +864,15 @@ def build_runtime_package(
     )
     if not reduction.retained_entry_ids:
         raise ValueError("no_reduced_candidates")
+    retained_snapshot, target_metadata_fixture = (
+        apply_target_metadata_fixture_overlay(
+            reduction.retained_snapshot,
+            config=config,
+            repo_root=repo_root,
+            input_path=path,
+            target_language=target_language,
+        )
+    )
     selected_rule_ids = tuple(rule.rule_id for rule in profile.rules)
     policy = build_translation_policy(
         text=_policy_sample_text(plan),
@@ -796,7 +881,7 @@ def build_runtime_package(
     )
     snapshot = build_translation_contract_snapshot(
         policy,
-        glossary_snapshot=reduction.retained_snapshot,
+        glossary_snapshot=retained_snapshot,
         profile_detection=profile,
         selected_rule_ids=selected_rule_ids,
         selection_policy_version=GLOSSARY_SELECTION_POLICY_VERSION,
@@ -820,7 +905,7 @@ def build_runtime_package(
         selections.append(
             select_glossary_subset_for_work_unit(
                 unit,
-                reduction.retained_snapshot,
+                retained_snapshot,
                 budget=GlossarySelectionBudget(
                     max_prompt_tokens=selection_budget["max_prompt_tokens"],
                     max_entries=selection_budget["max_entries"],
@@ -831,7 +916,11 @@ def build_runtime_package(
                 profile_rule_ids=selected_rule_ids,
             )
         )
-    reducer_metadata = _reducer_metadata(reduction)
+    reducer_metadata = _reducer_metadata(
+        reduction,
+        retained_snapshot=retained_snapshot,
+        target_metadata_fixture=target_metadata_fixture,
+    )
     epub_candidate_packages: list[RuntimeSmokePackage] = []
     epub_skipped_candidates: list[dict[str, Any]] = []
     is_epub_plan = plan.document_format.value == "epub"
@@ -871,16 +960,20 @@ def build_runtime_package(
                         budget_plan=budget_plan_by_sequence[
                             selection.work_unit_sequence
                         ],
+                        target_metadata_fixture=target_metadata_fixture,
                     )
                 )
             continue
         budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
         prompt_context_text, prompt_context_metadata = (
             format_runtime_glossary_prompt_context(
-                reduction.retained_snapshot.entries,
+                retained_snapshot.entries,
                 selected_entry_ids=decision.selected_entry_ids,
                 budget_plan=budget_plan,
             )
+        )
+        prompt_context_metadata["target_metadata_fixture"] = dict(
+            target_metadata_fixture
         )
         if (
             not prompt_context_metadata["included_entry_ids"]
@@ -903,6 +996,7 @@ def build_runtime_package(
                         ),
                         prompt_context_metadata=prompt_context_metadata,
                         budget_plan=budget_plan,
+                        target_metadata_fixture=target_metadata_fixture,
                     )
                 )
             continue
@@ -927,8 +1021,8 @@ def build_runtime_package(
             prompt_context_text=prompt_context_text,
             prompt_context_metadata=prompt_context_metadata,
             selection_metadata=selection_metadata,
-            glossary_entry_count=len(reduction.retained_snapshot.entries),
-            glossary_evidence_count=len(reduction.retained_snapshot.evidence),
+            glossary_entry_count=len(retained_snapshot.entries),
+            glossary_evidence_count=len(retained_snapshot.evidence),
             reducer_metadata=reducer_metadata,
         )
         if is_epub_plan:
@@ -939,11 +1033,12 @@ def build_runtime_package(
         return select_epub_runtime_unit_for_rehearsal(
             epub_candidate_packages,
             config=config,
-            entries=reduction.retained_snapshot.entries,
+            entries=retained_snapshot.entries,
             skipped_candidates=epub_skipped_candidates,
             input_id=_input_id(path, target_language),
             target_language=target_language,
             document_format=plan.document_format.value,
+            target_metadata_fixture=target_metadata_fixture,
         )
     raise ValueError("no_ready_glossary_injected_runtime_unit")
 
@@ -957,6 +1052,7 @@ def select_epub_runtime_unit_for_rehearsal(
     input_id: str = "Unknown",
     target_language: str = "Unknown",
     document_format: str = "epub",
+    target_metadata_fixture: Mapping[str, Any] | None = None,
 ) -> RuntimeSmokePackage:
     safe_skips = [dict(item) for item in skipped_candidates]
     entry_tuple = tuple(entries)
@@ -980,6 +1076,7 @@ def select_epub_runtime_unit_for_rehearsal(
             target_language=target_language,
             document_format=document_format,
             skipped_candidates=safe_skips,
+            target_metadata_fixture=target_metadata_fixture,
         ),
     )
 
@@ -1077,6 +1174,9 @@ def build_epub_runtime_unit_selection_decision(
             "reason_codes": list(pressure_fallback["reason_codes"]),
             "thresholds": dict(pressure_fallback["thresholds"]),
         },
+        "target_metadata_fixture": dict(
+            package.prompt_context_metadata.get("target_metadata_fixture") or {}
+        ),
         "thresholds": {
             "policy": PRESSURE_FALLBACK_THRESHOLD_POLICY,
             "max_epub_source_blocks": DEFAULT_PRESSURE_FALLBACK_MAX_EPUB_SOURCE_BLOCKS,
@@ -1116,6 +1216,7 @@ def _epub_runtime_unit_selection_skip_payload(
     adapter_metadata: Mapping[str, Any] | None = None,
     prompt_context_metadata: Mapping[str, Any] | None = None,
     budget_plan: Mapping[str, Any] | None = None,
+    target_metadata_fixture: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     selection_metadata = selection_metadata or {}
     adapter_metadata = adapter_metadata or {}
@@ -1172,6 +1273,7 @@ def _epub_runtime_unit_selection_skip_payload(
             "cache_get_allowed": cache_policy.get("cache_get_allowed", "Unknown"),
             "cache_put_allowed": cache_policy.get("cache_put_allowed", "Unknown"),
         },
+        "target_metadata_fixture": dict(target_metadata_fixture or {}),
         "normal_translation_prompts_changed": False,
         "live_provider_calls_allowed": False,
         "durable_state_mutation_allowed": False,
@@ -1188,6 +1290,7 @@ def _epub_runtime_no_selection_metadata(
     target_language: str,
     document_format: str,
     skipped_candidates: Sequence[Mapping[str, Any]],
+    target_metadata_fixture: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     reason_codes = sorted(
         {
@@ -1207,6 +1310,7 @@ def _epub_runtime_no_selection_metadata(
         "reason_codes": reason_codes or ["no_epub_runtime_unit_candidates"],
         "skipped_candidate_count": len(skipped_candidates),
         "skipped_candidates": [dict(item) for item in skipped_candidates],
+        "target_metadata_fixture": dict(target_metadata_fixture or {}),
         "fallback_action": "use_glossary_off_local_rehearsal_metadata",
         "fallback_cache_policy": {
             "behavior": "default_runtime_cache",
@@ -1332,6 +1436,379 @@ def _entry_value(entry: Any, field_name: str) -> Any:
     if isinstance(entry, Mapping):
         return entry.get(field_name)
     return getattr(entry, field_name, None)
+
+
+def apply_target_metadata_fixture_overlay(
+    snapshot: GlossarySnapshot,
+    *,
+    config: SmokeConfig,
+    repo_root: Path,
+    input_path: Path,
+    target_language: str,
+) -> tuple[GlossarySnapshot, dict[str, Any]]:
+    if config.target_metadata_fixture_path is None:
+        return snapshot, _target_metadata_fixture_metadata(
+            status="disabled",
+            reason_codes=("target_metadata_fixture_disabled",),
+            input_path=input_path,
+            target_language=target_language,
+            repo_root=repo_root,
+        )
+
+    fixture_path = _resolve_input_path(
+        config.target_metadata_fixture_path,
+        repo_root=repo_root,
+    )
+    if not fixture_path.is_file():
+        return snapshot, _target_metadata_fixture_metadata(
+            status="missing",
+            reason_codes=("target_metadata_fixture_missing",),
+            input_path=input_path,
+            target_language=target_language,
+            repo_root=repo_root,
+            fixture_path=fixture_path,
+        )
+
+    try:
+        payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return snapshot, _target_metadata_fixture_metadata(
+            status="invalid",
+            reason_codes=("target_metadata_fixture_unreadable",),
+            input_path=input_path,
+            target_language=target_language,
+            repo_root=repo_root,
+            fixture_path=fixture_path,
+        )
+
+    fixture_entries, reason_codes = _target_metadata_fixture_entries(
+        payload,
+        input_path=input_path,
+        target_language=target_language,
+        repo_root=repo_root,
+    )
+    if reason_codes:
+        return snapshot, _target_metadata_fixture_metadata(
+            status="invalid",
+            reason_codes=reason_codes,
+            input_path=input_path,
+            target_language=target_language,
+            repo_root=repo_root,
+            fixture_path=fixture_path,
+            fixture_id=_safe_fixture_identifier(payload.get("fixture_id"))
+            if isinstance(payload, Mapping)
+            else "Unknown",
+        )
+
+    overlaid_snapshot, matched_count = _overlay_target_metadata_entries(
+        snapshot,
+        fixture_entries,
+    )
+    status = "applied" if matched_count else "loaded_no_matches"
+    reason_codes = (
+        ()
+        if matched_count
+        else ("target_metadata_fixture_no_matching_retained_entries",)
+    )
+    return overlaid_snapshot, _target_metadata_fixture_metadata(
+        status=status,
+        reason_codes=reason_codes,
+        input_path=input_path,
+        target_language=target_language,
+        repo_root=repo_root,
+        fixture_path=fixture_path,
+        fixture_id=str(payload.get("fixture_id") or "Unknown"),
+        fixture_signature=_target_metadata_fixture_signature(
+            payload,
+            target_language=target_language,
+        ),
+        fixture_entry_count=len(fixture_entries),
+        matched_entry_count=matched_count,
+        unmatched_entry_count=max(0, len(fixture_entries) - matched_count),
+    )
+
+
+def _target_metadata_fixture_entries(
+    payload: Any,
+    *,
+    input_path: Path,
+    target_language: str,
+    repo_root: Path,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+    reason_codes: list[str] = []
+    if not isinstance(payload, Mapping):
+        return (), ("target_metadata_fixture_not_object",)
+    reason_codes.extend(_raw_fixture_key_reason_codes(payload))
+    if payload.get("schema_version") != TARGET_METADATA_FIXTURE_SCHEMA_VERSION:
+        reason_codes.append("target_metadata_fixture_schema_invalid")
+    if not payload.get("owner_approved"):
+        reason_codes.append("target_metadata_fixture_owner_approval_missing")
+    if payload.get("source_language") != "en":
+        reason_codes.append("target_metadata_fixture_source_language_invalid")
+    if set(payload) - TARGET_METADATA_FIXTURE_TOP_LEVEL_KEYS:
+        reason_codes.append("target_metadata_fixture_unsupported_field")
+
+    fixture_input_path = payload.get("input_path")
+    if not isinstance(fixture_input_path, str) or not fixture_input_path.strip():
+        reason_codes.append("target_metadata_fixture_input_path_missing")
+    else:
+        try:
+            resolved_fixture_input = _resolve_input_path(
+                Path(fixture_input_path),
+                repo_root=repo_root,
+            )
+        except RuntimeError:
+            resolved_fixture_input = Path()
+        if resolved_fixture_input != input_path.resolve():
+            reason_codes.append("target_metadata_fixture_input_mismatch")
+
+    targets = payload.get("targets")
+    if not isinstance(targets, Mapping):
+        reason_codes.append("target_metadata_fixture_targets_invalid")
+        return (), tuple(sorted(dict.fromkeys(reason_codes)))
+
+    target_payload = targets.get(target_language)
+    if not isinstance(target_payload, Mapping):
+        reason_codes.append("target_metadata_fixture_target_missing")
+        return (), tuple(sorted(dict.fromkeys(reason_codes)))
+    if set(target_payload) - TARGET_METADATA_FIXTURE_TARGET_KEYS:
+        reason_codes.append("target_metadata_fixture_unsupported_target_field")
+
+    raw_entries = target_payload.get("entries")
+    if isinstance(raw_entries, (str, bytes)) or not isinstance(raw_entries, Sequence):
+        reason_codes.append("target_metadata_fixture_entries_invalid")
+        return (), tuple(sorted(dict.fromkeys(reason_codes)))
+    if not raw_entries:
+        reason_codes.append("target_metadata_fixture_entries_empty")
+    if len(raw_entries) > TARGET_METADATA_FIXTURE_MAX_ENTRIES_PER_TARGET:
+        reason_codes.append("target_metadata_fixture_entry_limit_exceeded")
+
+    entries: list[dict[str, Any]] = []
+    for raw_entry in raw_entries:
+        entry, entry_reasons = _target_metadata_fixture_entry(raw_entry)
+        reason_codes.extend(entry_reasons)
+        if entry is not None:
+            entries.append(entry)
+
+    return tuple(entries), tuple(sorted(dict.fromkeys(reason_codes)))
+
+
+def _target_metadata_fixture_entry(
+    raw_entry: Any,
+) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+    reason_codes: list[str] = []
+    if not isinstance(raw_entry, Mapping):
+        return None, ("target_metadata_fixture_entry_invalid",)
+    if set(raw_entry) - TARGET_METADATA_FIXTURE_ENTRY_KEYS:
+        reason_codes.append("target_metadata_fixture_unsupported_entry_field")
+
+    source_canonical = _fixture_text_field(raw_entry.get("source_canonical"))
+    aliases = _fixture_text_sequence(
+        raw_entry.get("aliases"),
+        limit=TARGET_METADATA_FIXTURE_MAX_ALIASES,
+    )
+    target_canonical = _fixture_text_field(raw_entry.get("target_canonical"))
+    target_variants = _fixture_text_sequence(
+        raw_entry.get("target_variants"),
+        limit=TARGET_METADATA_FIXTURE_MAX_TARGET_VARIANTS,
+    )
+
+    if source_canonical is None:
+        reason_codes.append("target_metadata_fixture_source_missing")
+    if target_canonical is None and not target_variants:
+        reason_codes.append("target_metadata_fixture_target_missing")
+    if _fixture_sequence_over_limit(
+        raw_entry.get("aliases"),
+        limit=TARGET_METADATA_FIXTURE_MAX_ALIASES,
+    ):
+        reason_codes.append("target_metadata_fixture_alias_limit_exceeded")
+    if _fixture_sequence_over_limit(
+        raw_entry.get("target_variants"),
+        limit=TARGET_METADATA_FIXTURE_MAX_TARGET_VARIANTS,
+    ):
+        reason_codes.append("target_metadata_fixture_variant_limit_exceeded")
+
+    if reason_codes or source_canonical is None:
+        return None, tuple(sorted(dict.fromkeys(reason_codes)))
+
+    return {
+        "source_canonical": source_canonical,
+        "aliases": aliases,
+        "target_canonical": target_canonical,
+        "target_variants": target_variants,
+    }, ()
+
+
+def _overlay_target_metadata_entries(
+    snapshot: GlossarySnapshot,
+    fixture_entries: Sequence[Mapping[str, Any]],
+) -> tuple[GlossarySnapshot, int]:
+    fixture_by_source_key: dict[str, Mapping[str, Any]] = {}
+    for fixture_entry in fixture_entries:
+        for term in _fixture_entry_source_terms(fixture_entry):
+            fixture_by_source_key.setdefault(_fixture_term_key(term), fixture_entry)
+
+    matched_count = 0
+    overlaid_entries: list[GlossaryEntry] = []
+    for entry in snapshot.entries:
+        fixture_entry = _matching_fixture_entry(entry, fixture_by_source_key)
+        if fixture_entry is None:
+            overlaid_entries.append(entry)
+            continue
+        matched_count += 1
+        overlaid_entries.append(
+            replace(
+                entry,
+                target_canonical=fixture_entry.get("target_canonical") or None,
+                target_variants=tuple(fixture_entry.get("target_variants") or ()),
+            )
+        )
+    if not matched_count:
+        return snapshot, 0
+    return replace(snapshot, entries=tuple(overlaid_entries)), matched_count
+
+
+def _matching_fixture_entry(
+    entry: GlossaryEntry,
+    fixture_by_source_key: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    for term in _entry_source_terms(entry):
+        match = fixture_by_source_key.get(_fixture_term_key(term))
+        if match is not None:
+            return match
+    return None
+
+
+def _fixture_entry_source_terms(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    terms = [str(entry["source_canonical"])]
+    terms.extend(str(alias) for alias in entry.get("aliases") or ())
+    return tuple(dict.fromkeys(term for term in terms if term.strip()))
+
+
+def _fixture_term_key(term: str) -> str:
+    return " ".join(term.casefold().split())
+
+
+def _fixture_text_field(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.strip().split())
+    if not text or len(text) > TARGET_METADATA_FIXTURE_MAX_FIELD_CHARS:
+        return None
+    if text in {"TBD", "Unknown"}:
+        return None
+    return text
+
+
+def _fixture_text_sequence(value: Any, *, limit: int) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        return ()
+    result: list[str] = []
+    for item in value[:limit]:
+        text = _fixture_text_field(item)
+        if text is not None:
+            result.append(text)
+    return tuple(dict.fromkeys(result))
+
+
+def _fixture_sequence_over_limit(value: Any, *, limit: int) -> bool:
+    return (
+        not isinstance(value, (str, bytes))
+        and isinstance(value, Sequence)
+        and len(value) > limit
+    )
+
+
+def _raw_fixture_key_reason_codes(value: Any) -> list[str]:
+    if isinstance(value, Mapping):
+        reasons: list[str] = []
+        for key, item in value.items():
+            if str(key).strip().casefold() in TARGET_METADATA_FIXTURE_RAW_KEYS:
+                reasons.append("target_metadata_fixture_raw_field_present")
+            reasons.extend(_raw_fixture_key_reason_codes(item))
+        return reasons
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        reasons: list[str] = []
+        for item in value:
+            reasons.extend(_raw_fixture_key_reason_codes(item))
+        return reasons
+    return []
+
+
+def _target_metadata_fixture_metadata(
+    *,
+    status: str,
+    reason_codes: Sequence[str],
+    input_path: Path,
+    target_language: str,
+    repo_root: Path,
+    fixture_path: Path | None = None,
+    fixture_id: str = "Unknown",
+    fixture_signature: str = "Unknown",
+    fixture_entry_count: int = 0,
+    matched_entry_count: int = 0,
+    unmatched_entry_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "schema_version": TARGET_METADATA_FIXTURE_SCHEMA_VERSION,
+        "policy": TARGET_METADATA_FIXTURE_POLICY,
+        "status": status,
+        "reason_codes": list(reason_codes),
+        "fixture_id": _safe_fixture_identifier(fixture_id),
+        "fixture_signature": fixture_signature,
+        "fixture_path": (
+            _display_path(fixture_path, repo_root=repo_root)
+            if fixture_path is not None
+            else "disabled"
+        ),
+        "input_id": _input_id(input_path, target_language),
+        "target_language": target_language,
+        "fixture_entry_count": fixture_entry_count,
+        "matched_entry_count": matched_entry_count,
+        "unmatched_entry_count": unmatched_entry_count,
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+    }
+
+
+def _target_metadata_fixture_signature(
+    payload: Mapping[str, Any],
+    *,
+    target_language: str,
+) -> str:
+    target_payload = payload.get("targets", {})
+    target_entries = (
+        target_payload.get(target_language, {}).get("entries", ())
+        if isinstance(target_payload, Mapping)
+        else ()
+    )
+    digest_payload = {
+        "schema_version": TARGET_METADATA_FIXTURE_SCHEMA_VERSION,
+        "fixture_id": payload.get("fixture_id", "Unknown"),
+        "target_language": target_language,
+        "entries": target_entries,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+    return f"target-metadata-fixture:v1:{digest}"
+
+
+def _safe_fixture_identifier(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return "Unknown"
+    return re.sub(r"[^A-Za-z0-9:._/-]+", "_", value.strip())[:128] or "Unknown"
 
 
 def build_runtime_glossary_budget_plan(
@@ -1934,6 +2411,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         default=DEFAULT_MAX_COMPLETION_TOKENS,
     )
+    parser.add_argument(
+        "--target-metadata-fixture",
+        default="",
+        help=(
+            "Optional owner-only local target-metadata fixture path for the "
+            "default-off controlled EPUB glossary smoke path."
+        ),
+    )
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
     args = parser.parse_args(argv)
@@ -1946,6 +2431,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_completion_tokens=args.max_completion_tokens,
         raw_text_capture=True,
         fake=args.fake,
+        target_metadata_fixture_path=(
+            Path(args.target_metadata_fixture)
+            if args.target_metadata_fixture
+            else None
+        ),
     )
     provider: ChatProvider
     if args.fake:
@@ -2023,7 +2513,7 @@ def _validate_config(config: SmokeConfig) -> None:
         raise ValueError("max_tokens_total exceeds approved cap.")
     if not config.raw_text_capture:
         raise ValueError("raw_text_capture must match approved yes boundary.")
-    approved = set(APPROVED_INPUT_TARGETS)
+    approved = _approved_input_targets_for_config(config)
     if any(item not in approved for item in config.input_targets):
         raise ValueError("input_targets must be a subset of approved inputs/targets.")
 
@@ -2041,7 +2531,19 @@ def _approval_payload(config: SmokeConfig) -> dict[str, Any]:
             "yes; only bounded fixture/book excerpts, prompts and provider "
             "responses inside the owner-only untracked diagnostics directory"
         ),
+        "target_metadata_fixture": (
+            str(config.target_metadata_fixture_path)
+            if config.target_metadata_fixture_path is not None
+            else "disabled"
+        ),
     }
+
+
+def _approved_input_targets_for_config(config: SmokeConfig) -> set[tuple[Path, str]]:
+    approved = set(APPROVED_INPUT_TARGETS)
+    if config.target_metadata_fixture_path is not None:
+        approved.update(APPROVED_OWNER_TEST_INPUT_TARGETS)
+    return approved
 
 
 def _approved_input_path(
@@ -2049,8 +2551,11 @@ def _approved_input_path(
     target_language: str,
     *,
     repo_root: Path,
+    config: SmokeConfig,
 ) -> Path:
-    if (input_path, target_language) not in APPROVED_INPUT_TARGETS:
+    if (input_path, target_language) not in _approved_input_targets_for_config(
+        config
+    ):
         raise ValueError(
             f"input target is not approved: {input_path}::{target_language}"
         )
@@ -2171,19 +2676,30 @@ def _work_unit_payload(
     }
 
 
-def _reducer_metadata(reduction: Any) -> dict[str, Any]:
+def _reducer_metadata(
+    reduction: Any,
+    *,
+    retained_snapshot: GlossarySnapshot | None = None,
+    target_metadata_fixture: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     payload = glossary_candidate_reduction_payload(reduction)
-    return {
+    reduced_glossary_signature = payload["reduced_glossary_signature"]
+    if retained_snapshot is not None:
+        reduced_glossary_signature = glossary_snapshot_signature(retained_snapshot)
+    metadata = {
         "policy_version": payload["policy_version"],
         "reducer_signature": payload["reducer_signature"],
         "source_glossary_signature": payload["source_glossary_signature"],
-        "reduced_glossary_signature": payload["reduced_glossary_signature"],
+        "reduced_glossary_signature": reduced_glossary_signature,
         "profile_signature": payload["profile_signature"],
         "pressure_signature": payload["pressure_signature"],
         "retained_count": len(reduction.retained_entry_ids),
         "diagnostic_count": len(reduction.diagnostic_entry_ids),
         "dropped_count": len(reduction.dropped_entry_ids),
     }
+    if target_metadata_fixture is not None:
+        metadata["target_metadata_fixture"] = dict(target_metadata_fixture)
+    return metadata
 
 
 def _unit_by_sequence(units: Sequence[Any], sequence: int) -> Any:

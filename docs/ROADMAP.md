@@ -653,9 +653,12 @@ Acceptance criteria:
   path with metadata-only reason codes. Issue #503 / #204AW adds the local-only
   EPUB unit/output-budget selector before any fresh smoke approval: the smoke
   runner now selects only #501-style glossary-useful, pressure-safe EPUB units
-  or emits metadata-only skip/fallback reasons. A fresh live paired EPUB smoke
-  still needs exact owner approval; rollout, cache reuse and release/privacy
-  claims remain unapproved.
+  or emits metadata-only skip/fallback reasons. Issue #505 / #204AX adds a
+  default-off owner-only approved target-metadata fixture bridge for the
+  committed control EPUB fake/local path, so local rehearsal can get past
+  `target_metadata_missing` without local code inventing target facts. A fresh
+  live paired EPUB smoke still needs exact owner approval; rollout, cache reuse
+  and release/privacy claims remain unapproved.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
