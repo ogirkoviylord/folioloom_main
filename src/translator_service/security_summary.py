@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-import json
 from pathlib import Path
 from typing import Any
+
+from translator_service.json_utils import read_json_file
 
 
 @dataclass(frozen=True)
@@ -154,7 +156,7 @@ def _iter_run_dirs(root: Path):
 
 def _load_run_snapshot(run_dir: Path) -> dict[str, Any] | None:
     try:
-        snapshot = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        snapshot = read_json_file(run_dir / "run.json")
     except (OSError, json.JSONDecodeError):
         return None
     return snapshot if isinstance(snapshot, dict) else None

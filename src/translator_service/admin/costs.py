@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 
+from translator_service.json_utils import read_json_file
+
 
 @dataclass(frozen=True)
 class CostRates:
@@ -219,7 +221,7 @@ def _read_run(
     usage_lookup: Callable[[str], object | None] | None,
 ) -> CostRunSummary | None:
     try:
-        data = json.loads(run_json.read_text(encoding="utf-8"))
+        data = read_json_file(run_json)
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(data, dict):

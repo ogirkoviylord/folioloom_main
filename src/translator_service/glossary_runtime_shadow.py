@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from translator_service.book_profile import detect_book_profile
+from translator_service.digest_utils import payload_digest
 from translator_service.format_adapters.txt import plan_txt_translation
 from translator_service.glossary_candidate_reducer import (
     DEFAULT_GLOSSARY_CANDIDATE_REDUCER_CAPS,
@@ -334,10 +334,7 @@ def _aggregate_selection_signature(selection_signatures: Any) -> str:
         "schema_version": GLOSSARY_RUNTIME_SHADOW_SCHEMA_VERSION,
         "selection_signatures": sorted(str(item) for item in selection_signatures),
     }
-    digest = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()[:24]
-    return f"glossary-shadow-selection:v1:{digest}"
+    return f"glossary-shadow-selection:v1:{payload_digest(payload)}"
 
 
 def _policy_sample_text(plan: Any) -> str:

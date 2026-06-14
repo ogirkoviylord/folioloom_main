@@ -18,6 +18,7 @@ from translator_service.format_adapters.epub import (
     plan_epub_translation,
 )
 from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.json_utils import read_json_file
 
 READER_STATUS_DONE = "done"
 READER_STATUS_MISSING = "missing"
@@ -529,7 +530,7 @@ def _render_reader_page(
 
 def load_translation_mapping(path: Path) -> dict[str, str]:
     reject_runtime_var_path(path)
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = read_json_file(path)
     if not isinstance(payload, dict):
         raise ValueError("Translation mapping JSON must be an object")
     mapping: dict[str, str] = {}

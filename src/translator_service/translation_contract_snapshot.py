@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -14,6 +13,7 @@ from translator_service.book_profile import (
     PROFILE_GLOSSARY_RULE_SCHEMA_VERSION,
     BookProfileDetection,
 )
+from translator_service.digest_utils import payload_digest
 from translator_service.glossary_contracts import (
     GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     GlossarySnapshot,
@@ -189,7 +189,7 @@ def build_translation_contract_snapshot(
         ),
         quality_route=_optional_identifier(quality_route, field_name="quality_route"),
     )
-    snapshot_id = f"translation-snapshot:v1:{_payload_digest(body_payload)}"
+    snapshot_id = f"translation-snapshot:v1:{payload_digest(body_payload)}"
     return TranslationContractSnapshot(snapshot_id=snapshot_id, **body_payload)
 
 
@@ -241,7 +241,7 @@ def serialize_translation_contract_snapshot(
 def translation_contract_snapshot_signature(
     snapshot: TranslationContractSnapshot,
 ) -> str:
-    digest = _payload_digest(translation_contract_snapshot_payload(snapshot))
+    digest = payload_digest(translation_contract_snapshot_payload(snapshot))
     return f"translation-contract-snapshot:v1:{digest}"
 
 
@@ -305,7 +305,7 @@ def book_profile_detection_signature(detection: BookProfileDetection) -> str:
             _profile_evidence_signature(evidence) for evidence in detection.evidence
         ),
     }
-    return f"book-profile:v1:{_payload_digest(payload)}"
+    return f"book-profile:v1:{payload_digest(payload)}"
 
 
 def _body_payload(
@@ -387,7 +387,7 @@ def _profile_rule_signature(rule: Any) -> str:
         "evidence_refs": sorted(str(ref) for ref in rule.evidence_refs),
         "requires_review": bool(rule.requires_review),
     }
-    return f"profile-glossary-rule:v1:{_payload_digest(payload)}"
+    return f"profile-glossary-rule:v1:{payload_digest(payload)}"
 
 
 def _profile_evidence_signature(evidence: Any) -> str:
@@ -401,7 +401,7 @@ def _profile_evidence_signature(evidence: Any) -> str:
         "occurrence_count": evidence.occurrence_count,
         "offset_bucket": evidence.offset_bucket,
     }
-    return f"book-profile-evidence:v1:{_payload_digest(payload)}"
+    return f"book-profile-evidence:v1:{payload_digest(payload)}"
 
 
 def _normalize_identifier_sequence(
@@ -450,11 +450,4 @@ def _confidence_signature_value(value: Any) -> str:
     return str(value)
 
 
-def _payload_digest(payload: Mapping[str, Any] | Any) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:24]
+

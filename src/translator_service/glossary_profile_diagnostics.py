@@ -9,6 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from translator_service.json_utils import read_json_file
+
 GLOSSARY_PROFILE_DIAGNOSTIC_SIDECAR_SCHEMA_VERSION = (
     "glossary-profile-diagnostics-sidecar-v1"
 )
@@ -300,7 +302,7 @@ def read_glossary_profile_diagnostic_sidecar(path: Path) -> dict[str, Any]:
             f"glossary/profile diagnostics must be read from "
             f"{GLOSSARY_PROFILE_DIAGNOSTIC_FILENAME}"
         )
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = read_json_file(path)
     if not isinstance(payload, dict):
         raise ValueError("glossary/profile diagnostic sidecar root must be an object")
     result = validate_glossary_profile_diagnostic_sidecar(payload)

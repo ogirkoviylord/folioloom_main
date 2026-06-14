@@ -9,6 +9,7 @@ from translator_service.book_mode_output_audit import (
     BookModeAuditChunk,
     audit_book_mode_output,
 )
+from translator_service.json_utils import read_json_file
 from translator_service.security_telemetry import (
     build_security_event,
     normalize_security_event,
@@ -259,7 +260,7 @@ def finish_running_translation_runs_for_job(
     finished = 0
     for run_json in root_path.glob("*/run.json"):
         try:
-            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+            snapshot = read_json_file(run_json)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(snapshot, dict):
@@ -322,7 +323,7 @@ def append_provider_io_diagnostic_for_job(
     matching: list[tuple[Path, dict]] = []
     for run_json in root_path.glob("*/run.json"):
         try:
-            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+            snapshot = read_json_file(run_json)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
@@ -375,7 +376,7 @@ def record_book_mode_audit_fragment_for_job(
     updated = 0
     for run_json in root_path.glob("*/run.json"):
         try:
-            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+            snapshot = read_json_file(run_json)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:
@@ -425,7 +426,7 @@ def record_book_mode_audit_gate_for_job(
     updated = 0
     for run_json in root_path.glob("*/run.json"):
         try:
-            snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+            snapshot = read_json_file(run_json)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(snapshot, dict) or snapshot.get("job_id") != job_id:

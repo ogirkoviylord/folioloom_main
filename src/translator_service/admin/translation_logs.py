@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from translator_service.json_utils import read_json_file, write_json_atomic
+
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
 _COMPLETED_FRAGMENT_STATUSES = {
     "cached",
@@ -191,7 +193,7 @@ def get_translation_run_details(
     if summary is None:
         return None
     try:
-        data = json.loads(run_json.read_text(encoding="utf-8"))
+        data = read_json_file(run_json)
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(data, dict):
@@ -374,7 +376,7 @@ def save_reader_review_mark(
         "updated_at": _aware_utc(now or datetime.now(UTC)).isoformat(),
         "marks": marks,
     }
-    _write_json_atomic(marks_path, document)
+    write_json_atomic(marks_path, document)
     return load_reader_review_marks(root, run_id)
 
 
@@ -505,7 +507,7 @@ def _read_reader_review_marks_document(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"version": _READER_REVIEW_MARKS_VERSION, "marks": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = read_json_file(path)
     except (OSError, json.JSONDecodeError):
         return {"version": _READER_REVIEW_MARKS_VERSION, "marks": {}}
     if not isinstance(data, dict):
@@ -541,23 +543,13 @@ def _reader_review_mark_from_record(
     )
 
 
-def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-
-
 def _read_run_summary(
     run_json: Path,
     *,
     now: datetime | None = None,
 ) -> TranslationRunSummary | None:
     try:
-        data = json.loads(run_json.read_text(encoding="utf-8"))
+        data = read_json_file(run_json)
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(data, dict):
@@ -781,7 +773,7 @@ def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
     fragments: list[dict[str, Any]] = []
     for path in sorted(fragments_dir.glob("*.json")):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = read_json_file(path)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(data, dict):
