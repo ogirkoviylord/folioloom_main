@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -890,6 +891,160 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertNotIn("Darcy returns quietly.", serialized)
         self.assertNotIn("Дарси", serialized)
         self.assertNotIn("<glossary_context", serialized)
+
+    def test_epub_prompt_context_filters_to_target_backed_useful_entries(self):
+        plan = build_runtime_glossary_budget_plan(
+            document_format="epub",
+            source_block_count=1,
+            protected_marker_count=0,
+            protected_text="Darcy returns quietly.",
+            config=SmokeConfig(fake=True),
+        )
+        useful_entry = _runtime_context_entry(
+            "entry-1",
+            source="Fitzwilliam Darcy",
+            target="Дарси",
+        )
+        useful_entry["aliases"] = ["Darcy"]
+        missing_target_entry = _runtime_context_entry(
+            "entry-2",
+            source="Elizabeth",
+            target="",
+        )
+        missing_target_entry["target_canonical"] = ""
+        absent_source_entry = _runtime_context_entry(
+            "entry-3",
+            source="Bingley",
+            target="Бингли",
+        )
+
+        text, metadata = format_runtime_glossary_prompt_context(
+            [useful_entry, missing_target_entry, absent_source_entry],
+            selected_entry_ids=("entry-1", "entry-2", "entry-3"),
+            budget_plan=plan,
+            source_text="Darcy returns quietly.",
+            target_backed_source_present_only=True,
+        )
+
+        self.assertIn("<glossary_context", text)
+        self.assertEqual(metadata["included_entry_ids"], ["entry-1"])
+        self.assertEqual(metadata["selection_filter"]["input_selected_entry_count"], 3)
+        self.assertEqual(
+            metadata["selection_filter"]["context_selected_entry_count"],
+            1,
+        )
+        self.assertEqual(metadata["selection_filter"]["useful_entry_ids"], ["entry-1"])
+        self.assertNotIn("Elizabeth", text)
+        self.assertNotIn("Bingley", text)
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns quietly.", serialized)
+        self.assertNotIn("Дарси", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_epub_prompt_context_omits_when_no_target_backed_useful_entry(self):
+        plan = build_runtime_glossary_budget_plan(
+            document_format="epub",
+            source_block_count=1,
+            protected_marker_count=0,
+            protected_text="Darcy returns quietly.",
+            config=SmokeConfig(fake=True),
+        )
+
+        text, metadata = format_runtime_glossary_prompt_context(
+            [
+                {
+                    **_runtime_context_entry(
+                        "entry-1",
+                        source="Elizabeth",
+                        target="",
+                    ),
+                    "target_canonical": "",
+                    "target_variants": [],
+                }
+            ],
+            selected_entry_ids=("entry-1",),
+            budget_plan=plan,
+            source_text="Darcy returns quietly.",
+            target_backed_source_present_only=True,
+        )
+
+        self.assertEqual(text, "")
+        self.assertEqual(metadata["included_entry_ids"], [])
+        self.assertEqual(metadata["selection_filter"]["input_selected_entry_count"], 1)
+        self.assertEqual(
+            metadata["selection_filter"]["context_selected_entry_count"],
+            0,
+        )
+        self.assertEqual(metadata["selection_filter"]["useful_entry_ids"], [])
+        self.assertIn(
+            "target_metadata_missing",
+            metadata["selection_filter"]["reason_codes"],
+        )
+        self.assertIn(
+            "source_term_or_alias_absent",
+            metadata["selection_filter"]["reason_codes"],
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns quietly.", serialized)
+        self.assertNotIn("Elizabeth", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+
+    def test_epub_fake_compliance_checks_only_included_useful_entries(self):
+        package = _synthetic_runtime_package(
+            source_block_count=1,
+            raw_source="Darcy returns quietly.",
+            protected_text="Darcy returns quietly.",
+            required_markers=(),
+        )
+        package = replace(
+            package,
+            prompt_context_metadata={
+                **package.prompt_context_metadata,
+                "included_entry_ids": ["entry-1"],
+                "selection_filter": {
+                    "policy": "target_backed_source_present_entries",
+                    "input_selected_entry_count": 2,
+                    "context_selected_entry_count": 1,
+                    "useful_entry_ids": ["entry-1"],
+                    "reason_codes": [],
+                    "metadata_only": True,
+                    "raw_payload_included": False,
+                },
+            },
+            glossary_entries=(
+                {
+                    **_runtime_context_entry(
+                        "entry-1",
+                        source="Fitzwilliam Darcy",
+                        target="Дарси",
+                    ),
+                    "aliases": ["Darcy"],
+                },
+                {
+                    **_runtime_context_entry(
+                        "entry-2",
+                        source="Elizabeth",
+                        target="",
+                    ),
+                    "target_canonical": "",
+                    "target_variants": [],
+                },
+            ),
+        )
+
+        report = run_fake_paired_epub_rehearsal(
+            package,
+            config=SmokeConfig(fake=True),
+            provider=FakeRuntimeProvider(),
+        )
+
+        compliance = report["pairs"]["glossary_on"]["glossary_compliance"]
+        self.assertEqual(compliance["selected_entry_ids"], ["entry-1"])
+        self.assertEqual(compliance["selected_entry_count"], 1)
+        self.assertNotIn("target_metadata_missing", compliance["reason_codes"])
+        serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns quietly.", serialized)
+        self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", serialized)
 
     def test_epub_unit_selector_skips_missing_target_metadata(self):
         package = _synthetic_runtime_package(

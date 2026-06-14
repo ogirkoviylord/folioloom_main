@@ -2337,11 +2337,14 @@ def build_runtime_package(
                 )
             continue
         budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
+        unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
         prompt_context_text, prompt_context_metadata = (
             format_runtime_glossary_prompt_context(
                 retained_snapshot.entries,
                 selected_entry_ids=decision.selected_entry_ids,
                 budget_plan=budget_plan,
+                source_text=unit.source_text if is_epub_plan else None,
+                target_backed_source_present_only=is_epub_plan,
             )
         )
         prompt_context_metadata["target_metadata_fixture"] = dict(
@@ -2372,7 +2375,6 @@ def build_runtime_package(
                     )
                 )
             continue
-        unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
         protected = protected_by_sequence[selection.work_unit_sequence]
         package = RuntimeSmokePackage(
             input_path=path,
@@ -3281,11 +3283,41 @@ def format_runtime_glossary_prompt_context(
     *,
     selected_entry_ids: Iterable[str],
     budget_plan: Mapping[str, Any],
+    source_text: str | None = None,
+    target_backed_source_present_only: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     context_budget = budget_plan["prompt_context"]
+    entries_tuple = tuple(entries)
+    original_selected_ids = _compact_entry_ids(selected_entry_ids)
+    context_selected_ids = original_selected_ids
+    selection_filter = {
+        "policy": "all_selected_entries",
+        "input_selected_entry_count": len(original_selected_ids),
+        "context_selected_entry_count": len(context_selected_ids),
+        "useful_entry_ids": list(context_selected_ids),
+        "reason_codes": [],
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+    if target_backed_source_present_only:
+        useful = _glossary_useful_preflight_metadata(
+            entries_tuple,
+            selected_entry_ids=original_selected_ids,
+            source_text=source_text or "",
+        )
+        context_selected_ids = tuple(useful["useful_entry_ids"])
+        selection_filter = {
+            "policy": "target_backed_source_present_entries",
+            "input_selected_entry_count": len(original_selected_ids),
+            "context_selected_entry_count": len(context_selected_ids),
+            "useful_entry_ids": list(context_selected_ids),
+            "reason_codes": list(useful["reason_codes"]),
+            "metadata_only": True,
+            "raw_payload_included": False,
+        }
     prompt_context = format_glossary_prompt_context(
-        entries,
-        selected_entry_ids=selected_entry_ids,
+        entries_tuple,
+        selected_entry_ids=context_selected_ids,
         config=GlossaryPromptContextConfig(
             max_entries=context_budget["max_entries"],
             max_prompt_tokens=context_budget["max_prompt_tokens"],
@@ -3294,8 +3326,15 @@ def format_runtime_glossary_prompt_context(
     )
     metadata = glossary_prompt_context_metadata_payload(prompt_context)
     metadata["runtime_budget"] = _runtime_budget_metadata_payload(budget_plan)
+    metadata["selection_filter"] = selection_filter
     text = prompt_context.text if prompt_context.included_entries else ""
     return text, metadata
+
+
+def _compact_entry_ids(entry_ids: Iterable[Any]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(str(entry_id) for entry_id in entry_ids if str(entry_id).strip())
+    )
 
 
 def _runtime_glossary_budget_plan_payload(
@@ -4509,7 +4548,7 @@ def _runtime_glossary_compliance_summary(
             translated_text = "\n\n".join(batch_validation.translated_texts)
     return validate_glossary_compliance(
         package.glossary_entries,
-        selected_entry_ids=package.adapter_metadata.get("selected_entry_ids", ()),
+        selected_entry_ids=_runtime_glossary_compliance_entry_ids(package),
         source_text=package.source_text,
         translated_text=translated_text,
         included_entry_ids=package.prompt_context_metadata.get(
@@ -4518,6 +4557,22 @@ def _runtime_glossary_compliance_summary(
         ),
         structural_validation_passed=validation.get("valid") is True,
     )
+
+
+def _runtime_glossary_compliance_entry_ids(
+    package: RuntimeSmokePackage,
+) -> tuple[str, ...]:
+    selected_entry_ids = _compact_entry_ids(
+        package.adapter_metadata.get("selected_entry_ids", ())
+    )
+    if package.document_format != "epub":
+        return selected_entry_ids
+    included_entry_ids = _compact_entry_ids(
+        package.prompt_context_metadata.get("included_entry_ids", ())
+    )
+    if included_entry_ids:
+        return included_entry_ids
+    return selected_entry_ids
 
 
 def _smoke_status(calls: Sequence[Mapping[str, Any]]) -> str:
