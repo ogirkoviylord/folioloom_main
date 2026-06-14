@@ -135,6 +135,22 @@ future approval packet. Durable storage, retention/export/delete, admin
 visibility, legal/privacy/support copy and rollout remain `TBD`; provider
 quality/cost/latency remain `Unknown`.
 
+Issue #559 provider-boundary slice on 2026-06-14: branch
+`codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
+`--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
+for the owner-approved Gutenberg/Oz real-EPUB paired RU smoke. The same runner
+now enforces the effective 2-call cap, 60k token cap, DeepSeek-compatible model
+boundary, paired glossary-on/off shape, approved local target-metadata fixture
+and `outputs/issue-559-real-epub-glossary-live/<timestamp>/` owner-only raw
+diagnostic storage. Fake preflight completed with 2 calls. The bounded live
+run completed with 2 calls, 5,985 observed provider-reported tokens, structural
+validation passing on both glossary-on and glossary-off sides, #465 cache
+bypass visible only on glossary-on, and metadata-only glossary compliance
+findings on glossary-on (`target_form_missing` / `target_metadata_missing`).
+This proves the live prompt path can inject glossary context for an approved
+test unit, but does not prove glossary quality, rollout readiness, cache reuse,
+release/privacy/legal/support readiness or arbitrary-book preparation.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
