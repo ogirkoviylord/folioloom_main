@@ -20,6 +20,11 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_559_EFFECTIVE_MAX_CALLS,
     ISSUE_559_ID,
     ISSUE_559_MAX_TOKENS_TOTAL,
+    ISSUE_575_ID,
+    ISSUE_575_INPUT_TARGETS,
+    ISSUE_575_MAX_CALLS,
+    ISSUE_575_MAX_TOKENS_TOTAL,
+    ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
     POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
@@ -459,6 +464,142 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                     provider=FakeRuntimeProvider(),
                     repo_root=Path.cwd(),
                 )
+
+    def test_issue_575_adversarial_txt_fake_smoke_runs_paired_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report_path = tmp_path / "issue-575-report.md"
+            report = run_smoke(
+                SmokeConfig(
+                    issue_id=ISSUE_575_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=tmp_path / "diagnostics",
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=True,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                metadata_report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], ISSUE_575_ID)
+            self.assertEqual(report["approval"]["max_calls"], ISSUE_575_MAX_CALLS)
+            self.assertEqual(
+                report["approval"]["max_tokens_total"],
+                ISSUE_575_MAX_TOKENS_TOTAL,
+            )
+            self.assertEqual(report["calls_made"], 4)
+            self.assertEqual(
+                [call["side"] for call in report["calls"]],
+                [
+                    "glossary_on",
+                    "glossary_off",
+                    "glossary_on",
+                    "glossary_off",
+                ],
+            )
+            self.assertEqual(
+                [call["target_language"] for call in report["calls"]],
+                ["ru", "ru", "uk", "uk"],
+            )
+            self.assertTrue(
+                all(call["status"] == "validated" for call in report["calls"])
+            )
+            self.assertEqual(
+                report["calls"][0]["adapter"]["cache_policy"]["behavior"],
+                "bypass_glossary_injected_cache",
+            )
+            self.assertEqual(
+                report["calls"][1]["adapter"]["cache_policy"]["behavior"],
+                "default_runtime_cache",
+            )
+            self.assertGreater(
+                report["calls"][0]["prompt_context"]["included_entry_count"],
+                0,
+            )
+            self.assertGreater(
+                report["calls"][2]["prompt_context"]["included_entry_count"],
+                0,
+            )
+
+            rendered = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("<glossary_context", rendered)
+            self.assertNotIn("<translation_batch>", rendered)
+            self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", rendered)
+            self.assertNotIn("provider_response", rendered)
+
+    def test_issue_575_boundary_rejects_missing_pairing_wrong_target_or_live_root(
+        self,
+    ):
+        base_config = {
+            "issue_id": ISSUE_575_ID,
+            "input_targets": ISSUE_575_INPUT_TARGETS,
+            "max_calls": ISSUE_575_MAX_CALLS,
+            "max_tokens_total": ISSUE_575_MAX_TOKENS_TOTAL,
+            "fake": True,
+            "target_metadata_fixture_path": ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
+            "paired_glossary_off": True,
+        }
+
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "paired_glossary_off": False,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "input_targets": (
+                            (
+                                Path(
+                                    "test_samples/"
+                                    "glossary_adversarial_terms.en.txt"
+                                ),
+                                "de",
+                            ),
+                        ),
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "max_calls": ISSUE_575_MAX_CALLS + 1,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+        with self.assertRaises(ValueError):
+            run_smoke(
+                SmokeConfig(
+                    **{
+                        **base_config,
+                        "diagnostic_root": DEFAULT_DIAGNOSTIC_ROOT,
+                        "fake": False,
+                    }
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()

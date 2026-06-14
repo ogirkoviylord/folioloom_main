@@ -148,6 +148,20 @@ ISSUE_559_TARGET_METADATA_FIXTURE_PATH = Path(
     "outputs/issue-oz-gutenberg-epub-glossary-live/"
     "oz-scarecrow-target-metadata-fixture.json"
 )
+ISSUE_575_ID = "575"
+ISSUE_575_MAX_CALLS = 4
+ISSUE_575_MAX_TOKENS_TOTAL = 60_000
+ISSUE_575_DIAGNOSTIC_ROOT = Path(
+    "outputs/glossary-battle-test/issue-575-post-571-matrix"
+)
+ISSUE_575_INPUT_TARGETS = (
+    (Path("test_samples/glossary_adversarial_terms.en.txt"), "ru"),
+    (Path("test_samples/glossary_adversarial_terms.en.txt"), "uk"),
+)
+ISSUE_575_TARGET_METADATA_FIXTURE_PATH = Path(
+    "test_samples/glossary_targets/"
+    "glossary_adversarial_terms.runtime-glossary-targets.json"
+)
 LANGUAGE_POLICY_PACKAGE_FIXTURES = (
     Path("test_samples/language_policy_packages/ru_uk_v1.json"),
     Path("test_samples/language_policy_packages/contrast_casefold_v1.json"),
@@ -3868,6 +3882,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "tokens, and optional approved local target-metadata fixture overlay."
         ),
     )
+    parser.add_argument(
+        "--issue-575-adversarial-txt",
+        action="store_true",
+        help=(
+            "Use the issue #575 adversarial TXT glossary matrix boundary: "
+            "ru/uk targets, paired glossary-on/off calls, max 4 calls, and "
+            "the approved committed target-metadata fixture overlay."
+        ),
+    )
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
     args = parser.parse_args(argv)
@@ -3895,28 +3918,49 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata_report_path=metadata_report_path,
         )
         return 0
-    if args.control_epub and args.issue_559_real_epub:
+    selected_boundaries = sum(
+        bool(flag)
+        for flag in (
+            args.control_epub,
+            args.issue_559_real_epub,
+            args.issue_575_adversarial_txt,
+        )
+    )
+    if selected_boundaries > 1:
         raise SystemExit(
-            "--control-epub and --issue-559-real-epub are mutually exclusive"
+            "--control-epub, --issue-559-real-epub and "
+            "--issue-575-adversarial-txt are mutually exclusive"
         )
     issue_id = (
         ISSUE_559_ID
         if args.issue_559_real_epub
-        else (ISSUE_507_ID if args.control_epub else "477")
+        else (
+            ISSUE_575_ID
+            if args.issue_575_adversarial_txt
+            else (ISSUE_507_ID if args.control_epub else "477")
+        )
     )
     diagnostic_root = (
         ISSUE_559_DIAGNOSTIC_ROOT
         if args.issue_559_real_epub
         else (
-            ISSUE_507_DIAGNOSTIC_ROOT
-            if args.control_epub
-            else DEFAULT_DIAGNOSTIC_ROOT
+            ISSUE_575_DIAGNOSTIC_ROOT
+            if args.issue_575_adversarial_txt
+            else (
+                ISSUE_507_DIAGNOSTIC_ROOT
+                if args.control_epub
+                else DEFAULT_DIAGNOSTIC_ROOT
+            )
         )
     )
     target_metadata_fixture_path = (
         ISSUE_559_TARGET_METADATA_FIXTURE_PATH
         if args.issue_559_real_epub
-        else (DEFAULT_TARGET_METADATA_FIXTURE_PATH if args.control_epub else None)
+        else (
+            ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+            if args.issue_575_adversarial_txt
+            else (DEFAULT_TARGET_METADATA_FIXTURE_PATH if args.control_epub else None)
+        )
     )
     if args.diagnostic_root:
         diagnostic_root = Path(args.diagnostic_root)
@@ -3928,7 +3972,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         else (
             ISSUE_559_EFFECTIVE_MAX_CALLS
             if args.issue_559_real_epub
-            else (ISSUE_507_MAX_CALLS if args.control_epub else DEFAULT_MAX_CALLS)
+            else (
+                ISSUE_575_MAX_CALLS
+                if args.issue_575_adversarial_txt
+                else (ISSUE_507_MAX_CALLS if args.control_epub else DEFAULT_MAX_CALLS)
+            )
         )
     )
     max_tokens_total = (
@@ -3937,7 +3985,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         else (
             ISSUE_559_MAX_TOKENS_TOTAL
             if args.issue_559_real_epub
-            else DEFAULT_MAX_TOKENS_TOTAL
+            else (
+                ISSUE_575_MAX_TOKENS_TOTAL
+                if args.issue_575_adversarial_txt
+                else DEFAULT_MAX_TOKENS_TOTAL
+            )
         )
     )
     config = SmokeConfig(
@@ -3946,9 +3998,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ISSUE_559_INPUT_TARGETS
             if args.issue_559_real_epub
             else (
-                APPROVED_OWNER_TEST_INPUT_TARGETS
-                if args.control_epub
-                else APPROVED_INPUT_TARGETS
+                ISSUE_575_INPUT_TARGETS
+                if args.issue_575_adversarial_txt
+                else (
+                    APPROVED_OWNER_TEST_INPUT_TARGETS
+                    if args.control_epub
+                    else APPROVED_INPUT_TARGETS
+                )
             )
         ),
         diagnostic_root=diagnostic_root,
@@ -3960,7 +4016,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         raw_text_capture=True,
         fake=args.fake,
         target_metadata_fixture_path=target_metadata_fixture_path,
-        paired_glossary_off=args.control_epub or args.issue_559_real_epub,
+        paired_glossary_off=(
+            args.control_epub
+            or args.issue_559_real_epub
+            or args.issue_575_adversarial_txt
+        ),
     )
     provider: ChatProvider
     if args.fake:
@@ -4023,7 +4083,7 @@ def _build_package_or_skip(
 
 
 def _validate_config(config: SmokeConfig) -> None:
-    if config.issue_id not in {"477", ISSUE_507_ID, ISSUE_559_ID}:
+    if config.issue_id not in {"477", ISSUE_507_ID, ISSUE_559_ID, ISSUE_575_ID}:
         raise ValueError("issue_id does not match an approved smoke boundary.")
     if config.provider_model != DEFAULT_MODEL:
         raise ValueError("provider_model does not match approved model.")
@@ -4056,6 +4116,19 @@ def _validate_config(config: SmokeConfig) -> None:
             raise ValueError("diagnostic_root does not match issue 559 boundary.")
         if not config.fake and config.target_metadata_fixture_path is None:
             raise ValueError("issue 559 live requires target metadata fixture overlay.")
+    elif config.issue_id == ISSUE_575_ID:
+        if config.target_metadata_fixture_path is None:
+            raise ValueError("issue 575 requires target metadata fixture overlay.")
+        if any(item not in ISSUE_575_INPUT_TARGETS for item in config.input_targets):
+            raise ValueError(
+                "issue 575 input_targets must use the adversarial TXT only."
+            )
+        if not config.paired_glossary_off:
+            raise ValueError("issue 575 requires paired glossary-off calls.")
+        if config.max_calls > ISSUE_575_MAX_CALLS:
+            raise ValueError("max_calls exceeds issue 575 approved cap.")
+        if not config.fake and config.diagnostic_root != ISSUE_575_DIAGNOSTIC_ROOT:
+            raise ValueError("diagnostic_root does not match issue 575 boundary.")
     else:
         if any(
             item in APPROVED_OWNER_TEST_INPUT_TARGETS
@@ -4104,6 +4177,8 @@ def _approved_input_targets_for_config(config: SmokeConfig) -> set[tuple[Path, s
         return set(APPROVED_OWNER_TEST_INPUT_TARGETS)
     if config.issue_id == ISSUE_559_ID:
         return set(ISSUE_559_INPUT_TARGETS)
+    if config.issue_id == ISSUE_575_ID:
+        return set(ISSUE_575_INPUT_TARGETS)
     approved = set(APPROVED_INPUT_TARGETS)
     if config.target_metadata_fixture_path is not None:
         approved.update(APPROVED_OWNER_TEST_INPUT_TARGETS)
@@ -4122,12 +4197,19 @@ def _selection_description(config: SmokeConfig) -> str:
             "approved target metadata; paired glossary-on and glossary-off; "
             "max 1 ru target"
         )
+    if config.issue_id == ISSUE_575_ID:
+        return (
+            "first glossary-useful READY adversarial TXT runtime unit per target "
+            "with approved target metadata; paired glossary-on and glossary-off"
+        )
     return "first READY glossary-injected runtime test-path unit"
 
 
 def _max_tokens_total_cap(config: SmokeConfig) -> int:
     if config.issue_id == ISSUE_559_ID:
         return ISSUE_559_MAX_TOKENS_TOTAL
+    if config.issue_id == ISSUE_575_ID:
+        return ISSUE_575_MAX_TOKENS_TOTAL
     return DEFAULT_MAX_TOKENS_TOTAL
 
 
