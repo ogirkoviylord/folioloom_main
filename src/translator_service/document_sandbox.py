@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import math
 import os
 import subprocess
@@ -20,6 +21,8 @@ from translator_service.format_adapters.contracts import (
 )
 from translator_service.security_telemetry import record_security_event
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -295,6 +298,7 @@ def _resource_limiter(limits: DocumentSandboxLimits):
         try:
             os.umask(0o077)
         except OSError:
+            logger.warning("Failed to set umask in sandbox", exc_info=True)
             return
 
     return limit_resources
@@ -306,6 +310,7 @@ def _set_resource_limit(resource_name: int, soft: int, hard: int) -> None:
 
         resource.setrlimit(resource_name, (soft, hard))
     except (OSError, ValueError):
+        logger.warning("Failed to set resource limit %s", resource_name, exc_info=True)
         return
 
 

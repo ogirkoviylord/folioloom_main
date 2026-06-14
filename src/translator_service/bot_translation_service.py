@@ -888,7 +888,12 @@ class BotTranslationService:
                     UploadSafetyState.REJECTED,
                 )
             except UploadSafetyLedgerError:
-                pass
+                logger.warning(
+                    "Upload safety rejected transition "
+                    "failed after scan: id=%s",
+                    upload_safety_id,
+                    exc_info=True,
+                )
             self._record_upload_safety_activity(
                 user_telegram_id=user_telegram_id,
                 upload_safety_id=upload_safety_id,
@@ -975,7 +980,12 @@ class BotTranslationService:
                     UploadSafetyState.REJECTED,
                 )
             except UploadSafetyLedgerError:
-                pass
+                logger.warning(
+                    "Upload safety rejected transition "
+                    "failed after container: id=%s",
+                    upload_safety_id,
+                    exc_info=True,
+                )
             self._record_upload_safety_activity(
                 user_telegram_id=user_telegram_id,
                 upload_safety_id=upload_safety_id,
@@ -4247,7 +4257,11 @@ def _consume_translator_security_events(
             try:
                 translator._last_security_events.value = ()
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to reset translator "
+                    "security events",
+                    exc_info=True,
+                )
     events = []
     for raw_event in raw_events or ():
         event = normalize_security_event(raw_event)

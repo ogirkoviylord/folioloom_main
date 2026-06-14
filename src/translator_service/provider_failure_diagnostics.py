@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderFailureCategory(StrEnum):
@@ -208,6 +211,7 @@ def _call_method(value: object | None, name: str) -> object | None:
     try:
         return method()
     except Exception:
+        logger.debug("Diagnostic method %s failed", name, exc_info=True)
         return None
 
 
