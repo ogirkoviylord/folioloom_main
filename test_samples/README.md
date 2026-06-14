@@ -64,3 +64,29 @@ Do not copy raw excerpts, prompts, provider responses, translated text, or
 diagnostic payloads from these fixtures into ordinary logs, GitHub issues, PR
 descriptions, docs, release artifacts, support artifacts, or user-facing/admin
 surfaces. Live provider use requires a separate explicit bounded approval.
+
+## Synthetic adversarial glossary fixture
+
+The `glossary_adversarial_terms` TXT fixture is a synthetic, owner-requested
+control sample for glossary benefit checks. It uses invented English names that
+look like ordinary phrases, with synthetic Russian and Ukrainian target
+metadata that intentionally does not follow the plain literal translation.
+
+Files:
+
+- `glossary_adversarial_terms.en.txt` - English synthetic source fixture.
+- `glossary_targets/glossary_adversarial_terms.runtime-glossary-targets.json` -
+  owner-requested synthetic target metadata for Russian and Ukrainian
+  local/fake glossary checks.
+
+Purpose:
+
+- local/fake glossary-on selection and prompt-context checks;
+- future bounded live glossary-on/off provider smoke only after separate owner
+  approval;
+- no semantic-quality or rollout claim by itself.
+
+Do not copy raw fixture excerpts, prompts, provider responses, translated text,
+or diagnostic payloads into ordinary logs, GitHub issues, PR descriptions,
+docs, release artifacts, support artifacts, or user-facing/admin surfaces.
+Live provider use requires a separate explicit bounded approval.

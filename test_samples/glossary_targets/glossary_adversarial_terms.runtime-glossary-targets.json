@@ -1,0 +1,118 @@
+{
+  "schema_version": "glossary-runtime-target-metadata-fixture-v1",
+  "fixture_id": "glossary-adversarial-terms-owner-target-metadata-v1",
+  "input_path": "test_samples/glossary_adversarial_terms.en.txt",
+  "source_language": "en",
+  "scope": "local_owner_only_adversarial_glossary_benefit_fixture",
+  "owner_approved": true,
+  "targets": {
+    "ru": {
+      "entries": [
+        {
+          "entry_id": "adversarial-glass-market-ru",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Зеркальный Торг",
+          "target_variants": ["Зеркального Торга", "Зеркальном Торге"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-quiet-knife-ru",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Молчальник",
+          "target_variants": ["Молчальника", "Молчальником"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-north-door-ru",
+          "source_canonical": "North Door",
+          "aliases": ["The North Door"],
+          "target_canonical": "Северница",
+          "target_variants": ["Северницу", "Севернице"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-salt-thread-ru",
+          "source_canonical": "Salt Thread",
+          "aliases": ["The Salt Thread"],
+          "target_canonical": "Солевязь",
+          "target_variants": ["Солевязи", "Солевязью"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-glossary-map-ru",
+          "source_canonical": "Glossary Map",
+          "aliases": ["The Glossary Map"],
+          "target_canonical": "Карта Имён",
+          "target_variants": ["Картой Имён", "Карте Имён"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        }
+      ]
+    },
+    "uk": {
+      "entries": [
+        {
+          "entry_id": "adversarial-glass-market-uk",
+          "source_canonical": "Glass Market",
+          "aliases": ["The Glass Market"],
+          "target_canonical": "Дзеркальний Торг",
+          "target_variants": ["Дзеркального Торгу", "Дзеркальному Торзі"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-quiet-knife-uk",
+          "source_canonical": "Quiet Knife",
+          "aliases": ["The Quiet Knife"],
+          "target_canonical": "Мовчун-клинок",
+          "target_variants": ["Мовчуна-клинка", "Мовчуном-клинком"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-north-door-uk",
+          "source_canonical": "North Door",
+          "aliases": ["The North Door"],
+          "target_canonical": "Північниця",
+          "target_variants": ["Північницю", "Північниці"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-salt-thread-uk",
+          "source_canonical": "Salt Thread",
+          "aliases": ["The Salt Thread"],
+          "target_canonical": "Солев’язь",
+          "target_variants": ["Солев’язі", "Солев’яззю"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        },
+        {
+          "entry_id": "adversarial-glossary-map-uk",
+          "source_canonical": "Glossary Map",
+          "aliases": ["The Glossary Map"],
+          "target_canonical": "Карта Імен",
+          "target_variants": ["Картою Імен", "Карті Імен"],
+          "strategy": "owner_approved_preferred_rendering",
+          "status": "synthetic_control_fixture",
+          "confidence": 1.0
+        }
+      ]
+    }
+  }
+}
