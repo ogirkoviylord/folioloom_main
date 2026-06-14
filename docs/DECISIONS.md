@@ -95,7 +95,9 @@ Evidence:
   no-code glossary-aware cache-key design: future reuse must key every
   output-affecting glossary/profile/snapshot/selection/policy/formatter/
   fallback dimension or bypass, and current glossary-injected units still
-  bypass cache under #465.
+  bypass cache under #465. Issue #537 / #204BO records the metadata-only
+  decision packet for #529 and recommends keeping runtime glossary
+  shadow-only/default-off until the owner chooses a separate next issue.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added

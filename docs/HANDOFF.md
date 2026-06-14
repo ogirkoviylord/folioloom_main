@@ -2134,6 +2134,19 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #537 / #204BO adds the metadata-only decision packet for the
+  #529 language-policy package sequence.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-glossary-language-policy-decision-packet.md`
+  summarizes #530-#536 and #534, confirmed facts, `Unknown` evidence gaps,
+  `TBD` owner decisions, hard boundaries and next owner options.
+- Follow-up: close #529 after #537 is merged. Recommended posture is to keep
+  runtime glossary shadow-only/default-off, with the next issue chosen by the
+  owner: owner-only quality review, more local package coverage, another
+  bounded provider smoke, owner-only battle-test implementation, future
+  cache-key implementation or no-go for runtime rollout.
+
+- Date: 2026-06-14.
 - Change: Issue #536 / #204BN adds a no-code glossary-aware cache-key design
   for the #529 language-policy package sequence.
 - Evidence:
