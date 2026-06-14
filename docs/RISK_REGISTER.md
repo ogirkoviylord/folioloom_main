@@ -201,7 +201,10 @@
   and reviewed. Issue #578 tightens the #575 TXT path so prompt context and
   compliance use the same target-backed source-present useful entries, removing
   local `target_metadata_missing` / `source_term_absent` noise in fake preflight;
-  post-filter live behavior remains `Unknown`.
+  post-filter live behavior remains `Unknown`. Issue #580 strengthens the
+  default-off owner/test prompt-context terminology wording for included
+  target-backed entries, but live provider behavior after that wording change
+  remains `Unknown` until bounded rerun evidence is recorded.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
