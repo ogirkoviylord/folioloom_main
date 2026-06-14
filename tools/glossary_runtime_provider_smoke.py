@@ -78,6 +78,9 @@ PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION = (
 POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION = (
     "glossary-policy-provider-evidence-fake-dry-preflight-v1"
 )
+POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION = (
+    "glossary-policy-provider-evidence-live-smoke-v1"
+)
 EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION = (
     "glossary-epub-runtime-unit-selection-v1"
 )
@@ -1079,6 +1082,229 @@ def run_policy_provider_evidence_preflight(
     return report
 
 
+def run_policy_provider_evidence_live_smoke(
+    *,
+    provider: ChatProvider,
+    repo_root: Path | None = None,
+    metadata_report_path: Path | None = None,
+    diagnostic_root: Path = ISSUE_534_DIAGNOSTIC_ROOT,
+    raw_text_capture: bool = True,
+    preflight_report: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    repo_root = (repo_root or Path.cwd()).resolve()
+    preflight = dict(
+        preflight_report
+        if preflight_report is not None
+        else run_policy_provider_evidence_preflight(repo_root=repo_root)
+    )
+    if preflight.get("status") != "passed":
+        return _policy_live_blocked_report(
+            preflight=preflight,
+            reason_code="fake_dry_preflight_not_passed",
+        )
+
+    diagnostic_dir = _timestamped_diagnostic_dir(diagnostic_root)
+    diagnostic_dir.mkdir(parents=True, exist_ok=False)
+    cases = _policy_evidence_cases(repo_root=repo_root)
+    call_summaries: list[dict[str, Any]] = []
+    calls_made = 0
+    reserved_tokens = 0
+    observed_tokens: int | None = 0
+
+    for case in cases:
+        for side in ("glossary_on", "glossary_off"):
+            if calls_made >= ISSUE_534_MAX_CALLS:
+                call_summaries.append(
+                    _policy_live_skipped_call_summary(
+                        case,
+                        side=side,
+                        reason_code="skipped_max_calls",
+                    )
+                )
+                continue
+            prompt = _policy_live_prompt(case, side=side)
+            estimated_prompt_tokens = estimate_tokens(
+                prompt["system_prompt"] + prompt["user_prompt"]
+            )
+            reservation = reserve_tokens(
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                max_completion_tokens=DEFAULT_MAX_COMPLETION_TOKENS,
+                prompt_token_multiplier=(
+                    DEFAULT_PROMPT_TOKEN_RESERVATION_MULTIPLIER
+                ),
+            )
+            if reserved_tokens + reservation > ISSUE_534_MAX_TOKENS_TOTAL:
+                call_summaries.append(
+                    _policy_live_skipped_call_summary(
+                        case,
+                        side=side,
+                        reason_code="skipped_token_budget",
+                        estimated_prompt_tokens=estimated_prompt_tokens,
+                        reserved_tokens=reserved_tokens,
+                    )
+                )
+                continue
+
+            calls_made += 1
+            reserved_tokens += reservation
+            result = provider.chat(
+                model=DEFAULT_MODEL,
+                system_prompt=prompt["system_prompt"],
+                user_prompt=prompt["user_prompt"],
+                max_completion_tokens=DEFAULT_MAX_COMPLETION_TOKENS,
+            )
+            usage_tokens = _usage_total_tokens(result.usage)
+            observed_over_cap = False
+            if usage_tokens is None:
+                observed_tokens = None
+            elif observed_tokens is not None:
+                observed_tokens += usage_tokens
+                observed_over_cap = observed_tokens > ISSUE_534_MAX_TOKENS_TOTAL
+
+            validation = _policy_live_structural_validation(result)
+            compliance = _policy_live_glossary_compliance(
+                case,
+                result=result,
+                validation=validation,
+            )
+            summary = _policy_live_call_summary(
+                case,
+                side=side,
+                call_index=calls_made,
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                reserved_tokens=reserved_tokens,
+                reservation=reservation,
+                result=result,
+                validation=validation,
+                glossary_compliance=compliance,
+                observed_over_cap=observed_over_cap,
+            )
+            call_summaries.append(summary)
+            diagnostic_name = (
+                f"call-{calls_made:02d}-{case['target_language']}-{side}.json"
+            )
+            _write_json(
+                diagnostic_dir / diagnostic_name,
+                _policy_live_call_diagnostic(
+                    case,
+                    side=side,
+                    prompt=prompt,
+                    result=result,
+                    validation=validation,
+                    glossary_compliance=compliance,
+                    raw_text_capture=raw_text_capture,
+                ),
+            )
+            if observed_over_cap:
+                break
+        if call_summaries and call_summaries[-1].get("observed_over_cap") is True:
+            break
+
+    report = {
+        "schema_version": POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
+        "protocol_schema_version": PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION,
+        "issue_id": ISSUE_534_ID,
+        "status": _policy_live_status(call_summaries),
+        "mode": "live",
+        "created_at": datetime.now(UTC).isoformat(),
+        "fake_dry_preflight_status": preflight.get("status", "Unknown"),
+        "diagnostic_dir": str(diagnostic_dir),
+        "calls_made": calls_made,
+        "max_calls": ISSUE_534_MAX_CALLS,
+        "reserved_tokens": reserved_tokens,
+        "observed_tokens": _unknown_int(observed_tokens),
+        "max_tokens_total": ISSUE_534_MAX_TOKENS_TOTAL,
+        "provider_model": DEFAULT_MODEL,
+        "input_fixtures": [
+            str(path) for path in LANGUAGE_POLICY_PACKAGE_FIXTURES
+        ],
+        "targets": [str(case["target_language"]) for case in cases],
+        "calls": call_summaries,
+        "ordinary_artifact_safety": {
+            "metadata_only": True,
+            "raw_source_text_included": False,
+            "prompt_bodies_included": False,
+            "translated_text_bodies_included": False,
+            "provider_request_bodies_included": False,
+            "provider_response_bodies_included": False,
+            "api_keys_or_auth_material_included": False,
+            "release_privacy_legal_support_claim_made": False,
+        },
+        "confirmed": _policy_live_confirmed_items(call_summaries),
+        "unknown": _policy_live_unknown_items(call_summaries),
+        "tbd": [
+            "owner go/no-go after reviewing #534 evidence remains TBD",
+            "runtime glossary rollout remains TBD",
+            "glossary-aware cache reuse remains TBD",
+            "release-version diagnostic retention/deletion/consent remains TBD",
+            "translation quality remains TBD until owner-only quality review",
+        ],
+        "recommendation": _policy_live_recommendation(call_summaries),
+    }
+    _write_json(diagnostic_dir / "manifest.json", report)
+    if metadata_report_path is not None:
+        metadata_report_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_report_path.write_text(
+            render_policy_provider_evidence_live_report(report),
+            encoding="utf-8",
+        )
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "mode": report["mode"],
+                "diagnostic_dir": report["diagnostic_dir"],
+                "calls_made": report["calls_made"],
+                "observed_tokens": report["observed_tokens"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return report
+
+
+def render_policy_provider_evidence_live_report(
+    report: Mapping[str, Any],
+) -> str:
+    rows = "\n".join(_policy_live_call_report_row(call) for call in report["calls"])
+    if not rows:
+        rows = (
+            "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown "
+            "| Unknown | Unknown | Unknown | Unknown | Unknown |\n"
+        )
+    return (
+        "# Policy Provider Evidence Live Smoke Report\n\n"
+        "## Confirmed\n"
+        f"{_markdown_list(report['confirmed'])}\n\n"
+        "## Unknown\n"
+        f"{_markdown_list(report['unknown'])}\n\n"
+        "## TBD\n"
+        f"{_markdown_list(report['tbd'])}\n\n"
+        "## Approval Boundary\n"
+        f"- Issue: #{report['issue_id']}\n"
+        f"- Fake/dry preflight status: {report['fake_dry_preflight_status']}\n"
+        f"- Inputs: {', '.join(report['input_fixtures'])}\n"
+        f"- Targets: {', '.join(report['targets'])}\n"
+        f"- Max calls: {report['max_calls']}\n"
+        f"- Max tokens total: {report['max_tokens_total']}\n"
+        f"- Provider/model: {report['provider_model']}\n"
+        f"- Diagnostic storage: {report['diagnostic_dir']}\n\n"
+        "## Live Results\n"
+        "| Target | Side | Policy | Entry | Status | Finish reason | Usage tokens "
+        "| Validation issue codes | Compliance status | Hits | Misses | Forbidden |\n"
+        "| --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: "
+        "| ---: | ---: |\n"
+        f"{rows}\n\n"
+        "## Token Shape\n"
+        f"- Calls made: {report['calls_made']}\n"
+        f"- Reserved tokens: {report['reserved_tokens']}\n"
+        f"- Observed tokens: {report['observed_tokens']}\n\n"
+        "## Recommendation\n"
+        f"{report['recommendation']}\n"
+    )
+
+
 def render_policy_provider_evidence_preflight_report(
     report: Mapping[str, Any],
 ) -> str:
@@ -1508,6 +1734,380 @@ def _issue_534_approval_template(
         "ordinary_artifacts": "metadata-only counts, statuses and reason codes",
         "not_approved": provider_evidence_protocol_payload()["not_approved"],
     }
+
+
+def _policy_live_prompt(case: Mapping[str, Any], *, side: str) -> dict[str, str]:
+    glossary_context = (
+        _policy_live_glossary_context(case) if side == "glossary_on" else ""
+    )
+    request_text = _format_translation_request_text(
+        [str(case["source_text"])],
+        source_language_hints=["en"],
+        glossary_prompt_context=glossary_context,
+    )
+    policy = build_translation_policy(
+        text=request_text,
+        source_language="en",
+        target_language=str(case["target_language"]),
+    )
+    system_prompt = build_system_prompt(
+        policy,
+        provider_output_format=ProviderOutputFormat.DEFAULT,
+        expected_batch_count=1,
+    )
+    return {
+        "system_prompt": system_prompt,
+        "user_prompt": _wrap_untrusted_document_content(request_text),
+        "request_text": request_text,
+        "source_text": str(case["source_text"]),
+        "glossary_context": glossary_context,
+    }
+
+
+def _policy_live_glossary_context(case: Mapping[str, Any]) -> str:
+    entry = _policy_evidence_glossary_entry(case["entry"])
+    variants = "".join(
+        f'<target_variant value="{html.escape(str(variant))}" />'
+        for variant in entry["target_variants"]
+    )
+    forbidden = "".join(
+        f'<forbidden_variant value="{html.escape(str(variant))}" />'
+        for variant in entry["forbidden_variants"]
+    )
+    return (
+        '<glossary_context mode="terminology_policy_v1">'
+        f'<term id="{html.escape(str(entry["entry_id"]))}" '
+        f'policy_id="{html.escape(str(case["policy_id"]))}" '
+        f'match_mode="{html.escape(str(case["match_mode"]))}">'
+        f'<source>{html.escape(str(entry["source_canonical"]))}</source>'
+        f'<target_canonical>{html.escape(str(entry["target_canonical"]))}'
+        "</target_canonical>"
+        f"{variants}{forbidden}"
+        "</term>"
+        "</glossary_context>"
+    )
+
+
+def _policy_live_structural_validation(result: ChatCallResult) -> dict[str, Any]:
+    issues: list[dict[str, str]] = []
+    if result.finish_reason in {"length", "max_tokens"}:
+        issues.append(_issue("truncated_output", "finish_reason"))
+    if not result.ok:
+        issues.append(_issue("provider_error", "http_status"))
+    if not result.content.strip():
+        issues.append(_issue("empty_content", "content"))
+    safety = validate_model_output_safety(result.content)
+    if safety.reason is not None:
+        issues.append(_issue("unsafe_model_output", "content"))
+    batch_validation = normalize_provider_translation_batch_contract(
+        result.content,
+        expected_count=1,
+        required_markers=(),
+    )
+    if batch_validation.rejection_reason is not None:
+        issues.append(
+            _issue(batch_validation.rejection_reason.value, "translation_batch")
+        )
+    return {
+        "valid": not issues,
+        "issue_count": len(issues),
+        "issue_codes": [issue["code"] for issue in issues],
+        "issues": issues,
+        "translated_block_count": (
+            len(batch_validation.translated_texts)
+            if batch_validation.translated_texts is not None
+            else 0
+        ),
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _policy_live_glossary_compliance(
+    case: Mapping[str, Any],
+    *,
+    result: ChatCallResult,
+    validation: Mapping[str, Any],
+) -> dict[str, Any]:
+    translated_text: str | None = None
+    if validation.get("valid") is True:
+        batch_validation = normalize_provider_translation_batch_contract(
+            result.content,
+            expected_count=1,
+            required_markers=(),
+        )
+        if batch_validation.translated_texts is not None:
+            translated_text = "\n\n".join(batch_validation.translated_texts)
+    registry = TerminologyPolicyRegistry((case["policy"],))
+    return validate_glossary_compliance(
+        [_policy_evidence_glossary_entry(case["entry"])],
+        selected_entry_ids=(case["entry_id"],),
+        included_entry_ids=(case["entry_id"],),
+        source_text=str(case["source_text"]),
+        translated_text=translated_text,
+        target_language=str(case["target_language"]),
+        terminology_policy_registry=registry,
+        structural_validation_passed=validation.get("valid") is True,
+    )
+
+
+def _policy_live_call_summary(
+    case: Mapping[str, Any],
+    *,
+    side: str,
+    call_index: int,
+    estimated_prompt_tokens: int,
+    reserved_tokens: int,
+    reservation: int,
+    result: ChatCallResult,
+    validation: Mapping[str, Any],
+    glossary_compliance: Mapping[str, Any],
+    observed_over_cap: bool,
+) -> dict[str, Any]:
+    usage_tokens = _usage_total_tokens(result.usage)
+    return {
+        "call_index": call_index,
+        "input_fixture": case["fixture_path"],
+        "package_id": case["package_id"],
+        "target_language": case["target_language"],
+        "side": side,
+        "policy_id": case["policy_id"],
+        "policy_version": case["policy_version"],
+        "match_mode": case["match_mode"],
+        "entry_id": case["entry_id"],
+        "status": "validated" if validation.get("valid") else "failed",
+        "finish_reason": result.finish_reason or "Unknown",
+        "http_status": (
+            result.http_status if result.http_status is not None else "Unknown"
+        ),
+        "latency_seconds": round(result.elapsed_seconds, 3),
+        "usage": dict(result.usage),
+        "usage_total_tokens": _unknown_int(usage_tokens),
+        "estimated_prompt_tokens": estimated_prompt_tokens,
+        "reserved_request_tokens": reservation,
+        "reserved_tokens_after_call": reserved_tokens,
+        "observed_over_cap": observed_over_cap,
+        "validation": dict(validation),
+        "glossary_compliance": dict(glossary_compliance),
+        "cache_policy": {
+            "behavior": (
+                "bypass_glossary_injected_cache"
+                if side == "glossary_on"
+                else "default_runtime_cache"
+            ),
+            "cache_get_allowed": side != "glossary_on",
+            "cache_put_allowed": side != "glossary_on",
+        },
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _policy_live_skipped_call_summary(
+    case: Mapping[str, Any],
+    *,
+    side: str,
+    reason_code: str,
+    estimated_prompt_tokens: int | str = "Unknown",
+    reserved_tokens: int | str = "Unknown",
+) -> dict[str, Any]:
+    return {
+        "input_fixture": case["fixture_path"],
+        "package_id": case["package_id"],
+        "target_language": case["target_language"],
+        "side": side,
+        "policy_id": case["policy_id"],
+        "entry_id": case["entry_id"],
+        "status": "skipped",
+        "reason_codes": [reason_code],
+        "finish_reason": "not_applicable",
+        "http_status": "not_applicable",
+        "usage_total_tokens": "Unknown",
+        "estimated_prompt_tokens": estimated_prompt_tokens,
+        "reserved_tokens_before_skip": reserved_tokens,
+        "validation": {
+            "valid": False,
+            "issue_count": 1,
+            "issue_codes": [reason_code],
+            "metadata_only": True,
+            "raw_payload_included": False,
+        },
+        "glossary_compliance": {
+            "status": "skipped",
+            "reason_codes": [reason_code],
+            "metadata_only": True,
+            "raw_payload_included": False,
+        },
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _policy_live_call_diagnostic(
+    case: Mapping[str, Any],
+    *,
+    side: str,
+    prompt: Mapping[str, str],
+    result: ChatCallResult,
+    validation: Mapping[str, Any],
+    glossary_compliance: Mapping[str, Any],
+    raw_text_capture: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
+        "access_boundary": {
+            "local_owner_only": True,
+            "git_tracked_allowed": False,
+            "github_issue_or_pr_allowed": False,
+            "ordinary_logs_allowed": False,
+            "release_or_support_artifact_allowed": False,
+        },
+        "input_fixture": case["fixture_path"],
+        "package_id": case["package_id"],
+        "target_language": case["target_language"],
+        "side": side,
+        "policy_id": case["policy_id"],
+        "entry_id": case["entry_id"],
+        "validation": dict(validation),
+        "glossary_compliance": dict(glossary_compliance),
+        "provider": {
+            "model": DEFAULT_MODEL,
+            "finish_reason": result.finish_reason or "Unknown",
+            "http_status": (
+                result.http_status if result.http_status is not None else "Unknown"
+            ),
+            "usage": dict(result.usage),
+            "latency_seconds": round(result.elapsed_seconds, 3),
+            "error_type": result.error_type or "none",
+            "error_message": result.error_message or "none",
+        },
+        "secrets_included": False,
+    }
+    if raw_text_capture:
+        payload.update(
+            {
+                "bounded_source_excerpt": prompt["source_text"][
+                    :DEFAULT_MAX_FRAGMENT_CHARS
+                ],
+                "system_prompt": prompt["system_prompt"],
+                "user_prompt": prompt["user_prompt"],
+                "runtime_request_text": prompt["request_text"],
+                "glossary_context": prompt["glossary_context"],
+                "provider_request_payload": dict(result.request_payload),
+                "provider_response_payload": (
+                    dict(result.response_payload)
+                    if isinstance(result.response_payload, Mapping)
+                    else None
+                ),
+                "provider_response_text": result.response_text,
+                "provider_content": result.content,
+            }
+        )
+    return payload
+
+
+def _policy_live_status(calls: Sequence[Mapping[str, Any]]) -> str:
+    if any(call.get("observed_over_cap") is True for call in calls):
+        return "completed_token_cap_exceeded"
+    if any(call.get("status") == "failed" for call in calls):
+        return "completed_with_failures"
+    if any(call.get("status") == "skipped" for call in calls):
+        return "completed_with_skips"
+    return "completed"
+
+
+def _policy_live_confirmed_items(
+    calls: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    items = [
+        "fake/dry preflight ran before live calls",
+        "live calls used only #533-selected committed policy package fixtures",
+        "ordinary live report is metadata-only",
+        "raw prompts and provider responses were confined to owner-only diagnostics",
+        "runtime rollout, cache reuse and provider config were not changed",
+    ]
+    if calls:
+        items.append("bounded live calls were attempted within the approved call cap")
+    if calls and all(call.get("status") == "validated" for call in calls):
+        items.append("all live provider responses passed structural validation")
+    return items
+
+
+def _policy_live_unknown_items(
+    calls: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    unknown: list[str] = []
+    if any(call.get("usage_total_tokens") == "Unknown" for call in calls):
+        unknown.append("provider-reported usage is Unknown for one or more calls")
+    if any(call.get("status") == "failed" for call in calls):
+        unknown.append("one or more live provider responses did not validate")
+    if not calls:
+        unknown.append("provider behavior is Unknown because no calls were made")
+    unknown.append(
+        "translation quality remains Unknown until owner-only quality review"
+    )
+    return unknown
+
+
+def _policy_live_recommendation(
+    calls: Sequence[Mapping[str, Any]],
+) -> str:
+    if any(call.get("observed_over_cap") is True for call in calls):
+        return "stop: observed provider usage exceeded the approved token cap."
+    if any(call.get("status") == "failed" for call in calls):
+        return (
+            "review_provider_failures_before_rollout: one or more live "
+            "responses failed structural validation."
+        )
+    if any(
+        (call.get("glossary_compliance") or {}).get("status") == "findings"
+        for call in calls
+    ):
+        return (
+            "review_glossary_compliance_findings: provider calls completed, "
+            "but one or more policy-aware compliance summaries have findings."
+        )
+    return (
+        "proceed_to_metadata_only_decision_packet: provider-boundary evidence "
+        "completed without structural or compliance findings."
+    )
+
+
+def _policy_live_blocked_report(
+    *,
+    preflight: Mapping[str, Any],
+    reason_code: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
+        "issue_id": ISSUE_534_ID,
+        "status": "blocked",
+        "reason_codes": [reason_code],
+        "fake_dry_preflight_status": preflight.get("status", "Unknown"),
+        "calls_made": 0,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _policy_live_call_report_row(call: Mapping[str, Any]) -> str:
+    validation = call.get("validation") or {}
+    compliance = call.get("glossary_compliance") or {}
+    validation_codes = validation.get("issue_codes") or ["none"]
+    return (
+        f"| {call.get('target_language', 'Unknown')} | "
+        f"{call.get('side', 'Unknown')} | "
+        f"{call.get('policy_id', 'Unknown')} | "
+        f"{call.get('entry_id', 'Unknown')} | "
+        f"{call.get('status', 'Unknown')} | "
+        f"{call.get('finish_reason', 'Unknown')} | "
+        f"{call.get('usage_total_tokens', 'Unknown')} | "
+        f"{', '.join(str(code) for code in validation_codes)} | "
+        f"{compliance.get('status', 'Unknown')} | "
+        f"{compliance.get('target_form_present_count', 'Unknown')} | "
+        f"{compliance.get('target_form_missing_count', 'Unknown')} | "
+        f"{compliance.get('forbidden_variant_count', 'Unknown')} |"
+    )
 
 
 def _policy_preflight_pair_report_row(pair: Mapping[str, Any]) -> str:
@@ -3191,6 +3791,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "evidence preflight. No provider calls or API keys are used."
         ),
     )
+    parser.add_argument(
+        "--policy-evidence-live",
+        action="store_true",
+        help=(
+            "Run the issue #534 bounded live policy-provider evidence smoke "
+            "after the #533 fake/dry preflight. Requires DEEPSEEK_API_KEY or "
+            "DEEPSEEK_API_KEYS in the temporary process environment."
+        ),
+    )
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
     args = parser.parse_args(argv)
@@ -3199,6 +3808,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.policy_evidence_preflight:
         run_policy_provider_evidence_preflight(
+            metadata_report_path=metadata_report_path,
+        )
+        return 0
+    if args.policy_evidence_live:
+        api_key = load_env_api_key()
+        if not api_key:
+            raise SystemExit(
+                "DEEPSEEK_API_KEY/DEEPSEEK_API_KEYS is not set in the "
+                "process environment"
+            )
+        provider = OpenAICompatibleProvider(
+            api_key=api_key,
+            base_url=args.base_url,
+        )
+        run_policy_provider_evidence_live_smoke(
+            provider=provider,
             metadata_report_path=metadata_report_path,
         )
         return 0

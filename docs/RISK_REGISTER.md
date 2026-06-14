@@ -136,10 +136,13 @@
   levels, fixture rules and core-neutrality proof requirements; issues #531
   and #532 add local-only policy package fixtures/tests; issue #533 records a
   metadata-only fake/dry provider-evidence protocol and package-aware preflight
-  for #534. RU/UK full morphology remains `TBD`; live provider behavior,
-  provider usage and translation quality remain `Unknown` until approved
-  bounded evidence exists; future policy packages must stay behind the explicit
-  registry/adapter boundary, not hardcoded core behavior.
+  for #534; issue #534 records bounded live provider-boundary evidence with 6
+  completed calls, structural validation passing, RU/UK glossary-on compliance
+  passing, RU/UK glossary-off target-form-missing findings and DE on/off
+  compliance passing. RU/UK full morphology remains `TBD`; translation quality
+  remains `Unknown` until approved owner-only review evidence exists; future
+  policy packages must stay behind the explicit registry/adapter boundary, not
+  hardcoded core behavior.
 - External integrations: High; Telegram and DeepSeek/provider layer affect keys, cost, auth/billing failures and user UX.
   Issue #31 reduces misleading provider-health diagnostics by classifying unsafe
   model-output failures as `unsafe_model_output` rather than auth, billing, 429,
