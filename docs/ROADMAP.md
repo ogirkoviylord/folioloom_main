@@ -711,8 +711,11 @@ Acceptance criteria:
   after prerequisites, and #560 provider-backed arbitrary-book preparation
   design. Issue #556 adds the local-only/default-off owner-approved compact
   target-metadata overlay contract and tests, so future resolver work can get
-  target metadata without local code inventing semantic facts. None of this
-  approves rollout, cache reuse or release/privacy claims.
+  target metadata without local code inventing semantic facts. Issue #557 adds
+  the default-off persistent EPUB work-unit resolver that can produce existing
+  runtime glossary hook data only for explicitly enabled owner/test paths when
+  overlay metadata, source term/alias presence and prompt-context budgets pass.
+  None of this approves rollout, cache reuse or release/privacy claims.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1

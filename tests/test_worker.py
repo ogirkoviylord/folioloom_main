@@ -8,6 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.glossary_candidate_reducer import GlossaryCandidateReducerCaps
+from translator_service.glossary_persistent_runtime_resolver import (
+    PersistentEpubGlossaryResolverConfig,
+    build_persistent_epub_glossary_runtime_hook_resolver,
+)
+from translator_service.glossary_target_metadata_overlay import (
+    GLOSSARY_TARGET_METADATA_OVERLAY_SCHEMA_VERSION,
+)
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
@@ -955,6 +963,93 @@ class WorkerTest(unittest.TestCase):
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertIn("glossary-entry:v1:darcy", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
+
+    def test_scheduled_worker_with_epub_glossary_resolver_injects_ready_context(
+        self,
+    ):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Darcy returns.",
+            )
+            run_log_root = Path(temp_dir) / "run-logs"
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            store = self._store()
+            _job_with_stored_unit(
+                store,
+                source.object_key,
+                target_language="ru",
+                translation_policy=json.dumps(
+                    {"glossary_mode": "with_glossary"},
+                    ensure_ascii=False,
+                ),
+            )
+            translator = RecordingTranslator()
+            resolver = build_persistent_epub_glossary_runtime_hook_resolver(
+                source_text_loader=lambda work_unit: storage.get_bytes(
+                    work_unit.source_object_key
+                ).decode("utf-8"),
+                target_metadata_overlay_payload=_target_metadata_overlay_payload(),
+                config=PersistentEpubGlossaryResolverConfig(
+                    enabled=True,
+                    owner_battle_test_enabled=True,
+                    reducer_caps=GlossaryCandidateReducerCaps(
+                        max_editor_entries=20,
+                        max_diagnostic_entries=20,
+                        max_estimated_editor_tokens=1000,
+                        min_editor_score=1,
+                        min_diagnostic_score=1,
+                    ),
+                ),
+            )
+
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=run_log_root,
+                glossary_runtime_hook_resolver=resolver,
+            )
+
+            self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+            self.assertEqual(len(translator.calls), 1)
+            self.assertIn("<glossary_context", translator.calls[0][0])
+            self.assertIn("Дарси", translator.calls[0][0])
+            event_lines = run_logger.run_dir.joinpath("events.jsonl").read_text(
+                encoding="utf-8",
+            )
+            self.assertIn("glossary_runtime_adapter", event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            selected_entry_ids = re.findall(
+                r"glossary-scan:name:[a-f0-9]+",
+                event_lines,
+            )
+            self.assertEqual(len(set(selected_entry_ids)), 1)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("Дарси", event_lines)
 
     def test_scheduled_worker_without_glossary_blocks_global_hook_and_sidecar_event(
         self,
@@ -2456,6 +2551,27 @@ def _source_text_for(work_unit: PersistentWorkUnit) -> str:
         ("chapter-1:p1",): "First paragraph",
         ("chapter-1:p2",): "Second paragraph",
     }[work_unit.source_block_ids]
+
+
+def _target_metadata_overlay_payload() -> dict[str, object]:
+    return {
+        "schema_version": GLOSSARY_TARGET_METADATA_OVERLAY_SCHEMA_VERSION,
+        "overlay_id": "worker-resolver-test-overlay",
+        "scope": "local_owner_only_real_book_battle_test",
+        "owner_approved": True,
+        "source_language": "en",
+        "targets": {
+            "ru": {
+                "entries": [
+                    {
+                        "source_canonical": "Darcy",
+                        "target_canonical": "Дарси",
+                        "target_variants": ["мистер Дарси"],
+                    }
+                ]
+            }
+        },
+    }
 
 
 def _ready_glossary_hook() -> GlossaryRuntimeAdapterHookConfig:
