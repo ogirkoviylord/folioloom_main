@@ -707,6 +707,7 @@ def build_runtime_prompt(package: RuntimeSmokePackage) -> tuple[str, str, str]:
         text=request_text,
         source_language="en",
         target_language=package.target_language,
+        service_glossary_context_present=bool(package.prompt_context_text),
     )
     system_prompt = build_system_prompt(
         policy,
@@ -1783,6 +1784,7 @@ def _policy_live_prompt(case: Mapping[str, Any], *, side: str) -> dict[str, str]
         text=request_text,
         source_language="en",
         target_language=str(case["target_language"]),
+        service_glossary_context_present=bool(glossary_context),
     )
     system_prompt = build_system_prompt(
         policy,

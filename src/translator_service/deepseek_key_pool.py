@@ -310,6 +310,7 @@ class DeepSeekKeyPoolTranslator:
         source_language: str,
         target_language: str,
         translation_context: TranslationContextMemory | None = None,
+        service_glossary_context_present: bool = False,
     ) -> str:
         attempted_labels: set[str] = set()
         last_rate_error: DeepSeekApiError | None = None
@@ -328,6 +329,9 @@ class DeepSeekKeyPoolTranslator:
                     source_language=source_language,
                     target_language=target_language,
                     translation_context=translation_context,
+                    service_glossary_context_present=(
+                        service_glossary_context_present
+                    ),
                 )
                 latency_ms = self._elapsed_ms_since(started_at)
                 self._record_channel_success(channel, latency_ms=latency_ms)

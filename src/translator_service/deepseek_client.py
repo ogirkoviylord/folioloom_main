@@ -222,6 +222,7 @@ class DeepSeekClient:
         source_language: str,
         target_language: str,
         translation_context: TranslationContextMemory | None = None,
+        service_glossary_context_present: bool = False,
     ) -> str:
         security_events: list[dict] = []
         self._last_security_events.value = ()
@@ -239,6 +240,7 @@ class DeepSeekClient:
             source_language=source_language,
             target_language=target_language,
             translation_context=translation_context,
+            service_glossary_context_present=service_glossary_context_present,
         )
         try:
             batch_contract = _translation_batch_contract(text)
