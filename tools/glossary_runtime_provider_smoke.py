@@ -42,6 +42,11 @@ from translator_service.glossary_selection import (
     glossary_selection_metadata_payload,
     select_glossary_subset_for_work_unit,
 )
+from translator_service.glossary_terminology_policy import (
+    TerminologyPolicy,
+    TerminologyPolicyRegistry,
+    validate_terminology_policy,
+)
 from translator_service.model_output_safety import validate_model_output_safety
 from translator_service.output_contracts import (
     normalize_provider_translation_batch_contract,
@@ -67,6 +72,12 @@ SMOKE_SCHEMA_VERSION = "glossary-runtime-provider-smoke-v1"
 PRESSURE_SCHEMA_VERSION = "glossary-runtime-pressure-v1"
 PRESSURE_FALLBACK_SCHEMA_VERSION = "glossary-runtime-pressure-fallback-v1"
 PAIRED_REHEARSAL_SCHEMA_VERSION = "glossary-runtime-paired-rehearsal-v1"
+PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION = (
+    "glossary-provider-evidence-protocol-v1"
+)
+POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION = (
+    "glossary-policy-provider-evidence-fake-dry-preflight-v1"
+)
 EPUB_RUNTIME_UNIT_SELECTION_SCHEMA_VERSION = (
     "glossary-epub-runtime-unit-selection-v1"
 )
@@ -108,6 +119,16 @@ ISSUE_507_MAX_CALLS = 4
 ISSUE_507_DIAGNOSTIC_ROOT = Path(
     "outputs/issue-507-post-505-control-epub-glossary-live"
 )
+ISSUE_534_ID = "534"
+ISSUE_534_MAX_CALLS = 6
+ISSUE_534_MAX_TOKENS_TOTAL = 60_000
+ISSUE_534_DIAGNOSTIC_ROOT = Path(
+    "outputs/issue-534-bounded-policy-provider-evidence-smoke"
+)
+LANGUAGE_POLICY_PACKAGE_FIXTURES = (
+    Path("test_samples/language_policy_packages/ru_uk_v1.json"),
+    Path("test_samples/language_policy_packages/contrast_casefold_v1.json"),
+)
 DEFAULT_TARGET_METADATA_FIXTURE_PATH = Path(
     "test_samples/glossary_targets/"
     "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
@@ -148,6 +169,28 @@ TARGET_METADATA_FIXTURE_RAW_KEYS = frozenset(
         "translated_excerpt",
         "translated_text",
         "translation_text",
+    }
+)
+POLICY_EVIDENCE_RAW_KEYS = TARGET_METADATA_FIXTURE_RAW_KEYS | frozenset(
+    {
+        "api_key",
+        "auth_material",
+        "authorization",
+        "bounded_source_excerpt",
+        "prompt",
+        "prompt_body",
+        "provider_request",
+        "provider_response",
+        "raw_provider_response",
+        "raw_source_passage",
+        "raw_translation",
+        "request_body",
+        "response_body",
+        "source_text",
+        "system_prompt",
+        "translated_passage",
+        "translated_text",
+        "user_prompt",
     }
 )
 TARGET_METADATA_FIXTURE_TOP_LEVEL_KEYS = frozenset(
@@ -866,6 +909,635 @@ def _fake_rehearsal_side_summary(
         "pressure_summary": pressure_summary,
         "raw_payload_included": False,
     }
+
+
+def provider_evidence_protocol_payload() -> dict[str, Any]:
+    return {
+        "schema_version": PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION,
+        "issue_id": "533",
+        "live_followup_issue_id": ISSUE_534_ID,
+        "candidate_inputs": [
+            {
+                "fixture_path": str(path),
+                "rights_basis": "committed authorized/local synthetic fixture",
+                "raw_material_policy": "ordinary_artifacts_metadata_only",
+            }
+            for path in LANGUAGE_POLICY_PACKAGE_FIXTURES
+        ],
+        "targets": ["ru", "uk", "de"],
+        "unit_selection_rules": [
+            "first policy-aware glossary-useful unit per approved target",
+            "source term or alias must be present in the synthetic dry unit",
+            "target canonical or variant metadata must exist",
+            "structural validation and glossary compliance stay separate",
+        ],
+        "pairing": "paired glossary_on and glossary_off for each selected target",
+        "caps_placeholders": {
+            "max_calls": ISSUE_534_MAX_CALLS,
+            "max_tokens_total": ISSUE_534_MAX_TOKENS_TOTAL,
+            "max_targets": 3,
+        },
+        "provider_placeholders": {
+            "provider": "DeepSeek-compatible provider",
+            "model": DEFAULT_MODEL,
+            "provider_config_changes_allowed": False,
+        },
+        "diagnostic_storage_pattern": (
+            f"{ISSUE_534_DIAGNOSTIC_ROOT}/<timestamp>/ local owner-only untracked"
+        ),
+        "raw_text_capture_boundary": (
+            "yes for the live issue only, and only inside the approved "
+            "owner-only diagnostics directory"
+        ),
+        "ordinary_report_shape": {
+            "allowed": [
+                "package ids",
+                "policy ids",
+                "entry ids",
+                "target language codes",
+                "counts",
+                "statuses",
+                "reason codes",
+                "signatures",
+                "Unknown",
+                "TBD",
+            ],
+            "forbidden": [
+                "raw source text",
+                "prompt bodies",
+                "translated text bodies",
+                "provider request bodies",
+                "provider response bodies",
+                "API keys or auth material",
+            ],
+        },
+        "stop_conditions": [
+            "package descriptor missing or invalid",
+            "raw/prompt/provider/secret field detected in ordinary fixture",
+            "fake/dry structural validation fails",
+            "glossary_on compliance does not pass locally",
+            "selected live packet would exceed approved call or token caps",
+            "live provider usage is Unknown or over cap",
+            "live structural validation fails",
+        ],
+        "not_approved": [
+            "live provider calls in #533",
+            "runtime rollout",
+            "normal/default prompt integration",
+            "glossary-aware cache reuse",
+            "provider config/key changes",
+            "DB/schema/state/scheduler/work-unit/storage/admin/retention changes",
+            "release/privacy/legal/support claims",
+        ],
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def run_policy_provider_evidence_preflight(
+    *,
+    repo_root: Path | None = None,
+    metadata_report_path: Path | None = None,
+) -> dict[str, Any]:
+    repo_root = (repo_root or Path.cwd()).resolve()
+    cases = _policy_evidence_cases(repo_root=repo_root)
+    pairs = [_fake_policy_pair_summary(case) for case in cases]
+    failed_pairs = [
+        pair for pair in pairs if pair["status"] != "passed_fake_dry_preflight"
+    ]
+    report = {
+        "schema_version": POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
+        "protocol": provider_evidence_protocol_payload(),
+        "status": "passed" if not failed_pairs else "failed",
+        "mode": "fake_dry",
+        "created_at": datetime.now(UTC).isoformat(),
+        "live_provider_calls_allowed": False,
+        "provider_behavior": "Unknown",
+        "translation_quality": "Unknown",
+        "planned_live_issue_id": ISSUE_534_ID,
+        "planned_live_call_count": len(pairs) * 2,
+        "max_calls": ISSUE_534_MAX_CALLS,
+        "max_tokens_total": ISSUE_534_MAX_TOKENS_TOTAL,
+        "provider_model": DEFAULT_MODEL,
+        "diagnostic_storage": str(ISSUE_534_DIAGNOSTIC_ROOT / "<timestamp>"),
+        "targets": [pair["target_language"] for pair in pairs],
+        "package_fixture_count": len(LANGUAGE_POLICY_PACKAGE_FIXTURES),
+        "pairs": pairs,
+        "ordinary_artifact_safety": {
+            "metadata_only": True,
+            "raw_source_text_included": False,
+            "prompt_bodies_included": False,
+            "translated_text_bodies_included": False,
+            "provider_request_bodies_included": False,
+            "provider_response_bodies_included": False,
+            "api_keys_or_auth_material_included": False,
+            "release_privacy_legal_support_claim_made": False,
+        },
+        "recommended_live_approval_template": _issue_534_approval_template(pairs),
+        "confirmed": [
+            "policy package fixtures loaded from committed authorized/local inputs",
+            "fake/dry preflight selected one policy-aware unit per target",
+            "glossary_on and glossary_off summaries are paired per target",
+            "structural validation and glossary compliance are reported separately",
+            "ordinary report is metadata-only",
+            "no live provider call was made by this preflight",
+        ],
+        "unknown": [
+            "live provider behavior is Unknown until #534 runs within approval caps",
+            "provider-reported usage is Unknown because this is fake/dry only",
+            (
+                "translation quality is Unknown because fake/dry output is not "
+                "quality evidence"
+            ),
+        ],
+        "tbd": [
+            "owner go/no-go after #534 remains TBD",
+            "runtime glossary rollout remains TBD",
+            "glossary-aware cache reuse remains TBD",
+            "release-version diagnostic retention/deletion/consent remains TBD",
+        ],
+    }
+    if metadata_report_path is not None:
+        metadata_report_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_report_path.write_text(
+            render_policy_provider_evidence_preflight_report(report),
+            encoding="utf-8",
+        )
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "mode": report["mode"],
+                "planned_live_call_count": report["planned_live_call_count"],
+                "targets": report["targets"],
+                "provider_behavior": report["provider_behavior"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return report
+
+
+def render_policy_provider_evidence_preflight_report(
+    report: Mapping[str, Any],
+) -> str:
+    pair_rows = "\n".join(
+        _policy_preflight_pair_report_row(pair) for pair in report["pairs"]
+    )
+    side_rows = "\n".join(
+        _policy_preflight_side_report_row(pair, side_name, side)
+        for pair in report["pairs"]
+        for side_name, side in pair["sides"].items()
+    )
+    approval = report["recommended_live_approval_template"]
+    approved_inputs = ", ".join(approval["approved_inputs"])
+    approved_targets = ", ".join(approval["targets"])
+    return (
+        "# Policy Provider Evidence Fake/Dry Preflight\n\n"
+        "## Confirmed\n"
+        f"{_markdown_list(report['confirmed'])}\n\n"
+        "## Unknown\n"
+        f"{_markdown_list(report['unknown'])}\n\n"
+        "## TBD\n"
+        f"{_markdown_list(report['tbd'])}\n\n"
+        "## Protocol Boundary\n"
+        f"- Schema: {report['protocol']['schema_version']}\n"
+        f"- Live follow-up issue: #{report['planned_live_issue_id']}\n"
+        f"- Max calls: {report['max_calls']}\n"
+        f"- Max tokens total: {report['max_tokens_total']}\n"
+        f"- Provider/model: {report['provider_model']}\n"
+        f"- Diagnostic storage: {report['diagnostic_storage']}\n"
+        "- Live provider calls allowed here: "
+        f"{report['live_provider_calls_allowed']}\n\n"
+        "## Selected Policy Units\n"
+        "| Package | Target | Policy | Entry | On status | Off status |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        f"{pair_rows}\n\n"
+        "## Fake/Dry Pair Summaries\n"
+        "| Package | Target | Side | Structural status | Structural issue codes "
+        "| Compliance status | Hits | Misses | Forbidden | Skipped "
+        "| Compliance reason codes |\n"
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |\n"
+        f"{side_rows}\n\n"
+        "## Recommended Live Approval Packet\n"
+        f"- Approved inputs: {approved_inputs}\n"
+        f"- Targets: {approved_targets}\n"
+        f"- Selection: {approval['selection']}\n"
+        f"- Max calls: {approval['max_calls']}\n"
+        f"- Max tokens total: {approval['max_tokens_total']}\n"
+        f"- Provider/model: {approval['provider_model']}\n"
+        f"- Diagnostic storage: {approval['diagnostic_storage']}\n\n"
+        "## Recommendation\n"
+        "Proceed to #534 only after this PR is merged/reviewed and the owner "
+        "approval remains in force. Keep #534 metadata-only in ordinary artifacts.\n"
+    )
+
+
+def _policy_evidence_cases(*, repo_root: Path) -> tuple[dict[str, Any], ...]:
+    cases: list[dict[str, Any]] = []
+    for fixture_path in LANGUAGE_POLICY_PACKAGE_FIXTURES:
+        payload = _load_language_policy_fixture(fixture_path, repo_root=repo_root)
+        package_id = str(payload.get("package_id") or "Unknown")
+        if package_id == "language_policy.ru_uk.variant_list.v1":
+            cases.extend(
+                _ru_uk_policy_evidence_cases(
+                    payload,
+                    fixture_path=fixture_path,
+                )
+            )
+        elif package_id == "language_policy.de.casefold.contrast_v1":
+            cases.append(
+                _contrast_policy_evidence_case(
+                    payload,
+                    fixture_path=fixture_path,
+                )
+            )
+        else:
+            raise ValueError(f"unsupported language policy package: {package_id}")
+    return tuple(cases)
+
+
+def _load_language_policy_fixture(
+    fixture_path: Path,
+    *,
+    repo_root: Path,
+) -> Mapping[str, Any]:
+    path = _resolve_input_path(fixture_path, repo_root=repo_root)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("language policy package fixture must be an object")
+    raw_key_violations = _policy_evidence_raw_key_violations(payload)
+    if raw_key_violations:
+        raise ValueError(
+            "language policy package fixture contains forbidden raw fields: "
+            + ",".join(raw_key_violations)
+        )
+    return payload
+
+
+def _ru_uk_policy_evidence_cases(
+    payload: Mapping[str, Any],
+    *,
+    fixture_path: Path,
+) -> tuple[dict[str, Any], ...]:
+    cases: list[dict[str, Any]] = []
+    for descriptor in payload["policies"]:
+        target_language = str(descriptor["target_language"])
+        approved_case = _first_expected_case(
+            descriptor["expected_cases"],
+            "approved_variant",
+        )
+        forbidden_case = _first_expected_case(
+            descriptor["expected_cases"],
+            "forbidden_variant",
+        )
+        entry = _policy_entry_descriptor(
+            descriptor["entries"],
+            approved_case["entry_id"],
+        )
+        cases.append(
+            _policy_evidence_case(
+                payload,
+                fixture_path=fixture_path,
+                policy_descriptor=descriptor,
+                entry=entry,
+                approved_form=str(approved_case["form"]),
+                glossary_off_form=str(forbidden_case["form"]),
+                expected_off_reason="policy_forbidden_variant_present",
+                target_language=target_language,
+            )
+        )
+    return tuple(cases)
+
+
+def _contrast_policy_evidence_case(
+    payload: Mapping[str, Any],
+    *,
+    fixture_path: Path,
+) -> dict[str, Any]:
+    entry = payload["entries"][0]
+    approved_case = _first_expected_case(entry["expected_cases"], "casefold_match")
+    forbidden_case = _first_expected_case(
+        entry["expected_cases"],
+        "forbidden_variant",
+    )
+    return _policy_evidence_case(
+        payload,
+        fixture_path=fixture_path,
+        policy_descriptor=payload["policy"],
+        entry=entry,
+        approved_form=str(approved_case["form"]),
+        glossary_off_form=str(forbidden_case["form"]),
+        expected_off_reason="policy_forbidden_variant_present",
+        target_language=str(payload["target_language"]),
+    )
+
+
+def _policy_evidence_case(
+    payload: Mapping[str, Any],
+    *,
+    fixture_path: Path,
+    policy_descriptor: Mapping[str, Any],
+    entry: Mapping[str, Any],
+    approved_form: str,
+    glossary_off_form: str,
+    expected_off_reason: str,
+    target_language: str,
+) -> dict[str, Any]:
+    policy = _terminology_policy_from_descriptor(policy_descriptor)
+    validation = validate_terminology_policy(policy)
+    if not validation.valid:
+        first_issue = validation.issues[0]
+        raise ValueError(
+            f"invalid terminology policy for {target_language}: "
+            f"{first_issue.path} {first_issue.message}"
+        )
+    source_text = _policy_evidence_source_text(entry)
+    return {
+        "fixture_path": str(fixture_path),
+        "package_id": str(payload.get("package_id") or "Unknown"),
+        "package_version": str(payload.get("package_version") or "Unknown"),
+        "evidence_level": str(payload.get("evidence_level") or "Unknown"),
+        "rights_basis": str(
+            payload.get("rights_basis")
+            or payload.get("evidence_basis")
+            or payload.get("fixture_basis")
+            or "Unknown"
+        ),
+        "target_language": target_language,
+        "policy": policy,
+        "policy_id": policy.policy_id,
+        "policy_version": policy.policy_version,
+        "match_mode": str(policy.match_mode),
+        "entry": entry,
+        "entry_id": str(entry["entry_id"]),
+        "approved_form": approved_form,
+        "glossary_off_form": glossary_off_form,
+        "expected_off_reason": expected_off_reason,
+        "source_text": source_text,
+    }
+
+
+def _fake_policy_pair_summary(case: Mapping[str, Any]) -> dict[str, Any]:
+    policy = case["policy"]
+    registry = TerminologyPolicyRegistry((policy,))
+    glossary_on = _fake_policy_side_summary(
+        case,
+        registry=registry,
+        side="glossary_on",
+        translated_form=str(case["approved_form"]),
+        cache_behavior="bypass_glossary_injected_cache",
+        prompt_context_entry_count=1,
+    )
+    glossary_off = _fake_policy_side_summary(
+        case,
+        registry=registry,
+        side="glossary_off",
+        translated_form=str(case["glossary_off_form"]),
+        cache_behavior="default_runtime_cache",
+        prompt_context_entry_count=0,
+    )
+    status = "passed_fake_dry_preflight"
+    if glossary_on["glossary_compliance"]["status"] != "pass":
+        status = "failed_fake_dry_preflight"
+    if not glossary_on["structural_validation"]["valid"]:
+        status = "failed_fake_dry_preflight"
+    if not glossary_off["structural_validation"]["valid"]:
+        status = "failed_fake_dry_preflight"
+    return {
+        "package_id": case["package_id"],
+        "package_version": case["package_version"],
+        "fixture_path": case["fixture_path"],
+        "evidence_level": case["evidence_level"],
+        "rights_basis": case["rights_basis"],
+        "target_language": case["target_language"],
+        "policy_id": case["policy_id"],
+        "policy_version": case["policy_version"],
+        "match_mode": case["match_mode"],
+        "entry_id": case["entry_id"],
+        "selection": {
+            "status": "selected",
+            "rule": "first policy-aware glossary-useful package unit",
+            "source_term_or_alias_present": True,
+            "target_metadata_present": True,
+            "metadata_only": True,
+            "raw_payload_included": False,
+        },
+        "status": status,
+        "planned_live_calls": 2,
+        "provider_reported_usage": "Unknown",
+        "sides": {
+            "glossary_on": glossary_on,
+            "glossary_off": glossary_off,
+        },
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _fake_policy_side_summary(
+    case: Mapping[str, Any],
+    *,
+    registry: TerminologyPolicyRegistry,
+    side: str,
+    translated_form: str,
+    cache_behavior: str,
+    prompt_context_entry_count: int,
+) -> dict[str, Any]:
+    structural_validation = _fake_policy_structural_validation(translated_form)
+    compliance = validate_glossary_compliance(
+        [_policy_evidence_glossary_entry(case["entry"])],
+        selected_entry_ids=(case["entry_id"],),
+        included_entry_ids=(case["entry_id"],),
+        source_text=str(case["source_text"]),
+        translated_text=translated_form,
+        target_language=str(case["target_language"]),
+        terminology_policy_registry=registry,
+        structural_validation_passed=structural_validation["valid"],
+    )
+    return {
+        "side": side,
+        "status": "validated" if structural_validation["valid"] else "failed",
+        "finish_reason": "fake_dry",
+        "http_status": "not_applicable",
+        "usage": "Unknown",
+        "structural_validation": structural_validation,
+        "glossary_compliance": compliance,
+        "cache_policy": {
+            "behavior": cache_behavior,
+            "cache_get_allowed": cache_behavior == "default_runtime_cache",
+            "cache_put_allowed": cache_behavior == "default_runtime_cache",
+        },
+        "prompt_context": {
+            "included_entry_count": prompt_context_entry_count,
+            "raw_prompt_body_included": False,
+        },
+        "planned_live_call": True,
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _fake_policy_structural_validation(translated_form: str) -> dict[str, Any]:
+    content = (
+        "<translation_batch>"
+        '<translation_block id="0">'
+        f"{html.escape(translated_form, quote=False)}"
+        "</translation_block>"
+        "</translation_batch>"
+    )
+    validation = normalize_provider_translation_batch_contract(
+        content,
+        expected_count=1,
+        required_markers=(),
+    )
+    issue_codes: list[str] = []
+    if validation.rejection_reason is not None:
+        issue_codes.append(validation.rejection_reason.value)
+    return {
+        "valid": not issue_codes,
+        "issue_count": len(issue_codes),
+        "issue_codes": issue_codes,
+        "translated_block_count": (
+            len(validation.translated_texts)
+            if validation.translated_texts is not None
+            else 0
+        ),
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _terminology_policy_from_descriptor(
+    descriptor: Mapping[str, Any],
+) -> TerminologyPolicy:
+    return TerminologyPolicy(
+        policy_id=str(descriptor["policy_id"]),
+        policy_version=str(descriptor["policy_version"]),
+        target_language=descriptor.get("target_language"),
+        language_family=descriptor.get("language_family"),
+        match_mode=descriptor["match_mode"],
+        normalization_mode=descriptor["normalization_mode"],
+        allowed_variant_strategy=descriptor["allowed_variant_strategy"],
+        forbidden_variant_strategy=descriptor["forbidden_variant_strategy"],
+        unsupported_fallback=descriptor["unsupported_fallback"],
+        reason_codes=tuple(descriptor["reason_codes"]),
+    )
+
+
+def _policy_evidence_glossary_entry(entry: Mapping[str, Any]) -> dict[str, object]:
+    return {
+        "entry_id": entry["entry_id"],
+        "source_canonical": entry["source_canonical"],
+        "aliases": tuple(entry.get("aliases", ())),
+        "target_canonical": entry.get("target_canonical"),
+        "target_variants": tuple(
+            entry.get("approved_variants")
+            or entry.get("target_variants")
+            or ()
+        ),
+        "forbidden_variants": tuple(entry.get("forbidden_variants") or ()),
+    }
+
+
+def _policy_evidence_source_text(entry: Mapping[str, Any]) -> str:
+    source_terms = _entry_source_terms(_policy_evidence_glossary_entry(entry))
+    source_term = source_terms[0] if source_terms else "Unknown"
+    return f"{source_term} synthetic local policy preflight unit."
+
+
+def _first_expected_case(
+    cases: Sequence[Any],
+    expected_outcome: str,
+) -> Mapping[str, Any]:
+    for item in cases:
+        if (
+            isinstance(item, Mapping)
+            and item.get("expected_outcome") == expected_outcome
+        ):
+            return item
+    raise ValueError(f"missing expected case: {expected_outcome}")
+
+
+def _policy_entry_descriptor(
+    entries: Sequence[Any],
+    entry_id: Any,
+) -> Mapping[str, Any]:
+    for entry in entries:
+        if isinstance(entry, Mapping) and entry.get("entry_id") == entry_id:
+            return entry
+    raise ValueError(f"missing policy entry: {entry_id}")
+
+
+def _policy_evidence_raw_key_violations(value: Any) -> tuple[str, ...]:
+    violations: list[str] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            normalized = str(key).strip().casefold()
+            if normalized in POLICY_EVIDENCE_RAW_KEYS:
+                violations.append(normalized)
+            violations.extend(_policy_evidence_raw_key_violations(item))
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for item in value:
+            violations.extend(_policy_evidence_raw_key_violations(item))
+    return tuple(sorted(dict.fromkeys(violations)))
+
+
+def _issue_534_approval_template(
+    pairs: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "issue_id": ISSUE_534_ID,
+        "approved_inputs": sorted({str(pair["fixture_path"]) for pair in pairs}),
+        "targets": [str(pair["target_language"]) for pair in pairs],
+        "selection": (
+            "first policy-aware glossary-useful unit per approved target from "
+            "#533 fake/dry preflight; paired glossary-on and glossary-off"
+        ),
+        "max_calls": ISSUE_534_MAX_CALLS,
+        "max_tokens_total": ISSUE_534_MAX_TOKENS_TOTAL,
+        "provider_model": f"DeepSeek-compatible provider / {DEFAULT_MODEL}",
+        "diagnostic_storage": (
+            f"{ISSUE_534_DIAGNOSTIC_ROOT}/<timestamp>/ local owner-only untracked"
+        ),
+        "raw_text_capture": (
+            "yes, only bounded fixture excerpts, prompts and provider responses "
+            "inside that diagnostics directory"
+        ),
+        "ordinary_artifacts": "metadata-only counts, statuses and reason codes",
+        "not_approved": provider_evidence_protocol_payload()["not_approved"],
+    }
+
+
+def _policy_preflight_pair_report_row(pair: Mapping[str, Any]) -> str:
+    sides = pair["sides"]
+    return (
+        f"| {pair['package_id']} | {pair['target_language']} | "
+        f"{pair['policy_id']} | {pair['entry_id']} | "
+        f"{sides['glossary_on']['glossary_compliance']['status']} | "
+        f"{sides['glossary_off']['glossary_compliance']['status']} |"
+    )
+
+
+def _policy_preflight_side_report_row(
+    pair: Mapping[str, Any],
+    side_name: str,
+    side: Mapping[str, Any],
+) -> str:
+    structural = side["structural_validation"]
+    compliance = side["glossary_compliance"]
+    structural_codes = structural.get("issue_codes") or ["none"]
+    compliance_codes = compliance.get("reason_codes") or ["none"]
+    return (
+        f"| {pair['package_id']} | {pair['target_language']} | {side_name} | "
+        f"{'pass' if structural['valid'] else 'fail'} | "
+        f"{', '.join(structural_codes)} | {compliance['status']} | "
+        f"{compliance['target_form_present_count']} | "
+        f"{compliance['target_form_missing_count']} | "
+        f"{compliance['forbidden_variant_count']} | "
+        f"{compliance['skipped_entry_count']} | {', '.join(compliance_codes)} |"
+    )
 
 
 def _empty_prompt_context_metadata(*, reason: str) -> dict[str, Any]:
@@ -2511,9 +3183,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             "target-metadata fixture overlay."
         ),
     )
+    parser.add_argument(
+        "--policy-evidence-preflight",
+        action="store_true",
+        help=(
+            "Run the issue #533 local-only policy-package fake/dry provider "
+            "evidence preflight. No provider calls or API keys are used."
+        ),
+    )
     parser.add_argument("--fake", action="store_true")
     parser.add_argument("--metadata-report", default="")
     args = parser.parse_args(argv)
+    metadata_report_path = (
+        Path(args.metadata_report) if args.metadata_report else None
+    )
+    if args.policy_evidence_preflight:
+        run_policy_provider_evidence_preflight(
+            metadata_report_path=metadata_report_path,
+        )
+        return 0
     issue_id = ISSUE_507_ID if args.control_epub else "477"
     diagnostic_root = (
         ISSUE_507_DIAGNOSTIC_ROOT
@@ -2569,9 +3257,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             api_key=api_key,
             base_url=config.provider_base_url,
         )
-    metadata_report_path = (
-        Path(args.metadata_report) if args.metadata_report else None
-    )
     run_smoke(
         config,
         provider=provider,

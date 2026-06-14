@@ -78,6 +78,11 @@ Evidence:
   language-policy packages, including package contract fields, evidence levels,
   fixture rules, local thresholds, core-neutrality proof requirements and
   subagent file-ownership boundaries for #531/#532/#533.
+- Issues #531 / #204BI and #532 / #204BJ add local-only RU/UK and conservative
+  contrast language-policy package fixtures/tests behind the terminology
+  policy registry. Issue #533 / #204BK adds a metadata-only fake/dry
+  provider-evidence protocol and package-aware paired preflight report for
+  #534; live provider behavior and translation quality remain `Unknown`.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added
