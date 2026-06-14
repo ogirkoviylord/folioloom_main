@@ -11,6 +11,12 @@ from tools.glossary_runtime_provider_smoke import (
     DEFAULT_TARGET_METADATA_FIXTURE_PATH,
     ISSUE_507_ID,
     ISSUE_507_MAX_CALLS,
+    ISSUE_534_ID,
+    ISSUE_534_MAX_CALLS,
+    ISSUE_534_MAX_TOKENS_TOTAL,
+    LANGUAGE_POLICY_PACKAGE_FIXTURES,
+    POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
+    PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION,
     FakeRuntimeProvider,
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
@@ -25,10 +31,16 @@ from tools.glossary_runtime_provider_smoke import (
     build_runtime_pressure_summary,
     build_runtime_prompt,
     format_runtime_glossary_prompt_context,
+    provider_evidence_protocol_payload,
+    render_policy_provider_evidence_preflight_report,
     run_fake_paired_epub_rehearsal,
+    run_policy_provider_evidence_preflight,
     run_smoke,
     select_epub_runtime_unit_for_rehearsal,
     validate_runtime_response,
+)
+from tools.glossary_runtime_provider_smoke import (
+    main as smoke_main,
 )
 from translator_service.format_adapters.txt import plan_txt_translation
 from translator_service.glossary_scanner import scan_glossary_candidates
@@ -340,6 +352,148 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 provider=FakeRuntimeProvider(),
                 repo_root=Path.cwd(),
             )
+
+    def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
+        protocol = provider_evidence_protocol_payload()
+
+        self.assertEqual(
+            protocol["schema_version"],
+            PROVIDER_EVIDENCE_PROTOCOL_SCHEMA_VERSION,
+        )
+        self.assertEqual(protocol["issue_id"], "533")
+        self.assertEqual(protocol["live_followup_issue_id"], ISSUE_534_ID)
+        self.assertEqual(protocol["targets"], ["ru", "uk", "de"])
+        self.assertEqual(protocol["caps_placeholders"]["max_calls"], 6)
+        self.assertEqual(
+            protocol["caps_placeholders"]["max_tokens_total"],
+            60_000,
+        )
+        self.assertFalse(
+            protocol["provider_placeholders"]["provider_config_changes_allowed"]
+        )
+        self.assertTrue(protocol["metadata_only"])
+        self.assertFalse(protocol["raw_payload_included"])
+        self.assertIn(
+            "live provider calls in #533",
+            protocol["not_approved"],
+        )
+
+        serialized = json.dumps(protocol, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("<translation_batch>", serialized)
+        self.assertNotIn("<glossary_context", serialized)
+        self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", serialized)
+        self.assertNotIn("sk-", serialized)
+
+    def test_issue_533_policy_preflight_builds_metadata_only_paired_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "policy-preflight.md"
+            report = run_policy_provider_evidence_preflight(
+                repo_root=Path.cwd(),
+                metadata_report_path=report_path,
+            )
+            rendered = report_path.read_text(encoding="utf-8")
+
+        self.assertEqual(
+            report["schema_version"],
+            POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
+        )
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["mode"], "fake_dry")
+        self.assertFalse(report["live_provider_calls_allowed"])
+        self.assertEqual(report["provider_behavior"], "Unknown")
+        self.assertEqual(report["translation_quality"], "Unknown")
+        self.assertEqual(report["planned_live_issue_id"], ISSUE_534_ID)
+        self.assertEqual(report["planned_live_call_count"], 6)
+        self.assertEqual(report["max_calls"], ISSUE_534_MAX_CALLS)
+        self.assertEqual(report["max_tokens_total"], ISSUE_534_MAX_TOKENS_TOTAL)
+        self.assertEqual(report["targets"], ["ru", "uk", "de"])
+        self.assertEqual(
+            sorted(report["recommended_live_approval_template"]["approved_inputs"]),
+            sorted(str(path) for path in LANGUAGE_POLICY_PACKAGE_FIXTURES),
+        )
+        self.assertEqual(
+            report["recommended_live_approval_template"]["provider_model"],
+            "DeepSeek-compatible provider / deepseek-v4-pro",
+        )
+        self.assertTrue(report["ordinary_artifact_safety"]["metadata_only"])
+        self.assertFalse(
+            report["ordinary_artifact_safety"]["provider_response_bodies_included"]
+        )
+
+        for pair in report["pairs"]:
+            with self.subTest(target_language=pair["target_language"]):
+                self.assertEqual(pair["status"], "passed_fake_dry_preflight")
+                self.assertEqual(pair["planned_live_calls"], 2)
+                self.assertEqual(pair["provider_reported_usage"], "Unknown")
+                self.assertTrue(pair["selection"]["source_term_or_alias_present"])
+                self.assertTrue(pair["selection"]["target_metadata_present"])
+                glossary_on = pair["sides"]["glossary_on"]
+                glossary_off = pair["sides"]["glossary_off"]
+                self.assertEqual(
+                    glossary_on["cache_policy"]["behavior"],
+                    "bypass_glossary_injected_cache",
+                )
+                self.assertEqual(
+                    glossary_off["cache_policy"]["behavior"],
+                    "default_runtime_cache",
+                )
+                self.assertTrue(glossary_on["structural_validation"]["valid"])
+                self.assertTrue(glossary_off["structural_validation"]["valid"])
+                self.assertEqual(
+                    glossary_on["glossary_compliance"]["status"],
+                    "pass",
+                )
+                self.assertEqual(
+                    glossary_off["glossary_compliance"]["status"],
+                    "findings",
+                )
+                self.assertGreaterEqual(
+                    glossary_off["glossary_compliance"][
+                        "forbidden_variant_count"
+                    ],
+                    1,
+                )
+
+        serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        for payload in (rendered, serialized):
+            self.assertNotIn("Зеркального Торга", payload)
+            self.assertNotIn("Дзеркальному Торзі", payload)
+            self.assertNotIn("SPIEGELSTRASSE", payload)
+            self.assertNotIn("SPIEGELWEG", payload)
+            self.assertNotIn("<translation_batch>", payload)
+            self.assertNotIn("<glossary_context", payload)
+            self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", payload)
+            self.assertNotIn("Authorization:", payload)
+            self.assertNotIn("Bearer ", payload)
+
+    def test_issue_533_policy_preflight_report_renderer_is_metadata_only(self):
+        report = run_policy_provider_evidence_preflight(repo_root=Path.cwd())
+        rendered = render_policy_provider_evidence_preflight_report(report)
+
+        self.assertIn("Policy Provider Evidence Fake/Dry Preflight", rendered)
+        self.assertIn("Recommended Live Approval Packet", rendered)
+        self.assertIn("language_policy.ru_uk.variant_list.v1", rendered)
+        self.assertIn("terminology_policy.de.casefold.contrast_v1", rendered)
+        self.assertNotIn("Молчальником", rendered)
+        self.assertNotIn("Spiegelstraße", rendered)
+        self.assertNotIn("<translation_batch>", rendered)
+
+    def test_issue_533_policy_preflight_cli_does_not_require_provider_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "policy-preflight.md"
+            exit_code = smoke_main(
+                [
+                    "--policy-evidence-preflight",
+                    "--metadata-report",
+                    str(report_path),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(report_path.is_file())
+            rendered = report_path.read_text(encoding="utf-8")
+            self.assertIn("Live provider calls allowed here: False", rendered)
+            self.assertNotIn("provider_response", rendered)
 
     def test_pressure_summary_distinguishes_epub_shape_without_raw_text(self):
         raw_source = "RAW SOURCE SENTENCE MUST NOT SERIALIZE"

@@ -2134,6 +2134,22 @@ Potential issues to verify:
 ## 9. Последние изменения
 
 - Date: 2026-06-14.
+- Change: Issue #533 / #204BK adds a local-only provider-evidence protocol
+  and fake/dry package-aware preflight for the #529 language-policy evidence
+  sequence.
+- Evidence:
+  `docs/superpowers/specs/2026-06-14-policy-provider-evidence-protocol-preflight.md`
+  records selected RU/UK/DE policy-package units, paired glossary-on/off
+  structural validation and policy-aware compliance summaries, and the #534
+  approval packet shape. Local fake/dry preflight reports `passed` with 6
+  planned live calls across `ru`, `uk` and `de`.
+- Follow-up: #534 may run only after #530-#533 are merged/reviewed and must
+  stay inside the separately approved live-provider bounds. #533 does not
+  prove live provider behavior, token usage, translation quality, runtime
+  rollout readiness, cache reuse safety, release/privacy/legal/support
+  readiness or full RU/UK morphology.
+
+- Date: 2026-06-14.
 - Change: Issue #530 / #204BH records the no-code real language-policy package
   acceptance matrix for the next glossary step under #529.
 - Evidence:
