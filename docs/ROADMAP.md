@@ -699,7 +699,10 @@ Acceptance criteria:
   default-off glossary runtime hook only for the selected attempt, keeps #465
   cache bypass for glossary-injected units, and does not approve default
   rollout, cache reuse, automatic paired translation, provider/config changes,
-  durable state changes or release/privacy claims.
+  durable state changes or release/privacy claims. Issue #551 repairs the
+  scheduled/external worker evidence path so `with_glossary` either uses
+  per-work-unit READY hook data or records metadata-only fallback/omission
+  diagnostics; this is still evidence repair, not quality proof or rollout.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
