@@ -207,8 +207,11 @@
   remains `Unknown` until bounded rerun evidence is recorded. Issue #582 adds an
   explicit internal system-prompt acknowledgment for service-generated glossary
   context and avoids trusting raw document `<glossary_context>` tags by
-  auto-detection; live provider behavior after that boundary clarification
-  remains `Unknown` until bounded rerun evidence is recorded.
+  auto-detection; post-merge bounded #575 live rerun confirmed the boundary
+  change reached glossary-on prompts, but exact configured target-form
+  compliance remained partial (`ru` 2/5 and `uk` 4/5), so issue #584 tracks the
+  next local owner/test terminology-contract strengthening step before another
+  provider rerun.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
