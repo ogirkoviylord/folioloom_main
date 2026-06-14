@@ -1,10 +1,17 @@
+import json
 import socketserver
 import threading
 import unittest
+from io import StringIO
+from unittest.mock import patch
 
 from translator_service.clamd_runtime import (
     ClamdRuntimeCheckError,
+    _parse_version,
+    _sanitize_metadata_text,
     check_clamd_runtime,
+    main,
+    parse_args,
 )
 
 
@@ -136,6 +143,115 @@ class ClamdRuntimeCheckTest(unittest.TestCase):
                     port=server.server_address[1],
                     timeout_seconds=0.5,
                 )
+
+
+    def test_check_clamd_runtime_raises_on_connection_refused(self):
+        with self.assertRaises(ClamdRuntimeCheckError):
+            check_clamd_runtime(
+                host="127.0.0.1",
+                port=1,
+                timeout_seconds=0.1,
+            )
+
+    def test_check_clamd_runtime_raises_on_empty_response(self):
+        with _CommandClamdServer({b"zPING\0": b""}) as server:
+            with self.assertRaises(ClamdRuntimeCheckError):
+                check_clamd_runtime(
+                    host=server.server_address[0],
+                    port=server.server_address[1],
+                    timeout_seconds=0.5,
+                )
+
+
+class ParseVersionTest(unittest.TestCase):
+    def test_parses_full_version_string(self):
+        scanner, sig = _parse_version("ClamAV 1.4.0/27500/date")
+        self.assertEqual(scanner, "ClamAV 1.4.0")
+        self.assertEqual(sig, "27500")
+
+    def test_parses_version_without_signature(self):
+        scanner, sig = _parse_version("ClamAV 1.4.0")
+        self.assertEqual(scanner, "ClamAV 1.4.0")
+        self.assertIsNone(sig)
+
+    def test_returns_none_for_empty_version(self):
+        scanner, sig = _parse_version("")
+        self.assertIsNone(scanner)
+        self.assertIsNone(sig)
+
+
+class SanitizeMetadataTextTest(unittest.TestCase):
+    def test_strips_control_characters(self):
+        result = _sanitize_metadata_text("hello\x00world\x01!")
+        self.assertEqual(result, "helloworld!")
+
+    def test_truncates_long_text(self):
+        result = _sanitize_metadata_text("a" * 200, limit=50)
+        self.assertEqual(len(result), 50)
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_default_args(self):
+        args = parse_args([])
+        self.assertEqual(args.host, "clamd")
+        self.assertEqual(args.port, 3310)
+        self.assertEqual(args.timeout, 10.0)
+        self.assertEqual(args.response_limit_bytes, 4096)
+        self.assertFalse(args.scan_eicar)
+
+    def test_custom_args(self):
+        args = parse_args([
+            "--host", "localhost",
+            "--port", "9999",
+            "--timeout", "5.0",
+            "--response-limit-bytes", "2048",
+            "--scan-eicar",
+        ])
+        self.assertEqual(args.host, "localhost")
+        self.assertEqual(args.port, 9999)
+        self.assertEqual(args.timeout, 5.0)
+        self.assertEqual(args.response_limit_bytes, 2048)
+        self.assertTrue(args.scan_eicar)
+
+
+class ClamdMainTest(unittest.TestCase):
+    def test_main_returns_zero_on_success(self):
+        with _CommandClamdServer(
+            {
+                b"zPING\0": b"PONG\0",
+                b"zVERSION\0": b"ClamAV 1.4.0/27500/date\0",
+            }
+        ) as server:
+            host, port = server.server_address
+            result = main([
+                "--host", host,
+                "--port", str(port),
+                "--timeout", "1.0",
+            ])
+        self.assertEqual(result, 0)
+
+    def test_main_returns_one_on_failure(self):
+        result = main(["--host", "127.0.0.1", "--port", "1", "--timeout", "0.1"])
+        self.assertEqual(result, 1)
+
+    def test_main_prints_json_on_success(self):
+        with _CommandClamdServer(
+            {
+                b"zPING\0": b"PONG\0",
+                b"zVERSION\0": b"ClamAV 1.4.0/27500/date\0",
+            }
+        ) as server:
+            host, port = server.server_address
+            buf = StringIO()
+            with patch("sys.stdout", new=buf):
+                main([
+                    "--host", host,
+                    "--port", str(port),
+                    "--timeout", "1.0",
+                ])
+            output = json.loads(buf.getvalue())
+            self.assertEqual(output["status"], "ok")
+            self.assertEqual(output["scanner_name"], "clamd")
 
 
 if __name__ == "__main__":
