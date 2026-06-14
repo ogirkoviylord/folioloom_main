@@ -222,11 +222,119 @@ class GlossaryPromptContextTest(unittest.TestCase):
         self.assertNotIn("Elizabeth", serialized_payload)
         self.assertNotIn("Lizzy", serialized_payload)
 
+    def test_terminology_policy_metadata_is_default_off_and_compact(self):
+        entry = _entry_mapping(
+            "entry:policy",
+            source="Term with policy",
+            target="Термін",
+            terminology_policy={
+                "policy_id": "terminology_policy.generic.variant_list",
+                "policy_version": "v1",
+                "match_mode": "variant_list",
+            },
+        )
+
+        default_result = format_glossary_prompt_context([entry])
+        enabled_result = format_glossary_prompt_context(
+            [entry],
+            config=GlossaryPromptContextConfig(
+                include_terminology_policy_metadata=True,
+            ),
+        )
+        tight_result = format_glossary_prompt_context(
+            [entry],
+            config=GlossaryPromptContextConfig(
+                include_terminology_policy_metadata=True,
+                max_entry_characters=1,
+            ),
+        )
+
+        self.assertNotIn("terminology_policy:", default_result.text)
+        self.assertIn(
+            (
+                "terminology_policy: "
+                "policy_id=terminology_policy.generic.variant_list; "
+                "policy_version=v1; match_mode=variant_list"
+            ),
+            enabled_result.text,
+        )
+        self.assertEqual(enabled_result.included_entry_ids, ("entry:policy",))
+        self.assertEqual(tight_result.included_entry_ids, ())
+        self.assertEqual(
+            tight_result.omitted_entries[0].reason,
+            (
+                GlossaryPromptContextOmissionReason
+                .ENTRY_CHARACTER_BUDGET_EXHAUSTED
+            ),
+        )
+
+    def test_invalid_terminology_policy_metadata_is_omitted_safely(self):
+        entry = _entry_mapping(
+            "entry:invalid-policy",
+            source="Invalid policy term",
+            target="Invalid target",
+            terminology_policy={
+                "policy_id": "invalid <policy>",
+                "policy_version": "v1",
+                "match_mode": "variant_list",
+            },
+        )
+        version_only_entry = _entry_mapping(
+            "entry:version-only",
+            source="Version only term",
+            target="Version target",
+        )
+        version_only_entry["policy_version"] = "glossary-policy-v1"
+
+        result = format_glossary_prompt_context(
+            [entry],
+            config=GlossaryPromptContextConfig(
+                include_terminology_policy_metadata=True,
+            ),
+        )
+        version_only_result = format_glossary_prompt_context(
+            [version_only_entry],
+            config=GlossaryPromptContextConfig(
+                include_terminology_policy_metadata=True,
+            ),
+        )
+        payload = glossary_prompt_context_metadata_payload(result)
+        omissions = payload["included_entries"][0]["field_omissions"]
+        serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertEqual(result.included_entry_ids, ("entry:invalid-policy",))
+        self.assertNotIn("terminology_policy:", result.text)
+        self.assertNotIn("invalid <policy>", result.text)
+        self.assertIn(
+            {
+                "field_name": "terminology_policy",
+                "reason": (
+                    GlossaryPromptContextFieldOmissionReason
+                    .POLICY_METADATA_INVALID
+                    .value
+                ),
+                "omitted_count": 1,
+            },
+            omissions,
+        )
+        self.assertNotIn("invalid <policy>", serialized_payload)
+        self.assertNotIn("Invalid policy term", serialized_payload)
+        self.assertNotIn("Invalid target", serialized_payload)
+        self.assertNotIn("terminology_policy:", version_only_result.text)
+        self.assertEqual(version_only_result.included_entries[0].field_omissions, ())
+
     def test_formatter_rejects_invalid_config(self):
         with self.assertRaises(ValueError):
             format_glossary_prompt_context(
                 [_entry("entry:one")],
                 config=GlossaryPromptContextConfig(max_entries=-1),
+            )
+        with self.assertRaises(ValueError):
+            format_glossary_prompt_context(
+                [_entry("entry:one")],
+                config=GlossaryPromptContextConfig(
+                    include_terminology_policy_metadata=1,  # type: ignore[arg-type]
+                ),
             )
 
 
@@ -253,6 +361,29 @@ def _entry(
         grammatical_gender=GlossaryGender.UNKNOWN,
         profile_rule_ids=("profile-rule:test",),
     )
+
+
+def _entry_mapping(
+    entry_id: str,
+    *,
+    source: str,
+    target: str,
+    terminology_policy: dict[str, str] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "entry_id": entry_id,
+        "category": "name",
+        "layer": "soft",
+        "status": "validator_accepted",
+        "source_canonical": source,
+        "target_canonical": target,
+        "confidence": 0.91,
+        "strategy": "translate_meaning",
+        "grammatical_gender": "unknown",
+    }
+    if terminology_policy is not None:
+        payload["terminology_policy"] = terminology_policy
+    return payload
 
 
 if __name__ == "__main__":
