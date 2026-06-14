@@ -393,8 +393,10 @@ class AdminTranslationLogsTest(unittest.TestCase):
                             "content": (
                                 "Before prompt.\n"
                                 '<glossary_context role="untrusted_reference_data">\n'
-                                "- source: Darcy\n"
-                                "- target: Дарси\n"
+                                "<entry role=\"terminology_contract\">\n"
+                                "<source_canonical>Darcy</source_canonical>\n"
+                                "<target_canonical>Дарси</target_canonical>\n"
+                                "</entry>\n"
                                 "</glossary_context>\n"
                                 "<translation_batch>Darcy returns.</translation_batch>"
                             ),
@@ -436,8 +438,8 @@ class AdminTranslationLogsTest(unittest.TestCase):
             "bypass_glossary_injected_cache",
         )
         context_text = sidecar["rendered_prompt_contexts"][0]["text"]
-        self.assertIn("source: Darcy", context_text)
-        self.assertIn("target: Дарси", context_text)
+        self.assertIn("<source_canonical>Darcy</source_canonical>", context_text)
+        self.assertIn("<target_canonical>Дарси</target_canonical>", context_text)
         sidecar_text = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Darcy returns.", sidecar_text)
         self.assertIn("glossary_runtime_diagnostics.json", readme)
@@ -601,8 +603,10 @@ class AdminTranslationLogsTest(unittest.TestCase):
                             "role": "user",
                             "content": (
                                 '<glossary_context role="untrusted_reference_data">\n'
-                                "- source: Secret\n"
-                                "- target: sk-context-secret-value\n"
+                                "<entry role=\"terminology_contract\">\n"
+                                "<source_canonical>Secret</source_canonical>\n"
+                                "<target_canonical>sk-context-secret-value</target_canonical>\n"
+                                "</entry>\n"
                                 "</glossary_context>"
                             ),
                         }

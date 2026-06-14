@@ -59,8 +59,8 @@ class EpubGlossaryRehearsalArchiveTests(unittest.TestCase):
             "ready",
         )
         context_text = sidecar["rendered_prompt_contexts"][0]["text"]
-        self.assertIn("source: Darcy", context_text)
-        self.assertIn("target: Дарси", context_text)
+        self.assertIn("<source_canonical>Darcy</source_canonical>", context_text)
+        self.assertIn("<target_canonical>Дарси</target_canonical>", context_text)
         sidecar_text = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Darcy returns.", sidecar_text)
         self.assertIn("provider_io_diagnostics.jsonl", sidecar_text)

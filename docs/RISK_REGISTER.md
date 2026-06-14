@@ -183,7 +183,10 @@
   Issue #567 tightens the owner-only EPUB smoke context/compliance boundary so
   rendered prompt context and compliance checks use the same target-backed
   useful entries, reducing non-useful selected-entry noise without proving
-  translation quality or morphology correctness.
+  translation quality or morphology correctness. Issue #569 hardens the
+  default-off prompt-context formatter with explicit escaped source/target
+  terminology contract tags for included entries, reducing prompt-shape
+  ambiguity without approving rollout or proving provider obedience.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core

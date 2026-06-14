@@ -164,6 +164,19 @@ owner-only QA, policy/variant work or bounded provider rerun evidence. This is
 not a default rollout, cache reuse change, live provider call, durable state
 change or quality/readiness claim.
 
+Issue #569 implementation slice on 2026-06-14: branch
+`codex/issue-569-runtime-glossary-context-contract` hardens the local
+default-off glossary prompt-context contract. Included entries now render an
+explicit escaped terminology contract inside `<entry role="terminology_contract">`
+with `<source_canonical>`, `<target_canonical>`, `<alias>`,
+`<target_variant>` and `<forbidden_variant>` elements where data exists.
+Prompt-context metadata remains compact/metadata-only, and owner-only archive
+tests were updated to expect the explicit contract shape. This is intended to
+make the next bounded provider rerun distinguish model obedience or morphology
+issues from weak prompt-context formatting. It does not approve rollout, cache
+reuse, live provider calls by itself, durable state changes or quality/readiness
+claims.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,

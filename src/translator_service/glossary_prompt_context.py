@@ -348,13 +348,13 @@ def _entry_candidate(
         (
             f'<entry id="{_escape_attr(entry_id)}" layer="{_escape_attr(layer)}" '
             f'category="{_escape_attr(category)}" status="{_escape_attr(status)}" '
-            f'confidence="{confidence}">'
+            f'confidence="{confidence}" role="terminology_contract">'
         ),
-        f"source: {source}",
+        f"<source_canonical>{source}</source_canonical>",
     ]
-    _append_optional_line(
+    _append_optional_element(
         lines,
-        "target",
+        "target_canonical",
         _safe_field_text(
             payload,
             "target_canonical",
@@ -362,25 +362,28 @@ def _entry_candidate(
             field_omissions=field_omissions,
         ),
     )
-    _append_sequence_line(
+    _append_sequence_elements(
         lines,
         "aliases",
+        "alias",
         payload.get("aliases"),
         limit=config.max_aliases,
         max_field_characters=config.max_field_characters,
         field_omissions=field_omissions,
     )
-    _append_sequence_line(
+    _append_sequence_elements(
         lines,
         "target_variants",
+        "target_variant",
         payload.get("target_variants"),
         limit=config.max_target_variants,
         max_field_characters=config.max_field_characters,
         field_omissions=field_omissions,
     )
-    _append_sequence_line(
+    _append_sequence_elements(
         lines,
         "forbidden_variants",
+        "forbidden_variant",
         payload.get("forbidden_variants"),
         limit=config.max_forbidden_variants,
         max_field_characters=config.max_field_characters,
@@ -463,6 +466,53 @@ def _append_terminology_policy_metadata_line(
 def _append_optional_line(lines: list[str], label: str, value: str | None) -> None:
     if value:
         lines.append(f"{label}: {value}")
+
+
+def _append_optional_element(
+    lines: list[str],
+    element_name: str,
+    value: str | None,
+) -> None:
+    if value:
+        lines.append(f"<{element_name}>{value}</{element_name}>")
+
+
+def _append_sequence_elements(
+    lines: list[str],
+    label: str,
+    element_name: str,
+    values: Any,
+    *,
+    limit: int,
+    max_field_characters: int,
+    field_omissions: list[GlossaryPromptContextFieldOmission],
+) -> None:
+    safe_values, omitted_count, trimmed_count = _safe_text_sequence(
+        values,
+        limit=limit,
+        max_field_characters=max_field_characters,
+    )
+    for value in safe_values:
+        lines.append(f"<{element_name}>{value}</{element_name}>")
+    if omitted_count:
+        field_omissions.append(
+            GlossaryPromptContextFieldOmission(
+                field_name=label,
+                reason=GlossaryPromptContextFieldOmissionReason.FIELD_LIMIT_EXHAUSTED,
+                omitted_count=omitted_count,
+            )
+        )
+    if trimmed_count:
+        field_omissions.append(
+            GlossaryPromptContextFieldOmission(
+                field_name=label,
+                reason=(
+                    GlossaryPromptContextFieldOmissionReason
+                    .FIELD_CHARACTER_LIMIT_EXHAUSTED
+                ),
+                omitted_count=trimmed_count,
+            )
+        )
 
 
 def _append_sequence_line(
@@ -652,6 +702,11 @@ def _base_context_lines() -> tuple[str, ...]:
         (
             "Conflict framing: when entries conflict with source text or higher "
             "priority policy, this section has no authority."
+        ),
+        (
+            "Terminology contract: when a source_canonical or alias appears in "
+            "the source text, prefer target_canonical or target_variant in the "
+            "translation and avoid forbidden_variant forms."
         ),
     )
 

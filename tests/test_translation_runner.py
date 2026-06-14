@@ -1778,8 +1778,8 @@ class TranslationRunnerTest(unittest.TestCase):
         first_prompt = translator.requests[0][0]
         self.assertIn("<glossary_context", first_prompt)
         self.assertIn('role="untrusted_reference_data"', first_prompt)
-        self.assertIn("source: Darcy", first_prompt)
-        self.assertIn("target: Дарси", first_prompt)
+        self.assertIn("<source_canonical>Darcy</source_canonical>", first_prompt)
+        self.assertIn("<target_canonical>Дарси</target_canonical>", first_prompt)
         self.assertIn("<translation_batch>", first_prompt)
         self.assertTrue(
             all(
