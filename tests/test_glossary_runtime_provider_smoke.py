@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_scanner import scan_glossary_candidates
 from tools.glossary_runtime_provider_smoke import (
     APPROVED_INPUT_TARGETS,
     APPROVED_OWNER_TEST_INPUT_TARGETS,
@@ -15,6 +17,7 @@ from tools.glossary_runtime_provider_smoke import (
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
     SmokeConfig,
+    apply_target_metadata_fixture_overlay,
     apply_runtime_pressure_fallback,
     build_epub_runtime_unit_selection_decision,
     build_glossary_off_runtime_package,
@@ -652,6 +655,99 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 self.assertNotIn("three dimensions", serialized)
                 self.assertNotIn("<glossary_context", serialized)
                 self.assertNotIn("<translation_batch>", serialized)
+
+    def test_adversarial_glossary_fixture_matches_ru_uk_target_metadata(self):
+        fixture = Path("test_samples/glossary_adversarial_terms.en.txt")
+        metadata_fixture = Path(
+            "test_samples/glossary_targets/"
+            "glossary_adversarial_terms.runtime-glossary-targets.json"
+        )
+        expected_terms = {
+            "Glass Market",
+            "Glossary Map",
+            "North Door",
+            "Quiet Knife",
+            "Salt Thread",
+        }
+        expected_targets = {
+            "ru": {
+                "Glass Market": "Зеркальный Торг",
+                "Glossary Map": "Карта Имён",
+                "North Door": "Северница",
+                "Quiet Knife": "Молчальник",
+                "Salt Thread": "Солевязь",
+            },
+            "uk": {
+                "Glass Market": "Дзеркальний Торг",
+                "Glossary Map": "Карта Імен",
+                "North Door": "Північниця",
+                "Quiet Knife": "Мовчун-клинок",
+                "Salt Thread": "Солев’язь",
+            },
+        }
+
+        plan = plan_txt_translation(
+            content=fixture.read_bytes(),
+            max_fragment_chars=2400,
+        )
+        first_unit_text = plan.units[0].source_text
+        self.assertEqual(len(plan.units), 5)
+        self.assertEqual(
+            {term for term in expected_terms if term in first_unit_text},
+            expected_terms,
+        )
+
+        for target_language in ("ru", "uk"):
+            with self.subTest(target_language=target_language):
+                snapshot = scan_glossary_candidates(
+                    plan,
+                    source_language="en",
+                    target_language=target_language,
+                )
+                seen_terms = {entry.source_canonical for entry in snapshot.entries}
+                seen_aliases = {
+                    alias for entry in snapshot.entries for alias in entry.aliases
+                }
+                self.assertEqual(
+                    {
+                        term
+                        for term in expected_terms
+                        if term in seen_terms or term in seen_aliases
+                    },
+                    expected_terms,
+                )
+
+                overlaid, metadata = apply_target_metadata_fixture_overlay(
+                    snapshot,
+                    config=SmokeConfig(
+                        input_targets=((fixture, target_language),),
+                        fake=True,
+                        target_metadata_fixture_path=metadata_fixture,
+                    ),
+                    repo_root=Path.cwd(),
+                    input_path=fixture.resolve(),
+                    target_language=target_language,
+                )
+
+                self.assertEqual(metadata["status"], "applied")
+                self.assertEqual(metadata["fixture_entry_count"], 5)
+                self.assertEqual(metadata["matched_entry_count"], 5)
+                target_entries = {
+                    entry.source_canonical: entry.target_canonical
+                    for entry in overlaid.entries
+                    if entry.target_canonical
+                }
+                self.assertEqual(target_entries, expected_targets[target_language])
+
+                serialized = json.dumps(
+                    metadata,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                self.assertNotIn("The river town", serialized)
+                self.assertNotIn("<glossary_context", serialized)
+                self.assertNotIn("Зеркальный Торг", serialized)
+                self.assertNotIn("Дзеркальний Торг", serialized)
 
     def test_control_epub_missing_target_metadata_fixture_falls_back_safely(self):
         fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
