@@ -705,8 +705,10 @@ def _base_context_lines() -> tuple[str, ...]:
         ),
         (
             "Terminology contract: when a source_canonical or alias appears in "
-            "the source text, prefer target_canonical or target_variant in the "
-            "translation and avoid forbidden_variant forms."
+            "the source text, use a configured target_canonical or "
+            "target_variant form for that term. Do not freely translate, "
+            "paraphrase, rename, or omit listed terms; avoid forbidden_variant "
+            "forms."
         ),
     )
 
