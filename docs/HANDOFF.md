@@ -217,6 +217,18 @@ fake calls; live provider behavior remains `Unknown` until a bounded #575 run
 is executed. This is not default rollout, cache reuse, provider-config change,
 durable state change or release/privacy/legal/support evidence.
 
+Issue #578 implementation slice on 2026-06-15: branch
+`codex/issue-578-txt-useful-glossary-filter` tightens the #575 adversarial TXT
+smoke path so glossary-on prompt context and compliance use the same
+target-backed, source-present useful entries. Fake CLI preflight completed with
+4 fake calls and now reports 5 included / 5 selected / 5 checked entries for
+each `ru`/`uk` glossary-on side; the previous `target_metadata_missing` and
+`source_term_absent` noise is gone. Fake output still reports
+`target_form_missing`, as expected for a non-translating fake provider. Live
+provider behavior after this filter remains `Unknown` until a bounded #575
+rerun is executed. This is not default rollout, cache reuse, provider-config
+change, durable state change or release/privacy/legal/support evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,

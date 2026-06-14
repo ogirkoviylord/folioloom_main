@@ -2352,13 +2352,18 @@ def build_runtime_package(
             continue
         budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
         unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
+        target_backed_source_present_only = (
+            is_epub_plan or config.issue_id == ISSUE_575_ID
+        )
         prompt_context_text, prompt_context_metadata = (
             format_runtime_glossary_prompt_context(
                 retained_snapshot.entries,
                 selected_entry_ids=decision.selected_entry_ids,
                 budget_plan=budget_plan,
-                source_text=unit.source_text if is_epub_plan else None,
-                target_backed_source_present_only=is_epub_plan,
+                source_text=(
+                    unit.source_text if target_backed_source_present_only else None
+                ),
+                target_backed_source_present_only=target_backed_source_present_only,
             )
         )
         prompt_context_metadata["target_metadata_fixture"] = dict(
@@ -4647,7 +4652,12 @@ def _runtime_glossary_compliance_entry_ids(
     selected_entry_ids = _compact_entry_ids(
         package.adapter_metadata.get("selected_entry_ids", ())
     )
-    if package.document_format != "epub":
+    selection_filter = package.prompt_context_metadata.get("selection_filter", {})
+    should_use_included_entries = package.document_format == "epub" or (
+        isinstance(selection_filter, Mapping)
+        and selection_filter.get("policy") == "target_backed_source_present_entries"
+    )
+    if not should_use_included_entries:
         return selected_entry_ids
     included_entry_ids = _compact_entry_ids(
         package.prompt_context_metadata.get("included_entry_ids", ())
