@@ -72,6 +72,19 @@ not a default glossary rollout, not live provider evidence, not arbitrary
 real-book glossary generation, not glossary-aware cache reuse and not a
 quality/readiness claim.
 
+Issue #555 architecture slice on 2026-06-14: branch
+`codex/issue-555-real-book-glossary-resolver-contract` records the no-code
+real-book runtime glossary resolver contract in
+`docs/superpowers/specs/2026-06-14-real-book-runtime-glossary-resolver-contract.md`.
+It confirms the root cause of the latest real EPUB `with_glossary` run: the
+selector and #551 evidence path worked, but no READY runtime glossary data was
+available, so every unit fell back with `runtime_glossary_data_unavailable`
+and no `<glossary_context>` was sent to the provider. The contract defines a
+future worker-side resolver boundary, target-metadata sources, fallback reason
+codes, diagnostics boundaries, provider gates and #465 cache-bypass boundary.
+It is no-code architecture only: no rollout, live provider calls, cache reuse,
+storage/admin/retention changes or release/privacy claims are approved.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
