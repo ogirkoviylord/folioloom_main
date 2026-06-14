@@ -99,6 +99,26 @@ class GlossaryTerminologyPolicyTest(unittest.TestCase):
             UnsupportedTerminologyFallback.MANUAL_REVIEW_REQUIRED,
         )
 
+    def test_registry_treats_empty_language_as_missing_for_family_policy(self):
+        family_policy = _policy(
+            "terminology_policy.generic.slavic_variant_list",
+            target_language="",
+            language_family="slavic",
+            match_mode=TerminologyMatchMode.VARIANT_LIST,
+            allowed_variant_strategy=AllowedVariantStrategy.CANONICAL_AND_VARIANTS,
+        )
+        registry = TerminologyPolicyRegistry((family_policy,))
+
+        self.assertTrue(
+            validate_terminology_policy(family_policy).valid,
+            validate_terminology_policy(family_policy).issues,
+        )
+        self.assertFalse(registry.resolve("").supported)
+        self.assertEqual(
+            registry.resolve("uk", language_family="slavic").policy,
+            family_policy,
+        )
+
     def test_unsupported_language_fallback_is_metadata_only_not_pass(self):
         registry = TerminologyPolicyRegistry(())
 
