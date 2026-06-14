@@ -160,6 +160,10 @@
   overlay contract with raw/secret rejection and source-term/alias-only
   matching; it remains a planning foundation, not arbitrary glossary
   generation, runtime rollout, provider work, cache reuse or quality proof.
+  Issue #557 adds a default-off persistent EPUB resolver that reuses existing
+  worker hook/preflight/cache-bypass boundaries and falls back with metadata
+  reasons unless target metadata, source term/alias presence and prompt-context
+  budgets pass for an explicitly enabled owner/test path.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
