@@ -183,16 +183,18 @@ class TerminologyPolicyRegistry:
                     "Invalid terminology policy: "
                     f"{first_issue.path} {first_issue.message}"
                 )
-            if policy.target_language is not None:
-                key = _normalize_identifier(policy.target_language)
-                if key in by_language:
-                    raise ValueError(f"Duplicate target_language policy: {key}.")
-                by_language[key] = policy
-            if policy.language_family is not None:
-                key = _normalize_identifier(policy.language_family)
-                if key in by_family:
-                    raise ValueError(f"Duplicate language_family policy: {key}.")
-                by_family[key] = policy
+            language_key = _normalize_identifier(policy.target_language)
+            if language_key:
+                if language_key in by_language:
+                    raise ValueError(
+                        f"Duplicate target_language policy: {language_key}."
+                    )
+                by_language[language_key] = policy
+            family_key = _normalize_identifier(policy.language_family)
+            if family_key:
+                if family_key in by_family:
+                    raise ValueError(f"Duplicate language_family policy: {family_key}.")
+                by_family[family_key] = policy
         self._by_language = by_language
         self._by_family = by_family
 
