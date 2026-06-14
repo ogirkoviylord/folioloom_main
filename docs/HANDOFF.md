@@ -114,6 +114,17 @@ and scheduled worker injection/cache-bypass/redaction behavior. This does not
 call providers, roll out glossary by default, enable cache reuse, mutate
 DB/schema/state/storage/admin/retention or make release/privacy claims.
 
+Issue #558 verification slice on 2026-06-14: branch
+`codex/issue-558-fake-epub-glossary-rehearsal` adds a local fake-provider EPUB
+scheduled-worker rehearsal test for the real `with_glossary` owner/test path.
+The rehearsal proves the #557 resolver can inject bounded glossary context into
+a fake provider request, #465 cache bypass metadata is emitted, #549 owner-only
+download archives include `glossary_runtime_diagnostics.json` with rendered
+context evidence, fallback metadata remains metadata-only, and
+`without_glossary` omits glossary sidecars. This is local/fake evidence only:
+provider quality, live stability, runtime rollout and release/privacy readiness
+remain `Unknown`/not approved.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
