@@ -170,6 +170,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             compliance = report["calls"][0]["glossary_compliance"]
             self.assertTrue(compliance["metadata_only"])
             self.assertFalse(compliance["raw_payload_included"])
+            self.assertFalse(compliance["terminology_policy"]["enabled"])
             self.assertIn(
                 compliance["status"],
                 {"pass", "findings", "skipped"},
