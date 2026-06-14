@@ -73,6 +73,11 @@ Evidence:
   records the #517 / #204BA no-code policy-registry boundary, including policy
   descriptor fields, match modes, reason-code families, fallback behavior and
   #516 child-issue sequencing.
+- `docs/superpowers/specs/2026-06-14-language-policy-package-acceptance-matrix.md`
+  records the #530 / #204BH no-code acceptance matrix for real
+  language-policy packages, including package contract fields, evidence levels,
+  fixture rules, local thresholds, core-neutrality proof requirements and
+  subagent file-ownership boundaries for #531/#532/#533.
 - Issue #518 / #204BB added
   `src/translator_service/glossary_terminology_policy.py` as a local-only
   terminology policy registry foundation. Issue #521 / #204BE added

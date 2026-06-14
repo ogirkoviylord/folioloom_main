@@ -132,6 +132,8 @@ These gates apply to future language-aware glossary compliance or morphology
 work. They are architecture and local-test gates, not release-readiness or
 semantic-quality proof. Issue #517 records the current no-code architecture in
 `docs/superpowers/specs/2026-06-14-glossary-terminology-policy-registry-architecture.md`.
+Issue #530 records the real language-policy package acceptance matrix in
+`docs/superpowers/specs/2026-06-14-language-policy-package-acceptance-matrix.md`.
 Issues #518-#521 add the first local-only registry, RU/UK synthetic fixture
 coverage, compliance-adapter payloads and prompt-context metadata boundary.
 
@@ -142,6 +144,9 @@ coverage, compliance-adapter payloads and prompt-context metadata boundary.
 - A terminology policy must declare its id/version, match mode, allowed and
   forbidden variant strategy, unsupported-language fallback and metadata-only
   reason codes.
+- A real language-policy package must also declare its package id/version,
+  fixture/evidence basis, evidence level, raw-material policy, local acceptance
+  thresholds and core-neutrality proof before implementation is accepted.
 - Compliance summaries must preserve structural validation as a separate field
   from glossary compliance status, keep the default exact configured-form path
   compatible, and serialize only metadata-only policy ids, match status, entry
