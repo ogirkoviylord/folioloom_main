@@ -681,9 +681,11 @@ Acceptance criteria:
   metadata-only fake/dry provider-evidence protocol and package-aware preflight
   for conditional #534. Issue #534 adds bounded live provider-boundary evidence
   for the package units, with structural validation passing and RU/UK
-  glossary-off compliance findings to review. Normal runtime glossary rollout,
-  cache reuse, additional provider calls outside the separately approved #534
-  bounds and release/privacy/legal/support readiness remain unapproved.
+  glossary-off compliance findings to review. Issue #535 adds the no-code
+  runtime rollout state machine and evidence gates; it keeps normal/default and
+  limited-beta rollout rejected for now. Normal runtime glossary rollout, cache
+  reuse, additional provider calls outside separately approved bounds and
+  release/privacy/legal/support readiness remain unapproved.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
@@ -695,9 +697,9 @@ Acceptance criteria:
   no-code acceptance matrix for real language-policy packages. Issues #531 and
   #532 add local policy package fixtures/tests, issue #533 records a
   metadata-only fake/dry provider-evidence preflight, and issue #534 records
-  bounded live provider-boundary evidence. Remaining future work: runtime
-  rollout design, cache-key design, #537 decision prep and release diagnostic
-  policy.
+  bounded live provider-boundary evidence. Issue #535 records the no-code
+  runtime rollout design. Remaining future work: cache-key design, #537
+  decision prep and release diagnostic policy.
   Evidence: #517 recorded the architecture, #518 added the local registry,
   #519 added synthetic/authorized RU/UK fixture coverage, #520 added
   policy-aware metadata-only compliance summaries, #521 added opt-in compact

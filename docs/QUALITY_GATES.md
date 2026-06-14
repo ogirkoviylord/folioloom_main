@@ -167,6 +167,27 @@ coverage, compliance-adapter payloads and prompt-context metadata boundary.
   cache reuse, provider calls, storage/admin/retention changes or
   release/privacy/legal/support claims.
 
+### Glossary runtime rollout
+
+These gates apply to future glossary runtime rollout proposals. Issue #535
+records the current no-code state machine in
+`docs/superpowers/specs/2026-06-14-glossary-runtime-rollout-design.md`.
+
+- Current approved runtime posture remains `off`, `shadow_only` or explicitly
+  owner-approved test/smoke paths only. Normal/default and limited-beta glossary
+  rollout are rejected for now.
+- Promotion beyond shadow/test paths requires separate owner approval and
+  evidence for structural validation, policy-aware compliance, owner-only
+  quality review, provider stability/cost and diagnostics privacy boundaries.
+- Glossary-injected enabled/test-path units must preserve #465 cache bypass
+  unless a separate approved cache-key issue changes that policy.
+- Missing, invalid, unsupported, over-budget or `Unknown` glossary/policy data
+  must fall back to the existing non-glossary translation path or metadata-only
+  skip/fallback reasons, not pass or quality claims.
+- Release-version consent, retention, deletion, support and legal/privacy
+  policy for glossary diagnostics remains `TBD` and blocks beta/default
+  rollout claims.
+
 ### Docker / infrastructure
 
 Commands found:
