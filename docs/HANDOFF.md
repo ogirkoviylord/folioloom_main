@@ -24,6 +24,23 @@ TXT/DOCX/EPUB adapters, DeepSeek-compatible provider layer, admin visibility,
 beta allowlist, rights confirmation, beta cost/cap guard, Docker Compose stack
 и backup/restore scripts.
 
+Issue #546 implementation slice on 2026-06-14: branch
+`codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
+battle-test selector after target-language choice: `Translate with glossary` /
+`Перевести с глоссарием` or `Translate without glossary` / `Перевести без
+глоссария`. `without glossary` keeps the existing translation path. `with
+glossary` enables the default-off glossary runtime hook for the selected
+attempt and now threads that hook through in-memory DOCX/EPUB and persistent
+DOCX/EPUB worker paths, including EPUB. Missing/invalid/non-useful/over-budget
+glossary data falls back safely to the existing non-glossary path, and
+glossary-injected test-path units preserve #465 cache bypass. Selector state
+is stored only as safe metadata for debugging/history/admin investigation.
+This is not a default glossary rollout, not automatic on/off sampling, not
+glossary-aware cache reuse, not a provider/config/storage/admin/retention
+change and not a release/privacy/legal/support or quality-proof claim. TXT
+direct runtime prompt injection and deferred/external worker runtime config
+plumbing remain future/Unknown unless separately implemented and approved.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
