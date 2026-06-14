@@ -666,20 +666,26 @@ Acceptance criteria:
   behavior, including RU/UK morphology and future languages, to live behind an
   explicit policy/adapter boundary rather than scattered core-module branches.
   Issue #517 / #204BA records the no-code terminology policy registry
-  architecture and merge order for #518, #519, #520, #521 and #522.
+  architecture and merge order for #518, #519, #520, #521 and #522. Issues
+  #518-#521 are now merged as local-only foundations: registry contract,
+  synthetic RU/UK policy fixture coverage, policy-aware compliance summaries
+  and prompt-context policy metadata boundary. Issue #522 records this docs
+  sync. Normal runtime glossary rollout, cache reuse, provider calls and
+  release/privacy/legal/support readiness remain unapproved.
 
 - Task: Add glossary terminology policy registry and RU/UK variant coverage.
   Phase: 1
   Priority: High
   Risk: Medium/High
-  Agent suitability: Architect first, then small implementation issues
-  Suggested acceptance criteria: a language-neutral
-  `target_language -> terminology_policy` contract exists; RU/UK exact-form
-  compliance can distinguish true term misses from approved declined variants;
-  unsupported languages produce metadata-only `TBD` / `Unknown` /
-  `manual_review_required` style outcomes; no normal runtime glossary rollout,
-  cache reuse, provider calls, storage/admin/retention changes or release
-  claims are introduced.
+  Agent suitability: completed local foundation; future language packages need
+  focused issues
+  Status: Done for #516 local foundation via #517-#522. Remaining future work:
+  actual language-policy packages beyond synthetic fixture coverage, provider
+  evidence, runtime rollout, cache-key design and release diagnostic policy.
+  Evidence: #517 recorded the architecture, #518 added the local registry,
+  #519 added synthetic/authorized RU/UK fixture coverage, #520 added
+  policy-aware metadata-only compliance summaries, #521 added opt-in compact
+  prompt-context policy metadata and #522 synced docs.
 
 - Task: Produce Gate B evidence report.
   Phase: 1
