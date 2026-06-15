@@ -38,7 +38,6 @@ from translator_service.bot.messages import (
     build_delete_unavailable_message,
     build_download_unavailable_message,
     build_duplicate_upload_message,
-    build_glossary_mode_required_message,
     build_help_message,
     build_how_it_works_message,
     build_language_selected_message,
@@ -56,7 +55,6 @@ from translator_service.bot.messages import (
     build_settings_message,
     build_settings_reset_message,
     build_start_message,
-    build_translation_glossary_mode_selection_message,
     build_translation_job_status_message,
     build_translation_language_selection_message,
     build_translation_mode_required_message,
@@ -83,17 +81,13 @@ from translator_service.bot.messages import (
     get_open_book_text,
     get_reset_settings_text,
     get_toggle_progress_preview_text,
-    get_translate_with_glossary_text,
-    get_translate_without_glossary_text,
     get_translation_mode_book_manuscript_text,
     get_translation_mode_document_form_text,
-    glossary_mode_for_button_text,
     is_back_text,
     is_cancel_text,
     is_confirm_rights_text,
     is_confirm_translation_text,
     is_continue_translation_text,
-    is_glossary_mode_button_text,
     is_help_text,
     is_how_it_works_text,
     is_language_menu_text,
@@ -108,7 +102,6 @@ from translator_service.bot.messages import (
 )
 from translator_service.bot_translation_service import (
     BotTranslationService,
-    GlossaryModeRequired,
     PreparedGlossaryPackageAttachment,
     PreparedGlossaryPackageAttachmentRequest,
     PreparedGlossaryPackagePrepRequest,
@@ -1780,78 +1773,6 @@ def create_router(
             reply_markup=_target_language_keyboard(interface_language),
         )
 
-    @router.message(F.text.func(is_glossary_mode_button_text))
-    async def glossary_mode_text(message: Message) -> None:
-        glossary_mode = glossary_mode_for_button_text(message.text)
-        interface_language = service.get_interface_language(message.from_user.id)
-        if glossary_mode is None:
-            await message.answer(
-                build_glossary_mode_required_message(interface_language),
-                reply_markup=_glossary_mode_keyboard(interface_language),
-            )
-            return
-
-        try:
-            service.select_pending_translation_glossary_mode(
-                user_telegram_id=message.from_user.id,
-                glossary_mode=glossary_mode,
-            )
-        except RightsConfirmationRequired:
-            pending = service.get_pending(message.from_user.id)
-            await message.answer(
-                build_rights_confirmation_message(
-                    pending.file_name if pending else "document",
-                    interface_language=interface_language,
-                ),
-                reply_markup=_rights_confirmation_keyboard(interface_language),
-            )
-            return
-        except TranslationModeRequired:
-            pending = service.get_pending(message.from_user.id)
-            await message.answer(
-                build_translation_mode_selection_message(
-                    pending.file_name if pending else "document",
-                    interface_language=interface_language,
-                    source_language_display=(
-                        pending.source_language_display if pending else None
-                    ),
-                ),
-                reply_markup=_translation_mode_keyboard(interface_language),
-            )
-            return
-        except (BetaAccessDenied, SecurityCooldownActive) as error:
-            await message.answer(build_upload_error_message(error, interface_language))
-            return
-        except ValueError as error:
-            await message.answer(str(error))
-            return
-
-        duplicate = service.find_pending_translation_duplicate(
-            user_telegram_id=message.from_user.id,
-        )
-        if duplicate is not None:
-            await message.answer(
-                build_duplicate_upload_message(
-                    duplicate,
-                    interface_language=interface_language,
-                ),
-                reply_markup=_duplicate_upload_keyboard(
-                    duplicate,
-                    interface_language=interface_language,
-                ),
-            )
-            return
-
-        try:
-            await _send_pending_translation_preview(
-                message=message,
-                service=service,
-                translator=translator,
-                interface_language=interface_language,
-            )
-        except (PreviewTranslationError, TextExtractionError, ValueError) as error:
-            await message.answer(build_upload_error_message(error, interface_language))
-
     @router.message(F.text.func(_is_language_button_text))
     async def language_text(message: Message) -> None:
         language_option = find_language_by_button_text(message.text)
@@ -1869,9 +1790,10 @@ def create_router(
         pending_upload = service.get_pending_upload(message.from_user.id)
         if pending_upload is not None:
             try:
-                await _prepare_and_send_glossary_mode_selection(
+                await _prepare_and_send_translation_preview(
                     message=message,
                     service=service,
+                    translator=translator,
                     target_language=language_option.code,
                     interface_language=interface_language,
                 )
@@ -2137,15 +2059,6 @@ def create_router(
         if pending is None:
             await message.answer(
                 build_no_pending_translation_message(interface_language)
-            )
-            return
-        if pending.glossary_mode is None:
-            await message.answer(
-                build_translation_glossary_mode_selection_message(
-                    pending,
-                    interface_language=interface_language,
-                ),
-                reply_markup=_glossary_mode_keyboard(interface_language),
             )
             return
 
@@ -2503,20 +2416,6 @@ def _translation_mode_keyboard(interface_language: str = "en"):
                     text=get_translation_mode_book_manuscript_text(interface_language)
                 )
             ],
-            [KeyboardButton(text=get_back_text(interface_language))],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-
-
-def _glossary_mode_keyboard(interface_language: str = "en"):
-    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=get_translate_with_glossary_text(interface_language))],
-            [KeyboardButton(text=get_translate_without_glossary_text(interface_language))],
             [KeyboardButton(text=get_back_text(interface_language))],
         ],
         resize_keyboard=True,
@@ -2975,38 +2874,6 @@ async def _prepare_and_send_translation_preview(
     )
 
 
-async def _prepare_and_send_glossary_mode_selection(
-    *,
-    message,
-    service: BotTranslationService,
-    target_language: str,
-    interface_language: str,
-) -> None:
-    try:
-        pending = service.prepare_pending_upload(
-            user_telegram_id=message.from_user.id,
-            target_language=target_language,
-            glossary_mode=None,
-        )
-    except SameLanguageTranslationBlocked as error:
-        await message.answer(
-            build_same_language_translation_blocked_message(
-                source_language_code=error.source_language_code,
-                target_language_code=error.target_language_code,
-                interface_language=interface_language,
-            ),
-            reply_markup=_target_language_keyboard(interface_language),
-        )
-        return
-    await message.answer(
-        build_translation_glossary_mode_selection_message(
-            pending,
-            interface_language=interface_language,
-        ),
-        reply_markup=_glossary_mode_keyboard(interface_language),
-    )
-
-
 async def _send_pending_translation_preview(
     *,
     message,
@@ -3098,21 +2965,6 @@ async def _continue_pending_translation_after_preview(
             reply_markup=_translation_mode_keyboard(interface_language),
         )
         return
-    except GlossaryModeRequired:
-        pending = service.get_pending(message.from_user.id)
-        if pending is None:
-            await message.answer(
-                build_glossary_mode_required_message(interface_language)
-            )
-            return
-        await message.answer(
-            build_translation_glossary_mode_selection_message(
-                pending,
-                interface_language=interface_language,
-            ),
-            reply_markup=_glossary_mode_keyboard(interface_language),
-        )
-        return
     except (BetaAccessDenied, SecurityCooldownActive) as error:
         await message.answer(build_upload_error_message(error, interface_language))
         return
@@ -3168,15 +3020,6 @@ async def _run_confirm_pending_translation(
     if pending is not None and pending.translation_mode is None:
         await message.answer(
             build_translation_mode_required_message(interface_language)
-        )
-        return
-    if pending is not None and pending.glossary_mode is None:
-        await message.answer(
-            build_translation_glossary_mode_selection_message(
-                pending,
-                interface_language=interface_language,
-            ),
-            reply_markup=_glossary_mode_keyboard(interface_language),
         )
         return
     if pending is not None and not pending.preview_accepted:
@@ -3347,23 +3190,6 @@ async def _run_confirm_pending_translation(
                 ),
             ),
             reply_markup=_translation_mode_keyboard(interface_language),
-        )
-        return
-    except GlossaryModeRequired:
-        stop_heartbeat.set()
-        await heartbeat_task
-        pending = service.get_pending(message.from_user.id)
-        if pending is None:
-            await message.answer(
-                build_glossary_mode_required_message(interface_language)
-            )
-            return
-        await message.answer(
-            build_translation_glossary_mode_selection_message(
-                pending,
-                interface_language=interface_language,
-            ),
-            reply_markup=_glossary_mode_keyboard(interface_language),
         )
         return
     except PreviewAcceptanceRequired:
