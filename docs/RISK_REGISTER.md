@@ -56,6 +56,14 @@
 
 ## 4. Обязательные категории рисков
 
+R-041 update note, 2026-06-15: issue #614 adds metadata-only bounded live
+DeepSeek Pro prepared-glossary evidence after #619 fake/dry passed. One
+approved live call completed within caps, but the response omitted required
+top-level prepared-package fields and failed #610 validation. Treat #614 as
+provider-boundary failure evidence only: #607 remains blocked until a READY
+live prepared package exists, and rollout/cache/release claims remain
+unapproved.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
