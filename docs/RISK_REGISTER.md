@@ -215,8 +215,12 @@
   the default-off owner/test prompt context and fake #575 preflight confirms it
   appears only in glossary-on diagnostics; issue #588 adds an explicit #586
   post-#584 adversarial TXT smoke boundary with the same #575 safeguards and a
-  separate owner-only diagnostics root. Live provider behavior after this
-  prompt-context shape change remains `Unknown` until issue #586.
+  separate owner-only diagnostics root. Issue #586 completed the bounded
+  post-#584 adversarial TXT live rerun with 4 calls, structural validation
+  passing and no secret-pattern findings, but exact configured target-form
+  compliance did not improve versus the post-#582 baseline (`ru` remained 2/5,
+  `uk` remained 4/5), so rollout remains blocked pending compliance/selection
+  review.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
