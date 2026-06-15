@@ -1088,7 +1088,12 @@ def _adjudicate_provider_package_payload(
         "provider_model",
         "candidate_selector_signature",
     )
-    if all(key in payload for key in required_top_level):
+    local_metadata_reasons = _local_metadata_envelope_reasons(
+        payload,
+        config=config,
+        packet=packet,
+    )
+    if all(key in payload for key in required_top_level) and not local_metadata_reasons:
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="provider_package_as_is",
@@ -1125,9 +1130,66 @@ def _adjudicate_provider_package_payload(
         mode="local_envelope_applied",
         reason_codes=(
             *unwrap_reasons,
+            *local_metadata_reasons,
             "provider_package_missing_local_envelope_fields",
         ),
     )
+
+
+def _local_metadata_envelope_reasons(
+    payload: Mapping[str, Any],
+    *,
+    config: PreparedGlossaryPrepLiveConfig,
+    packet: Mapping[str, Any],
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    placeholder_fields = {
+        "package_id",
+        "provider_run_id",
+        "diagnostics_ref",
+        "source_document_fingerprint",
+        "candidate_selector_signature",
+    }
+    for field in placeholder_fields:
+        value = payload.get(field)
+        if _is_placeholder_text(value):
+            reasons.append("provider_package_local_metadata_placeholder")
+            break
+    if payload.get("owner_approved") is not True:
+        reasons.append("provider_package_owner_approval_not_local_true")
+    if payload.get("provider_role_id") != GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID:
+        reasons.append("provider_package_provider_role_not_local_value")
+    if payload.get("provider_model") != config.provider_model:
+        reasons.append("provider_package_provider_model_not_local_value")
+    if (
+        isinstance(payload.get("source_document_fingerprint"), str)
+        and payload.get("source_document_fingerprint")
+        != packet.get("source_document_fingerprint")
+    ):
+        reasons.append("provider_package_source_fingerprint_not_local_value")
+    if (
+        isinstance(payload.get("candidate_selector_signature"), str)
+        and payload.get("candidate_selector_signature")
+        != packet.get("candidate_selector_signature")
+    ):
+        reasons.append("provider_package_selector_signature_not_local_value")
+    return _dedupe(reasons)
+
+
+def _is_placeholder_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return value is None
+    normalized = value.strip().lower()
+    if not normalized:
+        return True
+    placeholder_needles = (
+        "unknown",
+        "unavailable",
+        "use package_id",
+        "local wrapper",
+        "if unavailable",
+    )
+    return any(needle in normalized for needle in placeholder_needles)
 
 
 def _unwrap_provider_package_payload(payload: Any) -> tuple[Any, tuple[str, ...]]:

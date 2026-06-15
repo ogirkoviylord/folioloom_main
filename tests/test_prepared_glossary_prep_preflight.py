@@ -314,6 +314,36 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
             result.reason_codes,
         )
 
+    def test_live_preparation_envelopes_placeholder_local_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_PlaceholderPackageIdProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+            prepared_package = json.loads(
+                result.prepared_package_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(
+            metadata_report["package_adjudication"]["mode"],
+            "local_envelope_applied",
+        )
+        self.assertIn(
+            "provider_package_local_metadata_placeholder",
+            result.reason_codes,
+        )
+        self.assertTrue(prepared_package["package_id"].startswith("prepared:issue-624"))
+
     def test_live_preparation_rejects_multi_key_output_skeleton_wrapper(self):
         with TemporaryDirectory() as temp_dir:
             result = run_live_preparation(
@@ -501,6 +531,31 @@ class _OutputSkeletonProvider(_PreparedPackageProvider):
                 {"output_package_skeleton": package},
                 ensure_ascii=False,
             ),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _PlaceholderPackageIdProvider(_OutputSkeletonProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["output_package_skeleton"][
+            "package_id"
+        ] = "use package_id from local wrapper if unavailable"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
             usage=result.usage,
             finish_reason=result.finish_reason,
             http_status=result.http_status,
