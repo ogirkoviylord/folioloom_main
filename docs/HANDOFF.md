@@ -135,6 +135,23 @@ future approval packet. Durable storage, retention/export/delete, admin
 visibility, legal/privacy/support copy and rollout remain `TBD`; provider
 quality/cost/latency remain `Unknown`.
 
+Issue #608 architecture slice on 2026-06-15: branch
+`codex/issue-608-pro-glossary-prep-architecture` adds
+`docs/superpowers/specs/2026-06-15-deepseek-pro-glossary-prep-before-telegram-battle-test.md`.
+It refines #560 for the real Telegram battle-test path after owner-only archive
+review showed `with_glossary` selected but no rendered `<glossary_context>`.
+The contract keeps `deepseek-v4-pro` glossary-prep only and keeps runtime book
+translation on the configured runtime provider/model. The recommended first
+implementation slice is a no-schema, job-scoped compact prepared-glossary
+package handoff into the existing #557 resolver, with raw preparation prompts,
+bounded excerpts and provider responses confined to owner-only diagnostics.
+Codex is not approved to operate Telegram for #607; #607 remains
+owner-assisted and should run only after #608 implementation evidence can make
+`with_glossary` produce READY target-backed runtime glossary data. Live Pro
+prep calls, compact job-state behavior, admin/archive expansion, retention,
+rollout and release/privacy/legal/support claims still require separate exact
+approval.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
