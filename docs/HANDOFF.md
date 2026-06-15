@@ -264,6 +264,20 @@ owner/test terminology contract shape before another provider rerun. This is
 not default rollout, cache reuse, provider-config change, durable state change
 or release/privacy/legal/support evidence.
 
+Issue #584 implementation slice on 2026-06-15: branch
+`codex/issue-584-stronger-terminology-contract` strengthens the default-off
+owner/test glossary prompt-context shape by adding a compact `mandatory_term:`
+checklist line for each included target-backed term. The line repeats the
+entry id, source/alias trigger surface, required target canonical/variant
+forms and forbidden forms where present, while retaining the existing escaped
+`<entry role="terminology_contract">` details below it. Fake #575 preflight
+completed with 4 fake calls; glossary-on diagnostics contained the mandatory
+checklist plus the #582 service clause, while glossary-off diagnostics did not.
+Live provider behavior after this local prompt-context strengthening remains
+`Unknown` until the post-#584 bounded live rerun in issue #586. This is not a
+default rollout, cache reuse, provider-config change, durable state change,
+RU/UK morphology engine or release/privacy/legal/support evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,

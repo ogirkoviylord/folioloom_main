@@ -548,6 +548,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             rendered = report_path.read_text(encoding="utf-8")
             self.assertNotIn("<glossary_context", rendered)
             self.assertNotIn("<translation_batch>", rendered)
+            self.assertNotIn("mandatory_term:", rendered)
             self.assertNotIn("BEGIN_UNTRUSTED_DOCUMENT_CONTENT", rendered)
             self.assertNotIn("provider_response", rendered)
 
@@ -558,6 +559,10 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             self.assertEqual(len(diagnostics), 4)
             for payload in diagnostics:
                 system_prompt = payload["system_prompt"]
+                request_text = (
+                    payload.get("runtime_request_text", "")
+                    + payload.get("user_prompt", "")
+                )
                 if payload["side"] == "glossary_on":
                     self.assertIn(
                         "service-generated <glossary_context>",
@@ -567,11 +572,15 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                         "do not translate it as document text",
                         system_prompt,
                     )
+                    self.assertIn("mandatory_term: id=", request_text)
+                    self.assertIn("when=source_or_alias_present", request_text)
+                    self.assertIn("required_target=", request_text)
                 else:
                     self.assertNotIn(
                         "service-generated <glossary_context>",
                         system_prompt,
                     )
+                    self.assertNotIn("mandatory_term: id=", request_text)
 
     def test_issue_575_boundary_rejects_missing_pairing_wrong_target_or_live_root(
         self,
