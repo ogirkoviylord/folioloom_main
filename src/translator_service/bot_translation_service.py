@@ -171,6 +171,12 @@ SUPPORTED_GLOSSARY_MODES = (
     GLOSSARY_MODE_WITH,
     GLOSSARY_MODE_WITHOUT,
 )
+PREPARED_GLOSSARY_PREP_BETA_SAFETY_SCHEMA_VERSION = (
+    "prepared-glossary-prep-beta-safety-v1"
+)
+_PREPARED_GLOSSARY_PREP_BASE_PROMPT_TOKENS = 1_200
+_PREPARED_GLOSSARY_PREP_MAX_SOURCE_PACKET_TOKENS = 9_600
+_PREPARED_GLOSSARY_PREP_COMPLETION_TOKENS = 2_400
 _LANGUAGE_NAME_TO_CODE = {
     language_name.casefold(): language_code
     for language_code, language_name in LANGUAGE_NAMES.items()
@@ -307,6 +313,15 @@ class _PreparedGlossaryPackageAttachmentResult:
     payload: dict | None
     metadata: dict[str, object]
     fail_closed: bool = False
+
+
+@dataclass(frozen=True)
+class _PreparedGlossaryPrepBetaSafetyReservation:
+    allowed: bool
+    metadata: dict[str, object]
+    job_id: str | None = None
+    user_id: str | None = None
+    estimate: JobCostEstimate | None = None
 
 
 @dataclass(frozen=True)
@@ -3400,6 +3415,25 @@ class BotTranslationService:
             source_sha256=request.source_sha256,
             content=pending.content,
         )
+        prep_beta_safety = (
+            self._reserve_beta_safety_for_prepared_glossary_prep(
+                pending=pending,
+                request=request,
+            )
+        )
+        if not prep_beta_safety.allowed:
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=tuple(
+                    prep_beta_safety.metadata.get("reason_codes", ())
+                )
+                or ("prepared_glossary_prep_beta_safety_blocked",),
+                request=request,
+                source="prep",
+                extra_metadata={
+                    "glossary_prep_beta_safety": prep_beta_safety.metadata,
+                },
+            )
         try:
             prep_attachment = self._prepared_glossary_package_prep_resolver(
                 prep_request
@@ -3418,8 +3452,22 @@ class BotTranslationService:
                 request=request,
                 source="prep",
                 fail_closed=True,
+                extra_metadata={
+                    "glossary_prep_beta_safety": (
+                        self._consume_prepared_glossary_prep_beta_safety(
+                            reservation=prep_beta_safety,
+                            attachment=None,
+                        )
+                    )
+                },
             )
         else:
+            prep_beta_safety_metadata = (
+                self._consume_prepared_glossary_prep_beta_safety(
+                    reservation=prep_beta_safety,
+                    attachment=prep_attachment,
+                )
+            )
             prep_result = _prepared_glossary_package_attachment_result_from(
                 prep_attachment,
                 request=request,
@@ -3427,8 +3475,175 @@ class BotTranslationService:
                 missing_reason_code="prepared_glossary_package_prep_missing",
                 disabled_reason_code="prepared_glossary_package_prep_disabled",
                 fail_closed_when_not_ready=True,
+                extra_metadata={
+                    "glossary_prep_beta_safety": prep_beta_safety_metadata,
+                },
             )
         return prep_result
+
+    def _reserve_beta_safety_for_prepared_glossary_prep(
+        self,
+        *,
+        pending: PendingTranslation,
+        request: PreparedGlossaryPackageAttachmentRequest,
+    ) -> _PreparedGlossaryPrepBetaSafetyReservation:
+        estimate = _estimate_prepared_glossary_prep_cost(
+            content=pending.content,
+            rates=self._beta_safety_rates,
+        )
+        job_id = _prepared_glossary_prep_beta_safety_job_id(
+            pending=pending,
+            request=request,
+        )
+        user_id = f"telegram:{pending.user_telegram_id}"
+        metadata = _prepared_glossary_prep_beta_safety_metadata(
+            status="not_reserved",
+            reason_codes=(),
+            job_id=job_id,
+            estimate=estimate,
+            provider_reported_usage_status="Unknown",
+        )
+        if self._beta_safety_guard is None:
+            return _PreparedGlossaryPrepBetaSafetyReservation(
+                allowed=False,
+                job_id=job_id,
+                user_id=user_id,
+                estimate=estimate,
+                metadata={
+                    **metadata,
+                    "reservation_status": "blocked",
+                    "reason_codes": [
+                        "prepared_glossary_prep_beta_safety_guard_missing"
+                    ],
+                },
+            )
+
+        start_decision = self._beta_safety_guard.can_start_new_work()
+        if not start_decision.allowed:
+            return _PreparedGlossaryPrepBetaSafetyReservation(
+                allowed=False,
+                job_id=job_id,
+                user_id=user_id,
+                estimate=estimate,
+                metadata={
+                    **metadata,
+                    "reservation_status": "blocked",
+                    "reason_codes": _beta_safety_reason_codes(
+                        "prepared_glossary_prep_beta_safety_start_blocked",
+                        start_decision.reason_code,
+                    ),
+                    "beta_safety_reason_code": start_decision.reason_code,
+                },
+            )
+
+        reservation_decision = self._beta_safety_guard.reserve_job(
+            job_id=job_id,
+            user_id=user_id,
+            estimate=estimate,
+        )
+        if not reservation_decision.allowed:
+            return _PreparedGlossaryPrepBetaSafetyReservation(
+                allowed=False,
+                job_id=job_id,
+                user_id=user_id,
+                estimate=estimate,
+                metadata={
+                    **metadata,
+                    "reservation_status": "blocked",
+                    "reason_codes": _beta_safety_reason_codes(
+                        "prepared_glossary_prep_beta_safety_reservation_denied",
+                        reservation_decision.reason_code,
+                    ),
+                    "beta_safety_reason_code": reservation_decision.reason_code,
+                },
+            )
+
+        return _PreparedGlossaryPrepBetaSafetyReservation(
+            allowed=True,
+            job_id=job_id,
+            user_id=user_id,
+            estimate=estimate,
+            metadata={
+                **metadata,
+                "reservation_status": "reserved",
+                "reason_codes": [],
+                "beta_safety_reason_code": reservation_decision.reason_code,
+            },
+        )
+
+    def _consume_prepared_glossary_prep_beta_safety(
+        self,
+        *,
+        reservation: _PreparedGlossaryPrepBetaSafetyReservation,
+        attachment: PreparedGlossaryPackageAttachment | None,
+    ) -> dict[str, object]:
+        metadata = dict(reservation.metadata)
+        if (
+            self._beta_safety_guard is None
+            or not reservation.allowed
+            or reservation.job_id is None
+            or reservation.user_id is None
+            or reservation.estimate is None
+        ):
+            return metadata
+
+        provider_usage = _prepared_glossary_provider_usage_from_attachment(
+            attachment,
+        )
+        if provider_usage is None:
+            prompt_tokens = reservation.estimate.prompt_tokens
+            completion_tokens = reservation.estimate.completion_tokens
+            usage_source = "estimate_when_provider_usage_unknown"
+            provider_reported_usage_status = "Unknown"
+            metadata["reason_codes"] = list(
+                _unique_texts(
+                    tuple(metadata.get("reason_codes", ()))
+                    + (
+                        "prepared_glossary_prep_provider_usage_unknown_"
+                        "estimate_accounted",
+                    )
+                )
+            )
+        else:
+            prompt_tokens, completion_tokens = provider_usage
+            usage_source = "provider_reported"
+            provider_reported_usage_status = "reported"
+
+        try:
+            self._beta_safety_guard.record_work_unit_usage(
+                job_id=reservation.job_id,
+                user_id=reservation.user_id,
+                work_unit_id=f"{reservation.job_id}:prepared_glossary_prep",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            self._mark_beta_safety_reservation_consumed(job_id=reservation.job_id)
+        except Exception:
+            logger.exception(
+                "Prepared glossary prep beta safety usage recording failed safely: "
+                "job_id=%s user_id=%s",
+                reservation.job_id,
+                reservation.user_id,
+            )
+            metadata["reservation_status"] = "usage_record_failed"
+            metadata["reason_codes"] = list(
+                _unique_texts(
+                    tuple(metadata.get("reason_codes", ()))
+                    + ("prepared_glossary_prep_beta_safety_usage_record_failed",)
+                )
+            )
+            return metadata
+
+        metadata.update(
+            {
+                "reservation_status": "consumed",
+                "accounting_usage_source": usage_source,
+                "accounted_prompt_tokens": prompt_tokens,
+                "accounted_completion_tokens": completion_tokens,
+                "provider_reported_usage_status": provider_reported_usage_status,
+            }
+        )
+        return metadata
 
     def _release_beta_safety_reservation(self, *, job_id: str, reason: str) -> None:
         if self._beta_safety_guard is None:
@@ -4785,6 +5000,150 @@ def _translation_policy_payload(translation_policy: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _estimate_prepared_glossary_prep_cost(
+    *,
+    content: bytes,
+    rates: BetaSafetyRates,
+) -> JobCostEstimate:
+    source_packet_tokens = min(
+        _PREPARED_GLOSSARY_PREP_MAX_SOURCE_PACKET_TOKENS,
+        max(1, math.ceil(len(content) / 4)),
+    )
+    prompt_tokens = (
+        _PREPARED_GLOSSARY_PREP_BASE_PROMPT_TOKENS + source_packet_tokens
+    )
+    completion_tokens = _PREPARED_GLOSSARY_PREP_COMPLETION_TOKENS
+    return JobCostEstimate(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        estimated_cost_usd=estimate_cost_usd(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            rates=rates,
+        ),
+    )
+
+
+def _prepared_glossary_prep_beta_safety_job_id(
+    *,
+    pending: PendingTranslation,
+    request: PreparedGlossaryPackageAttachmentRequest,
+) -> str:
+    attempt_ref = (
+        pending.attempt_id
+        or pending.preview_id
+        or request.source_sha256[:12]
+    )
+    return (
+        "glossary-prep:"
+        f"{_safe_identifier(attempt_ref)}:"
+        f"{request.source_sha256[:12]}:"
+        f"{_safe_identifier(request.document_kind)}:"
+        f"{_safe_identifier(request.target_language)}"
+    )
+
+
+def _safe_identifier(value: object) -> str:
+    text = str(value or "Unknown")
+    safe = re.sub(r"[^A-Za-z0-9_.:-]+", "_", text).strip("_")
+    return safe[:80] or "Unknown"
+
+
+def _prepared_glossary_prep_beta_safety_metadata(
+    *,
+    status: str,
+    reason_codes: tuple[str, ...],
+    job_id: str,
+    estimate: JobCostEstimate,
+    provider_reported_usage_status: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": PREPARED_GLOSSARY_PREP_BETA_SAFETY_SCHEMA_VERSION,
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "reservation_status": status,
+        "reason_codes": list(_unique_texts(reason_codes)),
+        "reservation_job_id": job_id,
+        "estimated_prompt_tokens": estimate.prompt_tokens,
+        "estimated_completion_tokens": estimate.completion_tokens,
+        "estimated_cost_usd": estimate.estimated_cost_usd,
+        "provider_reported_usage_status": provider_reported_usage_status,
+        "accounting_usage_source": "Unknown",
+    }
+
+
+def _beta_safety_reason_codes(
+    base_reason_code: str,
+    beta_safety_reason_code: str,
+) -> list[str]:
+    return list(
+        _unique_texts(
+            (
+                base_reason_code,
+                f"beta_safety_{beta_safety_reason_code or 'Unknown'}",
+            )
+        )
+    )
+
+
+def _prepared_glossary_provider_usage_from_attachment(
+    attachment: PreparedGlossaryPackageAttachment | None,
+) -> tuple[int, int] | None:
+    if attachment is None or not isinstance(attachment.metadata, Mapping):
+        return None
+    usage = _mapping_value(attachment.metadata, "provider_usage")
+    if usage is None:
+        usage = _mapping_value(attachment.metadata, "usage")
+    if usage is None:
+        usage = _mapping_value(attachment.metadata, "provider_reported_usage")
+    if usage is None:
+        return None
+    prompt_tokens = _int_usage_value(
+        usage,
+        ("prompt_tokens", "input_tokens", "provider_reported_prompt_tokens"),
+    )
+    completion_tokens = _int_usage_value(
+        usage,
+        (
+            "completion_tokens",
+            "output_tokens",
+            "provider_reported_completion_tokens",
+        ),
+    )
+    total_tokens = _int_usage_value(
+        usage,
+        ("total_tokens", "provider_reported_total_tokens"),
+    )
+    if completion_tokens is None and prompt_tokens is not None and total_tokens:
+        completion_tokens = max(0, total_tokens - prompt_tokens)
+    if prompt_tokens is None or completion_tokens is None:
+        return None
+    return prompt_tokens, completion_tokens
+
+
+def _mapping_value(
+    value: Mapping[str, object],
+    key: str,
+) -> Mapping[str, object] | None:
+    raw = value.get(key)
+    return raw if isinstance(raw, Mapping) else None
+
+
+def _int_usage_value(
+    usage: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> int | None:
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float) and value.is_integer():
+            return max(0, int(value))
+    return None
+
+
 def _prepared_glossary_package_attachment_result(
     *,
     status: str,
@@ -4792,6 +5151,7 @@ def _prepared_glossary_package_attachment_result(
     request: PreparedGlossaryPackageAttachmentRequest | None = None,
     source: str = "resolver",
     fail_closed: bool = False,
+    extra_metadata: Mapping[str, object] | None = None,
 ) -> _PreparedGlossaryPackageAttachmentResult:
     metadata: dict[str, object] = {
         "schema_version": "prepared-glossary-package-attachment-v1",
@@ -4813,6 +5173,8 @@ def _prepared_glossary_package_attachment_result(
                 "source_sha256_short": request.source_sha256[:12],
             }
         )
+    if extra_metadata is not None:
+        metadata.update(dict(extra_metadata))
     return _PreparedGlossaryPackageAttachmentResult(
         payload=None,
         metadata=metadata,
@@ -4828,6 +5190,7 @@ def _prepared_glossary_package_attachment_result_from(
     missing_reason_code: str,
     disabled_reason_code: str = "prepared_glossary_package_attachment_disabled",
     fail_closed_when_not_ready: bool = False,
+    extra_metadata: Mapping[str, object] | None = None,
 ) -> _PreparedGlossaryPackageAttachmentResult:
     if attachment is None:
         return _prepared_glossary_package_attachment_result(
@@ -4836,6 +5199,7 @@ def _prepared_glossary_package_attachment_result_from(
             request=request,
             source=source,
             fail_closed=fail_closed_when_not_ready,
+            extra_metadata=extra_metadata,
         )
     if not attachment.enabled:
         return _prepared_glossary_package_attachment_result(
@@ -4844,6 +5208,7 @@ def _prepared_glossary_package_attachment_result_from(
             request=request,
             source=source,
             fail_closed=fail_closed_when_not_ready,
+            extra_metadata=extra_metadata,
         )
 
     match_reasons = _prepared_glossary_package_attachment_match_reasons(
@@ -4857,6 +5222,7 @@ def _prepared_glossary_package_attachment_result_from(
             request=request,
             source=source,
             fail_closed=fail_closed_when_not_ready,
+            extra_metadata=extra_metadata,
         )
     if not isinstance(attachment.payload, Mapping):
         return _prepared_glossary_package_attachment_result(
@@ -4865,6 +5231,7 @@ def _prepared_glossary_package_attachment_result_from(
             request=request,
             source=source,
             fail_closed=fail_closed_when_not_ready,
+            extra_metadata=extra_metadata,
         )
 
     validation = validate_prepared_glossary_package(
@@ -4883,6 +5250,8 @@ def _prepared_glossary_package_attachment_result_from(
             "raw_payload_included": False,
         }
     )
+    if extra_metadata is not None:
+        metadata.update(dict(extra_metadata))
     if not validation.ready:
         return _PreparedGlossaryPackageAttachmentResult(
             payload=None,
