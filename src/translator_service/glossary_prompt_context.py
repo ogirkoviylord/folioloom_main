@@ -343,8 +343,61 @@ def _entry_candidate(
         field_omissions=field_omissions,
     )
     confidence = _confidence_value(payload.get("confidence"))
+    target = _safe_field_text(
+        payload,
+        "target_canonical",
+        config=config,
+        field_omissions=field_omissions,
+    )
+    aliases, alias_omitted_count, alias_trimmed_count = _safe_text_sequence(
+        payload.get("aliases"),
+        limit=config.max_aliases,
+        max_field_characters=config.max_field_characters,
+    )
+    _record_sequence_field_omissions(
+        field_omissions,
+        field_name="aliases",
+        omitted_count=alias_omitted_count,
+        trimmed_count=alias_trimmed_count,
+    )
+    target_variants, target_variant_omitted_count, target_variant_trimmed_count = (
+        _safe_text_sequence(
+            payload.get("target_variants"),
+            limit=config.max_target_variants,
+            max_field_characters=config.max_field_characters,
+        )
+    )
+    _record_sequence_field_omissions(
+        field_omissions,
+        field_name="target_variants",
+        omitted_count=target_variant_omitted_count,
+        trimmed_count=target_variant_trimmed_count,
+    )
+    (
+        forbidden_variants,
+        forbidden_variant_omitted_count,
+        forbidden_variant_trimmed_count,
+    ) = _safe_text_sequence(
+        payload.get("forbidden_variants"),
+        limit=config.max_forbidden_variants,
+        max_field_characters=config.max_field_characters,
+    )
+    _record_sequence_field_omissions(
+        field_omissions,
+        field_name="forbidden_variants",
+        omitted_count=forbidden_variant_omitted_count,
+        trimmed_count=forbidden_variant_trimmed_count,
+    )
 
     lines = [
+        *_mandatory_term_lines(
+            entry_id=entry_id,
+            source=source,
+            aliases=aliases,
+            target=target,
+            target_variants=target_variants,
+            forbidden_variants=forbidden_variants,
+        ),
         (
             f'<entry id="{_escape_attr(entry_id)}" layer="{_escape_attr(layer)}" '
             f'category="{_escape_attr(category)}" status="{_escape_attr(status)}" '
@@ -352,43 +405,13 @@ def _entry_candidate(
         ),
         f"<source_canonical>{source}</source_canonical>",
     ]
-    _append_optional_element(
-        lines,
-        "target_canonical",
-        _safe_field_text(
-            payload,
-            "target_canonical",
-            config=config,
-            field_omissions=field_omissions,
-        ),
-    )
-    _append_sequence_elements(
-        lines,
-        "aliases",
-        "alias",
-        payload.get("aliases"),
-        limit=config.max_aliases,
-        max_field_characters=config.max_field_characters,
-        field_omissions=field_omissions,
-    )
-    _append_sequence_elements(
-        lines,
-        "target_variants",
-        "target_variant",
-        payload.get("target_variants"),
-        limit=config.max_target_variants,
-        max_field_characters=config.max_field_characters,
-        field_omissions=field_omissions,
-    )
-    _append_sequence_elements(
-        lines,
-        "forbidden_variants",
-        "forbidden_variant",
-        payload.get("forbidden_variants"),
-        limit=config.max_forbidden_variants,
-        max_field_characters=config.max_field_characters,
-        field_omissions=field_omissions,
-    )
+    _append_optional_element(lines, "target_canonical", target)
+    for alias in aliases:
+        lines.append(f"<alias>{alias}</alias>")
+    for target_variant in target_variants:
+        lines.append(f"<target_variant>{target_variant}</target_variant>")
+    for forbidden_variant in forbidden_variants:
+        lines.append(f"<forbidden_variant>{forbidden_variant}</forbidden_variant>")
     _append_optional_line(
         lines,
         "strategy",
@@ -463,6 +486,32 @@ def _append_terminology_policy_metadata_line(
     )
 
 
+def _mandatory_term_lines(
+    *,
+    entry_id: str,
+    source: str,
+    aliases: Sequence[str],
+    target: str | None,
+    target_variants: Sequence[str],
+    forbidden_variants: Sequence[str],
+) -> tuple[str, ...]:
+    triggers = (source, *aliases)
+    required_forms = tuple(form for form in (target, *target_variants) if form)
+    parts = [
+        f"mandatory_term: id={entry_id}",
+        "when=source_or_alias_present",
+        f"source_or_alias={_compact_join(triggers)}",
+        f"required_target={_compact_join(required_forms) or 'Unknown'}",
+    ]
+    if forbidden_variants:
+        parts.append(f"forbidden_target={_compact_join(forbidden_variants)}")
+    return ("; ".join(parts),)
+
+
+def _compact_join(values: Sequence[str]) -> str:
+    return " | ".join(value for value in values if value)
+
+
 def _append_optional_line(lines: list[str], label: str, value: str | None) -> None:
     if value:
         lines.append(f"{label}: {value}")
@@ -475,44 +524,6 @@ def _append_optional_element(
 ) -> None:
     if value:
         lines.append(f"<{element_name}>{value}</{element_name}>")
-
-
-def _append_sequence_elements(
-    lines: list[str],
-    label: str,
-    element_name: str,
-    values: Any,
-    *,
-    limit: int,
-    max_field_characters: int,
-    field_omissions: list[GlossaryPromptContextFieldOmission],
-) -> None:
-    safe_values, omitted_count, trimmed_count = _safe_text_sequence(
-        values,
-        limit=limit,
-        max_field_characters=max_field_characters,
-    )
-    for value in safe_values:
-        lines.append(f"<{element_name}>{value}</{element_name}>")
-    if omitted_count:
-        field_omissions.append(
-            GlossaryPromptContextFieldOmission(
-                field_name=label,
-                reason=GlossaryPromptContextFieldOmissionReason.FIELD_LIMIT_EXHAUSTED,
-                omitted_count=omitted_count,
-            )
-        )
-    if trimmed_count:
-        field_omissions.append(
-            GlossaryPromptContextFieldOmission(
-                field_name=label,
-                reason=(
-                    GlossaryPromptContextFieldOmissionReason
-                    .FIELD_CHARACTER_LIMIT_EXHAUSTED
-                ),
-                omitted_count=trimmed_count,
-            )
-        )
 
 
 def _append_sequence_line(
@@ -531,10 +542,26 @@ def _append_sequence_line(
     )
     if safe_values:
         lines.append(f"{label}: {'; '.join(safe_values)}")
+    if omitted_count or trimmed_count:
+        _record_sequence_field_omissions(
+            field_omissions,
+            field_name=label,
+            omitted_count=omitted_count,
+            trimmed_count=trimmed_count,
+        )
+
+
+def _record_sequence_field_omissions(
+    field_omissions: list[GlossaryPromptContextFieldOmission],
+    *,
+    field_name: str,
+    omitted_count: int,
+    trimmed_count: int,
+) -> None:
     if omitted_count:
         field_omissions.append(
             GlossaryPromptContextFieldOmission(
-                field_name=label,
+                field_name=field_name,
                 reason=GlossaryPromptContextFieldOmissionReason.FIELD_LIMIT_EXHAUSTED,
                 omitted_count=omitted_count,
             )
@@ -542,7 +569,7 @@ def _append_sequence_line(
     if trimmed_count:
         field_omissions.append(
             GlossaryPromptContextFieldOmission(
-                field_name=label,
+                field_name=field_name,
                 reason=(
                     GlossaryPromptContextFieldOmissionReason
                     .FIELD_CHARACTER_LIMIT_EXHAUSTED
