@@ -65,7 +65,7 @@
 | `docs/` | Project docs, restart docs, deployment runbooks, specs/plans archive. | Scribe, Orchestrator, Architect, Reviewer. | medium; high для deployment, release gates, legal/privacy/safety текста. |
 | `src/translator_service/` | Основной Python package: backend, bot, worker, translation core, persistence, safety. | Implementer, Architect, Reviewer. | medium/high по зоне. |
 | `src/translator_service/admin/` | FastAPI admin console: auth, settings, secrets, provider keys, costs, audit, live, operations, owner-only text diagnostics, run-log reader and owner-only full diagnostic archive exports. Issue #549 adds `glossary_runtime_diagnostics.json` to downloaded archives only when glossary runtime diagnostic data exists; #612 extends that sidecar with prepared-glossary package status/linkage metadata from existing adapter events. | Admin/backend agents. | human approval required для auth, secrets, security, provider keys, user data and any raw-text/glossary diagnostic expansion. |
-| `src/translator_service/bot/` | aiogram Telegram runtime, messages, activity phrases. | Bot/UI agents. | high; затрагивает UX, Telegram API, user data, payments-adjacent flows. Issue #546 added a temporary per-attempt glossary mode selector for manual battle-test comparison; issue #640 supersedes that UX direction with an owner-approved automatic internal glossary policy. Code removal/default integration remains in #641-#645 and #648, and #646 live smoke remains conditionally gated. |
+| `src/translator_service/bot/` | aiogram Telegram runtime, messages, activity phrases. | Bot/UI agents. | high; затрагивает UX, Telegram API, user data, payments-adjacent flows. Issue #546 added a temporary per-attempt glossary mode selector for manual battle-test comparison; issue #640 supersedes that UX direction with an owner-approved automatic internal glossary policy, and #641 removes the normal selector flow while defaulting new supported jobs to internal automatic glossary metadata. Follow-up prep/diagnostic/provider wiring remains in #642-#645 and #648, and #646 live smoke remains conditionally gated. |
 | `src/translator_service/format_adapters/` | TXT/DOCX/EPUB adapters, contracts, EPUB repair, TXT layout. | Translation/file-format agents. | medium/high; file parsing and output fidelity. |
 | `src/translator_service/glossary_contracts.py` | Local glossary schema dataclasses, enums, validators and compact signature helpers for the glossary epic. | Implementer, Architect, Reviewer for glossary issues. | medium/high; contract changes can affect future prompt/cache/provider/runtime integrations, but this module has no provider/storage/runtime side effects by itself. |
 | `src/translator_service/glossary_scanner.py` | Local deterministic glossary candidate/evidence scanner over existing TXT/DOCX/EPUB adapter plans. | Implementer, Architect, Reviewer for glossary issues. | medium/high; scanner output can affect future prompt budgets and glossary quality, but this module has no provider/storage/runtime side effects by itself. |
@@ -148,8 +148,7 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
 - Пути: `src/translator_service/bot/`, `src/translator_service/bot_translation_service.py`.
 - Назначение: Telegram-first UX: upload, language, estimate, rights confirmation,
   progress, cancel/status/history flows. #546 temporary glossary selector is
-  now superseded as product direction by #640, but code removal is assigned to
-  #641.
+  superseded by #640 and removed from the normal flow by #641.
 - Glossary note: #633 adds a default-off owner/test prepared-package
   attachment boundary for explicit `with_glossary` job creation. The service
   may attach only a compact #610 READY package that matches source fingerprint,
@@ -166,10 +165,11 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   enabled prep failures block before queueing with metadata-only reason codes.
   #640 records the target policy: supported Telegram jobs should attempt
   glossary preparation and injection automatically, without user-facing mode
-  buttons. Implementation is split through #641-#645 and #648; #646 live smoke
-  remains conditional on those local/fake gates. #465 cache bypass,
-  language-neutral glossary core and metadata-only ordinary artifacts remain
-  required.
+  buttons. #641 defaults new pending/job metadata to the internal automatic
+  glossary flag and preserves legacy explicit `without_glossary`; remaining
+  implementation is split through #642-#645 and #648. #646 live smoke remains
+  conditional on those local/fake gates. #465 cache bypass, language-neutral
+  glossary core and metadata-only ordinary artifacts remain required.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 

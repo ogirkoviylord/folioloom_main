@@ -19,7 +19,7 @@ AI-агенты обязаны читать его перед архитекту
 
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
-Status: Active architecture/product direction; implementation pending
+Status: Active architecture/product direction; partially implemented through #641
 
 Decision:
 - The temporary Telegram glossary mode selector from issue #546 is superseded
@@ -32,11 +32,12 @@ Decision:
   progress and result. Glossary behavior should be internal policy/diagnostic
   metadata, not a user-facing mode choice.
 - Default automatic glossary integration must still be staged through the
-  approved #639 child issues. Issue #640 records the policy only. Issues
-  #641-#645 and #648 implement local/fake/default-path wiring, diagnostics and
-  provider-prep plumbing. Issue #646 is a separately gated bounded live smoke
-  and may run only after #641-#645 and #648 are merged/reviewed and local/fake
-  gates pass.
+  approved #639 child issues. Issue #640 records the policy only. Issue #641
+  removes the normal Telegram selector flow and defaults new pending/job
+  metadata to the internal automatic glossary policy. Issues #642-#645 and
+  #648 implement local/fake/default-path prep, diagnostics and provider-prep
+  plumbing. Issue #646 is a separately gated bounded live smoke and may run
+  only after #641-#645 and #648 are merged/reviewed and local/fake gates pass.
 - Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
   glossary data must not silently create quality/readiness claims. The
   approved default behavior is metadata-only fallback to the existing
@@ -73,9 +74,10 @@ Evidence:
 Consequences:
 - Future implementers should stop adding new user-facing glossary mode choices
   to the Telegram flow and should instead work through #639 child issues.
-- Until #641 and follow-up implementation issues are merged, existing runtime
-  behavior may still include the temporary selector. This decision records the
-  target policy; it is not evidence that the code path has already changed.
+- After #641, the normal Telegram flow no longer asks the user to choose
+  `with glossary` or `without glossary`, but downstream automatic prep,
+  diagnostics and provider-backed wiring still depend on follow-up #639 child
+  issues and their gates.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.

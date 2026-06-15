@@ -161,6 +161,7 @@ SUPPORTED_TRANSLATION_MODES = (
 )
 GLOSSARY_MODE_WITH = "with_glossary"
 GLOSSARY_MODE_WITHOUT = "without_glossary"
+DEFAULT_GLOSSARY_MODE = GLOSSARY_MODE_WITH
 SUPPORTED_GLOSSARY_MODES = (
     GLOSSARY_MODE_WITH,
     GLOSSARY_MODE_WITHOUT,
@@ -196,7 +197,7 @@ class TranslationModeRequired(ValueError):
 
 
 class GlossaryModeRequired(ValueError):
-    """Raised when the temporary glossary battle-test mode is required."""
+    """Raised when legacy callers explicitly require a glossary mode."""
 
 
 class SameLanguageTranslationBlocked(ValueError):
@@ -270,7 +271,7 @@ class PendingTranslation:
     preview_accepted: bool = False
     preview_accepted_at: str | None = None
     translation_mode: str | None = None
-    glossary_mode: str | None = GLOSSARY_MODE_WITHOUT
+    glossary_mode: str | None = DEFAULT_GLOSSARY_MODE
     scan_result: ScanResult | None = None
     upload_safety_id: str | None = None
     attempt_id: str | None = None
@@ -1201,7 +1202,7 @@ class BotTranslationService:
         *,
         user_telegram_id: int,
         target_language: str,
-        glossary_mode: str | None = GLOSSARY_MODE_WITHOUT,
+        glossary_mode: str | None = DEFAULT_GLOSSARY_MODE,
     ) -> PendingTranslation:
         self._assert_beta_access_allows(user_telegram_id)
         self._assert_security_cooldown_allows(user_telegram_id)
@@ -1259,7 +1260,7 @@ class BotTranslationService:
         rights_confirmation_version: str | None = None,
         rights_confirmation_source: str | None = None,
         translation_mode: str | None = None,
-        glossary_mode: str | None = GLOSSARY_MODE_WITHOUT,
+        glossary_mode: str | None = DEFAULT_GLOSSARY_MODE,
         scan_result: ScanResult | None = None,
         upload_safety_id: str | None = None,
         attempt_id: str | None = None,
@@ -1271,10 +1272,8 @@ class BotTranslationService:
             if translation_mode is not None
             else None
         )
-        normalized_glossary_mode = (
-            _normalize_glossary_mode(glossary_mode)
-            if glossary_mode is not None
-            else None
+        normalized_glossary_mode = _normalize_glossary_mode(
+            glossary_mode or DEFAULT_GLOSSARY_MODE
         )
         upload = validate_document_upload(
             file_name=file_name,
@@ -1374,7 +1373,7 @@ class BotTranslationService:
                 "file_name": file_name,
                 "source_language": source_language,
                 "translation_mode": normalized_mode,
-                "glossary_mode": normalized_glossary_mode or "unselected",
+                "glossary_mode": normalized_glossary_mode,
             },
         )
         self._record_activity_for_user(
@@ -1391,7 +1390,7 @@ class BotTranslationService:
                 "source_language": source_language,
                 "target_language": target_language,
                 "translation_mode": pending.translation_mode,
-                "glossary_mode": pending.glossary_mode or "unselected",
+                "glossary_mode": pending.glossary_mode,
                 "source_language_display": pending.source_language_display,
                 "fragment_count": pending.fragment_count,
                 "price_usd": pending.price_usd,
@@ -1467,9 +1466,11 @@ class BotTranslationService:
                     "Document rights must be confirmed before preview selection"
                 )
             if pending.glossary_mode is None:
-                raise GlossaryModeRequired(
-                    "Choose whether to translate with glossary or without glossary."
+                pending = replace(
+                    pending,
+                    glossary_mode=DEFAULT_GLOSSARY_MODE,
                 )
+                self._pending[user_telegram_id] = pending
             self._assert_parser_access_allowed(
                 upload_safety_id=pending.upload_safety_id,
                 source_object_key=pending.source_object_key,
@@ -1674,9 +1675,11 @@ class BotTranslationService:
                     "translation starts"
                 )
             if pending.glossary_mode is None:
-                raise GlossaryModeRequired(
-                    "Choose whether to translate with glossary or without glossary."
+                pending = replace(
+                    pending,
+                    glossary_mode=DEFAULT_GLOSSARY_MODE,
                 )
+                self._pending[user_telegram_id] = pending
             if not pending.preview_id or not pending.preview_shown:
                 raise PreviewAcceptanceRequired(
                     "Review the translation preview before continuing."
@@ -2926,9 +2929,11 @@ class BotTranslationService:
                     "translation starts"
                 )
             if pending.glossary_mode is None:
-                raise GlossaryModeRequired(
-                    "Choose whether to translate with glossary or without glossary."
+                pending = replace(
+                    pending,
+                    glossary_mode=DEFAULT_GLOSSARY_MODE,
                 )
+                self._pending[user_telegram_id] = pending
             if not pending.preview_accepted:
                 raise PreviewAcceptanceRequired(
                     "Review the translation preview before continuing."
