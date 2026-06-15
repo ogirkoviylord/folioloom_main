@@ -29,6 +29,8 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_586_ID,
     ISSUE_593_DIAGNOSTIC_ROOT,
     ISSUE_593_ID,
+    ISSUE_598_DIAGNOSTIC_ROOT,
+    ISSUE_598_ID,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
     POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
@@ -826,6 +828,98 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                     compliance["reason_codes"],
                 )
                 self.assertNotIn("source_term_absent", compliance["reason_codes"])
+
+    def test_issue_598_boundary_accepts_post_596_live_root(self):
+        _validate_config(
+            SmokeConfig(
+                issue_id=ISSUE_598_ID,
+                input_targets=ISSUE_575_INPUT_TARGETS,
+                diagnostic_root=ISSUE_598_DIAGNOSTIC_ROOT,
+                max_calls=ISSUE_575_MAX_CALLS,
+                max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                fake=False,
+                target_metadata_fixture_path=ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
+                paired_glossary_off=True,
+            )
+        )
+
+        with self.assertRaises(ValueError):
+            _validate_config(
+                SmokeConfig(
+                    issue_id=ISSUE_598_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=ISSUE_593_DIAGNOSTIC_ROOT,
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=False,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                )
+            )
+
+    def test_issue_598_fake_smoke_has_filtered_entries_and_binding_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report = run_smoke(
+                SmokeConfig(
+                    issue_id=ISSUE_598_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=tmp_path / "diagnostics",
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=True,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], ISSUE_598_ID)
+            self.assertEqual(report["calls_made"], 4)
+            diagnostic_dir = Path(report["diagnostic_dir"])
+            diagnostics = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(diagnostic_dir.glob("call-*.json"))
+            ]
+            for call, payload in zip(report["calls"], diagnostics, strict=True):
+                request_text = (
+                    payload.get("runtime_request_text", "")
+                    + payload.get("user_prompt", "")
+                )
+                if call["side"] == "glossary_on":
+                    self.assertEqual(
+                        call["prompt_context"]["included_entry_count"],
+                        5,
+                    )
+                    compliance = call["glossary_compliance"]
+                    self.assertEqual(compliance["selected_entry_count"], 5)
+                    self.assertEqual(compliance["checked_entry_count"], 5)
+                    self.assertIn(
+                        "binding=must_use_required_target",
+                        request_text,
+                    )
+                    self.assertIn("required_target_copy=exact", request_text)
+                    self.assertNotIn(
+                        "target_metadata_missing",
+                        compliance["reason_codes"],
+                    )
+                    self.assertNotIn(
+                        "source_term_absent",
+                        compliance["reason_codes"],
+                    )
+                else:
+                    self.assertEqual(call["prompt_context"]["included_entry_count"], 0)
+                    self.assertNotIn(
+                        "binding=must_use_required_target",
+                        request_text,
+                    )
+                    self.assertNotIn("required_target_copy=exact", request_text)
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()
