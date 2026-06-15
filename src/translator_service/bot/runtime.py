@@ -126,6 +126,11 @@ from translator_service.document_scanner import (
 from translator_service.documents import FileTooLargeError, UnsupportedDocumentError
 from translator_service.extractors import TextExtractionError
 from translator_service.file_storage import LocalObjectStorage
+from translator_service.glossary_prepared_prep_service import (
+    PreparedGlossaryPackageProvider,
+    PreparedGlossaryPrepService,
+    PreparedGlossaryPrepServiceConfig,
+)
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
     TranslationJob,
@@ -234,6 +239,10 @@ class BotRuntimeConfig:
         [PreparedGlossaryPackagePrepRequest],
         PreparedGlossaryPackageAttachment | None,
     ] | None = None
+    prepared_glossary_prep_provider: PreparedGlossaryPackageProvider | None = None
+    prepared_glossary_prep_service_config: PreparedGlossaryPrepServiceConfig | None = (
+        None
+    )
 
 
 class _CallbackSpamGuard:
@@ -415,6 +424,9 @@ def bot_runtime_config_from_settings(settings: Settings) -> BotRuntimeConfig:
 
 def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService:
     beta_safety_guard = build_beta_safety_guard(config)
+    prepared_glossary_package_prep_resolver = (
+        _prepared_glossary_package_prep_resolver_from_config(config)
+    )
     return BotTranslationService(
         job_repository=InMemoryTranslationJobRepository(),
         pricing_rules=build_default_pricing_rules(),
@@ -462,9 +474,26 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
             config.prepared_glossary_package_resolver
         ),
         prepared_glossary_package_prep_resolver=(
-            config.prepared_glossary_package_prep_resolver
+            prepared_glossary_package_prep_resolver
         ),
     )
+
+
+def _prepared_glossary_package_prep_resolver_from_config(
+    config: BotRuntimeConfig,
+) -> Callable[
+    [PreparedGlossaryPackagePrepRequest],
+    PreparedGlossaryPackageAttachment | None,
+] | None:
+    if config.prepared_glossary_package_prep_resolver is not None:
+        return config.prepared_glossary_package_prep_resolver
+    if config.prepared_glossary_prep_provider is None:
+        return None
+    service = PreparedGlossaryPrepService(
+        provider=config.prepared_glossary_prep_provider,
+        config=config.prepared_glossary_prep_service_config,
+    )
+    return service.prepare
 
 
 def build_deepseek_translator(settings: Settings) -> TextTranslator:
