@@ -70,6 +70,12 @@ package metadata around provider-supplied entries and must still pass #610
 validation. It does not approve local semantic inference, live retries,
 runtime translation, rollout, cache reuse or release/privacy claims.
 
+R-041 update note, 2026-06-15: issue #626 adds a conservative local unwrap for
+the #624 observed single-key `output_package_skeleton` provider wrapper. The
+unwrap still runs #622 boundary checks and #610 validation, and does not
+approve semantic inference, live retries, runtime translation, rollout, cache
+reuse or release/privacy claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
