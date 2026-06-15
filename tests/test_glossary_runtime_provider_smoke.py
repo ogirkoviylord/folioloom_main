@@ -905,6 +905,12 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                         request_text,
                     )
                     self.assertIn("required_target_copy=exact", request_text)
+                    if call["target_language"] == "ru":
+                        self.assertIn("Зеркальному Торгу", request_text)
+                        self.assertIn("Северницы", request_text)
+                        self.assertIn("Карту Имён", request_text)
+                    if call["target_language"] == "uk":
+                        self.assertIn("Карту Імен", request_text)
                     self.assertNotIn(
                         "target_metadata_missing",
                         compliance["reason_codes"],
@@ -920,6 +926,10 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                         request_text,
                     )
                     self.assertNotIn("required_target_copy=exact", request_text)
+                    self.assertNotIn("Зеркальному Торгу", request_text)
+                    self.assertNotIn("Северницы", request_text)
+                    self.assertNotIn("Карту Имён", request_text)
+                    self.assertNotIn("Карту Імен", request_text)
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()

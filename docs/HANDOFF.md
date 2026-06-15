@@ -366,6 +366,18 @@ secret-pattern findings. No live provider calls were made in #598. A future
 post-#596 live rerun remains `TBD` because the active goal's 30-call live cap
 was already reached by #593 evidence.
 
+Issue #601 implementation slice on 2026-06-15: branch
+`codex/issue-601-adversarial-variant-fixture` expands the committed synthetic
+adversarial TXT target-metadata fixture after owner-only #593 QA showed sparse
+variant coverage as a likely cause of exact-form compliance findings. The
+change adds a small number of observed synthetic RU/UK target variants while
+keeping the fixture local-only/test-only and below formatter limits. Fake #598
+preflight completed with 4 fake calls, 5 included/checked entries on each
+glossary-on side, expanded variants present only in glossary-on diagnostics,
+and no secret-pattern findings. This is not a RU/UK morphology engine,
+semantic-quality proof, live provider call, rollout, cache reuse or release
+claim.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
