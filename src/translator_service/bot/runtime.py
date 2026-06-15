@@ -111,6 +111,7 @@ from translator_service.bot_translation_service import (
     GlossaryModeRequired,
     PreparedGlossaryPackageAttachment,
     PreparedGlossaryPackageAttachmentRequest,
+    PreparedGlossaryPackagePrepRequest,
     PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
@@ -234,6 +235,10 @@ class BotRuntimeConfig:
     beta_cost_warning_fraction: float = 0.8
     prepared_glossary_package_resolver: Callable[
         [PreparedGlossaryPackageAttachmentRequest],
+        PreparedGlossaryPackageAttachment | None,
+    ] | None = None
+    prepared_glossary_package_prep_resolver: Callable[
+        [PreparedGlossaryPackagePrepRequest],
         PreparedGlossaryPackageAttachment | None,
     ] | None = None
 
@@ -462,6 +467,9 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         beta_safety_guard_owned=True,
         prepared_glossary_package_resolver=(
             config.prepared_glossary_package_resolver
+        ),
+        prepared_glossary_package_prep_resolver=(
+            config.prepared_glossary_package_prep_resolver
         ),
     )
 
