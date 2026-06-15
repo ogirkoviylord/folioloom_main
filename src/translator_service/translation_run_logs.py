@@ -590,6 +590,7 @@ _GLOSSARY_METADATA_RAW_KEYS = {
     "raw_prompt",
     "raw_response",
     "raw_source",
+    "raw_source_text",
     "source_text",
     "source_texts",
     "token",
@@ -609,6 +610,16 @@ _GLOSSARY_METADATA_RAW_KEY_MARKERS = (
     "secret",
     "token",
 )
+_GLOSSARY_METADATA_SECRET_VALUE_PATTERNS = (
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(
+        r"\b(?:postgres(?:ql)?|mysql|redis|mongodb|amqp)://[^\s]+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?m)^[A-Z_][A-Z0-9_]{2,}=[^\s].+$"),
+)
 
 
 def safe_glossary_adapter_metadata(value):
@@ -627,6 +638,11 @@ def safe_glossary_adapter_metadata(value):
         return [safe_glossary_adapter_metadata(item) for item in value]
     if isinstance(value, tuple):
         return tuple(safe_glossary_adapter_metadata(item) for item in value)
+    if isinstance(value, str) and any(
+        pattern.search(value)
+        for pattern in _GLOSSARY_METADATA_SECRET_VALUE_PATTERNS
+    ):
+        return "[redacted]"
     return value
 
 
