@@ -3048,9 +3048,13 @@ def _glossary_runtime_plan_metadata(
 ) -> dict[str, object] | None:
     if config is None or not isinstance(config.glossary_plan, Mapping):
         return None
+    metadata: dict[str, object] = {}
+    document_format = config.glossary_plan.get("document_format")
+    if isinstance(document_format, str) and document_format in {"txt", "docx", "epub"}:
+        metadata["document_format"] = document_format
     prepared_package = config.glossary_plan.get("prepared_package")
     if not isinstance(prepared_package, Mapping):
-        return None
+        return metadata or None
     allowed = {
         "schema_version",
         "metadata_only",
@@ -3071,7 +3075,9 @@ def _glossary_runtime_plan_metadata(
     for key, value in prepared_package.items():
         if key in allowed and _glossary_metadata_value_is_safe(value):
             filtered[str(key)] = value
-    return {"prepared_package": filtered} if filtered else None
+    if filtered:
+        metadata["prepared_package"] = filtered
+    return metadata or None
 
 
 def _glossary_metadata_value_is_safe(value: object) -> bool:

@@ -5,13 +5,16 @@ from datetime import UTC, datetime
 from translator_service.glossary_candidate_reducer import GlossaryCandidateReducerCaps
 from translator_service.glossary_persistent_runtime_resolver import (
     PersistentEpubGlossaryResolverConfig,
+    PersistentGlossaryResolverConfig,
     build_persistent_epub_glossary_runtime_hook,
     build_persistent_epub_glossary_runtime_hook_from_prepared_package,
+    build_persistent_glossary_runtime_hook_from_prepared_package,
 )
 from translator_service.glossary_prepared_package import (
     GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
     GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
 )
+from translator_service.glossary_prompt_context import GlossaryPromptContextConfig
 from translator_service.glossary_target_metadata_overlay import (
     GLOSSARY_TARGET_METADATA_OVERLAY_SCHEMA_VERSION,
 )
@@ -161,11 +164,132 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         )
         self.assertEqual(hook.prompt_context_entries, ())
 
+    def test_generic_prepared_package_ready_hook_supports_txt_and_docx(self):
+        for document_kind in ("txt", "docx"):
+            with self.subTest(document_kind=document_kind):
+                hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+                    work_unit=_work_unit(),
+                    source_text="Darcy returns.",
+                    prepared_package_payload=_prepared_package_payload(),
+                    document_kind=document_kind,
+                    config=_generic_enabled_config(),
+                )
+
+                self.assertEqual(hook.glossary_plan["status"], "planned")
+                self.assertEqual(hook.glossary_plan["document_format"], document_kind)
+                self.assertEqual(
+                    hook.glossary_plan["schema_version"],
+                    "persistent-glossary-runtime-resolver-v1",
+                )
+                self.assertEqual(
+                    hook.glossary_plan["prepared_package"]["status"],
+                    "ready",
+                )
+                self.assertEqual(len(hook.prompt_context_entries), 1)
+
+                serialized_plan = json.dumps(
+                    hook.glossary_plan,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                self.assertNotIn("Darcy returns.", serialized_plan)
+                self.assertNotIn("Дарси", serialized_plan)
+
+    def test_generic_prepared_package_unsupported_kind_falls_back(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=_prepared_package_payload(),
+            document_kind="pdf",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_unsupported_document_kind",
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
+    def test_generic_prepared_package_source_absent_falls_back(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="No matching source term here.",
+            prepared_package_payload=_prepared_package_payload(),
+            document_kind="txt",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_no_retained_glossary_entries",
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
+    def test_generic_prepared_package_target_metadata_missing_falls_back(self):
+        payload = _prepared_package_payload(target_canonical="", target_variants=())
+
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=payload,
+            document_kind="txt",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_prepared_package_invalid",
+        )
+        self.assertIn(
+            "prepared_glossary_package_target_missing",
+            hook.glossary_plan["prepared_package"]["reason_codes"],
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
+    def test_generic_prepared_package_prompt_budget_falls_back(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=_prepared_package_payload(),
+            document_kind="docx",
+            config=_generic_enabled_config(
+                prompt_context_config=GlossaryPromptContextConfig(max_prompt_tokens=1),
+            ),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_prompt_context_budget_exhausted",
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
 
 def _enabled_config() -> PersistentEpubGlossaryResolverConfig:
     return PersistentEpubGlossaryResolverConfig(
         enabled=True,
         owner_battle_test_enabled=True,
+        reducer_caps=GlossaryCandidateReducerCaps(
+            max_editor_entries=20,
+            max_diagnostic_entries=20,
+            max_estimated_editor_tokens=1000,
+            min_editor_score=1,
+            min_diagnostic_score=1,
+        ),
+    )
+
+
+def _generic_enabled_config(
+    *,
+    prompt_context_config: GlossaryPromptContextConfig | None = None,
+) -> PersistentGlossaryResolverConfig:
+    return PersistentGlossaryResolverConfig(
+        enabled=True,
+        owner_battle_test_enabled=True,
+        prompt_context_config=prompt_context_config or GlossaryPromptContextConfig(),
         reducer_caps=GlossaryCandidateReducerCaps(
             max_editor_entries=20,
             max_diagnostic_entries=20,
@@ -201,6 +325,8 @@ def _prepared_package_payload(
     *,
     target_language: str = "ru",
     needs_review: bool = False,
+    target_canonical: str = "Дарси",
+    target_variants: tuple[str, ...] = ("мистер Дарси",),
 ) -> dict[str, object]:
     return {
         "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
@@ -219,8 +345,8 @@ def _prepared_package_payload(
                 "source_canonical": "Darcy",
                 "aliases": ["Mr. Darcy"],
                 "evidence_refs": ["evidence:darcy"],
-                "target_canonical": "Дарси",
-                "target_variants": ["мистер Дарси"],
+                "target_canonical": target_canonical,
+                "target_variants": list(target_variants),
                 "forbidden_variants": ["Дэрси"],
                 "strategy": "transcribe",
                 "confidence": 0.91,

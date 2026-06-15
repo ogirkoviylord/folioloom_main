@@ -165,6 +165,16 @@ approve live provider calls, payment/billing semantics, provider config/key
 changes, cache reuse, DB/schema/state/storage/admin/retention changes,
 deployment or release/privacy/legal/support claims.
 
+R-041 update note, 2026-06-15: issue #644 generalizes the prepared-package
+runtime resolver from EPUB-only to supported persistent TXT/DOCX/EPUB units.
+The generic path still validates #610 compact packages, applies target metadata
+through the approved overlay boundary, requires source term/alias presence and
+budget-safe prompt context, and keeps #465 cache bypass only for injected
+units. Treat this as local/fake runtime plumbing only: it does not approve live
+provider calls, cache reuse, provider config/key changes, DB/schema/state/
+storage/admin/retention changes, deployment, or release/privacy/legal/support
+claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

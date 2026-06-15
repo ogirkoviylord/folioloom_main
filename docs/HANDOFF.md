@@ -75,6 +75,21 @@ payment/billing semantics, provider config/secrets, DB/schema/storage/admin/
 retention changes, deployment or release/privacy/legal/support claims.
 Follow-up #644-#645 and #648 remain required before #646 live smoke can run.
 
+Issue #644 implementation slice on 2026-06-15 generalizes the prepared-package
+runtime glossary resolver from EPUB-only to supported persistent TXT/DOCX/EPUB
+work units. Scheduled worker prepared-package handoff now uses the generic
+resolver, which validates #610 READY compact packages, applies #556-compatible
+target metadata, checks source term/alias presence and local budget gates, and
+renders bounded glossary context only when the unit is useful and safe. The
+older EPUB-specific resolver API remains available as a compatibility wrapper.
+Adapter events now include safe `document_format` metadata and preserve #465
+cache bypass only when glossary context is actually injected. Focused local
+tests cover TXT/DOCX injection, EPUB compatibility and fallback for unsupported
+formats, missing/invalid/targetless/non-useful/over-budget packages. This does
+not add live provider calls, provider config/secrets, cache reuse, DB/schema/
+storage/admin/retention changes, deployment or release/privacy/legal/support
+claims. Follow-up #645 and #648 remain required before #646 live smoke can run.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /
