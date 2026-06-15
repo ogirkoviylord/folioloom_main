@@ -288,6 +288,65 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
             result.reason_codes,
         )
 
+    def test_live_preparation_unwraps_single_output_package_skeleton(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_OutputSkeletonProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(
+            metadata_report["package_adjudication"]["mode"],
+            "provider_package_as_is",
+        )
+        self.assertIn(
+            "provider_package_unwrapped_output_skeleton",
+            result.reason_codes,
+        )
+
+    def test_live_preparation_rejects_multi_key_output_skeleton_wrapper(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_MultiKeyOutputSkeletonProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn(
+            "provider_package_output_skeleton_wrapper_not_exclusive",
+            result.reason_codes,
+        )
+
+    def test_live_preparation_rejects_raw_nested_output_skeleton(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_RawNestedOutputSkeletonProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("provider_package_raw_field_rejected", result.reason_codes)
+
 
 class _PreparedPackageProvider:
     def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
@@ -414,6 +473,77 @@ class _TopLevelMismatchProvider(_EntriesOnlyProvider):
         payload = json.loads(result.content)
         payload["target_language"] = "uk"
         payload["semantic_truth"] = "do not accept unsupported top-level fields"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _OutputSkeletonProvider(_PreparedPackageProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        package = json.loads(result.content)
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(
+                {"output_package_skeleton": package},
+                ensure_ascii=False,
+            ),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _MultiKeyOutputSkeletonProvider(_OutputSkeletonProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["extra"] = "not allowed"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _RawNestedOutputSkeletonProvider(_OutputSkeletonProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["output_package_skeleton"]["raw_prompt"] = "do not accept raw prompt"
         return ChatCallResult(
             ok=result.ok,
             content=json.dumps(payload, ensure_ascii=False),

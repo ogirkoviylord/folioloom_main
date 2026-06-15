@@ -1024,25 +1024,26 @@ def _adjudicate_provider_package_payload(
     config: PreparedGlossaryPrepLiveConfig,
     packet: Mapping[str, Any],
 ) -> PreparedPackageAdjudicationResult:
+    payload, unwrap_reasons = _unwrap_provider_package_payload(payload)
     if not isinstance(payload, Mapping):
         return PreparedPackageAdjudicationResult(
             payload={},
             mode="rejected",
-            reason_codes=("provider_package_not_object",),
+            reason_codes=(*unwrap_reasons, "provider_package_not_object"),
         )
     unsafe_reasons = _unsafe_provider_payload_reasons(payload)
     if unsafe_reasons:
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=unsafe_reasons,
+            reason_codes=(*unwrap_reasons, *unsafe_reasons),
         )
     top_level_reasons = _top_level_boundary_reasons(payload, config=config)
     if top_level_reasons:
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=top_level_reasons,
+            reason_codes=(*unwrap_reasons, *top_level_reasons),
         )
 
     entries = payload.get("entries")
@@ -1053,20 +1054,23 @@ def _adjudicate_provider_package_payload(
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=("provider_package_entries_invalid",),
+            reason_codes=(*unwrap_reasons, "provider_package_entries_invalid"),
         )
     entries = list(entries)
     if not entries:
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=("provider_package_entries_empty",),
+            reason_codes=(*unwrap_reasons, "provider_package_entries_empty"),
         )
     if len(entries) > config.max_candidates:
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=("provider_package_entry_count_exceeds_packet_bound",),
+            reason_codes=(
+                *unwrap_reasons,
+                "provider_package_entry_count_exceeds_packet_bound",
+            ),
         )
 
     boundary_reasons = _entry_boundary_reasons(entries, packet=packet)
@@ -1074,7 +1078,7 @@ def _adjudicate_provider_package_payload(
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="rejected",
-            reason_codes=boundary_reasons,
+            reason_codes=(*unwrap_reasons, *boundary_reasons),
         )
 
     required_top_level = (
@@ -1088,7 +1092,7 @@ def _adjudicate_provider_package_payload(
         return PreparedPackageAdjudicationResult(
             payload=payload,
             mode="provider_package_as_is",
-            reason_codes=(),
+            reason_codes=unwrap_reasons,
         )
 
     source_document_fingerprint = str(
@@ -1119,8 +1123,22 @@ def _adjudicate_provider_package_payload(
     return PreparedPackageAdjudicationResult(
         payload=envelope,
         mode="local_envelope_applied",
-        reason_codes=("provider_package_missing_local_envelope_fields",),
+        reason_codes=(
+            *unwrap_reasons,
+            "provider_package_missing_local_envelope_fields",
+        ),
     )
+
+
+def _unwrap_provider_package_payload(payload: Any) -> tuple[Any, tuple[str, ...]]:
+    if not isinstance(payload, Mapping) or "output_package_skeleton" not in payload:
+        return payload, ()
+    if set(payload.keys()) != {"output_package_skeleton"}:
+        return payload, ("provider_package_output_skeleton_wrapper_not_exclusive",)
+    nested = payload.get("output_package_skeleton")
+    if not isinstance(nested, Mapping):
+        return payload, ("provider_package_output_skeleton_not_object",)
+    return nested, ("provider_package_unwrapped_output_skeleton",)
 
 
 def _top_level_boundary_reasons(
