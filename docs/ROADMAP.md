@@ -684,17 +684,24 @@ Acceptance criteria:
   runtime rollout state machine and evidence gates; it keeps normal/default and
   limited-beta rollout rejected for now. Issue #536 adds the no-code
   glossary-aware cache-key design while preserving #465 bypass. Issue #537
-  records the metadata-only decision packet and recommends closing #529 with
-  runtime glossary still shadow-only/default-off. Normal runtime glossary
-  rollout, cache reuse, additional provider calls outside separately approved
-  bounds and release/privacy/legal/support readiness remain unapproved. Issue
-  #546 adds a temporary Telegram battle-test selector so the owner can manually
-  run the same file with or without glossary. This is a per-attempt opt-in
-  battle-test UX only: it preserves the existing non-glossary path, enables the
-  default-off glossary runtime hook only for the selected attempt, keeps #465
-  cache bypass for glossary-injected units, and does not approve default
-  rollout, cache reuse, automatic paired translation, provider/config changes,
-  durable state changes or release/privacy claims. Issue #551 repairs the
+  records the metadata-only decision packet and, at that evidence point,
+  recommended closing #529 with runtime glossary still shadow-only/default-off.
+  Cache reuse, provider calls outside separately approved bounds and
+  release/privacy/legal/support readiness remained unapproved. Issue #546
+  added a temporary Telegram battle-test selector so the owner could
+  manually run the same file with or without glossary. Issue #640 supersedes
+  that UX direction for future work: the owner-approved target is automatic
+  internal glossary preparation/injection for supported Telegram jobs without
+  user-facing glossary buttons. Implementation remains split under #639:
+  #641 removes the selector from the bot flow, #642 adds a reusable fake/local
+  prepared-glossary prep service, #643 adds cost/cap accounting, #644
+  generalizes automatic injection across supported formats, #645 updates
+  owner-only diagnostics, #648 wires provider-backed DeepSeek Pro prep with
+  fake-provider tests, #646 is the conditional bounded live smoke, and #647 is
+  docs closeout. The new policy still preserves #465 cache bypass for
+  glossary-injected units and does not approve cache reuse, provider/config
+  changes, durable state/storage/admin/retention changes, deployment or
+  release/privacy/legal/support claims. Issue #551 repairs the
   scheduled/external worker evidence path so `with_glossary` either uses
   per-work-unit READY hook data or records metadata-only fallback/omission
   diagnostics; this is still evidence repair, not quality proof or rollout.
