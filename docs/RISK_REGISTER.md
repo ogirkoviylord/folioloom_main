@@ -128,6 +128,15 @@ adds no live provider calls, package registry, durable storage/retention,
 Telegram operation by Codex, rollout, cache reuse or release/privacy/legal/
 support readiness.
 
+R-041 update note, 2026-06-15: issue #640 records the owner-approved #639
+policy that the temporary Telegram glossary selector is superseded by automatic
+internal glossary preparation/injection for supported Telegram jobs. Treat #640
+as a policy/docs change only: code removal/default integration is split across
+#641-#645 and #648, and #646 live smoke remains conditionally gated on those
+local/fake gates. This does not approve glossary-aware cache reuse, provider
+config/key changes, deployment, durable DB/schema/state/storage/admin/
+retention/export/delete changes or release/privacy/legal/support readiness.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
@@ -212,9 +221,11 @@ support readiness.
   completed calls, structural validation passing, RU/UK glossary-on compliance
   passing, RU/UK glossary-off target-form-missing findings and DE on/off
   compliance passing; issue #535 records a no-code runtime rollout state
-  machine that keeps normal/default and limited-beta rollout rejected for now
-  and requires separate owner approval for any owner-only battle-test,
-  beta/default rollout, cache reuse or release/privacy/legal/support claim;
+  machine that kept normal/default and limited-beta rollout rejected until a
+  separate owner decision; #640 now supersedes that posture only for the
+  approved #639 automatic-glossary child-issue path, while broader beta/default
+  rollout, cache reuse or release/privacy/legal/support claims still require
+  separate owner approval;
   issue #536 records no-code cache-key dimensions and requires bypass when any
   output-affecting glossary/profile/snapshot/selection/policy/formatter/
   fallback dimension is missing or `Unknown`; issue #537 records a
@@ -545,11 +556,12 @@ If a payment/provider/business zone is not implemented as a production-ready pat
   records a `NEEDS REVIEW` quality verdict because paired non-glossary
   comparison outputs were unavailable, so comparative glossary benefit remains
   `Unknown`. Issue #479 / #204AO records metadata-only decision preparation:
-  normal/default and limited-beta runtime glossary rollout are rejected for now,
-  and the final owner path remains `TBD`. Normal/default translation prompts,
-  live provider rollout, glossary-aware cache reuse, database/scheduler/
-  work-unit state, storage/admin/retention behavior,
-  user-visible behavior and release/privacy claims remain unchanged.
+  normal/default and limited-beta runtime glossary rollout were rejected for
+  that evidence state, and the final owner path remained `TBD`. Issue #640 now
+  records a separate owner-approved #639 default-integration path, but
+  glossary-aware cache reuse, database/scheduler/work-unit state, storage/
+  admin/retention behavior, deployment and release/privacy claims remain
+  unchanged outside that approved path.
 
 - Task: Спроектировать TTL cleanup/delete verification.
   Risk reduced: R-010, R-020, R-023.

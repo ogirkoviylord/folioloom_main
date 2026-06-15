@@ -65,7 +65,7 @@
 | `docs/` | Project docs, restart docs, deployment runbooks, specs/plans archive. | Scribe, Orchestrator, Architect, Reviewer. | medium; high для deployment, release gates, legal/privacy/safety текста. |
 | `src/translator_service/` | Основной Python package: backend, bot, worker, translation core, persistence, safety. | Implementer, Architect, Reviewer. | medium/high по зоне. |
 | `src/translator_service/admin/` | FastAPI admin console: auth, settings, secrets, provider keys, costs, audit, live, operations, owner-only text diagnostics, run-log reader and owner-only full diagnostic archive exports. Issue #549 adds `glossary_runtime_diagnostics.json` to downloaded archives only when glossary runtime diagnostic data exists; #612 extends that sidecar with prepared-glossary package status/linkage metadata from existing adapter events. | Admin/backend agents. | human approval required для auth, secrets, security, provider keys, user data and any raw-text/glossary diagnostic expansion. |
-| `src/translator_service/bot/` | aiogram Telegram runtime, messages, activity phrases. | Bot/UI agents. | high; затрагивает UX, Telegram API, user data, payments-adjacent flows. Issue #546 adds a temporary per-attempt glossary mode selector for manual battle-test comparison only; default rollout, automatic paired translation and glossary-aware cache reuse remain unapproved. |
+| `src/translator_service/bot/` | aiogram Telegram runtime, messages, activity phrases. | Bot/UI agents. | high; затрагивает UX, Telegram API, user data, payments-adjacent flows. Issue #546 added a temporary per-attempt glossary mode selector for manual battle-test comparison; issue #640 supersedes that UX direction with an owner-approved automatic internal glossary policy. Code removal/default integration remains in #641-#645 and #648, and #646 live smoke remains conditionally gated. |
 | `src/translator_service/format_adapters/` | TXT/DOCX/EPUB adapters, contracts, EPUB repair, TXT layout. | Translation/file-format agents. | medium/high; file parsing and output fidelity. |
 | `src/translator_service/glossary_contracts.py` | Local glossary schema dataclasses, enums, validators and compact signature helpers for the glossary epic. | Implementer, Architect, Reviewer for glossary issues. | medium/high; contract changes can affect future prompt/cache/provider/runtime integrations, but this module has no provider/storage/runtime side effects by itself. |
 | `src/translator_service/glossary_scanner.py` | Local deterministic glossary candidate/evidence scanner over existing TXT/DOCX/EPUB adapter plans. | Implementer, Architect, Reviewer for glossary issues. | medium/high; scanner output can affect future prompt budgets and glossary quality, but this module has no provider/storage/runtime side effects by itself. |
@@ -88,7 +88,7 @@
 | `src/translator_service/glossary_runtime_shadow.py` | Disabled-by-default fake-runtime/shadow glossary planning helper over TXT fixture content, local scanner/profile/reducer/snapshot/selection and compact policy signatures. | Implementer, Architect, Reviewer for glossary runtime-shadow and prompt-planning proposals. | high; runtime-adjacent, but default disabled and does not call providers, inject prompts, mutate cache/state/storage/admin, or change user-visible behavior. |
 | `src/translator_service/glossary_prompt_context.py` | Local bounded formatter for future glossary prompt-context sections from compact selected glossary entries, with escaping, metadata-only omission reporting, default-off compact terminology policy metadata, the #584 owner/test `mandatory_term:` checklist and the #596 binding target-form markers for included target-backed terms. | Implementer, Architect, Reviewer for controlled glossary prompt-context tests. | high; provider-facing prompt-context contract. #475 keeps it local only, #476 uses it only under an explicit disabled/test-only rehearsal flag, #521 adds only opt-in compact policy metadata, #584 strengthens the default-off owner/test prompt shape, and #596 adds local binding target-form wording after #593 found provider compliance misses; none of these approve normal runtime integration, live provider calls, cache reuse, durable state, admin/storage/retention changes or release/privacy claims. |
 | `src/translator_service/translation_policy.py` | Translation prompt policy, output-contract policy, optional compact glossary/profile signature context and disabled-by-default glossary prompt-policy adapter decision contract. | Implementer, Architect, Reviewer for translation policy, provider-boundary and glossary prompt/cache-signature issues. | medium/high; policy signatures and adapter decisions can affect future prompt/cache behavior. #411 adds signatures only; #466 adds a default-off adapter decision with cache bypass for enabled/test-path glossary planning and does not inject glossary/profile data into normal prompts. |
-| `src/translator_service/translation_runner.py` | TXT/DOCX/EPUB local translation runner and in-process translation unit orchestration. | Implementer, Architect, Reviewer for translation runtime, cache, prompt and controlled glossary test-path work. | high; #474 adds a default-off DOCX/EPUB glossary runtime adapter hook that emits compact metadata and requests cache bypass only for READY enabled/test-path units. #476 adds disabled/test-only fake prompt rehearsal, #501 narrows the owner-only battle-test path so bounded glossary context is injected only for useful READY units with source term/alias presence, target metadata and local pressure/budget pass, and #546 threads the selected hook through the Telegram in-memory DOCX/EPUB path. No normal prompt rollout, live provider calls, durable state or default user-visible glossary behavior are approved. |
+| `src/translator_service/translation_runner.py` | TXT/DOCX/EPUB local translation runner and in-process translation unit orchestration. | Implementer, Architect, Reviewer for translation runtime, cache, prompt and controlled glossary test-path work. | high; #474 adds a default-off DOCX/EPUB glossary runtime adapter hook that emits compact metadata and requests cache bypass only for READY enabled/test-path units. #476 adds disabled/test-only fake prompt rehearsal, #501 narrows the owner-only battle-test path so bounded glossary context is injected only for useful READY units with source term/alias presence, target metadata and local pressure/budget pass, and #546 threads the selected hook through the Telegram in-memory DOCX/EPUB path. #640 approves moving from user-selected battle-test UX to automatic internal glossary policy, but implementation remains split across #641-#645/#648 and live smoke #646. |
 | `src/translator_service/translation_cache.py` | In-memory translation cache key builder for repeated DOCX/EPUB translation units. | Implementer, Architect, Reviewer for cache/policy-signature work. | medium/high; cache-key changes can affect stale reuse, cost and latency. Glossary/profile signature context is optional and compact; migration/stale-cache behavior remains `TBD`. |
 | `tests/` | Unit/regression tests for admin, bot, scheduler, worker, provider, translation, deployment smoke. | Reviewer, QA, Implementer. | low/medium; high если меняются safety/payment/auth expectations. |
 | `scripts/` | Deploy, predeploy, server smoke/status, backup/verify, sample generation, security summary. | Ops, Reviewer, Implementer for scripts only. | human approval required for deploy/backup/server scripts. |
@@ -146,7 +146,10 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
 ### Bot / UI
 
 - Пути: `src/translator_service/bot/`, `src/translator_service/bot_translation_service.py`.
-- Назначение: Telegram-first UX: upload, language, estimate, rights confirmation, temporary #546 glossary mode selector for manual battle-test comparison, progress, cancel/status/history flows.
+- Назначение: Telegram-first UX: upload, language, estimate, rights confirmation,
+  progress, cancel/status/history flows. #546 temporary glossary selector is
+  now superseded as product direction by #640, but code removal is assigned to
+  #641.
 - Glossary note: #633 adds a default-off owner/test prepared-package
   attachment boundary for explicit `with_glossary` job creation. The service
   may attach only a compact #610 READY package that matches source fingerprint,
@@ -161,6 +164,12 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   READY package from the pending upload content for explicit `with_glossary`
   jobs only; the default and `without_glossary` paths remain unchanged, and
   enabled prep failures block before queueing with metadata-only reason codes.
+  #640 records the target policy: supported Telegram jobs should attempt
+  glossary preparation and injection automatically, without user-facing mode
+  buttons. Implementation is split through #641-#645 and #648; #646 live smoke
+  remains conditional on those local/fake gates. #465 cache bypass,
+  language-neutral glossary core and metadata-only ordinary artifacts remain
+  required.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 
@@ -193,10 +202,11 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   job creation path to place an already validated compact prepared package into
   `translation_policy` for the existing #611 worker handoff, and #635 wires
   that owner/test resolver through the runtime builder without adding package
-  registry, storage or config-source behavior. This does not approve default
-  glossary rollout, live provider calls, arbitrary real-book glossary
-  generation, glossary-aware cache reuse, durable state changes or provider/
-  config changes.
+  registry, storage or config-source behavior. #640 supersedes the temporary
+  selector as product direction and approves automatic internal glossary policy
+  only through #639 child issues. This still does not approve live provider
+  calls before #646 gates, arbitrary unvalidated glossary generation,
+  glossary-aware cache reuse, durable state changes or provider/config changes.
 - Важные файлы: listed above plus `translation_jobs.py`, `translation_runner.py`, `translation_run_logs.py`, `translation_metrics.py`.
 - Связанные тесты: `tests/test_worker.py`, `tests/test_scheduler*.py`, `tests/test_postgres_scheduler.py`, `tests/test_persistent_*`, `tests/test_job_runner.py`, `tests/test_translation_*`.
 
