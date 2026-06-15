@@ -211,6 +211,23 @@ only: no live provider calls, Telegram operation, rollout, cache reuse,
 provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim.
 
+Issue #619 local preflight slice on 2026-06-15: branch
+`codex/issue-619-prepared-glossary-prep-preflight` adds
+`tools/prepared_glossary_prep_preflight.py`, a local-only/fake DeepSeek Pro
+glossary-prep preflight runner for the committed Gutenberg control EPUB
+`test_samples/gutenberg_time_machine_noimages.en.epub` targeting `ru`. The
+runner builds a bounded packet from local EPUB planning, scanner/profile/
+reducer output, uses fake provider output only, validates the resulting compact
+prepared package through #610 and writes owner-only diagnostics under
+`outputs/glossary-battle-test/issue-619-pro-prep-fake/<timestamp>/`. A local
+run on 2026-06-15 produced `ready` metadata with 8 selected candidates,
+0 live calls and 0 provider tokens at
+`outputs/glossary-battle-test/issue-619-pro-prep-fake/20260615T151000Z/`.
+This is fake/dry evidence only; #614 live Pro-prep remains blocked on exact
+owner approval and this is not Telegram operation, runtime translation, rollout,
+cache reuse, provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
