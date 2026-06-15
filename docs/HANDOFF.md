@@ -362,9 +362,8 @@ writes under
 `outputs/glossary-battle-test/issue-598-post-596-adversarial-live/`. Fake #598
 preflight completed with 4 fake calls, 5 included/checked entries on each
 glossary-on side, #596 binding markers only in glossary-on diagnostics, and no
-secret-pattern findings. No live provider calls were made in #598. A future
-post-#596 live rerun remains `TBD` because the active goal's 30-call live cap
-was already reached by #593 evidence.
+secret-pattern findings. No live provider calls were made in #598. Issue #600
+owns the later post-#596 bounded live rerun evidence.
 
 Issue #601 implementation slice on 2026-06-15: branch
 `codex/issue-601-adversarial-variant-fixture` expands the committed synthetic
@@ -377,6 +376,21 @@ glossary-on side, expanded variants present only in glossary-on diagnostics,
 and no secret-pattern findings. This is not a RU/UK morphology engine,
 semantic-quality proof, live provider call, rollout, cache reuse or release
 claim.
+
+Issue #600 owner-only live evidence update on 2026-06-15: after #601 expanded
+the committed synthetic adversarial target-variant fixture, the post-#596/#598
+bounded adversarial TXT live rerun completed under
+`outputs/glossary-battle-test/issue-598-post-596-adversarial-live/20260615T040522Z`.
+The run used 4 approved live calls and 9884 observed provider-reported tokens,
+with structural validation passing on all calls, no secret-pattern findings in
+the diagnostics directory, and #596 binding/required-copy markers present only
+on glossary-on prompts. Glossary-on exact configured-form compliance passed for
+both targets: `ru` 5/5 and `uk` 5/5 checked entries present. Glossary-off
+remained baseline with no glossary context and `no_selected_entries` compliance
+skip metadata. This is narrow synthetic TXT provider-boundary evidence only:
+real-book/EPUB broad quality remains `Unknown`, RU/UK full morphology remains
+`TBD`, and default rollout, cache reuse, durable state changes and
+release/privacy/legal/support claims remain unapproved.
 
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
