@@ -203,7 +203,10 @@
   change reached glossary-on prompts, but exact configured target-form
   compliance remained partial (`ru` 2/5 and `uk` 4/5), so issue #584 tracks the
   next local owner/test terminology-contract strengthening step before another
-  provider rerun.
+  provider rerun. Issue #584 adds a compact `mandatory_term:` checklist line to
+  the default-off owner/test prompt context and fake #575 preflight confirms it
+  appears only in glossary-on diagnostics; live provider behavior after this
+  prompt-context shape change remains `Unknown` until issue #586.
   RU/UK full morphology remains `TBD`; translation quality remains `Unknown`
   until approved owner-only review evidence exists; future policy packages must
   stay behind the explicit registry/adapter boundary, not hardcoded core
