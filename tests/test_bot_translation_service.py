@@ -257,6 +257,26 @@ class CostCapRecordingBetaSafetyGuard(RecordingBetaSafetyGuard):
         return self.can_start_new_work()
 
 
+class DenyGlossaryPrepBetaSafetyGuard(RecordingBetaSafetyGuard):
+    def reserve_job(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        estimate: JobCostEstimate,
+    ) -> BetaSafetyDecision:
+        self.reservations.append((job_id, user_id, estimate))
+        if job_id.startswith("glossary-prep:"):
+            return BetaSafetyDecision(
+                allowed=False,
+                reason_code="job_estimate_cap",
+                safe_message=(
+                    "This translation cannot start under the current beta limits."
+                ),
+            )
+        return self.can_start_new_work()
+
+
 class SecurityEventTranslator(RecordingTranslator):
     def __init__(self) -> None:
         super().__init__()
@@ -4662,6 +4682,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             )
             source_sha256 = hashlib.sha256(content).hexdigest()
             prep_requests = []
+            guard = RecordingBetaSafetyGuard()
 
             def prep_resolver(request):
                 prep_requests.append(request)
@@ -4682,6 +4703,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translation_run_log_root=run_log_root,
                 use_scheduler_runner=True,
                 prepared_glossary_package_prep_resolver=prep_resolver,
+                beta_safety_guard=guard,
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -4717,9 +4739,158 @@ class BotTranslationServiceTest(unittest.TestCase):
             ).read_text()
             self.assertIn('"attachment_source": "prep"', event_lines)
             self.assertIn('"attachment_status": "attached"', event_lines)
+            self.assertIn('"reservation_status": "consumed"', event_lines)
+            self.assertIn(
+                '"accounting_usage_source": "estimate_when_provider_usage_unknown"',
+                event_lines,
+            )
+            self.assertIn(
+                "prepared_glossary_prep_provider_usage_unknown_estimate_accounted",
+                event_lines,
+            )
+            self.assertIn('"provider_reported_usage_status": "Unknown"', event_lines)
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("sk-", event_lines)
+            self.assertTrue(guard.reservations[0][0].startswith("glossary-prep:"))
+            self.assertEqual(guard.usage_events[0][0], guard.reservations[0][0])
+            self.assertEqual(
+                guard.usage_events[0][2],
+                f"{guard.reservations[0][0]}:prepared_glossary_prep",
+            )
+
+    def test_glossary_prep_beta_safety_denial_skips_prep_and_continues(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            run_log_root = root / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            content = b"Darcy returns."
+            prep_requests = []
+            guard = DenyGlossaryPrepBetaSafetyGuard()
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                prepared_glossary_package_prep_resolver=lambda request: (
+                    prep_requests.append(request) or None
+                ),
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(prep_requests, [])
+            self.assertEqual(len(translator.requests), 1)
+            self.assertNotIn("<glossary_context", translator.requests[0][0])
+            policy = json.loads(persistent_store.get_job(job.id).translation_policy)
+            self.assertEqual(policy["glossary_mode"], GLOSSARY_MODE_WITH)
+            self.assertNotIn("prepared_glossary_package", policy)
+            event_lines = next(run_log_root.iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text()
+            self.assertIn(
+                "prepared_glossary_prep_beta_safety_reservation_denied",
+                event_lines,
+            )
+            self.assertIn("beta_safety_job_estimate_cap", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertTrue(guard.reservations[0][0].startswith("glossary-prep:"))
+            self.assertTrue(
+                any(
+                    reservation[0] == job.id
+                    for reservation in guard.reservations
+                )
+            )
+
+    def test_glossary_prep_provider_usage_metadata_records_actual_usage(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            run_log_root = root / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            content = b"Darcy returns."
+            guard = RecordingBetaSafetyGuard()
+
+            def prep_resolver(request):
+                return PreparedGlossaryPackageAttachment(
+                    payload=_prepared_glossary_package(),
+                    source_sha256=request.source_sha256,
+                    document_kind=request.document_kind,
+                    target_language=request.target_language,
+                    metadata={
+                        "provider_usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                        }
+                    },
+                )
+
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                prepared_glossary_package_prep_resolver=prep_resolver,
+                beta_safety_guard=guard,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+
+            service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            self.assertEqual(guard.usage_events[0][3:], (10, 5))
+            event_lines = next(run_log_root.iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text()
+            self.assertIn('"accounting_usage_source": "provider_reported"', event_lines)
+            self.assertIn('"provider_reported_usage_status": "reported"', event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
 
     def test_without_glossary_does_not_attach_prepared_package(self):
         with TemporaryDirectory() as temp_dir:
@@ -4836,6 +5007,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.addCleanup(persistent_store.close)
             content = b"Darcy returns."
             prep_requests = []
+            guard = RecordingBetaSafetyGuard()
 
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
@@ -4849,6 +5021,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 prepared_glossary_package_prep_resolver=lambda request: (
                     prep_requests.append(request) or None
                 ),
+                beta_safety_guard=guard,
             )
             service.store_uploaded_document(
                 user_telegram_id=42,
@@ -4884,6 +5057,8 @@ class BotTranslationServiceTest(unittest.TestCase):
                 [],
             )
             self.assertFalse(run_log_root.exists())
+            self.assertTrue(guard.reservations[0][0].startswith("glossary-prep:"))
+            self.assertEqual(guard.consumed, [guard.reservations[0][0]])
 
     def test_with_glossary_invalid_prepared_package_is_not_attached(self):
         with TemporaryDirectory() as temp_dir:
