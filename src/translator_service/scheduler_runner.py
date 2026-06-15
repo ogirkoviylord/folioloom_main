@@ -319,6 +319,7 @@ def _run_scheduled_parallel_once(
                 resolved_glossary_runtime_hook = _scheduled_glossary_runtime_hook(
                     store=store,
                     work_unit=work_unit,
+                    source_text=source_text,
                     glossary_runtime_hook=glossary_runtime_hook,
                     glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
                 )

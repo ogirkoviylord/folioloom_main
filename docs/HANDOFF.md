@@ -167,6 +167,22 @@ does not call providers, operate Telegram, inject runtime prompts, hand off
 job state, change admin/archive behavior, enable rollout/cache reuse or make
 release/privacy/legal/support claims.
 
+Issue #611 implementation slice on 2026-06-15: branch
+`codex/issue-611-prepared-glossary-handoff` adds a no-schema, job-scoped
+prepared-glossary metadata handoff into the existing scheduled worker and #557
+persistent EPUB resolver path. For explicit `with_glossary` owner/test jobs,
+the worker can read a nested compact `translation_policy.prepared_glossary_package`,
+validate it through #610, convert only READY entries to the #556 overlay
+payload, and inject bounded glossary context through the existing resolver when
+the usual source-present/target-backed/budget gates pass. `without_glossary`
+and default/no-mode paths remain unchanged. Missing, invalid, target-mismatched
+or `needs_review` packages fall back with metadata-only reason codes; ordinary
+run events expose only compact prepared-package status/signature/count metadata
+and preserve #465 cache bypass only for units where glossary context is
+actually injected. This is not a live provider call, Telegram operation,
+DB/schema/storage/admin/retention/provider-config change, default rollout,
+cache reuse, release/privacy/legal/support claim or proof of glossary quality.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`

@@ -14,6 +14,9 @@ from translator_service.file_storage import (
     StoredFile,
     StoredFileKind,
 )
+from translator_service.glossary_persistent_runtime_resolver import (
+    build_persistent_epub_glossary_runtime_hook_from_prepared_package,
+)
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
@@ -69,6 +72,7 @@ from translator_service.translation_runner import (
     _format_translation_request_text,
     _glossary_prompt_context_text,
     _glossary_runtime_adapter_decision,
+    _glossary_runtime_plan_metadata,
     _glossary_runtime_prompt_context,
     _glossary_runtime_useful_preflight,
     _has_untranslated_cjk_text,
@@ -749,6 +753,7 @@ def run_next_scheduled_stored_text_work_unit(
             resolved_glossary_runtime_hook = _scheduled_glossary_runtime_hook(
                 store=store,
                 work_unit=work_unit,
+                source_text=source_text,
                 glossary_runtime_hook=glossary_runtime_hook,
                 glossary_runtime_hook_resolver=glossary_runtime_hook_resolver,
             )
@@ -887,6 +892,7 @@ def _scheduled_glossary_runtime_hook(
     *,
     store: SQLiteTranslationJobStore,
     work_unit: PersistentWorkUnit,
+    source_text: str,
     glossary_runtime_hook: GlossaryRuntimeAdapterHookConfig | None,
     glossary_runtime_hook_resolver: Callable[
         [PersistentWorkUnit],
@@ -902,6 +908,17 @@ def _scheduled_glossary_runtime_hook(
             resolved = glossary_runtime_hook_resolver(work_unit)
             if resolved is not None:
                 return resolved
+        prepared_package_payload = _job_prepared_glossary_package_for_work_unit(
+            store,
+            work_unit,
+        )
+        if prepared_package_payload is not None:
+            return build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+                work_unit=work_unit,
+                source_text=source_text,
+                prepared_package_payload=prepared_package_payload,
+                document_kind=_job_document_kind_for_work_unit(store, work_unit),
+            )
         return glossary_runtime_hook or build_fallback_glossary_runtime_hook()
     if glossary_mode is None:
         return glossary_runtime_hook
@@ -1314,6 +1331,7 @@ def _persistent_work_unit_glossary_prompt_context(
         glossary_adapter_metadata_callback,
         prompt_context=glossary_prompt_context,
         preflight=glossary_useful_preflight,
+        plan_metadata=_glossary_runtime_plan_metadata(glossary_runtime_hook),
     )
     return _glossary_prompt_context_text(glossary_prompt_context)
 
@@ -1882,6 +1900,41 @@ def _job_glossary_mode_for_work_unit(
     store: SQLiteTranslationJobStore,
     work_unit: PersistentWorkUnit,
 ) -> str | None:
+    payload = _job_translation_policy_payload_for_work_unit(store, work_unit)
+    if payload is None:
+        return None
+    glossary_mode = payload.get("glossary_mode")
+    if not isinstance(glossary_mode, str):
+        return None
+    return glossary_mode.strip().lower() or None
+
+
+def _job_prepared_glossary_package_for_work_unit(
+    store: SQLiteTranslationJobStore,
+    work_unit: PersistentWorkUnit,
+) -> object | None:
+    payload = _job_translation_policy_payload_for_work_unit(store, work_unit)
+    if payload is None:
+        return None
+    if "prepared_glossary_package" not in payload:
+        return None
+    return payload.get("prepared_glossary_package")
+
+
+def _job_document_kind_for_work_unit(
+    store: SQLiteTranslationJobStore,
+    work_unit: PersistentWorkUnit,
+) -> str | None:
+    job = store.get_job(work_unit.job_id)
+    if job is None:
+        return None
+    return job.document_kind
+
+
+def _job_translation_policy_payload_for_work_unit(
+    store: SQLiteTranslationJobStore,
+    work_unit: PersistentWorkUnit,
+) -> dict[str, object] | None:
     job = store.get_job(work_unit.job_id)
     if job is None or not job.translation_policy:
         return None
@@ -1895,10 +1948,7 @@ def _job_glossary_mode_for_work_unit(
         return None
     if not isinstance(payload, dict):
         return None
-    glossary_mode = payload.get("glossary_mode")
-    if not isinstance(glossary_mode, str):
-        return None
-    return glossary_mode.strip().lower() or None
+    return payload
 
 
 def open_scheduler_store(settings):
