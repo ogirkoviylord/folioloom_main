@@ -521,7 +521,10 @@ def _is_fixed_width_pseudo_table_paragraph(
             for key, value in run_fonts.attrib.items()
             if _local_name(key) in {"ascii", "hAnsi", "eastAsia", "cs"}
         }
-        if any("courier" in font_name or "mono" in font_name for font_name in font_names):
+        if any(
+            "courier" in font_name or "mono" in font_name
+            for font_name in font_names
+        ):
             return True
     return False
 
@@ -622,7 +625,10 @@ def _replace_docx_text_nodes(
     cursor = 0
     node_cursor = 0
     for start, end in preserved_ranges:
-        preserved_text = "".join(text_nodes[index].text or "" for index in range(start, end))
+        preserved_text = "".join(
+            text_nodes[index].text or ""
+            for index in range(start, end)
+        )
         preserved_at = translated_text.find(preserved_text, cursor)
         if preserved_at == -1:
             _replace_docx_text_nodes_with_static_ranges(
@@ -767,7 +773,10 @@ def _docx_preserved_text_node_ranges(
     text_nodes: list[ElementTree.Element],
     namespace: dict[str, str],
 ) -> list[tuple[int, int]]:
-    index_by_node_id = {id(text_node): index for index, text_node in enumerate(text_nodes)}
+    index_by_node_id = {
+        id(text_node): index
+        for index, text_node in enumerate(text_nodes)
+    }
     preserved_text_node_ids = _docx_preserved_text_node_ids(
         paragraph=paragraph,
         namespace=namespace,
@@ -1082,7 +1091,9 @@ def _extract_epub_blocks(content: bytes) -> list[_EpubTextBlock]:
                 group_index_by_element_id = _epub_group_indexes(document)
                 extracted_elements = [
                     (block_index, element, _visible_text(element))
-                    for block_index, element in enumerate(_iter_epub_text_elements(document))
+                    for block_index, element in enumerate(
+                        _iter_epub_text_elements(document)
+                    )
                 ]
                 text_elements = [
                     (block_index, element, text)
@@ -1678,7 +1689,9 @@ def _translate_docx_units(
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
-            raise TranslationCancelled(_build_epub_translation_result(translated_blocks))
+            raise TranslationCancelled(
+                _build_epub_translation_result(translated_blocks)
+            )
 
         unit_started_at = time.monotonic()
         unit_prompt_tokens = 0
@@ -1713,6 +1726,7 @@ def _translate_docx_units(
             glossary_adapter_metadata_callback,
             prompt_context=glossary_prompt_context,
             preflight=glossary_useful_preflight,
+            plan_metadata=_glossary_runtime_plan_metadata(glossary_runtime_hook),
         )
         for subgroup_source_language, subgroup_blocks in _docx_translation_subgroups(
             unit.blocks,
@@ -2070,7 +2084,11 @@ def _split_labeled_language_segments(text: str) -> list[tuple[str, str]]:
         label_code = _language_label_source_code(match.group(1))
         if label_code is None:
             continue
-        segment_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        segment_end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(text)
+        )
         segments.append((label_code, text[match.start() : segment_end].strip()))
     return segments
 
@@ -2681,7 +2699,9 @@ def _translate_epub_units(
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
-            raise TranslationCancelled(_build_epub_translation_result(translated_blocks))
+            raise TranslationCancelled(
+                _build_epub_translation_result(translated_blocks)
+            )
 
         unit_started_at = time.monotonic()
         glossary_adapter_decision = _glossary_runtime_adapter_decision(
@@ -2709,6 +2729,7 @@ def _translate_epub_units(
             glossary_adapter_metadata_callback,
             prompt_context=glossary_prompt_context,
             preflight=glossary_useful_preflight,
+            plan_metadata=_glossary_runtime_plan_metadata(glossary_runtime_hook),
         )
         cached = _translation_cache_get(
             translation_cache,
@@ -2736,13 +2757,21 @@ def _translate_epub_units(
             ]
             translated_blocks.extend(translated_unit_blocks)
             if progress_callback is not None:
-                last_block = translated_unit_blocks[-1] if translated_unit_blocks else None
+                last_block = (
+                    translated_unit_blocks[-1]
+                    if translated_unit_blocks
+                    else None
+                )
                 progress_callback(
                     TranslationProgress(
                         completed_fragments=unit_index + 1,
                         total_fragments=total_units,
                         source_text=last_block.source_text if last_block else "",
-                        translated_text=last_block.translated_text if last_block else "",
+                        translated_text=(
+                            last_block.translated_text
+                            if last_block
+                            else ""
+                        ),
                         elapsed_seconds=time.monotonic() - unit_started_at,
                     )
                 )
@@ -2832,7 +2861,9 @@ def _translate_marked_text_units(
 
     for unit_index, unit in enumerate(units):
         if cancellation_token is not None and cancellation_token.is_cancelled:
-            raise TranslationCancelled(_build_epub_translation_result(translated_blocks))
+            raise TranslationCancelled(
+                _build_epub_translation_result(translated_blocks)
+            )
 
         unit_started_at = time.monotonic()
         protected_blocks = [
@@ -2979,6 +3010,7 @@ def _emit_glossary_adapter_metadata(
     *,
     prompt_context: GlossaryPromptContextResult | None = None,
     preflight: Mapping[str, object] | None = None,
+    plan_metadata: Mapping[str, object] | None = None,
 ) -> None:
     if decision is None or callback is None:
         return
@@ -3006,7 +3038,50 @@ def _emit_glossary_adapter_metadata(
         payload["prompt_context"] = glossary_prompt_context_metadata_payload(
             prompt_context,
         )
+    if plan_metadata:
+        payload.update(plan_metadata)
     callback(payload)
+
+
+def _glossary_runtime_plan_metadata(
+    config: GlossaryRuntimeAdapterHookConfig | None,
+) -> dict[str, object] | None:
+    if config is None or not isinstance(config.glossary_plan, Mapping):
+        return None
+    prepared_package = config.glossary_plan.get("prepared_package")
+    if not isinstance(prepared_package, Mapping):
+        return None
+    allowed = {
+        "schema_version",
+        "metadata_only",
+        "raw_payload_included",
+        "status",
+        "reason_codes",
+        "package_id",
+        "package_signature",
+        "source_language",
+        "target_language",
+        "provider_role_id",
+        "provider_model",
+        "entry_count",
+        "ready_entry_count",
+        "needs_review_entry_count",
+    }
+    filtered: dict[str, object] = {}
+    for key, value in prepared_package.items():
+        if key in allowed and _glossary_metadata_value_is_safe(value):
+            filtered[str(key)] = value
+    return {"prepared_package": filtered} if filtered else None
+
+
+def _glossary_metadata_value_is_safe(value: object) -> bool:
+    if isinstance(value, str):
+        return len(value) <= 240
+    if isinstance(value, bool | int | float) or value is None:
+        return True
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return all(isinstance(item, str) and len(item) <= 240 for item in value)
+    return False
 
 
 def _glossary_runtime_prompt_context(
@@ -3465,7 +3540,10 @@ def _parse_translation_batch(
 def _required_protected_markers(
     protected_texts: list[ProtectedText],
 ) -> tuple[tuple[str, ...], ...]:
-    return tuple(tuple(protected_text.replacements) for protected_text in protected_texts)
+    return tuple(
+        tuple(protected_text.replacements)
+        for protected_text in protected_texts
+    )
 
 
 def _translate_epub_blocks_individually(
@@ -3696,7 +3774,9 @@ def _replace_epub_xhtml_blocks(content: bytes, replacements: dict[int, str]) -> 
     return ElementTree.tostring(document, encoding="utf-8", xml_declaration=True)
 
 
-def _epub_text_slots(element: ElementTree.Element) -> list[tuple[ElementTree.Element, str]]:
+def _epub_text_slots(
+    element: ElementTree.Element,
+) -> list[tuple[ElementTree.Element, str]]:
     if _local_name(element.tag) in _EPUB_IGNORED_TAGS:
         return []
 
@@ -3738,7 +3818,7 @@ def _split_text_by_lengths(text: str, lengths: list[int]) -> list[str]:
 
     parts: list[str] = []
     consumed = 0
-    for index, length in enumerate(lengths):
+    for index, _length in enumerate(lengths):
         if index == len(lengths) - 1:
             parts.append(text[consumed:])
             break

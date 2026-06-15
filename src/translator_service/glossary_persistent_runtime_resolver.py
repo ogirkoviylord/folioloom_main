@@ -20,6 +20,9 @@ from translator_service.glossary_candidate_reducer import (
     reduce_glossary_candidates,
 )
 from translator_service.glossary_contracts import GlossaryEntry, GlossarySnapshot
+from translator_service.glossary_prepared_package import (
+    validate_prepared_glossary_package,
+)
 from translator_service.glossary_prompt_context import (
     GlossaryPromptContextConfig,
     format_glossary_prompt_context,
@@ -278,10 +281,106 @@ def build_persistent_epub_glossary_runtime_hook(
     )
 
 
-def _fallback_hook(fallback_reason: str) -> GlossaryRuntimeAdapterHookConfig:
-    return build_fallback_glossary_runtime_hook(
+def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    prepared_package_payload: object | None,
+    document_kind: str | None = DocumentFormat.EPUB.value,
+    config: PersistentEpubGlossaryResolverConfig | None = None,
+) -> GlossaryRuntimeAdapterHookConfig:
+    if not isinstance(prepared_package_payload, Mapping):
+        reason_code = (
+            "prepared_glossary_package_missing"
+            if prepared_package_payload is None
+            else "prepared_glossary_package_invalid"
+        )
+        fallback_reason = (
+            "persistent_epub_prepared_package_missing"
+            if prepared_package_payload is None
+            else "persistent_epub_prepared_package_invalid"
+        )
+        return _fallback_hook(
+            fallback_reason,
+            prepared_package_metadata={
+                "metadata_only": True,
+                "raw_payload_included": False,
+                "status": "invalid",
+                "reason_codes": [reason_code],
+                "target_language": work_unit.target_language,
+            },
+        )
+
+    validation = validate_prepared_glossary_package(
+        prepared_package_payload,
+        target_language=work_unit.target_language,
+    )
+    prepared_metadata = validation.metadata
+    if not validation.ready or validation.package is None:
+        return _fallback_hook(
+            _prepared_package_fallback_reason(validation.reason_codes),
+            prepared_package_metadata=prepared_metadata,
+        )
+
+    hook = build_persistent_epub_glossary_runtime_hook(
+        work_unit=work_unit,
+        source_text=source_text,
+        target_metadata_overlay_payload=(
+            validation.package.to_target_metadata_overlay_payload()
+        ),
+        document_kind=document_kind,
+        config=config
+        or PersistentEpubGlossaryResolverConfig(
+            enabled=True,
+            owner_battle_test_enabled=True,
+        ),
+    )
+    return _hook_with_prepared_package_metadata(hook, prepared_metadata)
+
+
+def _fallback_hook(
+    fallback_reason: str,
+    *,
+    prepared_package_metadata: Mapping[str, Any] | None = None,
+) -> GlossaryRuntimeAdapterHookConfig:
+    hook = build_fallback_glossary_runtime_hook(
         fallback_reason=_compact_reason(fallback_reason),
     )
+    if prepared_package_metadata is None:
+        return hook
+    return _hook_with_prepared_package_metadata(hook, prepared_package_metadata)
+
+
+def _hook_with_prepared_package_metadata(
+    hook: GlossaryRuntimeAdapterHookConfig,
+    prepared_package_metadata: Mapping[str, Any],
+) -> GlossaryRuntimeAdapterHookConfig:
+    glossary_plan = dict(hook.glossary_plan or {})
+    glossary_plan["prepared_package"] = dict(prepared_package_metadata)
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=hook.enabled,
+        glossary_plan=glossary_plan,
+        max_selected_entries=hook.max_selected_entries,
+        prompt_rehearsal_enabled=hook.prompt_rehearsal_enabled,
+        prompt_context_entries=hook.prompt_context_entries,
+        prompt_context_config=hook.prompt_context_config,
+        owner_battle_test_enabled=hook.owner_battle_test_enabled,
+        battle_test_max_source_blocks=hook.battle_test_max_source_blocks,
+        battle_test_max_source_characters=hook.battle_test_max_source_characters,
+    )
+
+
+def _prepared_package_fallback_reason(reason_codes: Sequence[str]) -> str:
+    if "prepared_glossary_package_target_mismatch" in reason_codes:
+        return "persistent_epub_prepared_package_target_mismatch"
+    if "prepared_glossary_package_needs_review" in reason_codes:
+        return "persistent_epub_prepared_package_not_ready"
+    if any(
+        "secret" in reason_code or "raw" in reason_code
+        for reason_code in reason_codes
+    ):
+        return "persistent_epub_prepared_package_rejected"
+    return "persistent_epub_prepared_package_invalid"
 
 
 def _work_unit_plan_payload(
