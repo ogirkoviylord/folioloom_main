@@ -6,6 +6,11 @@ from translator_service.glossary_candidate_reducer import GlossaryCandidateReduc
 from translator_service.glossary_persistent_runtime_resolver import (
     PersistentEpubGlossaryResolverConfig,
     build_persistent_epub_glossary_runtime_hook,
+    build_persistent_epub_glossary_runtime_hook_from_prepared_package,
+)
+from translator_service.glossary_prepared_package import (
+    GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+    GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
 )
 from translator_service.glossary_target_metadata_overlay import (
     GLOSSARY_TARGET_METADATA_OVERLAY_SCHEMA_VERSION,
@@ -95,6 +100,67 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         )
         self.assertEqual(hook.prompt_context_entries, ())
 
+    def test_prepared_package_ready_hook_uses_validated_overlay(self):
+        hook = build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=_prepared_package_payload(),
+            config=_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "planned")
+        self.assertEqual(
+            hook.glossary_plan["prepared_package"]["status"],
+            "ready",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package"]["ready_entry_count"],
+            1,
+        )
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+
+    def test_prepared_package_target_mismatch_falls_back(self):
+        payload = _prepared_package_payload(target_language="uk")
+
+        hook = build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=payload,
+            config=_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_epub_prepared_package_target_mismatch",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package"]["status"],
+            "invalid",
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
+    def test_prepared_package_needs_review_falls_back(self):
+        payload = _prepared_package_payload(needs_review=True)
+
+        hook = build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            prepared_package_payload=payload,
+            config=_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_epub_prepared_package_not_ready",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package"]["status"],
+            "needs_review",
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
+
 
 def _enabled_config() -> PersistentEpubGlossaryResolverConfig:
     return PersistentEpubGlossaryResolverConfig(
@@ -128,6 +194,40 @@ def _overlay_payload() -> dict[str, object]:
                 ]
             }
         },
+    }
+
+
+def _prepared_package_payload(
+    *,
+    target_language: str = "ru",
+    needs_review: bool = False,
+) -> dict[str, object]:
+    return {
+        "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
+        "package_id": "prepared:resolver-test:ru",
+        "source_language": "en",
+        "target_language": target_language,
+        "glossary_mode": "with_glossary",
+        "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+        "provider_model": "deepseek-v4-pro",
+        "provider_run_id": "provider-run:fake",
+        "candidate_selector_signature": "selector:fake",
+        "owner_approved": True,
+        "entries": [
+            {
+                "source_entry_id": "entry:darcy",
+                "source_canonical": "Darcy",
+                "aliases": ["Mr. Darcy"],
+                "evidence_refs": ["evidence:darcy"],
+                "target_canonical": "Дарси",
+                "target_variants": ["мистер Дарси"],
+                "forbidden_variants": ["Дэрси"],
+                "strategy": "transcribe",
+                "confidence": 0.91,
+                "needs_review": needs_review,
+                "reason_codes": ["needs_human_review"] if needs_review else [],
+            }
+        ],
     }
 
 
