@@ -693,7 +693,8 @@ Acceptance criteria:
   that UX direction for future work: the owner-approved target is automatic
   internal glossary preparation/injection for supported Telegram jobs without
   user-facing glossary buttons. Implementation remains split under #639:
-  #641 removes the selector from the bot flow, #642 adds a reusable fake/local
+  #641 removes the selector from the bot flow and defaults new jobs to internal
+  automatic glossary metadata, #642 adds a reusable fake/local
   prepared-glossary prep service, #643 adds cost/cap accounting, #644
   generalizes automatic injection across supported formats, #645 updates
   owner-only diagnostics, #648 wires provider-backed DeepSeek Pro prep with

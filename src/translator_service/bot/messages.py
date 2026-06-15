@@ -1661,18 +1661,6 @@ def build_pending_translation_message(
                 mode_summary,
             ]
         )
-    glossary_display = _glossary_mode_display(
-        pending.glossary_mode,
-        interface_language,
-    )
-    if glossary_display is not None:
-        glossary_label, glossary_summary = glossary_display
-        lines.extend(
-            [
-                f"{messages['glossary']}: {glossary_label}",
-                glossary_summary,
-            ]
-        )
     lines.extend(
         [
             f"{messages['estimated_time']}: {duration_text}",

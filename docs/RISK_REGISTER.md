@@ -126,6 +126,14 @@ local/fake gates. This does not approve glossary-aware cache reuse, provider
 config/key changes, deployment, durable DB/schema/state/storage/admin/
 retention/export/delete changes or release/privacy/legal/support readiness.
 
+R-041 update note, 2026-06-15: issue #641 removes the user-facing Telegram
+glossary selector from the normal flow and defaults new supported job metadata
+to the internal automatic glossary policy, while preserving explicit legacy
+`without_glossary` compatibility. This is a UX/policy-metadata step only: it
+does not prove glossary quality, run live provider calls, approve cache reuse,
+change provider config/secrets, mutate DB/schema/storage/admin/retention, or
+make release/privacy/legal/support readiness claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

@@ -31,7 +31,6 @@ from translator_service.bot_translation_service import (
     BotTranslationService,
     DocumentScanRejectedError,
     DuplicatePreviewError,
-    GlossaryModeRequired,
     PendingTranslation,
     PendingUpload,
     PreparedGlossaryPackageAttachment,
@@ -1495,7 +1494,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translation_mode="provider_magic",
             )
 
-    def test_glossary_mode_is_required_before_preview_when_unselected(self):
+    def test_unselected_glossary_mode_defaults_to_automatic_before_preview(self):
         service = BotTranslationService(
             job_repository=InMemoryTranslationJobRepository(),
             pricing_rules=_pricing_rules(),
@@ -1516,11 +1515,15 @@ class BotTranslationServiceTest(unittest.TestCase):
             glossary_mode=None,
         )
 
-        with self.assertRaises(GlossaryModeRequired):
-            service.generate_preview_translation(
-                user_telegram_id=42,
-                translator=RecordingTranslator(),
-            )
+        preview = service.generate_preview_translation(
+            user_telegram_id=42,
+            translator=RecordingTranslator(),
+        )
+
+        self.assertEqual(preview.metadata["glossary_mode"], GLOSSARY_MODE_WITH)
+        pending = service.get_pending(42)
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.glossary_mode, GLOSSARY_MODE_WITH)
 
     def test_select_pending_translation_glossary_mode_records_safe_metadata(self):
         with TemporaryDirectory() as temp_dir:
@@ -1546,7 +1549,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             service.prepare_pending_upload(
                 user_telegram_id=42,
                 target_language="uk",
-                glossary_mode=None,
+                glossary_mode=GLOSSARY_MODE_WITHOUT,
             )
 
             selected = service.select_pending_translation_glossary_mode(
