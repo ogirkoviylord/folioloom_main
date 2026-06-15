@@ -62,6 +62,10 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(
+        r"\b(?:postgres(?:ql)?|mysql|redis|mongodb|amqp)://[^\s]+",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?m)^[A-Z_][A-Z0-9_]{2,}=[^\s].+$"),
 )
 _RAW_GLOSSARY_EVENT_KEYS = frozenset(
@@ -386,7 +390,8 @@ def build_effective_translation_run_archive(
                     "battle-test analysis. It may contain rendered glossary",
                     "prompt context extracted from provider IO, selected-entry",
                     "metadata, adapter/preflight/fallback decisions, cache policy",
-                    "metadata and compliance diagnostics.",
+                    "metadata, prepared-package resolver linkage and compliance",
+                    "diagnostics.",
                     "`diagnostic_files/`, when present, contains owner-only",
                     "copies of the original uploaded file and the final or partial",
                     "translated result file from object storage.",
@@ -555,6 +560,17 @@ def _glossary_runtime_diagnostics_payload(
     adapter_payloads = tuple(
         _glossary_adapter_event_payload(event) for event in adapter_events
     )
+    prepared_package_events = tuple(
+        prepared_package
+        for payload in adapter_payloads
+        if (
+            prepared_package := _prepared_package_event_payload(
+                payload.get("prepared_package"),
+                payload=payload,
+            )
+        )
+        is not None
+    )
     selected_entry_ids = sorted(
         {
             entry_id
@@ -603,6 +619,23 @@ def _glossary_runtime_diagnostics_payload(
         "glossary_mode": _translation_policy_value(details, "glossary_mode"),
         "summary": {
             "adapter_event_count": len(adapter_payloads),
+            "prepared_package_event_count": len(prepared_package_events),
+            "prepared_package_statuses": sorted(
+                {
+                    str(prepared_package.get("status"))
+                    for prepared_package in prepared_package_events
+                    if prepared_package.get("status")
+                }
+            ),
+            "prepared_package_reason_codes": sorted(
+                {
+                    str(reason_code)
+                    for prepared_package in prepared_package_events
+                    for reason_code in _string_sequence(
+                        prepared_package.get("reason_codes"),
+                    )
+                }
+            ),
             "rendered_prompt_context_count": len(rendered_contexts),
             "rejected_prompt_context_count": len(rejected_contexts),
             "selected_entry_ids": selected_entry_ids,
@@ -613,6 +646,7 @@ def _glossary_runtime_diagnostics_payload(
             ),
         },
         "adapter_events": list(adapter_payloads),
+        "prepared_package_events": list(prepared_package_events),
         "rendered_prompt_contexts": list(rendered_contexts),
         "rejected_prompt_contexts": list(rejected_contexts),
     }
@@ -637,11 +671,75 @@ def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any
         "cache_policy": _safe_dict(payload.get("cache_policy")),
         "battle_test_preflight": _safe_dict(payload.get("battle_test_preflight")),
         "prompt_context": payload.get("prompt_context"),
+        "prepared_package": _safe_dict(payload.get("prepared_package")),
         "policy_signature_context": _safe_dict(payload.get("policy_signature_context")),
         "work_unit_selection_signature": payload.get("work_unit_selection_signature"),
         "raw_event_redactions": raw_event_redactions,
         "payload": payload,
     }
+
+
+def _prepared_package_event_payload(
+    prepared_package: Any,
+    *,
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(prepared_package, dict):
+        return None
+    allowed_fields = {
+        "schema_version",
+        "metadata_only",
+        "raw_payload_included",
+        "status",
+        "reason_codes",
+        "package_id",
+        "package_signature",
+        "source_language",
+        "target_language",
+        "provider_role_id",
+        "provider_model",
+        "entry_count",
+        "ready_entry_count",
+        "needs_review_entry_count",
+    }
+    result = {
+        key: value
+        for key in allowed_fields
+        if (key in prepared_package)
+        and _prepared_package_metadata_value_is_safe(
+            value := prepared_package.get(key),
+        )
+    }
+    if not result:
+        return None
+    cache_policy = payload.get("cache_policy")
+    prompt_context = _safe_dict(payload.get("prompt_context"))
+    result["resolver_linkage"] = {
+        "event_type": payload.get("event_type", _GLOSSARY_RUNTIME_EVENT_TYPE),
+        "runtime_status": payload.get("status", "Unknown"),
+        "fallback_reason": payload.get("fallback_reason", "Unknown"),
+        "work_unit_sequence": payload.get("work_unit_sequence"),
+        "cache_behavior": (
+            cache_policy.get("behavior")
+            if isinstance(cache_policy, dict)
+            else "Unknown"
+        ),
+        "prompt_context_included": bool(
+            prompt_context.get("included_entry_count")
+            or _glossary_selected_entry_ids(payload)
+        ),
+    }
+    return result
+
+
+def _prepared_package_metadata_value_is_safe(value: object) -> bool:
+    if isinstance(value, str):
+        return len(value) <= 240
+    if isinstance(value, bool | int | float) or value is None:
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(isinstance(item, str) and len(item) <= 240 for item in value)
+    return False
 
 
 def _glossary_selected_entry_ids(payload: dict[str, Any]) -> tuple[str, ...]:

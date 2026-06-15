@@ -183,6 +183,21 @@ actually injected. This is not a live provider call, Telegram operation,
 DB/schema/storage/admin/retention/provider-config change, default rollout,
 cache reuse, release/privacy/legal/support claim or proof of glossary quality.
 
+Issue #612 implementation slice on 2026-06-15: branch
+`codex/issue-612-prepared-glossary-archive-diagnostics` extends the existing
+owner-only downloaded `glossary_runtime_diagnostics.json` archive sidecar with
+prepared-glossary package status/linkage metadata from #611 adapter events.
+The sidecar now summarizes package id/signature/schema, target language,
+validation status, reason codes, entry counts, READY/needs-review counts,
+resolver fallback/linkage and cache behavior while keeping raw prompt/source/
+provider/translation bodies out of ordinary artifacts. It also hardens
+glossary adapter event redaction for secret-looking values and `raw_source_text`
+fields before those events can enter run logs. The sidecar is still omitted
+for non-glossary/without-glossary runs without adapter events. Retention,
+export and deletion policy remain `TBD`; this is not a live provider call,
+Telegram operation, runtime rollout, storage/admin-auth/retention change,
+cache reuse or release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
