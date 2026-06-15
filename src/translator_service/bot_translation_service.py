@@ -309,6 +309,19 @@ class PreparedGlossaryPackageAttachmentRequest:
 
 
 @dataclass(frozen=True)
+class PreparedGlossaryPackagePrepRequest:
+    user_telegram_id: int
+    file_name: str
+    document_kind: str
+    source_language: str
+    target_language: str
+    translation_mode: str | None
+    glossary_mode: str | None
+    source_sha256: str
+    content: bytes
+
+
+@dataclass(frozen=True)
 class PreparedGlossaryPackageAttachment:
     payload: object | None = None
     source_sha256: str | None = None
@@ -322,6 +335,7 @@ class PreparedGlossaryPackageAttachment:
 class _PreparedGlossaryPackageAttachmentResult:
     payload: dict | None
     metadata: dict[str, object]
+    fail_closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -478,6 +492,11 @@ class BotTranslationService:
             PreparedGlossaryPackageAttachment | None,
         ]
         | None = None,
+        prepared_glossary_package_prep_resolver: Callable[
+            [PreparedGlossaryPackagePrepRequest],
+            PreparedGlossaryPackageAttachment | None,
+        ]
+        | None = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -523,6 +542,9 @@ class BotTranslationService:
         self._glossary_runtime_hook_builder = glossary_runtime_hook_builder
         self._prepared_glossary_package_resolver = (
             prepared_glossary_package_resolver
+        )
+        self._prepared_glossary_package_prep_resolver = (
+            prepared_glossary_package_prep_resolver
         )
         self._beta_safety_denied_job_ids: set[str] = set()
         self._generated_preview_ids: set[str] = set()
@@ -3343,12 +3365,6 @@ class BotTranslationService:
                 status="disabled",
                 reason_codes=("prepared_glossary_package_attachment_not_requested",),
             )
-        if self._prepared_glossary_package_resolver is None:
-            return _prepared_glossary_package_attachment_result(
-                status="skipped",
-                reason_codes=("prepared_glossary_package_attachment_disabled",),
-            )
-
         request = PreparedGlossaryPackageAttachmentRequest(
             user_telegram_id=pending.user_telegram_id,
             file_name=pending.file_name,
@@ -3359,74 +3375,85 @@ class BotTranslationService:
             glossary_mode=pending.glossary_mode,
             source_sha256=hashlib.sha256(pending.content).hexdigest(),
         )
+
+        resolver_result: _PreparedGlossaryPackageAttachmentResult | None = None
+        if self._prepared_glossary_package_resolver is not None:
+            try:
+                attachment = self._prepared_glossary_package_resolver(request)
+            except Exception:
+                logger.exception(
+                    "Prepared glossary package resolver failed safely: "
+                    "file_name=%s document_kind=%s user_telegram_id=%s",
+                    pending.file_name,
+                    document_kind.value,
+                    pending.user_telegram_id,
+                )
+                resolver_result = _prepared_glossary_package_attachment_result(
+                    status="skipped",
+                    reason_codes=(
+                        "prepared_glossary_package_attachment_resolver_failed",
+                    ),
+                    request=request,
+                    source="resolver",
+                )
+            else:
+                resolver_result = _prepared_glossary_package_attachment_result_from(
+                    attachment,
+                    request=request,
+                    source="resolver",
+                    missing_reason_code="prepared_glossary_package_attachment_missing",
+                )
+            if resolver_result.payload is not None:
+                return resolver_result
+
+        if self._prepared_glossary_package_prep_resolver is None:
+            return resolver_result or _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=("prepared_glossary_package_attachment_disabled",),
+                request=request,
+                source="resolver",
+            )
+
+        prep_request = PreparedGlossaryPackagePrepRequest(
+            user_telegram_id=request.user_telegram_id,
+            file_name=request.file_name,
+            document_kind=request.document_kind,
+            source_language=request.source_language,
+            target_language=request.target_language,
+            translation_mode=request.translation_mode,
+            glossary_mode=request.glossary_mode,
+            source_sha256=request.source_sha256,
+            content=pending.content,
+        )
         try:
-            attachment = self._prepared_glossary_package_resolver(request)
+            prep_attachment = self._prepared_glossary_package_prep_resolver(
+                prep_request
+            )
         except Exception:
             logger.exception(
-                "Prepared glossary package resolver failed safely: "
+                "Prepared glossary package prep resolver failed safely: "
                 "file_name=%s document_kind=%s user_telegram_id=%s",
                 pending.file_name,
                 document_kind.value,
                 pending.user_telegram_id,
             )
-            return _prepared_glossary_package_attachment_result(
+            prep_result = _prepared_glossary_package_attachment_result(
                 status="skipped",
-                reason_codes=("prepared_glossary_package_attachment_resolver_failed",),
+                reason_codes=("prepared_glossary_package_prep_resolver_failed",),
                 request=request,
+                source="prep",
+                fail_closed=True,
             )
-        if attachment is None:
-            return _prepared_glossary_package_attachment_result(
-                status="skipped",
-                reason_codes=("prepared_glossary_package_attachment_missing",),
+        else:
+            prep_result = _prepared_glossary_package_attachment_result_from(
+                prep_attachment,
                 request=request,
+                source="prep",
+                missing_reason_code="prepared_glossary_package_prep_missing",
+                disabled_reason_code="prepared_glossary_package_prep_disabled",
+                fail_closed_when_not_ready=True,
             )
-        if not attachment.enabled:
-            return _prepared_glossary_package_attachment_result(
-                status="skipped",
-                reason_codes=attachment.reason_codes
-                or ("prepared_glossary_package_attachment_disabled",),
-                request=request,
-            )
-
-        match_reasons = _prepared_glossary_package_attachment_match_reasons(
-            attachment,
-            request=request,
-        )
-        if match_reasons:
-            return _prepared_glossary_package_attachment_result(
-                status="skipped",
-                reason_codes=match_reasons,
-                request=request,
-            )
-        if not isinstance(attachment.payload, Mapping):
-            return _prepared_glossary_package_attachment_result(
-                status="invalid",
-                reason_codes=("prepared_glossary_package_attachment_payload_invalid",),
-                request=request,
-            )
-
-        validation = validate_prepared_glossary_package(
-            attachment.payload,
-            target_language=pending.target_language,
-        )
-        metadata = dict(validation.metadata)
-        metadata.update(
-            {
-                "attachment_status": "attached" if validation.ready else "skipped",
-                "attachment_reason_codes": list(validation.reason_codes),
-                "metadata_only": True,
-                "raw_payload_included": False,
-            }
-        )
-        if not validation.ready:
-            return _PreparedGlossaryPackageAttachmentResult(
-                payload=None,
-                metadata=metadata,
-            )
-        return _PreparedGlossaryPackageAttachmentResult(
-            payload=dict(attachment.payload),
-            metadata=metadata,
-        )
+        return prep_result
 
     def _release_beta_safety_reservation(self, *, job_id: str, reason: str) -> None:
         if self._beta_safety_guard is None:
@@ -3548,6 +3575,14 @@ class BotTranslationService:
                 document_kind=document_kind,
             )
         )
+        if prepared_glossary_package_attachment.fail_closed:
+            return _failed_translation_job(
+                pending=pending,
+                document_kind=document_kind,
+                error_message=_prepared_glossary_package_fail_closed_message(
+                    prepared_glossary_package_attachment.metadata
+                ),
+            )
 
         plan = _create_persistent_job_plan(
             document_kind=document_kind,
@@ -4780,11 +4815,15 @@ def _prepared_glossary_package_attachment_result(
     status: str,
     reason_codes: tuple[str, ...],
     request: PreparedGlossaryPackageAttachmentRequest | None = None,
+    source: str = "resolver",
+    fail_closed: bool = False,
 ) -> _PreparedGlossaryPackageAttachmentResult:
     metadata: dict[str, object] = {
         "schema_version": "prepared-glossary-package-attachment-v1",
         "attachment_status": status,
         "attachment_reason_codes": list(_unique_texts(reason_codes)),
+        "attachment_source": source,
+        "fail_closed": fail_closed,
         "metadata_only": True,
         "raw_payload_included": False,
     }
@@ -4799,7 +4838,86 @@ def _prepared_glossary_package_attachment_result(
                 "source_sha256_short": request.source_sha256[:12],
             }
         )
-    return _PreparedGlossaryPackageAttachmentResult(payload=None, metadata=metadata)
+    return _PreparedGlossaryPackageAttachmentResult(
+        payload=None,
+        metadata=metadata,
+        fail_closed=fail_closed,
+    )
+
+
+def _prepared_glossary_package_attachment_result_from(
+    attachment: PreparedGlossaryPackageAttachment | None,
+    *,
+    request: PreparedGlossaryPackageAttachmentRequest,
+    source: str,
+    missing_reason_code: str,
+    disabled_reason_code: str = "prepared_glossary_package_attachment_disabled",
+    fail_closed_when_not_ready: bool = False,
+) -> _PreparedGlossaryPackageAttachmentResult:
+    if attachment is None:
+        return _prepared_glossary_package_attachment_result(
+            status="skipped",
+            reason_codes=(missing_reason_code,),
+            request=request,
+            source=source,
+            fail_closed=fail_closed_when_not_ready,
+        )
+    if not attachment.enabled:
+        return _prepared_glossary_package_attachment_result(
+            status="skipped",
+            reason_codes=attachment.reason_codes or (disabled_reason_code,),
+            request=request,
+            source=source,
+            fail_closed=fail_closed_when_not_ready,
+        )
+
+    match_reasons = _prepared_glossary_package_attachment_match_reasons(
+        attachment,
+        request=request,
+    )
+    if match_reasons:
+        return _prepared_glossary_package_attachment_result(
+            status="skipped",
+            reason_codes=match_reasons,
+            request=request,
+            source=source,
+            fail_closed=fail_closed_when_not_ready,
+        )
+    if not isinstance(attachment.payload, Mapping):
+        return _prepared_glossary_package_attachment_result(
+            status="invalid",
+            reason_codes=("prepared_glossary_package_attachment_payload_invalid",),
+            request=request,
+            source=source,
+            fail_closed=fail_closed_when_not_ready,
+        )
+
+    validation = validate_prepared_glossary_package(
+        attachment.payload,
+        target_language=request.target_language,
+    )
+    metadata = dict(validation.metadata)
+    fail_closed = fail_closed_when_not_ready and not validation.ready
+    metadata.update(
+        {
+            "attachment_status": "attached" if validation.ready else "skipped",
+            "attachment_reason_codes": list(validation.reason_codes),
+            "attachment_source": source,
+            "fail_closed": fail_closed,
+            "metadata_only": True,
+            "raw_payload_included": False,
+        }
+    )
+    if not validation.ready:
+        return _PreparedGlossaryPackageAttachmentResult(
+            payload=None,
+            metadata=metadata,
+            fail_closed=fail_closed,
+        )
+    return _PreparedGlossaryPackageAttachmentResult(
+        payload=dict(attachment.payload),
+        metadata=metadata,
+    )
 
 
 def _prepared_glossary_package_attachment_match_reasons(
@@ -5330,6 +5448,20 @@ def _failed_translation_job(
         target_language=pending.target_language,
         status=TranslationJobStatus.FAILED,
         error_message=error_message,
+    )
+
+
+def _prepared_glossary_package_fail_closed_message(
+    metadata: Mapping[str, object],
+) -> str:
+    raw_reasons = metadata.get("attachment_reason_codes")
+    reason_codes: list[str] = []
+    if isinstance(raw_reasons, list):
+        reason_codes = [str(reason) for reason in raw_reasons if str(reason)]
+    reason_summary = ",".join(_unique_texts(reason_codes)) or "Unknown"
+    return (
+        "Prepared glossary data is not READY for this with_glossary "
+        f"owner/test run. reason_codes={reason_summary}"
     )
 
 

@@ -108,6 +108,15 @@ existing #611 worker/#557 resolver path and render glossary context with #465
 cache bypass. This still adds no package registry, storage/config source,
 release/privacy/legal/support readiness.
 
+R-041 update note, 2026-06-15: issue #637 adds a default-off local/fake
+owner/test prepared-glossary prep resolver boundary for explicit
+`with_glossary` jobs. The resolver receives pending upload content in memory
+and may return only a #610 READY compact package matched through #635; default
+and `without_glossary` jobs do not call prep. Configured prep failures fail
+closed before persistent queueing with metadata-only reason codes. This still
+adds no live provider calls, package registry, durable storage/retention,
+support readiness.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
