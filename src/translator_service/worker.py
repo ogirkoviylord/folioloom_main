@@ -15,7 +15,7 @@ from translator_service.file_storage import (
     StoredFileKind,
 )
 from translator_service.glossary_persistent_runtime_resolver import (
-    build_persistent_epub_glossary_runtime_hook_from_prepared_package,
+    build_persistent_glossary_runtime_hook_from_prepared_package,
 )
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
@@ -913,7 +913,7 @@ def _scheduled_glossary_runtime_hook(
             work_unit,
         )
         if prepared_package_payload is not None:
-            return build_persistent_epub_glossary_runtime_hook_from_prepared_package(
+            return build_persistent_glossary_runtime_hook_from_prepared_package(
                 work_unit=work_unit,
                 source_text=source_text,
                 prepared_package_payload=prepared_package_payload,

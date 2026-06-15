@@ -4664,6 +4664,110 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
 
+    def test_txt_and_docx_with_glossary_prepared_package_inject_context(self):
+        cases = (
+            ("txt", "notes.txt", b"Darcy returns."),
+            (
+                "docx",
+                "notes.docx",
+                _make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+            ),
+        )
+        for document_kind, file_name, content in cases:
+            with self.subTest(document_kind=document_kind):
+                with TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    storage = LocalObjectStorage(root / "objects")
+                    persistent_store = SQLiteTranslationJobStore(
+                        root / "jobs.sqlite3"
+                    )
+                    run_log_root = root / "translation-runs"
+                    self.addCleanup(persistent_store.close)
+                    source_sha256 = hashlib.sha256(content).hexdigest()
+
+                    def prepared_package_resolver(
+                        request,
+                        *,
+                        expected_source_sha256=source_sha256,
+                    ):
+                        return PreparedGlossaryPackageAttachment(
+                            payload=_prepared_glossary_package(),
+                            source_sha256=expected_source_sha256,
+                            document_kind=request.document_kind,
+                            target_language=request.target_language,
+                        )
+
+                    service = BotTranslationService(
+                        job_repository=InMemoryTranslationJobRepository(),
+                        pricing_rules=_pricing_rules(),
+                        max_upload_mb=50,
+                        max_fragment_chars=200,
+                        file_storage=storage,
+                        persistent_job_store=persistent_store,
+                        translation_run_log_root=run_log_root,
+                        use_scheduler_runner=True,
+                        prepared_glossary_package_resolver=prepared_package_resolver,
+                    )
+                    service.store_uploaded_document(
+                        user_telegram_id=42,
+                        file_name=file_name,
+                        content=content,
+                        source_language="en",
+                    )
+                    service.confirm_pending_upload_rights(user_telegram_id=42)
+                    self._select_default_translation_mode(service)
+                    service.prepare_pending_upload(
+                        user_telegram_id=42,
+                        target_language="ru",
+                        glossary_mode=GLOSSARY_MODE_WITH,
+                    )
+                    self._accept_pending_preview(service)
+                    translator = RecordingTranslator()
+
+                    job = service.confirm_pending_translation(
+                        user_telegram_id=42,
+                        translator=translator,
+                    )
+
+                    self.assertEqual(job.status, TranslationJobStatus.READY)
+                    self.assertGreaterEqual(len(translator.requests), 1)
+                    self.assertTrue(
+                        any(
+                            "<glossary_context" in request[0]
+                            for request in translator.requests
+                        ),
+                    )
+                    self.assertTrue(
+                        any("Дарси" in request[0] for request in translator.requests),
+                    )
+                    policy = json.loads(
+                        persistent_store.get_job(job.id).translation_policy
+                    )
+                    self.assertEqual(policy["glossary_mode"], GLOSSARY_MODE_WITH)
+                    self.assertEqual(
+                        policy["prepared_glossary_package"]["package_id"],
+                        "prepared:bot-test:ru",
+                    )
+                    run_dir = next(run_log_root.iterdir())
+                    event_lines = run_dir.joinpath("events.jsonl").read_text()
+                    self.assertIn(
+                        '"document_format": "' + document_kind + '"',
+                        event_lines,
+                    )
+                    self.assertIn("prepared_glossary_package_attachment", event_lines)
+                    self.assertIn('"attachment_status": "attached"', event_lines)
+                    self.assertIn("bypass_glossary_injected_cache", event_lines)
+                    self.assertNotIn("Darcy returns.", event_lines)
+                    self.assertNotIn("sk-", event_lines)
+
     def test_epub_with_glossary_prep_resolver_attaches_ready_package(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

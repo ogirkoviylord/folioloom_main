@@ -702,7 +702,8 @@ Acceptance criteria:
   automatic glossary metadata, #642 adds the reusable fake/local
   prepared-glossary prep service boundary, #643 gates configured prep resolver
   calls through existing beta-safety cost/cap accounting, #644 generalizes
-  automatic injection across supported formats, #645 updates
+  prepared-package injection across supported persistent TXT/DOCX/EPUB units
+  behind source-useful/budget gates, #645 updates
   owner-only diagnostics, #648 wires provider-backed DeepSeek Pro prep with
   fake-provider tests, #646 is the conditional bounded live smoke, and #647 is
   docs closeout. The new policy still preserves #465 cache bypass for
