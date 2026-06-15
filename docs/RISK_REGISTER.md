@@ -84,6 +84,12 @@ unwrap still runs #622 boundary checks and #610 validation, and does not
 approve semantic inference, live retries, runtime translation, rollout, cache
 reuse or release/privacy claims.
 
+R-041 update note, 2026-06-15: issue #628 treats prompt-placeholder or
+`Unknown` values in locally owned prepared-package metadata as missing local
+envelope fields. This improves package identity before #607 but does not
+approve semantic inference, live retries, runtime translation, rollout, cache
+reuse or release/privacy claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
