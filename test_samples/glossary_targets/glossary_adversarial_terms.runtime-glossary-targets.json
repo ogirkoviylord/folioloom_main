@@ -13,7 +13,11 @@
           "source_canonical": "Glass Market",
           "aliases": ["The Glass Market"],
           "target_canonical": "Зеркальный Торг",
-          "target_variants": ["Зеркального Торга", "Зеркальном Торге"],
+          "target_variants": [
+            "Зеркального Торга",
+            "Зеркальном Торге",
+            "Зеркальному Торгу"
+          ],
           "strategy": "owner_approved_preferred_rendering",
           "status": "synthetic_control_fixture",
           "confidence": 1.0
@@ -33,7 +37,7 @@
           "source_canonical": "North Door",
           "aliases": ["The North Door"],
           "target_canonical": "Северница",
-          "target_variants": ["Северницу", "Севернице"],
+          "target_variants": ["Северницу", "Севернице", "Северницы"],
           "strategy": "owner_approved_preferred_rendering",
           "status": "synthetic_control_fixture",
           "confidence": 1.0
@@ -53,7 +57,7 @@
           "source_canonical": "Glossary Map",
           "aliases": ["The Glossary Map"],
           "target_canonical": "Карта Имён",
-          "target_variants": ["Картой Имён", "Карте Имён"],
+          "target_variants": ["Картой Имён", "Карте Имён", "Карту Имён"],
           "strategy": "owner_approved_preferred_rendering",
           "status": "synthetic_control_fixture",
           "confidence": 1.0
@@ -107,7 +111,7 @@
           "source_canonical": "Glossary Map",
           "aliases": ["The Glossary Map"],
           "target_canonical": "Карта Імен",
-          "target_variants": ["Картою Імен", "Карті Імен"],
+          "target_variants": ["Картою Імен", "Карті Імен", "Карту Імен"],
           "strategy": "owner_approved_preferred_rendering",
           "status": "synthetic_control_fixture",
           "confidence": 1.0
