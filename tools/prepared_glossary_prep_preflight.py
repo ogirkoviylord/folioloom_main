@@ -1103,6 +1103,7 @@ def _adjudicate_provider_package_payload(
     source_document_fingerprint = str(
         packet.get("source_document_fingerprint") or "Unknown"
     )
+    envelope_entries = _local_envelope_entries(entries, packet=packet)
     envelope = {
         "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
         "package_id": _package_id_for_issue(
@@ -1123,7 +1124,7 @@ def _adjudicate_provider_package_payload(
             packet.get("candidate_selector_signature") or "Unknown"
         ),
         "owner_approved": True,
-        "entries": entries,
+        "entries": envelope_entries,
     }
     return PreparedPackageAdjudicationResult(
         payload=envelope,
@@ -1134,6 +1135,52 @@ def _adjudicate_provider_package_payload(
             "provider_package_missing_local_envelope_fields",
         ),
     )
+
+
+def _local_envelope_entries(
+    entries: Sequence[Any],
+    *,
+    packet: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    candidates = packet.get("candidates", ())
+    candidate_by_id = {
+        str(candidate.get("source_entry_id")): candidate
+        for candidate in candidates
+        if isinstance(candidate, Mapping) and candidate.get("source_entry_id")
+    }
+    envelope_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        source_entry_id = str(entry.get("source_entry_id") or "")
+        candidate = candidate_by_id.get(source_entry_id, {})
+        envelope_entry = {
+            "source_entry_id": source_entry_id,
+            "source_canonical": str(candidate.get("source_canonical") or ""),
+            "aliases": _safe_text_list(candidate.get("aliases", ()), limit=8),
+            "evidence_refs": _safe_text_list(
+                entry.get("evidence_refs") or candidate.get("evidence_refs", ()),
+                limit=16,
+            ),
+            "target_canonical": entry.get("target_canonical"),
+            "target_variants": entry.get("target_variants", ()),
+            "forbidden_variants": entry.get("forbidden_variants", ()),
+            "strategy": entry.get("strategy", "provider_prepared_local_envelope"),
+            "confidence": entry.get("confidence", 0.0),
+            "needs_review": entry.get("needs_review", False),
+            "reason_codes": entry.get("reason_codes", entry.get("issue_codes", ())),
+        }
+        policy_metadata = entry.get("terminology_policy_metadata")
+        if isinstance(policy_metadata, Mapping):
+            envelope_entry["terminology_policy_metadata"] = dict(policy_metadata)
+        envelope_entries.append(envelope_entry)
+    return envelope_entries
+
+
+def _safe_text_list(value: Any, *, limit: int) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [str(item) for item in value if str(item)][:limit]
 
 
 def _local_metadata_envelope_reasons(
