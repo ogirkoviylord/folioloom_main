@@ -90,6 +90,21 @@ not add live provider calls, provider config/secrets, cache reuse, DB/schema/
 storage/admin/retention changes, deployment or release/privacy/legal/support
 claims. Follow-up #645 and #648 remain required before #646 live smoke can run.
 
+Issue #645 implementation slice on 2026-06-15 extends the owner-only downloaded
+`glossary_runtime_diagnostics.json` archive sidecar for automatic default
+glossary runs. The sidecar now records automatic glossary policy status,
+prepared-package attachment/prep status, prep beta-safety metadata, target
+metadata presence, rendered context counts or fallback/omission reason codes,
+cache behavior and metadata-only glossary compliance summaries when those
+events exist. Rendered `<glossary_context>` text is still sourced only from the
+existing owner-only `provider_io_diagnostics.jsonl` boundary; ordinary logs,
+normal admin pages, Telegram/user surfaces, JSON APIs, docs/issues/PRs/support
+and release artifacts remain metadata-only/redacted, with secret/raw rejection
+tests for the new attachment fields. This does not add live provider calls,
+public/admin raw UI expansion, DB/schema/storage/admin-auth/retention changes,
+deployment or release/privacy/legal/support claims. Follow-up #648 remains
+required before #646 live smoke can run.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /

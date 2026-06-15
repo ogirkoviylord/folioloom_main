@@ -19,7 +19,7 @@ AI-агенты обязаны читать его перед архитекту
 
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
-Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644
+Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644/#645
 
 Decision:
 - The temporary Telegram glossary mode selector from issue #546 is superseded
@@ -39,8 +39,9 @@ Decision:
   a beta-safety cost/cap metadata and reservation gate around future prep
   resolver calls. Issue #644 generalizes prepared-package injection across
   supported persistent TXT/DOCX/EPUB work units behind source-useful and budget
-  gates. Issues #645 and #648 implement diagnostics and provider-prep
-  plumbing. Issue #646 is a separately gated bounded live smoke and may run
+  gates. Issue #645 updates owner-only archive diagnostics for automatic
+  default glossary runs. Issue #648 implements provider-prep plumbing. Issue
+  #646 is a separately gated bounded live smoke and may run
   only after #641-#645 and #648 are merged/reviewed and local/fake gates pass.
 - Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
   glossary data must not silently create quality/readiness claims. The
@@ -84,9 +85,13 @@ Consequences:
   calls are protected by an existing `BetaSafetyGuard` reservation and
   metadata-only usage path. After #644, #610 READY prepared packages can
   produce bounded glossary context for supported persistent TXT/DOCX/EPUB units
-  when source term/alias presence, target metadata and budget gates pass.
-  Downstream diagnostics and provider-backed wiring still depend on follow-up
-  #639 child issues and their gates.
+  when source term/alias presence, target metadata and budget gates pass. After
+  #645, owner-only downloaded diagnostic archives can summarize automatic
+  glossary policy status, prepared-package attachment/prep status, prep
+  beta-safety metadata, target metadata presence, rendered-context counts,
+  cache behavior and metadata-only compliance summaries when the run emits
+  those events. Provider-backed wiring still depends on follow-up #639 child
+  issues and their gates.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.

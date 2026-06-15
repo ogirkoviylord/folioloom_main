@@ -34,6 +34,7 @@ _GLOSSARY_RUNTIME_DIAGNOSTICS_SCHEMA_VERSION = (
     "glossary-runtime-archive-diagnostics-v1"
 )
 _GLOSSARY_RUNTIME_EVENT_TYPE = "glossary_runtime_adapter"
+_PREPARED_GLOSSARY_ATTACHMENT_EVENT_TYPE = "prepared_glossary_package_attachment"
 _GLOSSARY_CONTEXT_RE = re.compile(
     r"<glossary_context\b.*?</glossary_context>",
     re.DOTALL,
@@ -551,7 +552,12 @@ def _glossary_runtime_diagnostics_payload(
         for event in details.events
         if event.event_type == _GLOSSARY_RUNTIME_EVENT_TYPE
     )
-    if not adapter_events:
+    attachment_events = tuple(
+        event
+        for event in details.events
+        if event.event_type == _PREPARED_GLOSSARY_ATTACHMENT_EVENT_TYPE
+    )
+    if not adapter_events and not attachment_events:
         return None
     rendered_contexts, rejected_contexts = _provider_io_glossary_contexts(
         run_dir / "provider_io_diagnostics.jsonl",
@@ -560,13 +566,27 @@ def _glossary_runtime_diagnostics_payload(
     adapter_payloads = tuple(
         _glossary_adapter_event_payload(event) for event in adapter_events
     )
+    attachment_payloads = tuple(
+        _prepared_glossary_attachment_event_payload(event)
+        for event in attachment_events
+    )
     prepared_package_events = tuple(
         prepared_package
-        for payload in adapter_payloads
+        for payload in adapter_payloads + attachment_payloads
         if (
             prepared_package := _prepared_package_event_payload(
                 payload.get("prepared_package"),
                 payload=payload,
+            )
+        )
+        is not None
+    )
+    compliance_summaries = tuple(
+        compliance
+        for payload in adapter_payloads
+        if (
+            compliance := _glossary_compliance_summary_payload(
+                payload.get("glossary_compliance"),
             )
         )
         is not None
@@ -577,6 +597,18 @@ def _glossary_runtime_diagnostics_payload(
             for payload in adapter_payloads
             for entry_id in _glossary_selected_entry_ids(payload)
         }
+    )
+    prompt_context_summaries = tuple(
+        summary
+        for payload in adapter_payloads
+        if (summary := _prompt_context_summary_payload(payload)) is not None
+    )
+    diagnostic_reason_codes = _diagnostic_reason_codes(
+        adapter_payloads=adapter_payloads,
+        attachment_payloads=attachment_payloads,
+        prepared_package_events=prepared_package_events,
+        prompt_context_summaries=prompt_context_summaries,
+        compliance_summaries=compliance_summaries,
     )
     cache_behaviors = sorted(
         {
@@ -617,8 +649,26 @@ def _glossary_runtime_diagnostics_payload(
         "source_language": details.summary.source_language,
         "target_language": details.summary.target_language,
         "glossary_mode": _translation_policy_value(details, "glossary_mode"),
+        "automatic_glossary_policy": _automatic_glossary_policy_payload(details),
         "summary": {
             "adapter_event_count": len(adapter_payloads),
+            "attachment_event_count": len(attachment_payloads),
+            "attachment_statuses": sorted(
+                {
+                    str(attachment.get("attachment_status"))
+                    for attachment in attachment_payloads
+                    if attachment.get("attachment_status")
+                }
+            ),
+            "attachment_reason_codes": sorted(
+                {
+                    str(reason_code)
+                    for attachment in attachment_payloads
+                    for reason_code in _string_sequence(
+                        attachment.get("attachment_reason_codes"),
+                    )
+                }
+            ),
             "prepared_package_event_count": len(prepared_package_events),
             "prepared_package_statuses": sorted(
                 {
@@ -638,15 +688,45 @@ def _glossary_runtime_diagnostics_payload(
             ),
             "rendered_prompt_context_count": len(rendered_contexts),
             "rejected_prompt_context_count": len(rejected_contexts),
+            "prompt_context_event_count": len(prompt_context_summaries),
+            "prompt_context_included_event_count": sum(
+                1
+                for prompt_context in prompt_context_summaries
+                if prompt_context.get("included")
+            ),
+            "prompt_context_omission_reasons": sorted(
+                {
+                    str(reason)
+                    for prompt_context in prompt_context_summaries
+                    for reason in _string_sequence(
+                        prompt_context.get("omission_reasons"),
+                    )
+                }
+            ),
             "selected_entry_ids": selected_entry_ids,
+            "target_metadata_status": _target_metadata_status(
+                prepared_package_events,
+            ),
             "cache_policy_behaviors": cache_behaviors,
+            "compliance_summary_count": len(compliance_summaries),
+            "compliance_statuses": sorted(
+                {
+                    str(compliance.get("status"))
+                    for compliance in compliance_summaries
+                    if compliance.get("status")
+                }
+            ),
+            "diagnostic_reason_codes": diagnostic_reason_codes,
             "related_diagnostic_files": _glossary_related_diagnostic_files(
                 run_dir,
                 raw_text_diagnostics_present=raw_text_diagnostics_present,
             ),
         },
         "adapter_events": list(adapter_payloads),
+        "attachment_events": list(attachment_payloads),
         "prepared_package_events": list(prepared_package_events),
+        "prompt_context_events": list(prompt_context_summaries),
+        "compliance_summaries": list(compliance_summaries),
         "rendered_prompt_contexts": list(rendered_contexts),
         "rejected_prompt_contexts": list(rejected_contexts),
     }
@@ -667,13 +747,47 @@ def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any
         "status": payload.get("status", "Unknown"),
         "fallback_reason": payload.get("fallback_reason", "Unknown"),
         "work_unit_sequence": payload.get("work_unit_sequence"),
+        "document_format": payload.get("document_format"),
         "selected_entry_ids": _string_sequence(payload.get("selected_entry_ids")),
         "cache_policy": _safe_dict(payload.get("cache_policy")),
         "battle_test_preflight": _safe_dict(payload.get("battle_test_preflight")),
         "prompt_context": payload.get("prompt_context"),
         "prepared_package": _safe_dict(payload.get("prepared_package")),
+        "glossary_compliance": _safe_dict(payload.get("glossary_compliance")),
         "policy_signature_context": _safe_dict(payload.get("policy_signature_context")),
         "work_unit_selection_signature": payload.get("work_unit_selection_signature"),
+        "raw_event_redactions": raw_event_redactions,
+        "payload": payload,
+    }
+
+
+def _prepared_glossary_attachment_event_payload(
+    event: TranslationRunEvent,
+) -> dict[str, Any]:
+    payload, raw_event_redactions = _redact_glossary_event_raw_fields(
+        dict(event.payload),
+    )
+    return {
+        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+        "event_type": event.event_type,
+        "attachment_status": payload.get("attachment_status", "Unknown"),
+        "attachment_reason_codes": _string_sequence(
+            payload.get("attachment_reason_codes"),
+        ),
+        "attachment_source": payload.get("attachment_source", "Unknown"),
+        "fail_closed": bool(payload.get("fail_closed")),
+        "metadata_only": payload.get("metadata_only", True),
+        "raw_payload_included": payload.get("raw_payload_included", "Unknown"),
+        "document_kind": payload.get("document_kind"),
+        "source_language": payload.get("source_language"),
+        "target_language": payload.get("target_language"),
+        "translation_mode": payload.get("translation_mode"),
+        "glossary_mode": payload.get("glossary_mode"),
+        "source_sha256_short": payload.get("source_sha256_short"),
+        "prepared_package": _safe_dict(payload),
+        "glossary_prep_beta_safety": _glossary_prep_beta_safety_payload(
+            payload.get("glossary_prep_beta_safety"),
+        ),
         "raw_event_redactions": raw_event_redactions,
         "payload": payload,
     }
@@ -730,6 +844,205 @@ def _prepared_package_event_payload(
         ),
     }
     return result
+
+
+def _glossary_prep_beta_safety_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    allowed_fields = {
+        "schema_version",
+        "metadata_only",
+        "raw_payload_included",
+        "reservation_status",
+        "reason_codes",
+        "reservation_job_id",
+        "estimated_prompt_tokens",
+        "estimated_completion_tokens",
+        "estimated_cost_usd",
+        "provider_reported_usage_status",
+        "accounting_usage_source",
+        "accounted_prompt_tokens",
+        "accounted_completion_tokens",
+        "beta_safety_reason_code",
+    }
+    return {
+        key: item
+        for key in allowed_fields
+        if (key in value)
+        and _prepared_package_metadata_value_is_safe(item := value.get(key))
+    }
+
+
+def _glossary_compliance_summary_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed_fields = {
+        "schema_version",
+        "policy",
+        "status",
+        "reason_codes",
+        "uncertainty_reason_codes",
+        "selected_entry_count",
+        "checked_entry_count",
+        "target_form_present_count",
+        "target_form_missing_count",
+        "forbidden_variant_count",
+        "needs_review_entry_count",
+        "skipped_entry_count",
+        "selected_entry_ids",
+        "checked_entry_ids",
+        "target_form_present_entry_ids",
+        "target_form_missing_entry_ids",
+        "forbidden_variant_entry_ids",
+        "needs_review_entry_ids",
+        "skipped_entry_ids",
+        "metadata_only",
+        "raw_payload_included",
+        "semantic_quality_claim_made",
+    }
+    result = {
+        key: item
+        for key in allowed_fields
+        if (key in value)
+        and _prepared_package_metadata_value_is_safe(item := value.get(key))
+    }
+    terminology_policy = _safe_dict(value.get("terminology_policy"))
+    if terminology_policy:
+        result["terminology_policy"] = terminology_policy
+    entries = value.get("entries")
+    if isinstance(entries, list):
+        result["entries"] = [
+            _safe_dict(entry)
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+    return result or None
+
+
+def _prompt_context_summary_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    prompt_context = payload.get("prompt_context")
+    if not isinstance(prompt_context, dict):
+        if payload.get("fallback_reason") and payload.get("fallback_reason") != "none":
+            return {
+                "work_unit_sequence": payload.get("work_unit_sequence"),
+                "included": False,
+                "included_entry_count": 0,
+                "included_entry_ids": [],
+                "omission_reasons": [str(payload.get("fallback_reason"))],
+            }
+        return None
+    omitted_entries = prompt_context.get("omitted_entries")
+    if not isinstance(omitted_entries, list):
+        omitted_entries = []
+    included_entry_ids = _string_sequence(prompt_context.get("included_entry_ids"))
+    return {
+        "work_unit_sequence": payload.get("work_unit_sequence"),
+        "included": bool(
+            included_entry_ids
+            or _int(prompt_context.get("included_entry_count")) > 0
+        ),
+        "included_entry_count": max(
+            len(included_entry_ids),
+            _int(prompt_context.get("included_entry_count")),
+        ),
+        "included_entry_ids": included_entry_ids,
+        "omitted_entry_count": len(omitted_entries),
+        "omission_reasons": sorted(
+            {
+                str(entry.get("reason"))
+                for entry in omitted_entries
+                if isinstance(entry, dict) and entry.get("reason")
+            }
+        ),
+        "estimated_prompt_tokens": _int(
+            prompt_context.get("estimated_prompt_tokens"),
+        ),
+        "prompt_budget_tokens": _int(prompt_context.get("prompt_budget_tokens")),
+        "character_count": _int(prompt_context.get("character_count")),
+        "character_budget": _int(prompt_context.get("character_budget")),
+    }
+
+
+def _automatic_glossary_policy_payload(
+    details: TranslationRunDetails,
+) -> dict[str, Any]:
+    glossary_mode = _translation_policy_value(details, "glossary_mode")
+    if glossary_mode == "with_glossary":
+        policy_status = "automatic_default_enabled"
+        runtime_intent = "attempt_glossary_when_ready"
+    elif glossary_mode == "without_glossary":
+        policy_status = "legacy_without_glossary"
+        runtime_intent = "do_not_attempt_glossary"
+    else:
+        policy_status = "Unknown"
+        runtime_intent = "Unknown"
+    return {
+        "schema_version": "automatic-glossary-policy-diagnostics-v1",
+        "policy_source": "translation_policy.glossary_mode",
+        "translation_policy_glossary_mode": glossary_mode,
+        "policy_status": policy_status,
+        "runtime_intent": runtime_intent,
+        "user_facing_selector_required": False,
+        "normal_telegram_selector_state": "removed_from_normal_flow",
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+
+
+def _target_metadata_status(
+    prepared_package_events: tuple[dict[str, Any], ...],
+) -> str:
+    if any(
+        _int(event.get("ready_entry_count")) > 0
+        for event in prepared_package_events
+    ):
+        return "present"
+    reason_codes = {
+        reason_code
+        for event in prepared_package_events
+        for reason_code in _string_sequence(event.get("reason_codes"))
+    }
+    if "prepared_glossary_package_target_missing" in reason_codes:
+        return "missing"
+    if prepared_package_events:
+        return "Unknown"
+    return "not_observed"
+
+
+def _diagnostic_reason_codes(
+    *,
+    adapter_payloads: tuple[dict[str, Any], ...],
+    attachment_payloads: tuple[dict[str, Any], ...],
+    prepared_package_events: tuple[dict[str, Any], ...],
+    prompt_context_summaries: tuple[dict[str, Any], ...],
+    compliance_summaries: tuple[dict[str, Any], ...],
+) -> list[str]:
+    reason_codes: set[str] = set()
+    for payload in adapter_payloads:
+        fallback_reason = payload.get("fallback_reason")
+        if fallback_reason and fallback_reason != "none":
+            reason_codes.add(str(fallback_reason))
+        preflight = payload.get("battle_test_preflight")
+        if isinstance(preflight, dict):
+            reason_codes.update(_string_sequence(preflight.get("reason_codes")))
+            preflight_fallback = preflight.get("fallback_reason")
+            if preflight_fallback and preflight_fallback != "none":
+                reason_codes.add(str(preflight_fallback))
+    for payload in attachment_payloads:
+        reason_codes.update(_string_sequence(payload.get("attachment_reason_codes")))
+        prep_safety = payload.get("glossary_prep_beta_safety")
+        if isinstance(prep_safety, dict):
+            reason_codes.update(_string_sequence(prep_safety.get("reason_codes")))
+    for prepared_package in prepared_package_events:
+        reason_codes.update(_string_sequence(prepared_package.get("reason_codes")))
+    for prompt_context in prompt_context_summaries:
+        reason_codes.update(_string_sequence(prompt_context.get("omission_reasons")))
+    for compliance in compliance_summaries:
+        reason_codes.update(_string_sequence(compliance.get("reason_codes")))
+        reason_codes.update(_string_sequence(compliance.get("uncertainty_reason_codes")))
+    return sorted(reason_codes)
 
 
 def _prepared_package_metadata_value_is_safe(value: object) -> bool:
