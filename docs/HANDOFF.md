@@ -319,6 +319,24 @@ not prove translation quality and does not approve Telegram operation by Codex,
 default rollout, cache reuse, provider-config changes, DB/schema/storage/admin/
 retention changes or release/privacy/legal/support claims.
 
+Issue #633 implementation slice on 2026-06-15: branch
+`codex/issue-633-prepared-package-attachment` adds a default-off owner/test
+prepared-glossary package attachment boundary to Telegram job creation for
+explicit `with_glossary` attempts. The bot service can receive a compact
+prepared package from an injected resolver, require deterministic job matching
+by source fingerprint, document kind and target language, validate the payload
+through #610 as READY for the job target, and attach it to
+`translation_policy.prepared_glossary_package` for the existing #611 worker/
+#557 resolver path. Default and `without_glossary` jobs do not attach packages.
+Missing, disabled, non-matching, invalid, target-mismatched or not-READY
+packages fall back safely with metadata-only attachment reason codes in owner
+run logs. Focused fake/local tests prove the attached policy can reach worker
+injection and emit #465 cache bypass only when glossary context is actually
+injected. This is not a live provider call, Telegram operation by Codex,
+default glossary rollout, glossary-aware cache reuse, DB/schema/storage/admin/
+retention/provider-config change, release/privacy/legal/support claim or proof
+of glossary translation quality.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
