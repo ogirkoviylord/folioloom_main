@@ -321,6 +321,16 @@ but it is not a clean post-#584 terminology-contract obedience test. A fresh
 bounded live rerun is needed before judging whether #584 improved exact
 configured target-form compliance.
 
+Issue #594 implementation slice on 2026-06-15: branch
+`codex/issue-594-post-591-root` adds an explicit
+`--issue-593-post-591-adversarial-txt` boundary to
+`tools/glossary_runtime_provider_smoke.py`. The boundary reuses the same
+adversarial TXT input/targets, paired glossary-on/off shape, 4-call cap,
+60k-token cap, target-metadata fixture and #591 useful-entry filter, but writes
+under `outputs/glossary-battle-test/issue-593-post-591-adversarial-live/`.
+Fake #593 preflight completed with 4 fake calls. No live provider calls were
+made in #594; #593 owns the fresh bounded live rerun.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,

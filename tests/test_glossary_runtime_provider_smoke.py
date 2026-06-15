@@ -27,6 +27,8 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
     ISSUE_586_DIAGNOSTIC_ROOT,
     ISSUE_586_ID,
+    ISSUE_593_DIAGNOSTIC_ROOT,
+    ISSUE_593_ID,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
     POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
@@ -751,6 +753,70 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                     "target_backed_source_present_entries",
                 )
                 self.assertEqual(selection_filter["context_selected_entry_count"], 5)
+
+    def test_issue_593_boundary_accepts_post_591_live_root(self):
+        _validate_config(
+            SmokeConfig(
+                issue_id=ISSUE_593_ID,
+                input_targets=ISSUE_575_INPUT_TARGETS,
+                diagnostic_root=ISSUE_593_DIAGNOSTIC_ROOT,
+                max_calls=ISSUE_575_MAX_CALLS,
+                max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                fake=False,
+                target_metadata_fixture_path=ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
+                paired_glossary_off=True,
+            )
+        )
+
+        with self.assertRaises(ValueError):
+            _validate_config(
+                SmokeConfig(
+                    issue_id=ISSUE_593_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=ISSUE_586_DIAGNOSTIC_ROOT,
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=False,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                )
+            )
+
+    def test_issue_593_fake_smoke_reuses_filtered_adversarial_txt_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report = run_smoke(
+                SmokeConfig(
+                    issue_id=ISSUE_593_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=tmp_path / "diagnostics",
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=True,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], ISSUE_593_ID)
+            self.assertEqual(report["calls_made"], 4)
+            for call in (report["calls"][0], report["calls"][2]):
+                self.assertEqual(call["prompt_context"]["included_entry_count"], 5)
+                compliance = call["glossary_compliance"]
+                self.assertEqual(compliance["selected_entry_count"], 5)
+                self.assertEqual(compliance["checked_entry_count"], 5)
+                self.assertNotIn(
+                    "target_metadata_missing",
+                    compliance["reason_codes"],
+                )
+                self.assertNotIn("source_term_absent", compliance["reason_codes"])
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()
