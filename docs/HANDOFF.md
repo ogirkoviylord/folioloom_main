@@ -228,6 +228,24 @@ owner approval and this is not Telegram operation, runtime translation, rollout,
 cache reuse, provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim.
 
+Issue #614 provider-boundary slice on 2026-06-15: branch
+`codex/issue-614-live-pro-glossary-prep` extends the #619 fake preflight runner
+with an explicit owner-approved `--issue-614-live` boundary for one bounded
+DeepSeek Pro prepared-glossary package call over the committed Gutenberg
+control EPUB targeting `ru`. Fake/dry preflight passed first with 8 selected
+candidates and 0 live calls at
+`outputs/glossary-battle-test/issue-614-pro-prep/20260615T160000Z/`. The
+approved live run then made 1 call, used 9,595 provider-reported tokens and
+finished with provider `stop`, but local #610 prepared-package validation
+failed because the provider omitted required top-level fields: package id,
+owner approval, provider role/model and candidate selector signature. The
+metadata-only report is recorded in
+`docs/superpowers/specs/2026-06-15-deepseek-pro-glossary-prep-live-spike-report.md`.
+#607 remains blocked until a future READY live prepared package exists. This is
+not Telegram operation, runtime translation, rollout, cache reuse,
+provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
