@@ -198,6 +198,19 @@ export and deletion policy remain `TBD`; this is not a live provider call,
 Telegram operation, runtime rollout, storage/admin-auth/retention change,
 cache reuse or release/privacy/legal/support claim.
 
+Issue #613 verification slice on 2026-06-15: branch
+`codex/issue-613-prepared-glossary-e2e-rehearsal` adds a local/fake
+end-to-end worker rehearsal for the prepared-glossary package path. The test
+proves that an explicit `with_glossary` EPUB work unit can validate a compact
+READY prepared package from `translation_policy`, inject bounded glossary
+context through the existing #557 resolver, mark #465 cache bypass, and expose
+prepared-package/runtime linkage in the owner-only downloaded archive sidecar.
+Existing tests continue to cover invalid/malformed packages and
+`without_glossary` fallback/omission behavior. This is local/fake evidence
+only: no live provider calls, Telegram operation, rollout, cache reuse,
+provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
