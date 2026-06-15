@@ -60,10 +60,21 @@ PERSISTENT_EPUB_GLOSSARY_RESOLVER_SCHEMA_VERSION = (
 PERSISTENT_EPUB_GLOSSARY_RESOLVER_ADAPTER_VERSION = (
     "persistent-epub-work-unit-glossary-adapter-v1"
 )
+PERSISTENT_GLOSSARY_RESOLVER_SCHEMA_VERSION = "persistent-glossary-runtime-resolver-v1"
+PERSISTENT_GLOSSARY_RESOLVER_ADAPTER_VERSION = (
+    "persistent-work-unit-glossary-adapter-v1"
+)
+_SUPPORTED_PERSISTENT_GLOSSARY_DOCUMENT_FORMATS = frozenset(
+    (
+        DocumentFormat.TXT.value,
+        DocumentFormat.DOCX.value,
+        DocumentFormat.EPUB.value,
+    )
+)
 
 
 @dataclass(frozen=True)
-class PersistentEpubGlossaryResolverConfig:
+class PersistentGlossaryResolverConfig:
     enabled: bool = False
     owner_battle_test_enabled: bool = False
     prompt_rehearsal_enabled: bool = True
@@ -86,14 +97,42 @@ class PersistentEpubGlossaryResolverConfig:
     )
 
 
+PersistentEpubGlossaryResolverConfig = PersistentGlossaryResolverConfig
+
+
+def build_persistent_glossary_runtime_hook_resolver(
+    *,
+    source_text_loader: Callable[[PersistentWorkUnit], str],
+    target_metadata_overlay_payload: Mapping[str, Any] | None,
+    document_kind_resolver: Callable[[PersistentWorkUnit], str | None],
+    config: PersistentGlossaryResolverConfig | None = None,
+) -> Callable[[PersistentWorkUnit], GlossaryRuntimeAdapterHookConfig | None]:
+    config = config or PersistentGlossaryResolverConfig()
+
+    def resolve(work_unit: PersistentWorkUnit) -> GlossaryRuntimeAdapterHookConfig:
+        try:
+            source_text = source_text_loader(work_unit)
+        except Exception:
+            return _fallback_hook("persistent_glossary_source_text_unavailable")
+        return build_persistent_glossary_runtime_hook(
+            work_unit=work_unit,
+            source_text=source_text,
+            target_metadata_overlay_payload=target_metadata_overlay_payload,
+            document_kind=document_kind_resolver(work_unit),
+            config=config,
+        )
+
+    return resolve
+
+
 def build_persistent_epub_glossary_runtime_hook_resolver(
     *,
     source_text_loader: Callable[[PersistentWorkUnit], str],
     target_metadata_overlay_payload: Mapping[str, Any] | None,
     document_kind_resolver: Callable[[PersistentWorkUnit], str | None] | None = None,
-    config: PersistentEpubGlossaryResolverConfig | None = None,
+    config: PersistentGlossaryResolverConfig | None = None,
 ) -> Callable[[PersistentWorkUnit], GlossaryRuntimeAdapterHookConfig | None]:
-    config = config or PersistentEpubGlossaryResolverConfig()
+    config = config or PersistentGlossaryResolverConfig()
 
     def resolve(work_unit: PersistentWorkUnit) -> GlossaryRuntimeAdapterHookConfig:
         try:
@@ -116,32 +155,87 @@ def build_persistent_epub_glossary_runtime_hook_resolver(
     return resolve
 
 
+def build_persistent_glossary_runtime_hook(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    target_metadata_overlay_payload: Mapping[str, Any] | None,
+    document_kind: str | None,
+    config: PersistentGlossaryResolverConfig | None = None,
+) -> GlossaryRuntimeAdapterHookConfig:
+    return _build_persistent_glossary_runtime_hook(
+        work_unit=work_unit,
+        source_text=source_text,
+        target_metadata_overlay_payload=target_metadata_overlay_payload,
+        document_kind=document_kind,
+        config=config or PersistentGlossaryResolverConfig(),
+        schema_version=PERSISTENT_GLOSSARY_RESOLVER_SCHEMA_VERSION,
+        adapter_version=PERSISTENT_GLOSSARY_RESOLVER_ADAPTER_VERSION,
+        reason_prefix="persistent_glossary",
+        disabled_reason_code="persistent_glossary_resolver_disabled",
+        supported_document_formats=_SUPPORTED_PERSISTENT_GLOSSARY_DOCUMENT_FORMATS,
+        quality_route="automatic_glossary",
+    )
+
+
 def build_persistent_epub_glossary_runtime_hook(
     *,
     work_unit: PersistentWorkUnit,
     source_text: str,
     target_metadata_overlay_payload: Mapping[str, Any] | None,
     document_kind: str | None = DocumentFormat.EPUB.value,
-    config: PersistentEpubGlossaryResolverConfig | None = None,
+    config: PersistentGlossaryResolverConfig | None = None,
 ) -> GlossaryRuntimeAdapterHookConfig:
-    config = config or PersistentEpubGlossaryResolverConfig()
+    return _build_persistent_glossary_runtime_hook(
+        work_unit=work_unit,
+        source_text=source_text,
+        target_metadata_overlay_payload=target_metadata_overlay_payload,
+        document_kind=document_kind,
+        config=config or PersistentGlossaryResolverConfig(),
+        schema_version=PERSISTENT_EPUB_GLOSSARY_RESOLVER_SCHEMA_VERSION,
+        adapter_version=PERSISTENT_EPUB_GLOSSARY_RESOLVER_ADAPTER_VERSION,
+        reason_prefix="persistent_epub",
+        disabled_reason_code="persistent_epub_glossary_resolver_disabled",
+        supported_document_formats=frozenset((DocumentFormat.EPUB.value,)),
+        quality_route="owner_battle_test",
+    )
+
+
+def _build_persistent_glossary_runtime_hook(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    target_metadata_overlay_payload: Mapping[str, Any] | None,
+    document_kind: str | None,
+    config: PersistentGlossaryResolverConfig,
+    schema_version: str,
+    adapter_version: str,
+    reason_prefix: str,
+    disabled_reason_code: str,
+    supported_document_formats: frozenset[str],
+    quality_route: str,
+) -> GlossaryRuntimeAdapterHookConfig:
     if not config.enabled:
-        return _fallback_hook("persistent_epub_glossary_resolver_disabled")
+        return _fallback_hook(disabled_reason_code)
     if not config.owner_battle_test_enabled:
-        return _fallback_hook("persistent_epub_owner_battle_test_not_enabled")
-    if _normalized_document_kind(document_kind) != DocumentFormat.EPUB.value:
-        return _fallback_hook("persistent_epub_unsupported_document_kind")
+        return _fallback_hook(f"{reason_prefix}_owner_battle_test_not_enabled")
+    document_format = _document_format_for_kind(document_kind)
+    if (
+        document_format is None
+        or document_format.value not in supported_document_formats
+    ):
+        return _fallback_hook(f"{reason_prefix}_unsupported_document_kind")
     if not isinstance(target_metadata_overlay_payload, Mapping):
-        return _fallback_hook("persistent_epub_target_metadata_missing")
+        return _fallback_hook(f"{reason_prefix}_target_metadata_missing")
 
     source_blocks = _source_blocks_for_work_unit(work_unit, source_text)
     source_character_count = sum(len(block.text) for block in source_blocks)
     if not source_blocks or source_character_count == 0:
-        return _fallback_hook("persistent_epub_source_text_empty")
+        return _fallback_hook(f"{reason_prefix}_source_text_empty")
     if len(source_blocks) > config.max_source_blocks:
-        return _fallback_hook("persistent_epub_source_block_limit_exceeded")
+        return _fallback_hook(f"{reason_prefix}_source_block_limit_exceeded")
     if source_character_count > config.max_source_characters:
-        return _fallback_hook("persistent_epub_source_character_limit_exceeded")
+        return _fallback_hook(f"{reason_prefix}_source_character_limit_exceeded")
 
     unit = FormatTranslationUnit(
         sequence=work_unit.sequence,
@@ -149,8 +243,8 @@ def build_persistent_epub_glossary_runtime_hook(
         prompt_tier=_prompt_tier(work_unit.prompt_tier),
     )
     plan = FormatAdapterPlan(
-        document_format=DocumentFormat.EPUB,
-        adapter_version=PERSISTENT_EPUB_GLOSSARY_RESOLVER_ADAPTER_VERSION,
+        document_format=document_format,
+        adapter_version=adapter_version,
         units=(unit,),
         character_count=source_character_count,
         estimated_input_tokens=max(1, source_character_count // 4),
@@ -174,16 +268,18 @@ def build_persistent_epub_glossary_runtime_hook(
             profile_detection=profile,
             pressure_context=_pressure_context(
                 work_unit,
+                schema_version=schema_version,
+                document_format=document_format,
                 source_character_count=source_character_count,
                 scanned_entry_count=len(scanned.entries),
             ),
             caps=config.reducer_caps,
         )
     except Exception:
-        return _fallback_hook("persistent_epub_local_glossary_planning_failed")
+        return _fallback_hook(f"{reason_prefix}_local_glossary_planning_failed")
 
     if not reduction.retained_entry_ids:
-        return _fallback_hook("persistent_epub_no_retained_glossary_entries")
+        return _fallback_hook(f"{reason_prefix}_no_retained_glossary_entries")
 
     overlay_result = apply_glossary_target_metadata_overlay(
         reduction.retained_snapshot,
@@ -193,7 +289,10 @@ def build_persistent_epub_glossary_runtime_hook(
     )
     if overlay_result.status != "applied":
         return _fallback_hook(
-            _fallback_reason_from_overlay_status(overlay_result.status),
+            _fallback_reason_from_overlay_status(
+                overlay_result.status,
+                reason_prefix=reason_prefix,
+            ),
         )
 
     selection = select_glossary_subset_for_work_unit(
@@ -209,7 +308,7 @@ def build_persistent_epub_glossary_runtime_hook(
         source_text=unit.source_text,
     )
     if not useful_entry_ids:
-        return _fallback_hook("persistent_epub_no_useful_glossary_entries")
+        return _fallback_hook(f"{reason_prefix}_no_useful_glossary_entries")
 
     prompt_context_result = format_glossary_prompt_context(
         _prompt_context_entries(overlay_result.snapshot),
@@ -217,7 +316,7 @@ def build_persistent_epub_glossary_runtime_hook(
         config=config.prompt_context_config,
     )
     if not prompt_context_result.included_entries:
-        return _fallback_hook("persistent_epub_prompt_context_budget_exhausted")
+        return _fallback_hook(f"{reason_prefix}_prompt_context_budget_exhausted")
 
     policy = build_translation_policy(
         text=unit.source_text,
@@ -232,7 +331,7 @@ def build_persistent_epub_glossary_runtime_hook(
         profile_detection=profile,
         selected_rule_ids=selected_rule_ids,
         selection_policy_version=GLOSSARY_SELECTION_POLICY_VERSION,
-        quality_route="owner_battle_test",
+        quality_route=quality_route,
     )
     policy_context = translation_policy_signature_context_payload(
         translation_policy_signature_context_from_snapshot(
@@ -247,13 +346,13 @@ def build_persistent_epub_glossary_runtime_hook(
     return GlossaryRuntimeAdapterHookConfig(
         enabled=True,
         glossary_plan={
-            "schema_version": PERSISTENT_EPUB_GLOSSARY_RESOLVER_SCHEMA_VERSION,
+            "schema_version": schema_version,
             "enabled": True,
             "status": "planned",
             "fallback_reason": "none",
             "source_language": work_unit.source_language,
             "target_language": work_unit.target_language,
-            "document_format": DocumentFormat.EPUB.value,
+            "document_format": document_format.value,
             "translation_mode": "book",
             "source_glossary_signature": reduction.source_glossary_signature,
             "glossary_signature": snapshot.glossary_signature,
@@ -281,13 +380,61 @@ def build_persistent_epub_glossary_runtime_hook(
     )
 
 
+def build_persistent_glossary_runtime_hook_from_prepared_package(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    prepared_package_payload: object | None,
+    document_kind: str | None,
+    config: PersistentGlossaryResolverConfig | None = None,
+) -> GlossaryRuntimeAdapterHookConfig:
+    return _build_persistent_glossary_runtime_hook_from_prepared_package(
+        work_unit=work_unit,
+        source_text=source_text,
+        prepared_package_payload=prepared_package_payload,
+        document_kind=document_kind,
+        config=config
+        or PersistentGlossaryResolverConfig(
+            enabled=True,
+            owner_battle_test_enabled=True,
+        ),
+        reason_prefix="persistent_glossary",
+        build_hook=build_persistent_glossary_runtime_hook,
+    )
+
+
 def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
     *,
     work_unit: PersistentWorkUnit,
     source_text: str,
     prepared_package_payload: object | None,
     document_kind: str | None = DocumentFormat.EPUB.value,
-    config: PersistentEpubGlossaryResolverConfig | None = None,
+    config: PersistentGlossaryResolverConfig | None = None,
+) -> GlossaryRuntimeAdapterHookConfig:
+    return _build_persistent_glossary_runtime_hook_from_prepared_package(
+        work_unit=work_unit,
+        source_text=source_text,
+        prepared_package_payload=prepared_package_payload,
+        document_kind=document_kind,
+        config=config
+        or PersistentGlossaryResolverConfig(
+            enabled=True,
+            owner_battle_test_enabled=True,
+        ),
+        reason_prefix="persistent_epub",
+        build_hook=build_persistent_epub_glossary_runtime_hook,
+    )
+
+
+def _build_persistent_glossary_runtime_hook_from_prepared_package(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    prepared_package_payload: object | None,
+    document_kind: str | None,
+    config: PersistentGlossaryResolverConfig,
+    reason_prefix: str,
+    build_hook: Callable[..., GlossaryRuntimeAdapterHookConfig],
 ) -> GlossaryRuntimeAdapterHookConfig:
     if not isinstance(prepared_package_payload, Mapping):
         reason_code = (
@@ -296,9 +443,9 @@ def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
             else "prepared_glossary_package_invalid"
         )
         fallback_reason = (
-            "persistent_epub_prepared_package_missing"
+            f"{reason_prefix}_prepared_package_missing"
             if prepared_package_payload is None
-            else "persistent_epub_prepared_package_invalid"
+            else f"{reason_prefix}_prepared_package_invalid"
         )
         return _fallback_hook(
             fallback_reason,
@@ -318,22 +465,21 @@ def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
     prepared_metadata = validation.metadata
     if not validation.ready or validation.package is None:
         return _fallback_hook(
-            _prepared_package_fallback_reason(validation.reason_codes),
+            _prepared_package_fallback_reason(
+                validation.reason_codes,
+                reason_prefix=reason_prefix,
+            ),
             prepared_package_metadata=prepared_metadata,
         )
 
-    hook = build_persistent_epub_glossary_runtime_hook(
+    hook = build_hook(
         work_unit=work_unit,
         source_text=source_text,
         target_metadata_overlay_payload=(
             validation.package.to_target_metadata_overlay_payload()
         ),
         document_kind=document_kind,
-        config=config
-        or PersistentEpubGlossaryResolverConfig(
-            enabled=True,
-            owner_battle_test_enabled=True,
-        ),
+        config=config,
     )
     return _hook_with_prepared_package_metadata(hook, prepared_metadata)
 
@@ -370,17 +516,21 @@ def _hook_with_prepared_package_metadata(
     )
 
 
-def _prepared_package_fallback_reason(reason_codes: Sequence[str]) -> str:
+def _prepared_package_fallback_reason(
+    reason_codes: Sequence[str],
+    *,
+    reason_prefix: str,
+) -> str:
     if "prepared_glossary_package_target_mismatch" in reason_codes:
-        return "persistent_epub_prepared_package_target_mismatch"
+        return f"{reason_prefix}_prepared_package_target_mismatch"
     if "prepared_glossary_package_needs_review" in reason_codes:
-        return "persistent_epub_prepared_package_not_ready"
+        return f"{reason_prefix}_prepared_package_not_ready"
     if any(
         "secret" in reason_code or "raw" in reason_code
         for reason_code in reason_codes
     ):
-        return "persistent_epub_prepared_package_rejected"
-    return "persistent_epub_prepared_package_invalid"
+        return f"{reason_prefix}_prepared_package_rejected"
+    return f"{reason_prefix}_prepared_package_invalid"
 
 
 def _work_unit_plan_payload(
@@ -542,12 +692,14 @@ def _snapshot_id(
 def _pressure_context(
     work_unit: PersistentWorkUnit,
     *,
+    schema_version: str,
+    document_format: DocumentFormat,
     source_character_count: int,
     scanned_entry_count: int,
 ) -> dict[str, Any]:
     return {
-        "schema_version": PERSISTENT_EPUB_GLOSSARY_RESOLVER_SCHEMA_VERSION,
-        "document_format": DocumentFormat.EPUB.value,
+        "schema_version": schema_version,
+        "document_format": document_format.value,
         "work_unit_sequence": work_unit.sequence,
         "source_block_count": len(work_unit.source_block_ids),
         "source_character_count": source_character_count,
@@ -567,19 +719,31 @@ def _runtime_integration_payload() -> dict[str, object]:
     }
 
 
-def _fallback_reason_from_overlay_status(status: str) -> str:
-    return f"persistent_epub_target_metadata_overlay_{_compact_reason(status)}"
+def _fallback_reason_from_overlay_status(
+    status: str,
+    *,
+    reason_prefix: str,
+) -> str:
+    return f"{reason_prefix}_target_metadata_overlay_{_compact_reason(status)}"
 
 
 def _normalized_document_kind(document_kind: str | None) -> str:
     return (document_kind or "Unknown").strip().lower() or "Unknown"
 
 
+def _document_format_for_kind(document_kind: str | None) -> DocumentFormat | None:
+    normalized = _normalized_document_kind(document_kind)
+    try:
+        return DocumentFormat(normalized)
+    except ValueError:
+        return None
+
+
 def _compact_reason(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
-        value = "persistent_epub_glossary_fallback"
+        value = "persistent_glossary_fallback"
     normalized = value.strip().lower().replace(" ", "_").replace("-", "_")
     return (
         re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")[:96]
-        or "persistent_epub_glossary_fallback"
+        or "persistent_glossary_fallback"
     )

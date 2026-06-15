@@ -19,7 +19,7 @@ AI-агенты обязаны читать его перед архитекту
 
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
-Status: Active architecture/product direction; partially implemented through #641/#642/#643
+Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644
 
 Decision:
 - The temporary Telegram glossary mode selector from issue #546 is superseded
@@ -37,10 +37,11 @@ Decision:
   metadata to the internal automatic glossary policy. Issue #642 adds the
   reusable local/fake prepared-glossary prep service boundary. Issue #643 adds
   a beta-safety cost/cap metadata and reservation gate around future prep
-  resolver calls. Issues #644-#645 and #648 implement generalized injection,
-  diagnostics and provider-prep plumbing. Issue #646 is a separately gated
-  bounded live smoke and may run only after #641-#645 and #648 are
-  merged/reviewed and local/fake gates pass.
+  resolver calls. Issue #644 generalizes prepared-package injection across
+  supported persistent TXT/DOCX/EPUB work units behind source-useful and budget
+  gates. Issues #645 and #648 implement diagnostics and provider-prep
+  plumbing. Issue #646 is a separately gated bounded live smoke and may run
+  only after #641-#645 and #648 are merged/reviewed and local/fake gates pass.
 - Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
   glossary data must not silently create quality/readiness claims. The
   approved default behavior is metadata-only fallback to the existing
@@ -80,9 +81,11 @@ Consequences:
   `with glossary` or `without glossary`. After #642, a reusable fake/local
   prep service boundary exists. After #643, configured automatic prep resolver
   calls are protected by an existing `BetaSafetyGuard` reservation and
-  metadata-only usage path. Downstream generalized injection, diagnostics and
-  provider-backed wiring still depend on follow-up #639 child issues and their
-  gates.
+  metadata-only usage path. After #644, #610 READY prepared packages can
+  produce bounded glossary context for supported persistent TXT/DOCX/EPUB units
+  when source term/alias presence, target metadata and budget gates pass.
+  Downstream diagnostics and provider-backed wiring still depend on follow-up
+  #639 child issues and their gates.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.
