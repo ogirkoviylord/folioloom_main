@@ -299,6 +299,26 @@ hardening with no live calls, Telegram operation, runtime translation, rollout,
 cache reuse, provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim.
 
+Issue #630 implementation slice on 2026-06-15: branch
+`codex/issue-630-prep-entry-enrichment` hardens the #624 local-envelope path
+after a live retry showed compact provider entries with valid source ids and
+target metadata, but without #610-required source-side fields. The runner now
+enriches local-envelope entries from the already approved preflight packet for
+source canonical, aliases and evidence refs only, strips provider-only extra
+entry metadata, preserves provider-supplied target metadata and revalidates
+through #610. A post-#630 bounded #624 live retry at
+`outputs/glossary-battle-test/issue-624-pro-prep-retry/20260615T193500Z/`
+made 1 call, used 9,776 provider-reported tokens, finished with provider
+`stop`, applied the local envelope, and produced a #610 `ready` prepared
+package with 8 ready entries and 0 `needs_review` entries. Secret scan over the
+checked diagnostics marker set found no provider auth/key/env markers. The
+metadata-only report is recorded in
+`docs/superpowers/specs/2026-06-15-prepared-glossary-pro-prep-retry-ready-report.md`.
+This unblocks preparing the owner-assisted #607 Telegram battle-test, but does
+not prove translation quality and does not approve Telegram operation by Codex,
+default rollout, cache reuse, provider-config changes, DB/schema/storage/admin/
+retention changes or release/privacy/legal/support claims.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
