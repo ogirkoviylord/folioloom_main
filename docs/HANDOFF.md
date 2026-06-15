@@ -352,6 +352,20 @@ local formatter/test-path contract change only; it does not approve live
 provider calls, default rollout, cache reuse, durable state changes or release
 claims.
 
+Issue #598 implementation slice on 2026-06-15: branch
+`codex/issue-598-post-596-boundary` adds an explicit
+`--issue-598-post-596-adversarial-txt` boundary to
+`tools/glossary_runtime_provider_smoke.py`. The boundary reuses the same
+adversarial TXT input/targets, paired glossary-on/off shape, 4-call cap,
+60k-token cap, target-metadata fixture and useful-entry filter as #593, but
+writes under
+`outputs/glossary-battle-test/issue-598-post-596-adversarial-live/`. Fake #598
+preflight completed with 4 fake calls, 5 included/checked entries on each
+glossary-on side, #596 binding markers only in glossary-on diagnostics, and no
+secret-pattern findings. No live provider calls were made in #598. A future
+post-#596 live rerun remains `TBD` because the active goal's 30-call live cap
+was already reached by #593 evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
