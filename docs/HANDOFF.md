@@ -123,6 +123,19 @@ operation, deployment, provider config/key changes, runtime translation model
 changes, DB/schema/storage/admin/retention changes, cache reuse or
 release/privacy/legal/support claims. #646 live smoke remains conditional.
 
+Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
+in the automatic prepared-package runtime path. #610 prepared package
+validation now preserves compact `source_unit_refs` and `source_block_refs`,
+and the persistent resolver can build a local metadata-only glossary snapshot
+directly from #610 READY target-backed prepared entries when the current work
+unit matches the recorded refs and contains the source term/alias. This avoids
+requiring the unit-local deterministic scanner to rediscover the exact same
+candidate key before glossary context can render. Existing non-prepared
+overlay behavior remains available; default runtime, provider config, live
+calls, Telegram operation, cache reuse, DB/schema/storage/admin/retention and
+release/privacy/legal/support claims remain unchanged. #646 live smoke still
+requires a fresh fake/dry pass first.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /

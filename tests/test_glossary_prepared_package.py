@@ -35,6 +35,11 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         self.assertEqual(result.ready_entry_count, 1)
         self.assertEqual(result.metadata["metadata_only"], True)
         self.assertEqual(result.metadata["raw_payload_included"], False)
+        self.assertEqual(result.package.entries[0].source_unit_refs, (7,))
+        self.assertEqual(
+            result.package.entries[0].source_block_refs,
+            ("epub:chapter.xhtml:2",),
+        )
 
         overlay_payload = result.package.to_target_metadata_overlay_payload()
         overlay = apply_glossary_target_metadata_overlay(
@@ -195,6 +200,27 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
             result.reason_codes,
         )
 
+    def test_invalid_source_refs_are_rejected(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_unit_refs=["7"],
+                    source_block_refs=[{"raw": "nope"}],
+                )
+            ]
+        )
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertEqual(result.status, "invalid")
+        self.assertIn(
+            "prepared_glossary_package_source_unit_refs_invalid",
+            result.reason_codes,
+        )
+        self.assertIn(
+            "prepared_glossary_package_source_block_refs_invalid",
+            result.reason_codes,
+        )
+
 
 def _snapshot() -> GlossarySnapshot:
     return GlossarySnapshot(
@@ -270,6 +296,8 @@ def _entry_payload(
         "evidence_refs": (
             evidence_refs if evidence_refs is not None else ["evidence:darcy"]
         ),
+        "source_unit_refs": [7],
+        "source_block_refs": ["epub:chapter.xhtml:2"],
         "target_canonical": target_canonical,
         "target_variants": (
             target_variants

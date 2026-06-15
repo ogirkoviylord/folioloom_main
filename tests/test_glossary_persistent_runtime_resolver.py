@@ -103,7 +103,7 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         )
         self.assertEqual(hook.prompt_context_entries, ())
 
-    def test_prepared_package_ready_hook_uses_validated_overlay(self):
+    def test_prepared_package_ready_hook_uses_validated_bridge(self):
         hook = build_persistent_epub_glossary_runtime_hook_from_prepared_package(
             work_unit=_work_unit(),
             source_text="Darcy returns.",
@@ -121,6 +121,79 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
             1,
         )
         self.assertEqual(len(hook.prompt_context_entries), 1)
+
+    def test_prepared_package_entry_injects_when_scanner_does_not_rediscover_term(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="The chrono-loom hummed once.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:chrono-loom",
+                source_canonical="chrono-loom",
+                aliases=(),
+                evidence_refs=("evidence:chrono-loom",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="хроно-станок",
+                target_variants=("хроно-станок",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "planned")
+        self.assertEqual(
+            hook.glossary_plan["prepared_package_runtime_bridge"]["status"],
+            "applied",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package_runtime_bridge"][
+                "applicable_entry_count"
+            ],
+            1,
+        )
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+        self.assertEqual(
+            hook.glossary_plan["work_unit_plans"][0]["selected_entry_ids"],
+            ["entry:chrono-loom"],
+        )
+        serialized_plan = json.dumps(
+            hook.glossary_plan,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertNotIn("The chrono-loom hummed once.", serialized_plan)
+        self.assertNotIn("хроно-станок", serialized_plan)
+
+    def test_prepared_package_entry_for_other_unit_falls_back(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="The chrono-loom hummed once.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:chrono-loom",
+                source_canonical="chrono-loom",
+                aliases=(),
+                evidence_refs=("evidence:chrono-loom",),
+                source_unit_refs=(99,),
+                source_block_refs=("chapter-9:p9",),
+                target_canonical="хроно-станок",
+                target_variants=("хроно-станок",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_prepared_package_no_applicable_entries",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package_runtime_bridge"][
+                "source_ref_mismatch_count"
+            ],
+            1,
+        )
+        self.assertEqual(hook.prompt_context_entries, ())
 
     def test_prepared_package_target_mismatch_falls_back(self):
         payload = _prepared_package_payload(target_language="uk")
@@ -223,7 +296,7 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertEqual(hook.glossary_plan["status"], "fallback")
         self.assertEqual(
             hook.glossary_plan["fallback_reason"],
-            "persistent_glossary_no_retained_glossary_entries",
+            "persistent_glossary_prepared_package_no_applicable_entries",
         )
         self.assertEqual(hook.prompt_context_entries, ())
 
@@ -325,6 +398,12 @@ def _prepared_package_payload(
     *,
     target_language: str = "ru",
     needs_review: bool = False,
+    source_entry_id: str = "entry:darcy",
+    source_canonical: str = "Darcy",
+    aliases: tuple[str, ...] = ("Mr. Darcy",),
+    evidence_refs: tuple[str, ...] = ("evidence:darcy",),
+    source_unit_refs: tuple[int, ...] = (1,),
+    source_block_refs: tuple[str, ...] = ("chapter-1:p1",),
     target_canonical: str = "Дарси",
     target_variants: tuple[str, ...] = ("мистер Дарси",),
 ) -> dict[str, object]:
@@ -341,10 +420,12 @@ def _prepared_package_payload(
         "owner_approved": True,
         "entries": [
             {
-                "source_entry_id": "entry:darcy",
-                "source_canonical": "Darcy",
-                "aliases": ["Mr. Darcy"],
-                "evidence_refs": ["evidence:darcy"],
+                "source_entry_id": source_entry_id,
+                "source_canonical": source_canonical,
+                "aliases": list(aliases),
+                "evidence_refs": list(evidence_refs),
+                "source_unit_refs": list(source_unit_refs),
+                "source_block_refs": list(source_block_refs),
                 "target_canonical": target_canonical,
                 "target_variants": list(target_variants),
                 "forbidden_variants": ["Дэрси"],
@@ -357,13 +438,16 @@ def _prepared_package_payload(
     }
 
 
-def _work_unit() -> PersistentWorkUnit:
+def _work_unit(
+    *,
+    source_block_ids: tuple[str, ...] = ("chapter-1:p1",),
+) -> PersistentWorkUnit:
     now = datetime(2026, 6, 14, tzinfo=UTC)
     return PersistentWorkUnit(
         id="job-1:unit-1",
         job_id="job-1",
         sequence=1,
-        source_block_ids=("chapter-1:p1",),
+        source_block_ids=source_block_ids,
         source_object_key="intermediate/job-1-unit-1.txt",
         source_text_hash="hash-1",
         prompt_tier="plain",
