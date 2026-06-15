@@ -17,9 +17,78 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
+
+Status: Active architecture/product direction; implementation pending
+
+Decision:
+- The temporary Telegram glossary mode selector from issue #546 is superseded
+  by the owner-approved #639/#640 direction: supported Telegram translation
+  jobs should attempt glossary preparation and glossary-context injection as an
+  internal default behavior, without asking the user to choose
+  `with glossary` or `without glossary`.
+- The normal user flow should remain simple: upload, rights confirmation,
+  translation mode, target language, preview/estimate, explicit confirmation,
+  progress and result. Glossary behavior should be internal policy/diagnostic
+  metadata, not a user-facing mode choice.
+- Default automatic glossary integration must still be staged through the
+  approved #639 child issues. Issue #640 records the policy only. Issues
+  #641-#645 and #648 implement local/fake/default-path wiring, diagnostics and
+  provider-prep plumbing. Issue #646 is a separately gated bounded live smoke
+  and may run only after #641-#645 and #648 are merged/reviewed and local/fake
+  gates pass.
+- Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
+  glossary data must not silently create quality/readiness claims. The
+  approved default behavior is metadata-only fallback to the existing
+  translation path or explicit fail-closed behavior only where a child issue
+  approves it.
+- Glossary-injected units must continue to preserve the #465 cache-bypass
+  policy. This decision does not approve glossary-aware cache reuse.
+- The runtime translation provider/model remains unchanged by this decision.
+  DeepSeek Pro remains the glossary-prep provider boundary where separately
+  approved; provider config/key changes are not approved.
+- Glossary core remains language-neutral. Target-language morphology,
+  script/segmentation and compliance behavior must stay behind explicit
+  terminology policy/package boundaries.
+- Ordinary logs, telemetry, GitHub issues, PR descriptions, docs, support
+  artifacts, release artifacts and normal user/admin surfaces remain
+  metadata-only/redacted. Raw source text, prompt bodies, translated text,
+  provider responses, API keys and auth material must stay out of ordinary
+  artifacts. Owner-only diagnostic boundaries remain dedicated and sensitive.
+- Release-version glossary diagnostic privacy, consent, retention, deletion,
+  export, support and legal/privacy policy remain `TBD`/blocking. This
+  decision does not make glossary behavior production-ready, release-ready or
+  legally/privacy ready.
+
+Evidence:
+- The owner requested removal of the button-based glossary UX in the current
+  Codex thread on 2026-06-15 and approved #640-#645, #647 and #648 under #639.
+- GitHub issue #639 records the full approval packet in
+  https://github.com/ogirkoviylord/folioloom_main/issues/639#issuecomment-4712031753.
+- GitHub issue #640 records scoped approval in
+  https://github.com/ogirkoviylord/folioloom_main/issues/640#issuecomment-4712036223.
+- Issue #646 has conditional live-smoke approval only after #641-#645 and
+  #648 are merged/reviewed and local/fake gates pass.
+
+Consequences:
+- Future implementers should stop adding new user-facing glossary mode choices
+  to the Telegram flow and should instead work through #639 child issues.
+- Until #641 and follow-up implementation issues are merged, existing runtime
+  behavior may still include the temporary selector. This decision records the
+  target policy; it is not evidence that the code path has already changed.
+- Any broader rollout beyond the approved default integration path, cache
+  reuse, provider-config change, storage/admin/retention change, deployment or
+  release/privacy/legal/support claim still needs separate owner approval.
+
+Human approval required to change:
+- yes; changing the default glossary rollout posture, cache behavior, provider
+  config, durable state/storage/admin/retention behavior, diagnostic
+  boundaries or release/privacy/legal/support claims requires explicit owner
+  approval.
+
 ### 2026-06-14 - Temporary Telegram glossary mode selector for battle-test comparison
 
-Status: Active temporary battle-test UX
+Status: Superseded by the 2026-06-15 default automatic glossary policy
 
 Decision:
 - The Telegram bot may temporarily ask the user to choose one of two modes for

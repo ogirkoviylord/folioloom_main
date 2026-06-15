@@ -191,21 +191,29 @@ records the current no-code design in
 
 ### Glossary runtime rollout
 
-These gates apply to future glossary runtime rollout proposals. Issue #535
-records the current no-code state machine in
-`docs/superpowers/specs/2026-06-14-glossary-runtime-rollout-design.md`.
+These gates apply to glossary runtime rollout proposals. Issue #535 records
+the older no-code state machine in
+`docs/superpowers/specs/2026-06-14-glossary-runtime-rollout-design.md`. Issue
+#640 supersedes the temporary selector posture with an owner-approved default
+automatic glossary policy under #639, but only through the approved child issue
+sequence and its verification gates.
 
-- Current approved runtime posture remains `off`, `shadow_only` or explicitly
-  owner-approved test/smoke paths only. Normal/default and limited-beta glossary
-  rollout are rejected for now.
-- Promotion beyond shadow/test paths requires separate owner approval and
-  evidence for structural validation, policy-aware compliance, owner-only
-  quality review, provider stability/cost and diagnostics privacy boundaries.
+- The approved default integration path is #639: #641 removes the user-facing
+  selector, #642 adds fake/local prep service boundaries, #643 adds cost/cap
+  accounting, #644 generalizes injection, #645 updates owner-only diagnostics,
+  #648 wires provider-backed prep with fake-provider tests, #646 runs only as a
+  bounded live smoke after local/fake gates, and #647 closes docs.
+- Promotion outside the #639 child-issue path, or beyond the evidence produced
+  by those issues, requires separate owner approval and evidence for structural
+  validation, policy-aware compliance, owner-only quality review, provider
+  stability/cost and diagnostics privacy boundaries.
 - Glossary-injected enabled/test-path units must preserve #465 cache bypass
   unless a separate approved cache-key issue changes that policy.
 - Missing, invalid, unsupported, over-budget or `Unknown` glossary/policy data
   must fall back to the existing non-glossary translation path or metadata-only
-  skip/fallback reasons, not pass or quality claims.
+  skip/fallback reasons, or fail closed only where a #639 child issue
+  explicitly approves that behavior. It must not produce pass or quality
+  claims.
 - Release-version consent, retention, deletion, support and legal/privacy
   policy for glossary diagnostics remains `TBD` and blocks beta/default
   rollout claims.

@@ -24,6 +24,22 @@ TXT/DOCX/EPUB adapters, DeepSeek-compatible provider layer, admin visibility,
 beta allowlist, rights confirmation, beta cost/cap guard, Docker Compose stack
 и backup/restore scripts.
 
+Issue #640 docs/policy slice on 2026-06-15 records the owner-approved #639
+direction that the temporary Telegram glossary selector is superseded by
+automatic internal glossary behavior for supported Telegram translation jobs.
+The intended user flow is upload -> rights confirmation -> translation mode ->
+target language -> preview/estimate -> explicit confirmation -> progress/result,
+without `with glossary` / `without glossary` buttons. This is a policy/docs
+change only: implementation remains in child issues #641-#645 and #648, and
+bounded live evidence is gated by #646 after local/fake gates pass. The default
+policy must preserve rights confirmation, beta allowlist, cost/cap guard, kill
+switch, confirmation, progress/cancel/status/history, My Books, #465 cache
+bypass for glossary-injected units, language-neutral glossary core,
+metadata-only ordinary artifacts and `TBD` release-version diagnostic
+retention/export/delete/support/legal policy. It does not approve deployment,
+provider config/key changes, glossary-aware cache reuse, DB/schema/state/
+storage/admin/retention changes or release/privacy/legal/support claims.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /
@@ -42,6 +58,8 @@ direct runtime prompt injection and deferred/external worker runtime config
 plumbing remains limited to the #551 evidence-repair path described below:
 with-glossary jobs must inject only when approved READY hook data exists or
 record deterministic metadata-only fallback/omission diagnostics.
+This temporary selector behavior is now historical/superseded as product
+direction by #640, but it may remain in code until #641 removes it.
 
 Issue #549 implementation slice on 2026-06-14: branch
 `codex/issue-549-glossary-archive-diagnostics` adds
@@ -2213,12 +2231,11 @@ core flow, release gates, operational visibility and documentation.
   glossary-off quality benefit remains `Unknown`; keep runtime glossary
   shadow-only and iterate EPUB prompt/selection budget before another bounded
   paired quality review;
-- treat issue #479 / #204AO as metadata-only decision preparation, not an owner
-  go/no-go decision: normal/default runtime glossary rollout and limited beta
-  rollout are rejected for now; the recommended path is to keep shadow-only,
-  create a local EPUB prompt/selection budget iteration issue only after owner
-  selection, then request fresh approval for a paired glossary-on/off smoke.
-  Final owner path remains `TBD`;
+- treat issue #479 / #204AO as historical metadata-only decision preparation,
+  not an owner go/no-go decision: normal/default runtime glossary rollout and
+  limited beta rollout were rejected for that evidence state. Issue #640 now
+  records a separate owner-approved #639 automatic default-integration path,
+  but only through #641-#645, #648, conditional #646 and #647 docs closeout;
 - treat issue #487 / #204AP as the local metadata-only EPUB/TXT runtime
   pressure-profiler slice for the #477 follow-up chain:
   `tools/glossary_runtime_provider_smoke.py` now adds compact pressure summaries
@@ -2791,11 +2808,12 @@ Potential issues to verify:
   owner-only smoke/review and future battle-test/beta/default candidates, with
   entry gates, stop conditions, fallback behavior, cache bypass, diagnostics
   privacy boundaries and owner approval points.
-- Follow-up: normal/default runtime glossary rollout and limited beta rollout
-  remain rejected for now. Owner-only battle-test implementation, cache reuse,
-  live provider reruns, diagnostics retention/export/delete behavior,
-  release/privacy/legal/support claims and final go/no-go all require separate
-  owner approval. Translation quality remains `Unknown`.
+- Follow-up: issue #640 supersedes the old temporary-selector and
+  shadow-only/default-off posture only for the approved #639 automatic
+  integration sequence. Cache reuse, live provider reruns outside #646,
+  diagnostics retention/export/delete behavior, release/privacy/legal/support
+  claims and final go/no-go all require separate owner approval. Translation
+  quality remains `Unknown`.
 
 - Date: 2026-06-14.
 - Change: Issue #534 / #204BL adds bounded paired live provider evidence for
