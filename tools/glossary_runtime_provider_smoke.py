@@ -2359,7 +2359,7 @@ def build_runtime_package(
         budget_plan = budget_plan_by_sequence[selection.work_unit_sequence]
         unit = _unit_by_sequence(plan.units, selection.work_unit_sequence)
         target_backed_source_present_only = (
-            is_epub_plan or config.issue_id == ISSUE_575_ID
+            is_epub_plan or _is_adversarial_txt_issue(config)
         )
         prompt_context_text, prompt_context_metadata = (
             format_runtime_glossary_prompt_context(
@@ -4201,6 +4201,10 @@ def _validate_config(config: SmokeConfig) -> None:
     approved = _approved_input_targets_for_config(config)
     if any(item not in approved for item in config.input_targets):
         raise ValueError("input_targets must be a subset of approved inputs/targets.")
+
+
+def _is_adversarial_txt_issue(config: SmokeConfig) -> bool:
+    return config.issue_id in {ISSUE_575_ID, ISSUE_586_ID}
 
 
 def _approval_payload(config: SmokeConfig) -> dict[str, Any]:

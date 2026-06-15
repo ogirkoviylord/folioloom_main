@@ -720,12 +720,37 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                     "glossary_off",
                 ],
             )
+            for call in (report["calls"][0], report["calls"][2]):
+                prompt_context = call["prompt_context"]
+                compliance = call["glossary_compliance"]
+                self.assertEqual(prompt_context["included_entry_count"], 5)
+                self.assertEqual(compliance["selected_entry_count"], 5)
+                self.assertEqual(compliance["checked_entry_count"], 5)
+                self.assertNotIn(
+                    "target_metadata_missing",
+                    compliance["reason_codes"],
+                )
+                self.assertNotIn("source_term_absent", compliance["reason_codes"])
 
             rendered = report_path.read_text(encoding="utf-8")
             self.assertNotIn("<glossary_context", rendered)
             self.assertNotIn("<translation_batch>", rendered)
             self.assertNotIn("mandatory_term:", rendered)
             self.assertNotIn("provider_response", rendered)
+
+            diagnostics = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(Path(report["diagnostic_dir"]).glob("call-*.json"))
+            ]
+            for payload in (diagnostics[0], diagnostics[2]):
+                selection_filter = payload["prompt_context_metadata"][
+                    "selection_filter"
+                ]
+                self.assertEqual(
+                    selection_filter["policy"],
+                    "target_backed_source_present_entries",
+                )
+                self.assertEqual(selection_filter["context_selected_entry_count"], 5)
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()
