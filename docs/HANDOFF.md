@@ -43,6 +43,21 @@ storage/admin/retention changes, live provider calls or release/privacy/legal/
 support claims. Follow-up #642-#645 and #648 remain required before #646 live
 smoke can run.
 
+Issue #642 implementation slice on 2026-06-15 adds
+`src/translator_service/glossary_prepared_prep_service.py`, a reusable
+local/fake prepared-glossary prep service for automatic Telegram job setup.
+The service accepts pending upload content plus compact document/source/target
+metadata, builds local TXT/DOCX/EPUB adapter plans, scanner/profile/reducer
+metadata, sends a bounded in-memory prep packet only to an injected fake/local
+provider callable, validates the returned compact package through #610, and
+returns either a READY `PreparedGlossaryPackageAttachment` or metadata-only
+fallback reason codes. It preserves the existing `BotTranslationService`
+callable hook, keeps default/legacy `without_glossary` behavior dependent on
+the caller policy, and does not call live providers, operate Telegram, change
+provider config/secrets, cache reuse, DB/schema/state/storage/admin/retention
+or make release/privacy/legal/support claims. Follow-up #643-#645 and #648
+remain required before #646 live smoke can run.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /

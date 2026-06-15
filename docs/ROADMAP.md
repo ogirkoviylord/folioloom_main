@@ -699,8 +699,8 @@ Acceptance criteria:
   internal glossary preparation/injection for supported Telegram jobs without
   user-facing glossary buttons. Implementation remains split under #639:
   #641 removes the selector from the bot flow and defaults new jobs to internal
-  automatic glossary metadata, #642 adds a reusable fake/local
-  prepared-glossary prep service, #643 adds cost/cap accounting, #644
+  automatic glossary metadata, #642 adds the reusable fake/local
+  prepared-glossary prep service boundary, #643 adds cost/cap accounting, #644
   generalizes automatic injection across supported formats, #645 updates
   owner-only diagnostics, #648 wires provider-backed DeepSeek Pro prep with
   fake-provider tests, #646 is the conditional bounded live smoke, and #647 is

@@ -145,6 +145,15 @@ does not prove glossary quality, run live provider calls, approve cache reuse,
 change provider config/secrets, mutate DB/schema/storage/admin/retention, or
 make release/privacy/legal/support readiness claims.
 
+R-041 update note, 2026-06-15: issue #642 adds a reusable local/fake
+prepared-glossary prep service for automatic job setup. The service builds
+local scanner/profile/reducer packets from pending upload content and validates
+injected fake/local provider output through #610 before returning a compact
+attachment or metadata-only fallback. Treat this as a local contract and fake
+provider boundary only: live provider calls, provider config/key changes,
+cache reuse, DB/schema/state/storage/admin/retention changes, Telegram
+operation and release/privacy/legal/support claims remain unapproved.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
