@@ -169,10 +169,12 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   buttons. #641 defaults new pending/job metadata to the internal automatic
   glossary flag and preserves legacy explicit `without_glossary`; #642 adds a
   reusable local/fake prepared-glossary prep service that can feed the existing
-  callable hook after #610 validation. Remaining implementation is split
-  through #643-#645 and #648. #646 live smoke remains conditional on those
-  local/fake gates. #465 cache bypass, language-neutral glossary core and
-  metadata-only ordinary artifacts remain required.
+  callable hook after #610 validation; #643 gates configured prep resolver calls
+  through existing beta-safety cost/cap reservation and metadata-only usage
+  accounting before any future provider-backed prep boundary. Remaining
+  implementation is split through #644-#645 and #648. #646 live smoke remains
+  conditional on those local/fake gates. #465 cache bypass, language-neutral
+  glossary core and metadata-only ordinary artifacts remain required.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 

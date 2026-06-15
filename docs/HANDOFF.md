@@ -58,6 +58,23 @@ provider config/secrets, cache reuse, DB/schema/state/storage/admin/retention
 or make release/privacy/legal/support claims. Follow-up #643-#645 and #648
 remain required before #646 live smoke can run.
 
+Issue #643 implementation slice on 2026-06-15 adds a beta-safety
+cost/cap gate around automatic prepared-glossary prep resolver calls. When a
+prep resolver is configured for a `with_glossary` Telegram job, the bot service
+now creates a metadata-only glossary-prep estimate and reserves it through the
+existing `BetaSafetyGuard` before calling the prep resolver. If the guard is
+missing, kill-switched, or denies the prep estimate/caps, the prep resolver is
+not called, no prepared package is attached, and the job continues through the
+existing translation path with metadata-only reason codes. When prep is called,
+provider-reported prep usage is recorded if supplied; otherwise the accounting
+uses the conservative estimate while the metadata keeps provider usage as
+`Unknown`. This preserves existing translation job accounting, beta allowlist,
+kill switch, #465 cache bypass, runtime translation provider/model and
+metadata-only ordinary artifacts. It does not add live provider calls,
+payment/billing semantics, provider config/secrets, DB/schema/storage/admin/
+retention changes, deployment or release/privacy/legal/support claims.
+Follow-up #644-#645 and #648 remain required before #646 live smoke can run.
+
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
 battle-test selector after target-language choice: `Translate with glossary` /
