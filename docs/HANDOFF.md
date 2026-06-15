@@ -289,6 +289,22 @@ post-#584 owner-only diagnostics root
 preflight completed with 4 fake calls. No live provider calls were made in
 #588; live provider behavior after #584 remains `Unknown` until #586 runs.
 
+Issue #586 owner-only live evidence on 2026-06-15: after #588 merged, the
+post-#584 adversarial TXT `ru`/`uk` paired live rerun completed under
+`outputs/glossary-battle-test/issue-586-post-584-adversarial-live/20260615T031740Z/`.
+The run used 4 approved live calls and 10,277 observed provider-reported
+tokens, with structural validation passing on all calls, `stop` finish reasons,
+no secret-pattern findings in the diagnostics directory, service-glossary
+system acknowledgment plus `mandatory_term:` present only on glossary-on, and
+no glossary context on glossary-off. Exact configured target-form compliance
+did not improve versus the post-#582 baseline: `ru` remained 2/5 and `uk`
+remained 4/5, with metadata-only reason codes including
+`target_form_missing`, `policy_target_form_missing`, `source_term_absent` and
+`target_metadata_missing`. Recommendation remains no rollout / review
+compliance findings before another provider retry. This is not default rollout,
+cache reuse, provider-config change, durable state change, RU/UK morphology
+engine or release/privacy/legal/support evidence.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
