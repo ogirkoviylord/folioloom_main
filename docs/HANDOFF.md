@@ -350,6 +350,35 @@ injected. No package registry, file/package storage, `.env`, provider config,
 DB/schema/state, admin/retention surface, live provider call, Telegram operation
 by Codex, rollout, cache reuse or release/privacy/legal/support claim is added.
 
+Prepared package terminology note, 2026-06-15: `prepared_glossary_package` is
+an internal owner/test battle-test bridge, not the final product-facing
+glossary model. It exists to move #610-validated, target-backed glossary data
+for one exact uploaded document/target into the #611 worker/#557 prompt-context
+path without adding a durable glossary registry, storage/retention policy,
+admin UI, cache reuse or rollout. Future agents should describe the product
+capability as "book glossary" and treat the package as a temporary transport
+contract until a separately approved `BookGlossary`/`GlossaryArtifact` or
+registry design exists. Issue #637 should therefore prepare this bridge for
+explicit owner/test `with_glossary` runs, not silently promote the package into
+the final glossary architecture.
+
+Issue #637 implementation slice on 2026-06-15: branch
+`codex/issue-637-local-fake-prep-resolver` adds a default-off local/fake
+prepared-glossary prep resolver boundary for explicit Telegram `with_glossary`
+jobs. `BotTranslationService` now accepts a `PreparedGlossaryPackagePrepRequest`
+resolver that receives the pending upload content in memory, source SHA-256,
+document kind and target language, then returns the same compact attachment
+shape validated by #610 and matched through #635. Existing package resolvers are
+tried first; if no READY package is attached and a prep resolver is explicitly
+configured, prep failures fail closed before persistent job planning/queueing
+with metadata-only reason codes. Default jobs and `without_glossary` jobs do
+not call prep. This adds no live provider calls, package registry, file/package
+storage, `.env`, provider config, DB/schema/state, admin/retention surface,
+Telegram operation by Codex, rollout, cache reuse or release/privacy/legal/
+support claim. Focused tests cover successful fake prep -> worker context/cache
+bypass, no prep for `without_glossary`, fail-closed missing prep and runtime
+config wiring.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`

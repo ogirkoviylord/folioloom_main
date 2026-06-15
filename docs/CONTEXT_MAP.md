@@ -154,7 +154,13 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   remain unchanged, and fallback/omission diagnostics stay metadata-only.
   #635 wires that boundary through `BotRuntimeConfig` and
   `build_translation_service` only when an owner/test resolver is explicitly
-  injected; the default runtime builder still has no package source.
+  injected; the default runtime builder still has no package source. The
+  prepared package is an internal battle-test transport bridge, not the final
+  product-facing glossary model or durable glossary registry. #637 adds a
+  separate default-off owner/test prep resolver that can derive a compact
+  READY package from the pending upload content for explicit `with_glossary`
+  jobs only; the default and `without_glossary` paths remain unchanged, and
+  enabled prep failures block before queueing with metadata-only reason codes.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 

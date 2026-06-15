@@ -4641,6 +4641,83 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
 
+    def test_epub_with_glossary_prep_resolver_attaches_ready_package(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            run_log_root = root / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            source_sha256 = hashlib.sha256(content).hexdigest()
+            prep_requests = []
+
+            def prep_resolver(request):
+                prep_requests.append(request)
+                return PreparedGlossaryPackageAttachment(
+                    payload=_prepared_glossary_package(),
+                    source_sha256=request.source_sha256,
+                    document_kind=request.document_kind,
+                    target_language=request.target_language,
+                )
+
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                prepared_glossary_package_prep_resolver=prep_resolver,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.READY)
+            self.assertEqual(len(prep_requests), 1)
+            self.assertEqual(prep_requests[0].source_sha256, source_sha256)
+            self.assertEqual(prep_requests[0].content, content)
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            policy = json.loads(persistent_store.get_job(job.id).translation_policy)
+            self.assertIn("prepared_glossary_package", policy)
+            event_lines = next(run_log_root.iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text()
+            self.assertIn('"attachment_source": "prep"', event_lines)
+            self.assertIn('"attachment_status": "attached"', event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("sk-", event_lines)
+
     def test_without_glossary_does_not_attach_prepared_package(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -4649,6 +4726,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             run_log_root = root / "translation-runs"
             self.addCleanup(persistent_store.close)
             content = b"Darcy returns."
+            prep_requests = []
             service = BotTranslationService(
                 job_repository=InMemoryTranslationJobRepository(),
                 pricing_rules=_pricing_rules(),
@@ -4665,6 +4743,9 @@ class BotTranslationServiceTest(unittest.TestCase):
                         document_kind="txt",
                         target_language="ru",
                     )
+                ),
+                prepared_glossary_package_prep_resolver=lambda request: (
+                    prep_requests.append(request) or None
                 ),
             )
             service.store_uploaded_document(
@@ -4694,6 +4775,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "events.jsonl"
             ).read_text()
             self.assertNotIn("prepared_glossary_package_attachment", event_lines)
+            self.assertEqual(prep_requests, [])
 
     def test_with_glossary_missing_attachment_falls_back_safely(self):
         with TemporaryDirectory() as temp_dir:
@@ -4741,6 +4823,64 @@ class BotTranslationServiceTest(unittest.TestCase):
             ).read_text()
             self.assertIn("prepared_glossary_package_attachment", event_lines)
             self.assertIn("prepared_glossary_package_attachment_disabled", event_lines)
+
+    def test_with_glossary_prep_missing_fails_closed_before_queueing(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            persistent_store = SQLiteTranslationJobStore(root / "jobs.sqlite3")
+            run_log_root = root / "translation-runs"
+            self.addCleanup(persistent_store.close)
+            content = b"Darcy returns."
+            prep_requests = []
+
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=200,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                use_scheduler_runner=True,
+                prepared_glossary_package_prep_resolver=lambda request: (
+                    prep_requests.append(request) or None
+                ),
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+            translator = RecordingTranslator()
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=translator,
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.FAILED)
+            self.assertIn(
+                "prepared_glossary_package_prep_missing",
+                job.error_message,
+            )
+            self.assertEqual(len(prep_requests), 1)
+            self.assertEqual(prep_requests[0].content, content)
+            self.assertEqual(translator.requests, [])
+            self.assertEqual(
+                persistent_store.list_jobs_for_user("telegram:42"),
+                [],
+            )
+            self.assertFalse(run_log_root.exists())
 
     def test_with_glossary_invalid_prepared_package_is_not_attached(self):
         with TemporaryDirectory() as temp_dir:
