@@ -305,6 +305,22 @@ compliance findings before another provider retry. This is not default rollout,
 cache reuse, provider-config change, durable state change, RU/UK morphology
 engine or release/privacy/legal/support evidence.
 
+Issue #591 implementation slice on 2026-06-15: branch
+`codex/issue-591-fix-adversarial-filter` fixes a #586 runner-boundary drift
+found after the live rerun. #588 added a new `ISSUE_586_ID`, but the
+adversarial TXT prompt-context filter still checked only `ISSUE_575_ID`, so
+#586 used `all_selected_entries` instead of the #578
+`target_backed_source_present_entries` filter. This caused #586 to include and
+check 8 selected entries instead of the intended 5 useful target-backed
+source-present entries, reintroducing `source_term_absent` and
+`target_metadata_missing` noise. After the fix, fake #586 preflight uses the
+target-backed source-present filter, includes/checks 5 entries for both `ru`
+and `uk`, and removes the metadata/source-absence noise. The previous #586
+live run remains valid evidence that provider calls completed structurally,
+but it is not a clean post-#584 terminology-contract obedience test. A fresh
+bounded live rerun is needed before judging whether #584 improved exact
+configured target-form compliance.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
