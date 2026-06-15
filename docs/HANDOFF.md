@@ -274,6 +274,18 @@ run a provider by itself and does not approve Telegram operation, runtime
 translation, rollout, cache reuse, provider-config, DB/schema/storage/admin/
 retention changes or release/privacy/legal/support claims.
 
+Issue #626 implementation slice on 2026-06-15: branch
+`codex/issue-626-unwrap-prep-skeleton` addresses the #624 live retry shape
+failure where the provider returned a package under a single top-level
+`output_package_skeleton` key. The prepared-glossary runner can now unwrap only
+that exact single-key wrapper, then reuses #622 raw/secret rejection,
+top-level boundary checks, packet evidence/source-id checks and #610
+validation. Multi-key wrappers, non-object nested values and raw/secret nested
+payloads are rejected. This is local-only/default-off hardening; no live
+provider calls, Telegram operation, runtime translation, rollout, cache reuse,
+provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim is approved by #626.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
