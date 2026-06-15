@@ -90,6 +90,16 @@ envelope fields. This improves package identity before #607 but does not
 approve semantic inference, live retries, runtime translation, rollout, cache
 reuse or release/privacy claims.
 
+R-041 update note, 2026-06-15: issue #630 enriches local-envelope prepared
+entries from the approved preflight packet for source-side fields only, while
+preserving provider-supplied target metadata. A post-#630 bounded #624 live
+retry produced a #610 `ready` package for the approved committed Gutenberg
+control EPUB targeting `ru` with 8 ready entries, 0 `needs_review` entries, 1
+live call and 9,776 provider-reported tokens. Treat this as provider-boundary
+evidence that can inform the owner-assisted #607 Telegram battle-test, not as
+translation quality proof, default rollout approval, cache reuse approval or
+release/privacy/legal/support readiness.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
