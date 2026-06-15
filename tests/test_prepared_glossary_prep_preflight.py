@@ -344,6 +344,39 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
         )
         self.assertTrue(prepared_package["package_id"].startswith("prepared:issue-624"))
 
+    def test_live_preparation_enriches_compact_provider_entries_from_packet(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_CompactPlaceholderEntriesProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+            prepared_package = json.loads(
+                result.prepared_package_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(
+            metadata_report["package_adjudication"]["mode"],
+            "local_envelope_applied",
+        )
+        first_entry = prepared_package["entries"][0]
+        self.assertEqual(first_entry["target_canonical"], "Provider Target 1")
+        self.assertTrue(first_entry["source_canonical"])
+        self.assertNotIn("category", first_entry)
+        self.assertIn(
+            "provider_package_local_metadata_placeholder",
+            result.reason_codes,
+        )
+
     def test_live_preparation_rejects_multi_key_output_skeleton_wrapper(self):
         with TemporaryDirectory() as temp_dir:
             result = run_live_preparation(
@@ -553,6 +586,45 @@ class _PlaceholderPackageIdProvider(_OutputSkeletonProvider):
         payload["output_package_skeleton"][
             "package_id"
         ] = "use package_id from local wrapper if unavailable"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _CompactPlaceholderEntriesProvider(_OutputSkeletonProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        skeleton = payload["output_package_skeleton"]
+        skeleton["package_id"] = "use package_id from local wrapper if unavailable"
+        compact_entries = []
+        for index, entry in enumerate(skeleton["entries"], start=1):
+            compact_entries.append(
+                {
+                    "source_entry_id": entry["source_entry_id"],
+                    "evidence_refs": entry["evidence_refs"],
+                    "target_canonical": f"Provider Target {index}",
+                    "target_variants": [],
+                    "category": "provider_extra_metadata",
+                    "confidence": 0.81,
+                    "needs_review": False,
+                    "reason_codes": [],
+                }
+            )
+        skeleton["entries"] = compact_entries
         return ChatCallResult(
             ok=result.ok,
             content=json.dumps(payload, ensure_ascii=False),
