@@ -147,6 +147,11 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
 
 - Пути: `src/translator_service/bot/`, `src/translator_service/bot_translation_service.py`.
 - Назначение: Telegram-first UX: upload, language, estimate, rights confirmation, temporary #546 glossary mode selector for manual battle-test comparison, progress, cancel/status/history flows.
+- Glossary note: #633 adds a default-off owner/test prepared-package
+  attachment boundary for explicit `with_glossary` job creation. The service
+  may attach only a compact #610 READY package that matches source fingerprint,
+  document kind and target language; default and `without_glossary` paths
+  remain unchanged, and fallback/omission diagnostics stay metadata-only.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 
@@ -175,10 +180,12 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   the owner-only archive sidecar. #555 defines the next resolver contract for
   real-book persistent EPUB jobs: approved target metadata plus local
   source-match/budget gates may produce READY hooks, while missing or invalid
-  data must fall back with metadata-only reason codes. This does not approve
-  default glossary rollout, live provider calls, arbitrary real-book glossary
-  generation, glossary-aware cache reuse, durable state changes or
-  provider/config changes.
+  data must fall back with metadata-only reason codes. #633 allows the Telegram
+  job creation path to place an already validated compact prepared package into
+  `translation_policy` for the existing #611 worker handoff, without schema or
+  storage changes. This does not approve default glossary rollout, live provider
+  calls, arbitrary real-book glossary generation, glossary-aware cache reuse,
+  durable state changes or provider/config changes.
 - Важные файлы: listed above plus `translation_jobs.py`, `translation_runner.py`, `translation_run_logs.py`, `translation_metrics.py`.
 - Связанные тесты: `tests/test_worker.py`, `tests/test_scheduler*.py`, `tests/test_postgres_scheduler.py`, `tests/test_persistent_*`, `tests/test_job_runner.py`, `tests/test_translation_*`.
 

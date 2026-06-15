@@ -4,7 +4,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
@@ -49,6 +49,9 @@ from translator_service.format_adapters import (
     plan_docx_translation,
     plan_epub_translation,
     plan_txt_translation,
+)
+from translator_service.glossary_prepared_package import (
+    validate_prepared_glossary_package,
 )
 from translator_service.job_runner import (
     DocumentKind,
@@ -294,6 +297,34 @@ class PreviewCandidate:
 
 
 @dataclass(frozen=True)
+class PreparedGlossaryPackageAttachmentRequest:
+    user_telegram_id: int
+    file_name: str
+    document_kind: str
+    source_language: str
+    target_language: str
+    translation_mode: str | None
+    glossary_mode: str | None
+    source_sha256: str
+
+
+@dataclass(frozen=True)
+class PreparedGlossaryPackageAttachment:
+    payload: object | None = None
+    source_sha256: str | None = None
+    document_kind: str | None = None
+    target_language: str | None = None
+    enabled: bool = True
+    reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _PreparedGlossaryPackageAttachmentResult:
+    payload: dict | None
+    metadata: dict[str, object]
+
+
+@dataclass(frozen=True)
 class PreviewTranslation:
     preview_id: str
     user_telegram_id: int
@@ -442,6 +473,11 @@ class BotTranslationService:
             GlossaryRuntimeAdapterHookConfig | None,
         ]
         | None = None,
+        prepared_glossary_package_resolver: Callable[
+            [PreparedGlossaryPackageAttachmentRequest],
+            PreparedGlossaryPackageAttachment | None,
+        ]
+        | None = None,
     ) -> None:
         self._job_repository = job_repository
         self._pricing_rules = pricing_rules
@@ -485,6 +521,9 @@ class BotTranslationService:
         self._beta_safety_rates = beta_safety_rates or BetaSafetyRates()
         self._beta_safety_guard_owned = beta_safety_guard_owned
         self._glossary_runtime_hook_builder = glossary_runtime_hook_builder
+        self._prepared_glossary_package_resolver = (
+            prepared_glossary_package_resolver
+        )
         self._beta_safety_denied_job_ids: set[str] = set()
         self._generated_preview_ids: set[str] = set()
         self._automatic_result_delivered_keys: set[AutomaticResultDeliveryKey] = set()
@@ -3200,6 +3239,7 @@ class BotTranslationService:
         adapter_version: str | None = None,
         prompt_version: str | None = None,
         total_fragment_count: int | None = None,
+        prepared_glossary_package: dict | None = None,
     ) -> TranslationRunLogger | None:
         if self._translation_run_log_root is None:
             return None
@@ -3211,6 +3251,7 @@ class BotTranslationService:
             pending=pending,
             document_kind=document_kind,
             document_sandbox=self._document_sandbox,
+            prepared_glossary_package=prepared_glossary_package,
         )
         return TranslationRunLogger.start(
             root=self._translation_run_log_root,
@@ -3290,6 +3331,102 @@ class BotTranslationService:
             )
             return _fallback_glossary_runtime_hook()
         return hook or _fallback_glossary_runtime_hook()
+
+    def _prepared_glossary_package_attachment_for_pending(
+        self,
+        *,
+        pending: PendingTranslation,
+        document_kind: DocumentKind,
+    ) -> _PreparedGlossaryPackageAttachmentResult:
+        if pending.glossary_mode != GLOSSARY_MODE_WITH:
+            return _prepared_glossary_package_attachment_result(
+                status="disabled",
+                reason_codes=("prepared_glossary_package_attachment_not_requested",),
+            )
+        if self._prepared_glossary_package_resolver is None:
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=("prepared_glossary_package_attachment_disabled",),
+            )
+
+        request = PreparedGlossaryPackageAttachmentRequest(
+            user_telegram_id=pending.user_telegram_id,
+            file_name=pending.file_name,
+            document_kind=document_kind.value,
+            source_language=pending.source_language,
+            target_language=pending.target_language,
+            translation_mode=pending.translation_mode,
+            glossary_mode=pending.glossary_mode,
+            source_sha256=hashlib.sha256(pending.content).hexdigest(),
+        )
+        try:
+            attachment = self._prepared_glossary_package_resolver(request)
+        except Exception:
+            logger.exception(
+                "Prepared glossary package resolver failed safely: "
+                "file_name=%s document_kind=%s user_telegram_id=%s",
+                pending.file_name,
+                document_kind.value,
+                pending.user_telegram_id,
+            )
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=("prepared_glossary_package_attachment_resolver_failed",),
+                request=request,
+            )
+        if attachment is None:
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=("prepared_glossary_package_attachment_missing",),
+                request=request,
+            )
+        if not attachment.enabled:
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=attachment.reason_codes
+                or ("prepared_glossary_package_attachment_disabled",),
+                request=request,
+            )
+
+        match_reasons = _prepared_glossary_package_attachment_match_reasons(
+            attachment,
+            request=request,
+        )
+        if match_reasons:
+            return _prepared_glossary_package_attachment_result(
+                status="skipped",
+                reason_codes=match_reasons,
+                request=request,
+            )
+        if not isinstance(attachment.payload, Mapping):
+            return _prepared_glossary_package_attachment_result(
+                status="invalid",
+                reason_codes=("prepared_glossary_package_attachment_payload_invalid",),
+                request=request,
+            )
+
+        validation = validate_prepared_glossary_package(
+            attachment.payload,
+            target_language=pending.target_language,
+        )
+        metadata = dict(validation.metadata)
+        metadata.update(
+            {
+                "attachment_status": "attached" if validation.ready else "skipped",
+                "attachment_reason_codes": list(validation.reason_codes),
+                "metadata_only": True,
+                "raw_payload_included": False,
+            }
+        )
+        if not validation.ready:
+            return _PreparedGlossaryPackageAttachmentResult(
+                payload=None,
+                metadata=metadata,
+            )
+        return _PreparedGlossaryPackageAttachmentResult(
+            payload=dict(attachment.payload),
+            metadata=metadata,
+        )
 
     def _release_beta_safety_reservation(self, *, job_id: str, reason: str) -> None:
         if self._beta_safety_guard is None:
@@ -3405,6 +3542,12 @@ class BotTranslationService:
             upload_safety_id=pending.upload_safety_id,
             source_object_key=pending.source_object_key,
         )
+        prepared_glossary_package_attachment = (
+            self._prepared_glossary_package_attachment_for_pending(
+                pending=pending,
+                document_kind=document_kind,
+            )
+        )
 
         plan = _create_persistent_job_plan(
             document_kind=document_kind,
@@ -3412,6 +3555,7 @@ class BotTranslationService:
             storage=self._file_storage,
             pending=pending,
             max_fragment_chars=self._max_fragment_chars,
+            prepared_glossary_package=prepared_glossary_package_attachment.payload,
         )
         total_fragments = len(plan.work_units)
         allowed_source_object_keys = _allowed_persistent_work_unit_source_keys(
@@ -3445,8 +3589,14 @@ class BotTranslationService:
             adapter_version=plan.job.adapter_version,
             prompt_version=plan.job.prompt_version,
             total_fragment_count=total_fragments,
+            prepared_glossary_package=prepared_glossary_package_attachment.payload,
         )
         if run_logger is not None:
+            if pending.glossary_mode == GLOSSARY_MODE_WITH:
+                run_logger.record_event(
+                    "prepared_glossary_package_attachment",
+                    prepared_glossary_package_attachment.metadata,
+                )
             run_logger.record_event(
                 "job_created",
                 {
@@ -4113,6 +4263,7 @@ def _create_persistent_job_plan(
     storage: LocalObjectStorage,
     pending: PendingTranslation,
     max_fragment_chars: int,
+    prepared_glossary_package: dict | None = None,
 ):
     common = {
         "store": store,
@@ -4127,6 +4278,7 @@ def _create_persistent_job_plan(
         "rights_confirmation": _rights_confirmation_payload(pending),
         "translation_mode": pending.translation_mode,
         "glossary_mode": pending.glossary_mode,
+        "prepared_glossary_package": prepared_glossary_package,
         "upload_safety_id": pending.upload_safety_id,
     }
     if document_kind is DocumentKind.TXT:
@@ -4524,6 +4676,7 @@ def _translation_policy_snapshot_for_pending(
     pending: PendingTranslation,
     document_kind: DocumentKind,
     document_sandbox: DocumentSandbox | None = None,
+    prepared_glossary_package: dict | None = None,
 ) -> str | None:
     try:
         source_text = _extract_policy_source_text(
@@ -4560,6 +4713,7 @@ def _translation_policy_snapshot_for_pending(
         rights_confirmation=_rights_confirmation_payload(pending),
         translation_mode=pending.translation_mode,
         glossary_mode=pending.glossary_mode,
+        prepared_glossary_package=prepared_glossary_package,
         translation_mode_profile=translation_mode_profile.signature
         if translation_mode_profile is not None
         else None,
@@ -4621,12 +4775,67 @@ def _translation_policy_payload(translation_policy: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _prepared_glossary_package_attachment_result(
+    *,
+    status: str,
+    reason_codes: tuple[str, ...],
+    request: PreparedGlossaryPackageAttachmentRequest | None = None,
+) -> _PreparedGlossaryPackageAttachmentResult:
+    metadata: dict[str, object] = {
+        "schema_version": "prepared-glossary-package-attachment-v1",
+        "attachment_status": status,
+        "attachment_reason_codes": list(_unique_texts(reason_codes)),
+        "metadata_only": True,
+        "raw_payload_included": False,
+    }
+    if request is not None:
+        metadata.update(
+            {
+                "document_kind": request.document_kind,
+                "source_language": request.source_language,
+                "target_language": request.target_language,
+                "translation_mode": request.translation_mode or "Unknown",
+                "glossary_mode": request.glossary_mode or "Unknown",
+                "source_sha256_short": request.source_sha256[:12],
+            }
+        )
+    return _PreparedGlossaryPackageAttachmentResult(payload=None, metadata=metadata)
+
+
+def _prepared_glossary_package_attachment_match_reasons(
+    attachment: PreparedGlossaryPackageAttachment,
+    *,
+    request: PreparedGlossaryPackageAttachmentRequest,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if attachment.source_sha256 != request.source_sha256:
+        reasons.append("prepared_glossary_package_attachment_source_mismatch")
+    if attachment.document_kind != request.document_kind:
+        reasons.append("prepared_glossary_package_attachment_document_kind_mismatch")
+    if attachment.target_language != request.target_language:
+        reasons.append("prepared_glossary_package_attachment_target_mismatch")
+    return _unique_texts(reasons)
+
+
+def _unique_texts(values) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return tuple(result)
+
+
 def _translation_policy_with_rights_confirmation(
     translation_policy: str | None,
     *,
     rights_confirmation: dict,
     translation_mode: str | None = None,
     glossary_mode: str | None = None,
+    prepared_glossary_package: dict | None = None,
     translation_mode_profile: str | None = None,
     upload_safety: dict | None = None,
 ) -> str | None:
@@ -4640,6 +4849,8 @@ def _translation_policy_with_rights_confirmation(
         payload["translation_mode"] = translation_mode
     if glossary_mode is not None:
         payload["glossary_mode"] = glossary_mode
+    if prepared_glossary_package is not None:
+        payload["prepared_glossary_package"] = prepared_glossary_package
     if translation_mode_profile is not None:
         payload["translation_mode_profile"] = translation_mode_profile
     if upload_safety is not None:
