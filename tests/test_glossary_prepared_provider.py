@@ -55,6 +55,11 @@ class DeepSeekPreparedGlossaryProviderTests(unittest.TestCase):
             GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
         )
         self.assertEqual(response.payload["entries"][0]["source_canonical"], "Darcy")
+        self.assertEqual(response.payload["entries"][0]["source_unit_refs"], [1])
+        self.assertEqual(
+            response.payload["entries"][0]["source_block_refs"],
+            ["block:1"],
+        )
         self.assertEqual(response.metadata["provider_usage"]["total_tokens"], 120)
         self.assertEqual(
             response.metadata["adjudication"]["mode"],

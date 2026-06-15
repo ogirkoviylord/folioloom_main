@@ -496,7 +496,7 @@ def _local_envelope_entries(
                 entry.get("evidence_refs") or candidate.get("evidence_refs", ()),
                 limit=16,
             ),
-            "source_unit_refs": _safe_text_list(
+            "source_unit_refs": _safe_int_list(
                 candidate.get("source_unit_refs", ()),
                 limit=16,
             ),
@@ -688,6 +688,20 @@ def _safe_text_list(value: Any, *, limit: int) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
     return [str(item) for item in value if str(item)][:limit]
+
+
+def _safe_int_list(value: Any, *, limit: int) -> list[int]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    result: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int) and item >= 0:
+            result.append(item)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def _is_placeholder_text(value: Any) -> bool:

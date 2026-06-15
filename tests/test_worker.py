@@ -1228,7 +1228,7 @@ class WorkerTest(unittest.TestCase):
         )
         self.assertTrue(prepared_event["resolver_linkage"]["prompt_context_included"])
         self.assertIn(
-            "glossary-scan:name:",
+            "entry:darcy",
             "\n".join(diagnostics["summary"]["selected_entry_ids"]),
         )
         self.assertNotIn("Darcy returns.", archive_text)

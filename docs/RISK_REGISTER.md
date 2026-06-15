@@ -195,6 +195,16 @@ remains the first bounded live smoke gate. Cache reuse, provider config/key
 changes, DB/schema/state/storage/admin/retention changes, deployment and
 release/privacy/legal/support claims remain unapproved.
 
+R-041 update note, 2026-06-16: issue #656 fixes a #646 fake/dry local blocker
+by preserving #610 prepared package source refs and allowing the persistent
+resolver to build source-present, target-backed runtime glossary entries
+directly from READY prepared package entries when work-unit/source-block refs
+match. Treat this as local/default-off owner/test resolver plumbing only: it
+does not approve live provider calls, Telegram operation by Codex, rollout,
+cache reuse, provider config/key changes, DB/schema/state/storage/admin/
+retention/export/delete changes, deployment or release/privacy/legal/support
+claims. #646 live remains blocked until a fresh fake/dry preflight passes.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

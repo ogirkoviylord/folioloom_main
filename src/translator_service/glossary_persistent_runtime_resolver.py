@@ -19,8 +19,21 @@ from translator_service.glossary_candidate_reducer import (
     GlossaryCandidateReducerCaps,
     reduce_glossary_candidates,
 )
-from translator_service.glossary_contracts import GlossaryEntry, GlossarySnapshot
+from translator_service.glossary_contracts import (
+    GlossaryEntry,
+    GlossaryEntryCategory,
+    GlossaryEntryStatus,
+    GlossaryEvidenceRef,
+    GlossaryEvidenceSurface,
+    GlossaryEvidenceType,
+    GlossaryGender,
+    GlossaryLayer,
+    GlossarySnapshot,
+    glossary_snapshot_signature,
+)
 from translator_service.glossary_prepared_package import (
+    PreparedGlossaryEntry,
+    PreparedGlossaryPackage,
     validate_prepared_glossary_package,
 )
 from translator_service.glossary_prompt_context import (
@@ -399,7 +412,6 @@ def build_persistent_glossary_runtime_hook_from_prepared_package(
             owner_battle_test_enabled=True,
         ),
         reason_prefix="persistent_glossary",
-        build_hook=build_persistent_glossary_runtime_hook,
     )
 
 
@@ -422,7 +434,6 @@ def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
             owner_battle_test_enabled=True,
         ),
         reason_prefix="persistent_epub",
-        build_hook=build_persistent_epub_glossary_runtime_hook,
     )
 
 
@@ -434,7 +445,6 @@ def _build_persistent_glossary_runtime_hook_from_prepared_package(
     document_kind: str | None,
     config: PersistentGlossaryResolverConfig,
     reason_prefix: str,
-    build_hook: Callable[..., GlossaryRuntimeAdapterHookConfig],
 ) -> GlossaryRuntimeAdapterHookConfig:
     if not isinstance(prepared_package_payload, Mapping):
         reason_code = (
@@ -472,16 +482,197 @@ def _build_persistent_glossary_runtime_hook_from_prepared_package(
             prepared_package_metadata=prepared_metadata,
         )
 
-    hook = build_hook(
+    hook = _build_persistent_glossary_runtime_hook_from_prepared_entries(
         work_unit=work_unit,
         source_text=source_text,
-        target_metadata_overlay_payload=(
-            validation.package.to_target_metadata_overlay_payload()
-        ),
+        prepared_package=validation.package,
         document_kind=document_kind,
         config=config,
+        reason_prefix=reason_prefix,
+        schema_version=(
+            PERSISTENT_EPUB_GLOSSARY_RESOLVER_SCHEMA_VERSION
+            if reason_prefix == "persistent_epub"
+            else PERSISTENT_GLOSSARY_RESOLVER_SCHEMA_VERSION
+        ),
+        adapter_version=(
+            PERSISTENT_EPUB_GLOSSARY_RESOLVER_ADAPTER_VERSION
+            if reason_prefix == "persistent_epub"
+            else PERSISTENT_GLOSSARY_RESOLVER_ADAPTER_VERSION
+        ),
+        supported_document_formats=(
+            frozenset((DocumentFormat.EPUB.value,))
+            if reason_prefix == "persistent_epub"
+            else _SUPPORTED_PERSISTENT_GLOSSARY_DOCUMENT_FORMATS
+        ),
+        quality_route=(
+            "owner_battle_test"
+            if reason_prefix == "persistent_epub"
+            else "automatic_glossary"
+        ),
     )
     return _hook_with_prepared_package_metadata(hook, prepared_metadata)
+
+
+def _build_persistent_glossary_runtime_hook_from_prepared_entries(
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    prepared_package: PreparedGlossaryPackage,
+    document_kind: str | None,
+    config: PersistentGlossaryResolverConfig,
+    reason_prefix: str,
+    schema_version: str,
+    adapter_version: str,
+    supported_document_formats: frozenset[str],
+    quality_route: str,
+) -> GlossaryRuntimeAdapterHookConfig:
+    if not config.enabled:
+        return _fallback_hook(f"{reason_prefix}_resolver_disabled")
+    if not config.owner_battle_test_enabled:
+        return _fallback_hook(f"{reason_prefix}_owner_battle_test_not_enabled")
+    document_format = _document_format_for_kind(document_kind)
+    if (
+        document_format is None
+        or document_format.value not in supported_document_formats
+    ):
+        return _fallback_hook(f"{reason_prefix}_unsupported_document_kind")
+
+    source_blocks = _source_blocks_for_work_unit(work_unit, source_text)
+    source_character_count = sum(len(block.text) for block in source_blocks)
+    if not source_blocks or source_character_count == 0:
+        return _fallback_hook(f"{reason_prefix}_source_text_empty")
+    if len(source_blocks) > config.max_source_blocks:
+        return _fallback_hook(f"{reason_prefix}_source_block_limit_exceeded")
+    if source_character_count > config.max_source_characters:
+        return _fallback_hook(f"{reason_prefix}_source_character_limit_exceeded")
+
+    unit = FormatTranslationUnit(
+        sequence=work_unit.sequence,
+        blocks=tuple(source_blocks),
+        prompt_tier=_prompt_tier(work_unit.prompt_tier),
+    )
+    plan = FormatAdapterPlan(
+        document_format=document_format,
+        adapter_version=adapter_version,
+        units=(unit,),
+        character_count=source_character_count,
+        estimated_input_tokens=max(1, source_character_count // 4),
+    )
+    package_snapshot, bridge_metadata = _prepared_package_snapshot_for_work_unit(
+        prepared_package,
+        work_unit=work_unit,
+        source_text=unit.source_text,
+        snapshot_id=_snapshot_id(work_unit, source_character_count),
+    )
+    if not package_snapshot.entries:
+        return _hook_with_plan_metadata(
+            _fallback_hook(f"{reason_prefix}_prepared_package_no_applicable_entries"),
+            "prepared_package_runtime_bridge",
+            bridge_metadata,
+        )
+
+    try:
+        profile = detect_book_profile(
+            plan,
+            source_language=work_unit.source_language,
+            target_language=work_unit.target_language,
+            glossary_snapshot=package_snapshot,
+        )
+    except Exception:
+        return _fallback_hook(f"{reason_prefix}_local_glossary_planning_failed")
+
+    selection = select_glossary_subset_for_work_unit(
+        unit,
+        package_snapshot,
+        budget=config.selection_budget,
+        profile_rule_ids=tuple(rule.rule_id for rule in profile.rules),
+    )
+    selection_payload = glossary_selection_metadata_payload(selection)
+    useful_entry_ids = _useful_selected_entry_ids(
+        selection_payload.get("selected_entries", ()),
+        package_snapshot,
+        source_text=unit.source_text,
+    )
+    if not useful_entry_ids:
+        return _hook_with_plan_metadata(
+            _fallback_hook(f"{reason_prefix}_no_useful_glossary_entries"),
+            "prepared_package_runtime_bridge",
+            bridge_metadata,
+        )
+
+    prompt_context_result = format_glossary_prompt_context(
+        _prompt_context_entries(package_snapshot),
+        selected_entry_ids=useful_entry_ids,
+        config=config.prompt_context_config,
+    )
+    if not prompt_context_result.included_entries:
+        return _hook_with_plan_metadata(
+            _fallback_hook(f"{reason_prefix}_prompt_context_budget_exhausted"),
+            "prepared_package_runtime_bridge",
+            bridge_metadata,
+        )
+
+    policy = build_translation_policy(
+        text=unit.source_text,
+        source_language=work_unit.source_language,
+        target_language=work_unit.target_language,
+        prompt_tier=unit.prompt_tier,
+    )
+    selected_rule_ids = tuple(rule.rule_id for rule in profile.rules)
+    snapshot = build_translation_contract_snapshot(
+        policy,
+        glossary_snapshot=package_snapshot,
+        profile_detection=profile,
+        selected_rule_ids=selected_rule_ids,
+        selection_policy_version=GLOSSARY_SELECTION_POLICY_VERSION,
+        quality_route=quality_route,
+    )
+    policy_context = translation_policy_signature_context_payload(
+        translation_policy_signature_context_from_snapshot(
+            snapshot,
+            selection_signature=str(selection_payload["selection_signature"]),
+        )
+    )
+    work_unit_plan = _work_unit_plan_payload(
+        selection_payload,
+        selected_entry_ids=useful_entry_ids,
+    )
+    package_snapshot_signature = glossary_snapshot_signature(package_snapshot)
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=True,
+        glossary_plan={
+            "schema_version": schema_version,
+            "enabled": True,
+            "status": "planned",
+            "fallback_reason": "none",
+            "source_language": work_unit.source_language,
+            "target_language": work_unit.target_language,
+            "document_format": document_format.value,
+            "translation_mode": "book",
+            "source_glossary_signature": package_snapshot_signature,
+            "glossary_signature": snapshot.glossary_signature,
+            "reduced_glossary_signature": package_snapshot_signature,
+            "profile_signature": snapshot.profile_signature,
+            "translation_snapshot_signature": (
+                translation_contract_snapshot_signature(snapshot)
+            ),
+            "aggregate_selection_signature": selection_payload[
+                "selection_signature"
+            ],
+            "policy_signature_context": policy_context,
+            "selected_rule_ids": list(selected_rule_ids),
+            "prepared_package_runtime_bridge": bridge_metadata,
+            "work_unit_plans": [work_unit_plan],
+            "runtime_integration": _runtime_integration_payload(),
+        },
+        max_selected_entries=config.max_selected_entries,
+        prompt_rehearsal_enabled=config.prompt_rehearsal_enabled,
+        prompt_context_entries=_prompt_context_entries(package_snapshot),
+        prompt_context_config=config.prompt_context_config,
+        owner_battle_test_enabled=config.owner_battle_test_enabled,
+        battle_test_max_source_blocks=config.max_source_blocks,
+        battle_test_max_source_characters=config.max_source_characters,
+    )
 
 
 def _fallback_hook(
@@ -516,6 +707,26 @@ def _hook_with_prepared_package_metadata(
     )
 
 
+def _hook_with_plan_metadata(
+    hook: GlossaryRuntimeAdapterHookConfig,
+    key: str,
+    metadata: Mapping[str, Any],
+) -> GlossaryRuntimeAdapterHookConfig:
+    glossary_plan = dict(hook.glossary_plan or {})
+    glossary_plan[key] = dict(metadata)
+    return GlossaryRuntimeAdapterHookConfig(
+        enabled=hook.enabled,
+        glossary_plan=glossary_plan,
+        max_selected_entries=hook.max_selected_entries,
+        prompt_rehearsal_enabled=hook.prompt_rehearsal_enabled,
+        prompt_context_entries=hook.prompt_context_entries,
+        prompt_context_config=hook.prompt_context_config,
+        owner_battle_test_enabled=hook.owner_battle_test_enabled,
+        battle_test_max_source_blocks=hook.battle_test_max_source_blocks,
+        battle_test_max_source_characters=hook.battle_test_max_source_characters,
+    )
+
+
 def _prepared_package_fallback_reason(
     reason_codes: Sequence[str],
     *,
@@ -531,6 +742,175 @@ def _prepared_package_fallback_reason(
     ):
         return f"{reason_prefix}_prepared_package_rejected"
     return f"{reason_prefix}_prepared_package_invalid"
+
+
+def _prepared_package_snapshot_for_work_unit(
+    package: PreparedGlossaryPackage,
+    *,
+    work_unit: PersistentWorkUnit,
+    source_text: str,
+    snapshot_id: str,
+) -> tuple[GlossarySnapshot, dict[str, Any]]:
+    entries: list[GlossaryEntry] = []
+    evidence_refs: list[GlossaryEvidenceRef] = []
+    seen_evidence_ids: set[str] = set()
+    counts = {
+        "entry_count": len(package.entries),
+        "applicable_entry_count": 0,
+        "target_metadata_missing_count": 0,
+        "source_ref_mismatch_count": 0,
+        "source_term_missing_count": 0,
+    }
+    for entry_index, prepared_entry in enumerate(package.entries):
+        if not _prepared_entry_has_target_metadata(prepared_entry):
+            counts["target_metadata_missing_count"] += 1
+            continue
+        if not _prepared_entry_refs_match(prepared_entry, work_unit):
+            counts["source_ref_mismatch_count"] += 1
+            continue
+        if not _prepared_entry_source_matches(prepared_entry, source_text):
+            counts["source_term_missing_count"] += 1
+            continue
+        entry_evidence_ids: list[str] = []
+        for evidence_index, evidence_id in enumerate(prepared_entry.evidence_refs):
+            unique_id = _unique_prepared_evidence_id(
+                evidence_id,
+                entry_index=entry_index,
+                evidence_index=evidence_index,
+                seen_evidence_ids=seen_evidence_ids,
+            )
+            entry_evidence_ids.append(unique_id)
+            evidence_refs.append(
+                GlossaryEvidenceRef(
+                    evidence_id=unique_id,
+                    evidence_type=GlossaryEvidenceType.SOURCE_ANCHOR,
+                    unit_sequence=work_unit.sequence,
+                    source_block_id=_prepared_evidence_source_block_id(
+                        prepared_entry,
+                        work_unit=work_unit,
+                        evidence_index=evidence_index,
+                    ),
+                    source_scope="work_unit",
+                    surface=GlossaryEvidenceSurface.BODY,
+                    occurrence_count=1,
+                    raw_excerpt=None,
+                )
+            )
+        entries.append(
+            GlossaryEntry(
+                entry_id=prepared_entry.source_entry_id,
+                category=GlossaryEntryCategory.TERM,
+                layer=GlossaryLayer.HARD,
+                status=GlossaryEntryStatus.VALIDATOR_ACCEPTED,
+                source_canonical=prepared_entry.source_canonical,
+                aliases=prepared_entry.aliases,
+                target_canonical=prepared_entry.target_canonical,
+                target_variants=prepared_entry.target_variants,
+                forbidden_variants=prepared_entry.forbidden_variants,
+                evidence_refs=tuple(entry_evidence_ids),
+                confidence=prepared_entry.confidence,
+                strategy=prepared_entry.strategy,
+                grammatical_gender=GlossaryGender.UNKNOWN,
+                morphology_notes=(),
+                profile_rule_ids=("prepared-glossary-package:v1",),
+            )
+        )
+    counts["applicable_entry_count"] = len(entries)
+    snapshot = GlossarySnapshot(
+        snapshot_id=snapshot_id,
+        source_language=package.source_language,
+        target_language=package.target_language,
+        entries=tuple(entries),
+        evidence=tuple(evidence_refs),
+        policy_version="prepared-glossary-package-runtime-bridge-v1",
+        profile_signature="book-profile:prepared-package",
+    )
+    metadata = {
+        "schema_version": "prepared-glossary-package-runtime-bridge-v1",
+        "status": "applied" if entries else "skipped",
+        "reason_codes": (
+            []
+            if entries
+            else ["prepared_package_runtime_bridge_no_applicable_entries"]
+        ),
+        **counts,
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "source_refs_required_when_present": True,
+        "normal_translation_prompts_changed": False,
+        "live_provider_calls_allowed": False,
+        "durable_state_mutation_allowed": False,
+        "cache_mutation_allowed": False,
+    }
+    return snapshot, metadata
+
+
+def _prepared_entry_has_target_metadata(entry: PreparedGlossaryEntry) -> bool:
+    return bool(
+        (entry.target_canonical and entry.target_canonical.strip())
+        or any(variant.strip() for variant in entry.target_variants)
+    )
+
+
+def _prepared_entry_refs_match(
+    entry: PreparedGlossaryEntry,
+    work_unit: PersistentWorkUnit,
+) -> bool:
+    has_unit_refs = bool(entry.source_unit_refs)
+    has_block_refs = bool(entry.source_block_refs)
+    if not has_unit_refs and not has_block_refs:
+        return True
+    if work_unit.sequence in entry.source_unit_refs:
+        return True
+    work_unit_block_ids = frozenset(work_unit.source_block_ids)
+    return any(block_id in work_unit_block_ids for block_id in entry.source_block_refs)
+
+
+def _prepared_entry_source_matches(
+    entry: PreparedGlossaryEntry,
+    source_text: str,
+) -> bool:
+    return any(
+        _source_term_present(term, source_text)
+        for term in (entry.source_canonical, *entry.aliases)
+        if term.strip()
+    )
+
+
+def _unique_prepared_evidence_id(
+    evidence_id: str,
+    *,
+    entry_index: int,
+    evidence_index: int,
+    seen_evidence_ids: set[str],
+) -> str:
+    if evidence_id not in seen_evidence_ids:
+        seen_evidence_ids.add(evidence_id)
+        return evidence_id
+    unique_id = f"{evidence_id}:prepared-{entry_index}-{evidence_index}"
+    while unique_id in seen_evidence_ids:
+        unique_id = f"{unique_id}-1"
+    seen_evidence_ids.add(unique_id)
+    return unique_id
+
+
+def _prepared_evidence_source_block_id(
+    entry: PreparedGlossaryEntry,
+    *,
+    work_unit: PersistentWorkUnit,
+    evidence_index: int,
+) -> str:
+    work_unit_block_ids = tuple(work_unit.source_block_ids)
+    matching_block_refs = tuple(
+        block_id
+        for block_id in entry.source_block_refs
+        if block_id in work_unit_block_ids
+    )
+    if matching_block_refs:
+        return matching_block_refs[min(evidence_index, len(matching_block_refs) - 1)]
+    if work_unit_block_ids:
+        return work_unit_block_ids[min(evidence_index, len(work_unit_block_ids) - 1)]
+    return f"work-unit:{work_unit.sequence}:0"
 
 
 def _work_unit_plan_payload(

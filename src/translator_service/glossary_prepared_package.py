@@ -22,6 +22,8 @@ _DEFAULT_MAX_ALIASES = 8
 _DEFAULT_MAX_TARGET_VARIANTS = 8
 _DEFAULT_MAX_FORBIDDEN_VARIANTS = 8
 _DEFAULT_MAX_EVIDENCE_REFS = 16
+_DEFAULT_MAX_SOURCE_UNIT_REFS = 64
+_DEFAULT_MAX_SOURCE_BLOCK_REFS = 64
 _DEFAULT_MAX_REASON_CODES = 16
 _DEFAULT_MAX_FIELD_CHARS = 180
 
@@ -145,6 +147,8 @@ class PreparedGlossaryPackageConfig:
     max_target_variants: int = _DEFAULT_MAX_TARGET_VARIANTS
     max_forbidden_variants: int = _DEFAULT_MAX_FORBIDDEN_VARIANTS
     max_evidence_refs: int = _DEFAULT_MAX_EVIDENCE_REFS
+    max_source_unit_refs: int = _DEFAULT_MAX_SOURCE_UNIT_REFS
+    max_source_block_refs: int = _DEFAULT_MAX_SOURCE_BLOCK_REFS
     max_reason_codes: int = _DEFAULT_MAX_REASON_CODES
     max_field_chars: int = _DEFAULT_MAX_FIELD_CHARS
 
@@ -155,6 +159,8 @@ class PreparedGlossaryEntry:
     source_canonical: str
     aliases: tuple[str, ...]
     evidence_refs: tuple[str, ...]
+    source_unit_refs: tuple[int, ...]
+    source_block_refs: tuple[str, ...]
     target_canonical: str | None
     target_variants: tuple[str, ...]
     forbidden_variants: tuple[str, ...]
@@ -446,6 +452,21 @@ def _prepared_entry(
     )
     if not evidence_refs:
         reason_codes.append("prepared_glossary_package_evidence_missing")
+    source_unit_refs = _int_tuple(
+        payload.get("source_unit_refs", ()),
+        max_items=config.max_source_unit_refs,
+        invalid_code="prepared_glossary_package_source_unit_refs_invalid",
+        limit_code="prepared_glossary_package_source_unit_ref_limit_exceeded",
+        reason_codes=reason_codes,
+    )
+    source_block_refs = _string_tuple(
+        payload.get("source_block_refs", ()),
+        max_items=config.max_source_block_refs,
+        max_chars=config.max_field_chars,
+        invalid_code="prepared_glossary_package_source_block_refs_invalid",
+        limit_code="prepared_glossary_package_source_block_ref_limit_exceeded",
+        reason_codes=reason_codes,
+    )
 
     aliases = _string_tuple(
         payload.get("aliases", ()),
@@ -509,6 +530,8 @@ def _prepared_entry(
             source_canonical=source_canonical,
             aliases=aliases,
             evidence_refs=evidence_refs,
+            source_unit_refs=source_unit_refs,
+            source_block_refs=source_block_refs,
             target_canonical=target_canonical,
             target_variants=target_variants,
             forbidden_variants=forbidden_variants,
@@ -583,6 +606,31 @@ def _string_tuple(
             continue
         items.append(text)
     return tuple(items)
+
+
+def _int_tuple(
+    value: Any,
+    *,
+    max_items: int,
+    invalid_code: str,
+    limit_code: str,
+    reason_codes: list[str],
+) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        reason_codes.append(invalid_code)
+        return ()
+    if len(value) > max_items:
+        reason_codes.append(limit_code)
+        return ()
+    items: list[int] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            reason_codes.append(invalid_code)
+            continue
+        items.append(item)
+    return tuple(dict.fromkeys(items))
 
 
 def _required_text(

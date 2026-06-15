@@ -179,9 +179,13 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   attachment/prep, beta-safety, fallback/cache and compliance metadata.
   #648 adds explicit provider-backed prep adapter/runtime wiring with
   fake-provider tests; default runtime still has no automatic key/config source
-  or live prep call. #646 live smoke remains conditional on those local/fake
-  gates. #465 cache bypass, language-neutral glossary core and metadata-only
-  ordinary artifacts remain required.
+  or live prep call. #656 preserves #610 prepared package source refs and lets
+  the persistent resolver build source-present, target-backed runtime glossary
+  entries directly from READY prepared packages when refs match the current
+  work unit, without relying on unit-local scanner rediscovery. #646 live smoke
+  remains conditional on a fresh local/fake gate. #465 cache bypass,
+  language-neutral glossary core and metadata-only ordinary artifacts remain
+  required.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 
