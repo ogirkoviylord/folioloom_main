@@ -76,6 +76,8 @@ class PreparedGlossaryPrepServiceConfig:
     max_estimated_editor_tokens: int = 2_400
     min_editor_score: int = 1
     min_diagnostic_score: int = 1
+    require_provider_usage: bool = False
+    max_provider_reported_total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -84,9 +86,15 @@ class PreparedGlossaryProviderRequest:
     metadata: Mapping[str, Any]
 
 
+@dataclass(frozen=True)
+class PreparedGlossaryProviderResponse:
+    payload: Any
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
 PreparedGlossaryPackageProvider = Callable[
     [PreparedGlossaryProviderRequest],
-    Mapping[str, Any] | None,
+    Mapping[str, Any] | PreparedGlossaryProviderResponse | None,
 ]
 PreparedGlossaryPlanBuilder = Callable[
     [DocumentFormat, bytes, int, str | None],
@@ -227,7 +235,7 @@ class PreparedGlossaryPrepService:
             selected_candidate_count=len(candidates),
         )
         try:
-            payload = self._provider(
+            provider_result = self._provider(
                 PreparedGlossaryProviderRequest(
                     packet=packet,
                     metadata=provider_metadata,
@@ -243,6 +251,18 @@ class PreparedGlossaryPrepService:
                 candidate_selector_signature=reduction.reducer_signature,
                 selected_candidate_count=len(candidates),
             )
+        payload, response_metadata = _provider_payload_and_metadata(provider_result)
+        metadata_reasons = _provider_metadata_safety_reasons(response_metadata)
+        if metadata_reasons:
+            return _disabled_attachment(
+                request=request,
+                status="skipped",
+                reason_codes=metadata_reasons,
+                config=config,
+                source_sha256=source_sha256,
+                candidate_selector_signature=reduction.reducer_signature,
+                selected_candidate_count=len(candidates),
+            )
         if payload is None:
             return _disabled_attachment(
                 request=request,
@@ -252,6 +272,20 @@ class PreparedGlossaryPrepService:
                 source_sha256=source_sha256,
                 candidate_selector_signature=reduction.reducer_signature,
                 selected_candidate_count=len(candidates),
+                provider_response_metadata=response_metadata,
+            )
+
+        usage_reason = _provider_usage_policy_reason(response_metadata, config=config)
+        if usage_reason is not None:
+            return _disabled_attachment(
+                request=request,
+                status="skipped",
+                reason_codes=(usage_reason,),
+                config=config,
+                source_sha256=source_sha256,
+                candidate_selector_signature=reduction.reducer_signature,
+                selected_candidate_count=len(candidates),
+                provider_response_metadata=response_metadata,
             )
 
         validation = validate_prepared_glossary_package(
@@ -267,6 +301,7 @@ class PreparedGlossaryPrepService:
             candidate_selector_signature=reduction.reducer_signature,
             selected_candidate_count=len(candidates),
             validation_metadata=validation.metadata,
+            provider_response_metadata=response_metadata,
         )
         if not validation.ready:
             return PreparedGlossaryPackageAttachment(
@@ -419,6 +454,7 @@ def _disabled_attachment(
     source_sha256: str | None = None,
     candidate_selector_signature: str = "Unknown",
     selected_candidate_count: int = 0,
+    provider_response_metadata: Mapping[str, Any] | None = None,
 ) -> PreparedGlossaryPackageAttachment:
     return PreparedGlossaryPackageAttachment(
         enabled=False,
@@ -434,6 +470,7 @@ def _disabled_attachment(
             source_sha256=source_sha256 or request.source_sha256,
             candidate_selector_signature=candidate_selector_signature,
             selected_candidate_count=selected_candidate_count,
+            provider_response_metadata=provider_response_metadata,
         ),
     )
 
@@ -448,6 +485,7 @@ def _metadata(
     candidate_selector_signature: str = "Unknown",
     selected_candidate_count: int = 0,
     validation_metadata: Mapping[str, Any] | None = None,
+    provider_response_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "schema_version": PREPARED_GLOSSARY_PREP_SERVICE_SCHEMA_VERSION,
@@ -468,4 +506,170 @@ def _metadata(
     }
     if validation_metadata is not None:
         metadata["validation"] = dict(validation_metadata)
+    if provider_response_metadata is not None:
+        safe_response = _safe_provider_metadata(provider_response_metadata)
+        metadata["provider_response"] = safe_response
+        usage = safe_response.get("provider_usage")
+        if isinstance(usage, Mapping):
+            metadata["provider_usage"] = dict(usage)
     return metadata
+
+
+def _provider_payload_and_metadata(
+    result: Mapping[str, Any] | PreparedGlossaryProviderResponse | None,
+) -> tuple[Any, Mapping[str, Any]]:
+    if isinstance(result, PreparedGlossaryProviderResponse):
+        return result.payload, result.metadata
+    return result, {}
+
+
+def _provider_usage_policy_reason(
+    metadata: Mapping[str, Any],
+    *,
+    config: PreparedGlossaryPrepServiceConfig,
+) -> str | None:
+    total_tokens = _provider_total_tokens(metadata)
+    if config.require_provider_usage and total_tokens is None:
+        return "prepared_glossary_prep_provider_usage_missing"
+    if (
+        config.max_provider_reported_total_tokens is not None
+        and total_tokens is not None
+        and total_tokens > config.max_provider_reported_total_tokens
+    ):
+        return "prepared_glossary_prep_provider_token_cap_exceeded"
+    return None
+
+
+def _provider_total_tokens(metadata: Mapping[str, Any]) -> int | None:
+    usage = metadata.get("provider_usage")
+    if usage is None:
+        usage = metadata.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    total = usage.get("total_tokens")
+    if isinstance(total, bool):
+        return None
+    if isinstance(total, int):
+        return max(0, total)
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    if (
+        isinstance(prompt, int)
+        and not isinstance(prompt, bool)
+        and isinstance(completion, int)
+        and not isinstance(completion, bool)
+    ):
+        return max(0, prompt) + max(0, completion)
+    return None
+
+
+def _safe_provider_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    allowed_keys = {
+        "adjudication",
+        "elapsed_seconds",
+        "finish_reason",
+        "http_status",
+        "provider_model",
+        "provider_role_id",
+        "provider_status",
+        "provider_usage",
+        "reason_codes",
+        "usage",
+    }
+    safe: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key not in allowed_keys:
+            continue
+        safe[key] = _safe_provider_metadata_value(value)
+    return safe
+
+
+def _safe_provider_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _safe_provider_metadata_value(child)
+            for key, child in value.items()
+            if isinstance(key, str)
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_safe_provider_metadata_value(item) for item in value]
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    return str(value)
+
+
+def _provider_metadata_safety_reasons(metadata: Mapping[str, Any]) -> tuple[str, ...]:
+    text = str(_safe_provider_metadata(metadata))
+    reasons: list[str] = []
+    safe_usage_keys = {"prompt_tokens", "completion_tokens", "total_tokens"}
+    raw_metadata_keys = {
+        "prompt",
+        "prompt_body",
+        "prompt_messages",
+        "provider_request",
+        "provider_response",
+        "raw",
+        "raw_output",
+        "raw_prompt",
+        "raw_provider_response",
+        "raw_source",
+        "raw_source_text",
+        "request_body",
+        "response_body",
+        "source_text",
+        "translated_text",
+        "translation",
+        "translation_text",
+    }
+    secret_metadata_keys = {
+        "api_key",
+        "auth",
+        "auth_material",
+        "authorization",
+        "bearer_token",
+        "dsn",
+        "password",
+        "refresh_token",
+        "secret",
+        "token",
+    }
+
+    def visit_keys(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                lowered_key = str(key).lower()
+                if lowered_key in safe_usage_keys:
+                    visit_keys(child)
+                    continue
+                if (
+                    lowered_key in raw_metadata_keys
+                    or lowered_key.startswith("raw_")
+                    or lowered_key.endswith("_raw")
+                    or lowered_key.endswith("_body")
+                    or lowered_key.endswith("_source_text")
+                    or lowered_key.endswith("_translation_text")
+                ):
+                    reasons.append(
+                        "prepared_glossary_prep_provider_metadata_raw_field"
+                    )
+                if (
+                    lowered_key in secret_metadata_keys
+                    or lowered_key.endswith("_api_key")
+                    or lowered_key.endswith("_secret")
+                    or lowered_key.endswith("_token")
+                ):
+                    reasons.append(
+                        "prepared_glossary_prep_provider_metadata_secret_field"
+                    )
+                visit_keys(child)
+        elif isinstance(value, Sequence) and not isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            for item in value:
+                visit_keys(item)
+
+    visit_keys(metadata)
+    if any(marker in text for marker in ("sk-", "Bearer ", "Authorization:")):
+        reasons.append("prepared_glossary_prep_provider_metadata_secret_material")
+    return tuple(dict.fromkeys(reasons))
