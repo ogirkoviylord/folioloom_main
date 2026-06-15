@@ -578,14 +578,23 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                         system_prompt,
                     )
                     self.assertIn("mandatory_term: id=", request_text)
+                    self.assertIn(
+                        "binding=must_use_required_target",
+                        request_text,
+                    )
                     self.assertIn("when=source_or_alias_present", request_text)
                     self.assertIn("required_target=", request_text)
+                    self.assertIn("required_target_copy=exact", request_text)
                 else:
                     self.assertNotIn(
                         "service-generated <glossary_context>",
                         system_prompt,
                     )
                     self.assertNotIn("mandatory_term: id=", request_text)
+                    self.assertNotIn(
+                        "binding=must_use_required_target",
+                        request_text,
+                    )
 
     def test_issue_575_boundary_rejects_missing_pairing_wrong_target_or_live_root(
         self,
