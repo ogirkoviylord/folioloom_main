@@ -152,6 +152,9 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   may attach only a compact #610 READY package that matches source fingerprint,
   document kind and target language; default and `without_glossary` paths
   remain unchanged, and fallback/omission diagnostics stay metadata-only.
+  #635 wires that boundary through `BotRuntimeConfig` and
+  `build_translation_service` only when an owner/test resolver is explicitly
+  injected; the default runtime builder still has no package source.
 - Важные файлы: `bot/runtime.py`, `bot/messages.py`, `bot/activity_phrases.py`, `bot/__main__.py`, `bot_translation_service.py`.
 - Связанные тесты: `tests/test_bot_runtime.py`, `tests/test_bot_runtime_logging.py`, `tests/test_bot_messages.py`, `tests/test_bot_translation_service.py`.
 
@@ -182,10 +185,12 @@ runtime rollout, provider calls, cache reuse or release/privacy claims.
   source-match/budget gates may produce READY hooks, while missing or invalid
   data must fall back with metadata-only reason codes. #633 allows the Telegram
   job creation path to place an already validated compact prepared package into
-  `translation_policy` for the existing #611 worker handoff, without schema or
-  storage changes. This does not approve default glossary rollout, live provider
-  calls, arbitrary real-book glossary generation, glossary-aware cache reuse,
-  durable state changes or provider/config changes.
+  `translation_policy` for the existing #611 worker handoff, and #635 wires
+  that owner/test resolver through the runtime builder without adding package
+  registry, storage or config-source behavior. This does not approve default
+  glossary rollout, live provider calls, arbitrary real-book glossary
+  generation, glossary-aware cache reuse, durable state changes or provider/
+  config changes.
 - Важные файлы: listed above plus `translation_jobs.py`, `translation_runner.py`, `translation_run_logs.py`, `translation_metrics.py`.
 - Связанные тесты: `tests/test_worker.py`, `tests/test_scheduler*.py`, `tests/test_postgres_scheduler.py`, `tests/test_persistent_*`, `tests/test_job_runner.py`, `tests/test_translation_*`.
 

@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -108,6 +109,8 @@ from translator_service.bot.messages import (
 from translator_service.bot_translation_service import (
     BotTranslationService,
     GlossaryModeRequired,
+    PreparedGlossaryPackageAttachment,
+    PreparedGlossaryPackageAttachmentRequest,
     PreviewAcceptanceRequired,
     PreviewTranslationError,
     RightsConfirmationRequired,
@@ -229,6 +232,10 @@ class BotRuntimeConfig:
     beta_cost_input_usd_per_million: float = 0.28
     beta_cost_output_usd_per_million: float = 1.10
     beta_cost_warning_fraction: float = 0.8
+    prepared_glossary_package_resolver: Callable[
+        [PreparedGlossaryPackageAttachmentRequest],
+        PreparedGlossaryPackageAttachment | None,
+    ] | None = None
 
 
 class _CallbackSpamGuard:
@@ -453,6 +460,9 @@ def build_translation_service(config: BotRuntimeConfig) -> BotTranslationService
         beta_safety_guard=beta_safety_guard,
         beta_safety_rates=beta_safety_rates_from_settings(config),
         beta_safety_guard_owned=True,
+        prepared_glossary_package_resolver=(
+            config.prepared_glossary_package_resolver
+        ),
     )
 
 
