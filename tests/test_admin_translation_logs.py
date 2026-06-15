@@ -15,6 +15,7 @@ from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    append_translation_run_event_for_job,
 )
 
 
@@ -445,6 +446,198 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn("glossary_runtime_diagnostics.json", readme)
         self.assertIn("provider_io_diagnostics.jsonl", sidecar_text)
 
+    def test_effective_archive_includes_automatic_glossary_policy_diagnostics(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-automatic-glossary-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "prepared_glossary_package_attachment",
+                {
+                    "schema_version": "prepared-glossary-package-attachment-v1",
+                    "attachment_status": "attached",
+                    "attachment_reason_codes": ["ready"],
+                    "attachment_source": "prep",
+                    "fail_closed": False,
+                    "metadata_only": True,
+                    "raw_payload_included": False,
+                    "document_kind": "txt",
+                    "source_language": "en",
+                    "target_language": "ru",
+                    "translation_mode": "book",
+                    "glossary_mode": "with_glossary",
+                    "source_sha256_short": "abc123def456",
+                    "status": "ready",
+                    "reason_codes": ["ready"],
+                    "package_id": "prepared:automatic:ru",
+                    "package_signature": "prepared-signature",
+                    "entry_count": 2,
+                    "ready_entry_count": 2,
+                    "needs_review_entry_count": 0,
+                    "glossary_prep_beta_safety": {
+                        "schema_version": "prepared-glossary-prep-beta-safety-v1",
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "reservation_status": "consumed",
+                        "reason_codes": [],
+                        "reservation_job_id": "job-automatic:prepared_glossary_prep",
+                        "estimated_prompt_tokens": 1200,
+                        "estimated_completion_tokens": 600,
+                        "estimated_cost_usd": 0.12,
+                        "provider_reported_usage_status": "reported",
+                        "accounting_usage_source": "provider_reported",
+                        "accounted_prompt_tokens": 1100,
+                        "accounted_completion_tokens": 500,
+                    },
+                },
+            )
+            append_translation_run_event_for_job(
+                temp_dir,
+                job_id="job-automatic-glossary-archive",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "planned",
+                    "fallback_reason": "none",
+                    "work_unit_sequence": 1,
+                    "document_format": "txt",
+                    "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                    "cache_policy": {
+                        "behavior": "bypass_glossary_injected_cache",
+                        "cache_get_allowed": False,
+                        "cache_put_allowed": False,
+                    },
+                    "prompt_context": {
+                        "included_entry_count": 1,
+                        "included_entry_ids": ["glossary-entry:v1:darcy"],
+                        "omitted_entries": [
+                            {
+                                "entry_id": "glossary-entry:v1:bingley",
+                                "reason": "entry_limit_exceeded",
+                                "estimated_prompt_tokens": 60,
+                            }
+                        ],
+                        "estimated_prompt_tokens": 144,
+                        "prompt_budget_tokens": 700,
+                        "character_count": 480,
+                        "character_budget": 2400,
+                    },
+                    "prepared_package": {
+                        "schema_version": "prepared-glossary-package-v1",
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "status": "ready",
+                        "reason_codes": ["ready"],
+                        "package_id": "prepared:automatic:ru",
+                        "package_signature": "prepared-signature",
+                        "target_language": "ru",
+                        "entry_count": 2,
+                        "ready_entry_count": 2,
+                        "needs_review_entry_count": 0,
+                    },
+                    "glossary_compliance": {
+                        "schema_version": "glossary-compliance-v2",
+                        "policy": "glossary_compliance.target_forms",
+                        "status": "pass",
+                        "reason_codes": ["target_form_present"],
+                        "selected_entry_count": 1,
+                        "checked_entry_count": 1,
+                        "target_form_present_count": 1,
+                        "target_form_missing_count": 0,
+                        "forbidden_variant_count": 0,
+                        "needs_review_entry_count": 0,
+                        "skipped_entry_count": 0,
+                        "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                        "checked_entry_ids": ["glossary-entry:v1:darcy"],
+                        "target_form_present_entry_ids": [
+                            "glossary-entry:v1:darcy"
+                        ],
+                        "target_form_missing_entry_ids": [],
+                        "forbidden_variant_entry_ids": [],
+                        "needs_review_entry_ids": [],
+                        "skipped_entry_ids": [],
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "semantic_quality_claim_made": False,
+                    },
+                },
+            )
+            _write_provider_io(
+                logger.run_dir,
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                '<glossary_context role="untrusted_reference_data">\n'
+                                "<entry role=\"terminology_contract\">\n"
+                                "<source_canonical>Darcy</source_canonical>\n"
+                                "<target_canonical>Дарси</target_canonical>\n"
+                                "</entry>\n"
+                                "</glossary_context>"
+                            ),
+                        }
+                    ]
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertEqual(
+            sidecar["automatic_glossary_policy"]["policy_status"],
+            "automatic_default_enabled",
+        )
+        self.assertFalse(
+            sidecar["automatic_glossary_policy"]["user_facing_selector_required"],
+        )
+        self.assertEqual(sidecar["summary"]["attachment_event_count"], 1)
+        self.assertEqual(sidecar["summary"]["attachment_statuses"], ["attached"])
+        self.assertEqual(sidecar["summary"]["target_metadata_status"], "present")
+        self.assertEqual(sidecar["summary"]["rendered_prompt_context_count"], 1)
+        self.assertEqual(sidecar["summary"]["prompt_context_event_count"], 0)
+        self.assertEqual(sidecar["summary"]["compliance_summary_count"], 1)
+        self.assertEqual(sidecar["summary"]["compliance_statuses"], ["pass"])
+        self.assertEqual(sidecar["attachment_events"][0]["attachment_source"], "prep")
+        self.assertEqual(
+            sidecar["attachment_events"][0]["glossary_prep_beta_safety"][
+                "reservation_status"
+            ],
+            "consumed",
+        )
+        rendered_context_text = sidecar["rendered_prompt_contexts"][0]["text"]
+        self.assertIn(
+            "<target_canonical>Дарси</target_canonical>",
+            rendered_context_text,
+        )
+        self.assertEqual(
+            sidecar["compliance_summaries"][0]["target_form_present_count"],
+            1,
+        )
+
     def test_effective_archive_includes_glossary_fallback_diagnostics(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
@@ -508,6 +701,93 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertEqual(
             sidecar["adapter_events"][0]["cache_policy"]["behavior"],
             "default_runtime_cache",
+        )
+
+    def test_effective_archive_summarizes_automatic_glossary_fallback_reasons(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-fallback-reasons",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "prepared_glossary_package_attachment",
+                {
+                    "attachment_status": "skipped",
+                    "attachment_reason_codes": [
+                        "prepared_glossary_package_attachment_disabled"
+                    ],
+                    "attachment_source": "resolver",
+                    "metadata_only": True,
+                    "raw_payload_included": False,
+                },
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "fallback",
+                    "fallback_reason": "persistent_glossary_no_useful_glossary_entries",
+                    "work_unit_sequence": 1,
+                    "document_format": "docx",
+                    "cache_policy": {
+                        "behavior": "default_runtime_cache",
+                        "cache_get_allowed": True,
+                        "cache_put_allowed": True,
+                    },
+                    "battle_test_preflight": {
+                        "status": "skipped",
+                        "fallback_reason": (
+                            "persistent_glossary_prompt_context_budget_exhausted"
+                        ),
+                        "reason_codes": ["prompt_context_budget_exhausted"],
+                    },
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertEqual(
+            sidecar["automatic_glossary_policy"]["runtime_intent"],
+            "attempt_glossary_when_ready",
+        )
+        self.assertIn(
+            "prepared_glossary_package_attachment_disabled",
+            sidecar["summary"]["diagnostic_reason_codes"],
+        )
+        self.assertIn(
+            "persistent_glossary_no_useful_glossary_entries",
+            sidecar["summary"]["diagnostic_reason_codes"],
+        )
+        self.assertIn(
+            "persistent_glossary_prompt_context_budget_exhausted",
+            sidecar["summary"]["diagnostic_reason_codes"],
+        )
+        self.assertIn(
+            "prompt_context_budget_exhausted",
+            sidecar["summary"]["diagnostic_reason_codes"],
         )
 
     def test_effective_archive_omits_glossary_diagnostics_without_glossary_data(self):
@@ -595,6 +875,22 @@ class AdminTranslationLogsTest(unittest.TestCase):
                     },
                 },
             )
+            logger.record_event(
+                "prepared_glossary_package_attachment",
+                {
+                    "attachment_status": "skipped",
+                    "attachment_reason_codes": ["prepared_glossary_package_invalid"],
+                    "attachment_source": "prep",
+                    "api_key": "sk-attachment-secret-value",
+                    "authorization_header": "Bearer attachment-secret-value",
+                    "raw_source_text": "RAW ATTACHMENT SOURCE MUST NOT COPY",
+                    "glossary_prep_beta_safety": {
+                        "reservation_status": "blocked",
+                        "reason_codes": ["prepared_glossary_prep_beta_safety_blocked"],
+                        "reservation_job_id": "postgres://secret:user@localhost/db",
+                    },
+                },
+            )
             _write_provider_io(
                 logger.run_dir,
                 {
@@ -632,6 +928,10 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertNotIn("sk-event-secret-value", sidecar_text)
         self.assertNotIn("Bearer event-secret-value", sidecar_text)
         self.assertNotIn("sk-context-secret-value", sidecar_text)
+        self.assertNotIn("sk-attachment-secret-value", sidecar_text)
+        self.assertNotIn("Bearer attachment-secret-value", sidecar_text)
+        self.assertNotIn("RAW ATTACHMENT SOURCE MUST NOT COPY", sidecar_text)
+        self.assertNotIn("postgres://secret:user@localhost/db", sidecar_text)
         self.assertNotIn("RAW PROMPT BODY MUST NOT COPY", sidecar_text)
         self.assertNotIn("RAW SOURCE TEXT MUST NOT COPY", sidecar_text)
         self.assertEqual(sidecar["rendered_prompt_contexts"], [])

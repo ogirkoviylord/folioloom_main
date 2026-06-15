@@ -62,7 +62,10 @@ evidence, а не создание документов с нуля.
   provider `Authorization` headers and API keys, plus `diagnostic_files/`
   copies of the original uploaded file and final or partial translated result,
   and issue #549 `glossary_runtime_diagnostics.json` for glossary battle-test
-  diagnostics when glossary runtime diagnostic data exists.
+  diagnostics when glossary runtime diagnostic data exists. Issue #645 extends
+  that owner-only glossary sidecar with automatic-policy, attachment/prep,
+  beta-safety, fallback/cache and compliance metadata for automatic default
+  runs.
   Telemetry, normal admin pages, APIs and support artifacts remain
   metadata-only/redacted.
 - Не считать beta safety accounting платежным ledger.
@@ -698,10 +701,11 @@ Acceptance criteria:
   prepared-glossary prep service boundary, #643 gates configured prep resolver
   calls through existing beta-safety cost/cap accounting, #644 generalizes
   prepared-package injection across supported persistent TXT/DOCX/EPUB units
-  behind source-useful/budget gates, #645 updates
-  owner-only diagnostics, #648 wires provider-backed DeepSeek Pro prep with
-  fake-provider tests, #646 is the conditional bounded live smoke, and #647 is
-  docs closeout. The new policy still preserves #465 cache bypass for
+  behind source-useful/budget gates, #645 updates owner-only archive
+  diagnostics for automatic policy/prep/fallback/cache/compliance metadata,
+  #648 wires provider-backed DeepSeek Pro prep with fake-provider tests, #646
+  is the conditional bounded live smoke, and #647 is docs closeout. The new
+  policy still preserves #465 cache bypass for
   glossary-injected units and does not approve cache reuse, provider/config
   changes, durable state/storage/admin/retention changes, deployment or
   release/privacy/legal/support claims. Issue #551 repairs the
