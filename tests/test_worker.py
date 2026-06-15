@@ -1295,7 +1295,7 @@ class WorkerTest(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertIn(
-                "persistent_epub_prepared_package_target_mismatch",
+                "persistent_glossary_prepared_package_target_mismatch",
                 event_lines,
             )
             self.assertIn("default_runtime_cache", event_lines)
@@ -1359,7 +1359,7 @@ class WorkerTest(unittest.TestCase):
             event_lines = run_logger.run_dir.joinpath("events.jsonl").read_text(
                 encoding="utf-8",
             )
-            self.assertIn("persistent_epub_prepared_package_invalid", event_lines)
+            self.assertIn("persistent_glossary_prepared_package_invalid", event_lines)
             self.assertIn("prepared_glossary_package_invalid", event_lines)
             self.assertIn("default_runtime_cache", event_lines)
             self.assertNotIn("<glossary_context", event_lines)
