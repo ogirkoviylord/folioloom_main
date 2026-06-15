@@ -64,6 +64,12 @@ provider-boundary failure evidence only: #607 remains blocked until a READY
 live prepared package exists, and rollout/cache/release claims remain
 unapproved.
 
+R-041 update note, 2026-06-15: issue #622 adds a local-only package-envelope
+hardening step for the #614 runner. The envelope may fill only locally known
+package metadata around provider-supplied entries and must still pass #610
+validation. It does not approve local semantic inference, live retries,
+runtime translation, rollout, cache reuse or release/privacy claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
