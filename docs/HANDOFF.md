@@ -331,6 +331,27 @@ under `outputs/glossary-battle-test/issue-593-post-591-adversarial-live/`.
 Fake #593 preflight completed with 4 fake calls. No live provider calls were
 made in #594; #593 owns the fresh bounded live rerun.
 
+Issue #593 owner-only evidence update on 2026-06-15: the fresh post-#591/#594
+bounded adversarial TXT live rerun completed with 4 live calls and 9556
+provider-reported tokens under
+`outputs/glossary-battle-test/issue-593-post-591-adversarial-live/20260615T033805Z`.
+All four responses passed structural validation and the glossary-on path used
+the intended 5 target-backed source-present entries for both `ru` and `uk`.
+Compliance findings remain: `ru` target forms were present for 2/5 checked
+entries and `uk` target forms were present for 4/5 checked entries. This
+confirms the remaining issue is provider obedience to configured target forms,
+not selector drift. It is not rollout, cache reuse, release/privacy/legal/
+support readiness, semantic-quality proof or RU/UK morphology evidence.
+
+Issue #596 implementation slice on 2026-06-15: branch
+`codex/issue-596-binding-glossary-contract` hardens the local default-off
+glossary prompt-context contract after #593. Included entries now add an
+explicit binding target-form rule plus compact `mandatory_term` markers
+`binding=must_use_required_target` and `required_target_copy=exact`. This is a
+local formatter/test-path contract change only; it does not approve live
+provider calls, default rollout, cache reuse, durable state changes or release
+claims.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,

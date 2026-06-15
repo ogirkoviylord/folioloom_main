@@ -499,9 +499,11 @@ def _mandatory_term_lines(
     required_forms = tuple(form for form in (target, *target_variants) if form)
     parts = [
         f"mandatory_term: id={entry_id}",
+        "binding=must_use_required_target",
         "when=source_or_alias_present",
         f"source_or_alias={_compact_join(triggers)}",
         f"required_target={_compact_join(required_forms) or 'Unknown'}",
+        "required_target_copy=exact",
     ]
     if forbidden_variants:
         parts.append(f"forbidden_target={_compact_join(forbidden_variants)}")
@@ -736,6 +738,12 @@ def _base_context_lines() -> tuple[str, ...]:
             "target_variant form for that term. Do not freely translate, "
             "paraphrase, rename, or omit listed terms; avoid forbidden_variant "
             "forms."
+        ),
+        (
+            "Binding target-form rule: for each mandatory_term whose trigger "
+            "appears, copy one required_target form exactly into the "
+            "translation; do not invent an unlisted target form unless a "
+            "higher-priority instruction or source-text conflict requires it."
         ),
     )
 
