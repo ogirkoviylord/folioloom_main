@@ -2,11 +2,17 @@ import json
 import re
 import threading
 import unittest
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
+from zipfile import ZipFile
 
+from translator_service.admin.translation_logs import (
+    build_effective_translation_run_archive,
+    get_translation_run_details,
+)
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.glossary_candidate_reducer import GlossaryCandidateReducerCaps
 from translator_service.glossary_persistent_runtime_resolver import (
@@ -1121,6 +1127,114 @@ class WorkerTest(unittest.TestCase):
             self.assertIn('"status": "ready"', event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("Дарси", event_lines)
+
+    def test_prepared_package_rehearsal_archive_links_injection_metadata(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Darcy returns.",
+            )
+            policy = json.dumps(
+                {
+                    "glossary_mode": "with_glossary",
+                    "prepared_glossary_package": _prepared_glossary_package(),
+                },
+                ensure_ascii=False,
+            )
+            run_log_root = Path(temp_dir) / "run-logs"
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=policy,
+                ),
+            )
+            store = self._store()
+            _job_with_stored_unit(
+                store,
+                source.object_key,
+                target_language="ru",
+                translation_policy=policy,
+            )
+            translator = RecordingTranslator()
+
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=run_log_root,
+            )
+            details = get_translation_run_details(
+                run_log_root,
+                run_logger.run_dir.name,
+            )
+            self.assertIsNotNone(details)
+            archive = build_effective_translation_run_archive(
+                run_log_root,
+                run_logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(len(translator.calls), 1)
+        self.assertIn("<glossary_context", translator.calls[0][0])
+        self.assertIn("Дарси", translator.calls[0][0])
+        self.assertIsNotNone(archive)
+        with ZipFile(BytesIO(archive.content)) as archive_zip:
+            names = set(archive_zip.namelist())
+            self.assertIn("glossary_runtime_diagnostics.json", names)
+            diagnostics = json.loads(
+                archive_zip.read("glossary_runtime_diagnostics.json")
+            )
+            archive_text = "\n".join(
+                archive_zip.read(name).decode("utf-8", errors="ignore")
+                for name in names
+            )
+
+        self.assertEqual(diagnostics["glossary_mode"], "with_glossary")
+        self.assertEqual(diagnostics["summary"]["prepared_package_event_count"], 1)
+        self.assertEqual(
+            diagnostics["summary"]["prepared_package_statuses"],
+            ["ready"],
+        )
+        self.assertEqual(
+            diagnostics["summary"]["cache_policy_behaviors"],
+            ["bypass_glossary_injected_cache"],
+        )
+        prepared_event = diagnostics["prepared_package_events"][0]
+        self.assertEqual(prepared_event["package_id"], "prepared:worker-test:ru")
+        self.assertEqual(prepared_event["ready_entry_count"], 1)
+        self.assertEqual(
+            prepared_event["resolver_linkage"]["runtime_status"],
+            "ready",
+        )
+        self.assertEqual(
+            prepared_event["resolver_linkage"]["fallback_reason"],
+            "none",
+        )
+        self.assertTrue(prepared_event["resolver_linkage"]["prompt_context_included"])
+        self.assertIn(
+            "glossary-scan:name:",
+            "\n".join(diagnostics["summary"]["selected_entry_ids"]),
+        )
+        self.assertNotIn("Darcy returns.", archive_text)
+        self.assertNotIn("RAW PROMPT", archive_text)
+        self.assertNotIn("Bearer ", archive_text)
+        self.assertNotIn("sk-", archive_text)
 
     def test_scheduled_worker_with_invalid_prepared_package_falls_back(self):
         from translator_service.scheduler import SchedulerLimits
