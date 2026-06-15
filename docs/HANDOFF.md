@@ -286,6 +286,19 @@ provider calls, Telegram operation, runtime translation, rollout, cache reuse,
 provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim is approved by #626.
 
+Issue #628 implementation slice on 2026-06-15: branch
+`codex/issue-628-prep-placeholder-hardening` treats prompt-placeholder or
+`Unknown` values in locally owned prepared-package metadata as missing local
+envelope fields. A Pro-prep response can no longer pass as-is with a placeholder
+`package_id` such as `use package_id from local wrapper if unavailable`; the
+runner applies a deterministic local envelope for package id, provider role,
+provider model, owner approval, source fingerprint, candidate selector
+signature and diagnostics ref, while keeping provider target metadata
+provider-supplied and revalidating through #610. This is local-only/default-off
+hardening with no live calls, Telegram operation, runtime translation, rollout,
+cache reuse, provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
