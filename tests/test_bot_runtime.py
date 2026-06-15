@@ -86,6 +86,9 @@ from translator_service.glossary_prepared_package import (
     GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
     GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
 )
+from translator_service.glossary_prepared_prep_service import (
+    PreparedGlossaryProviderResponse,
+)
 from translator_service.job_runner import (
     DocumentKind,
     TranslationJob,
@@ -2586,6 +2589,112 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "events.jsonl"
             ).read_text(encoding="utf-8")
             self.assertIn('"attachment_source": "prep"', event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("Дарси", event_lines)
+
+    def test_build_translation_service_wires_provider_backed_glossary_prep(self):
+        from translator_service.scheduler import SchedulerLimits
+        from translator_service.worker import run_next_scheduled_stored_text_work_unit
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            provider_requests = []
+
+            def prep_provider(provider_request):
+                provider_requests.append(provider_request)
+                return PreparedGlossaryProviderResponse(
+                    payload=_prepared_glossary_package(),
+                    metadata={
+                        "provider_status": "ready",
+                        "provider_model": "deepseek-v4-pro",
+                        "provider_usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    },
+                )
+
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(root / "objects"),
+                    persistent_jobs_db_path=str(root / "jobs.sqlite3"),
+                    user_settings_db_path=str(root / "settings.sqlite3"),
+                    admin_db_path=str(root / "admin.sqlite3"),
+                    translation_run_log_root=str(root / "translation-runs"),
+                    max_fragment_chars=200,
+                    defer_persistent_jobs_to_worker=True,
+                    prepared_glossary_prep_provider=prep_provider,
+                )
+            )
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=_RuntimeRecordingTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(len(provider_requests), 1)
+            self.assertEqual(
+                provider_requests[0].packet["provider_model"],
+                "deepseek-v4-pro",
+            )
+            assert service._persistent_job_store is not None
+            assert service._file_storage is not None
+            policy = json.loads(
+                service._persistent_job_store.get_job(job.id).translation_policy
+            )
+            self.assertIn("prepared_glossary_package", policy)
+            self.assertEqual(
+                policy["prepared_glossary_package"]["provider_model"],
+                "deepseek-v4-pro",
+            )
+
+            translator = _RuntimeBatchRecordingTranslator()
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=service._persistent_job_store,
+                storage=service._file_storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=root / "translation-runs",
+            )
+
+            self.assertIsNotNone(completed)
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            self.assertIn("Дарси", translator.requests[0][0])
+            event_lines = next((root / "translation-runs").iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text(encoding="utf-8")
+            self.assertIn('"attachment_source": "prep"', event_lines)
+            self.assertIn('"provider_reported_usage_status": "reported"', event_lines)
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("Дарси", event_lines)

@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## 1. Текущее состояние проекта
 
@@ -104,6 +104,24 @@ tests for the new attachment fields. This does not add live provider calls,
 public/admin raw UI expansion, DB/schema/storage/admin-auth/retention changes,
 deployment or release/privacy/legal/support claims. Follow-up #648 remains
 required before #646 live smoke can run.
+
+Issue #648 implementation slice on 2026-06-16 adds a DeepSeek-compatible
+prepared-glossary provider adapter and explicit runtime config wiring for
+automatic job creation. The adapter builds bounded glossary-prep prompts,
+parses JSON object responses, rejects raw/secret/provider-body fields, locally
+wraps only compact target-backed provider entries with deterministic #610
+envelope metadata, and returns metadata-only provider usage/adjudication
+summaries. `build_translation_service` can now build the #642 prep service
+from an explicitly injected provider and #643 config, while default runtime
+still does not read provider keys/config or make live prep calls unless a
+provider is supplied. Fake-provider tests prove package attachment reaches
+worker injection and #465 cache bypass only when glossary context renders;
+invalid JSON/schema, target mismatch, missing required usage, token-cap
+exceeded, raw/secret metadata and provider-failure paths fail safely with
+metadata-only reason codes. This does not add live provider calls, Telegram
+operation, deployment, provider config/key changes, runtime translation model
+changes, DB/schema/storage/admin/retention changes, cache reuse or
+release/privacy/legal/support claims. #646 live smoke remains conditional.
 
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram

@@ -19,7 +19,7 @@ AI-агенты обязаны читать его перед архитекту
 
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
-Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644/#645
+Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644/#645/#648
 
 Decision:
 - The temporary Telegram glossary mode selector from issue #546 is superseded
@@ -40,9 +40,10 @@ Decision:
   resolver calls. Issue #644 generalizes prepared-package injection across
   supported persistent TXT/DOCX/EPUB work units behind source-useful and budget
   gates. Issue #645 updates owner-only archive diagnostics for automatic
-  default glossary runs. Issue #648 implements provider-prep plumbing. Issue
-  #646 is a separately gated bounded live smoke and may run
-  only after #641-#645 and #648 are merged/reviewed and local/fake gates pass.
+  default glossary runs. Issue #648 adds provider-backed DeepSeek Pro
+  prep-adapter wiring with fake-provider tests. Issue #646 is a separately
+  gated bounded live smoke and may run only after #641-#645 and #648 are
+  merged/reviewed and local/fake gates pass.
 - Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
   glossary data must not silently create quality/readiness claims. The
   approved default behavior is metadata-only fallback to the existing
@@ -90,8 +91,12 @@ Consequences:
   glossary policy status, prepared-package attachment/prep status, prep
   beta-safety metadata, target metadata presence, rendered-context counts,
   cache behavior and metadata-only compliance summaries when the run emits
-  those events. Provider-backed wiring still depends on follow-up #639 child
-  issues and their gates.
+  those events. After #648, runtime config can explicitly inject a
+  DeepSeek-compatible glossary-prep provider into the #642/#643 prep service,
+  validate compact output through #610, and attach READY packages before
+  worker injection in fake-tested paths. The default runtime still does not
+  read provider keys/config or make live prep calls unless a provider is
+  supplied. #646 remains the first bounded live smoke gate.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.
