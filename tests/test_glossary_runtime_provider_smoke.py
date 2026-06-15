@@ -25,6 +25,8 @@ from tools.glossary_runtime_provider_smoke import (
     ISSUE_575_MAX_CALLS,
     ISSUE_575_MAX_TOKENS_TOTAL,
     ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
+    ISSUE_586_DIAGNOSTIC_ROOT,
+    ISSUE_586_ID,
     LANGUAGE_POLICY_PACKAGE_FIXTURES,
     POLICY_PROVIDER_EVIDENCE_LIVE_SCHEMA_VERSION,
     POLICY_PROVIDER_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
@@ -33,6 +35,7 @@ from tools.glossary_runtime_provider_smoke import (
     RuntimePackageSelectionError,
     RuntimeSmokePackage,
     SmokeConfig,
+    _validate_config,
     apply_runtime_pressure_fallback,
     apply_target_metadata_fixture_overlay,
     build_epub_runtime_unit_selection_decision,
@@ -648,6 +651,81 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 provider=FakeRuntimeProvider(),
                 repo_root=Path.cwd(),
             )
+
+    def test_issue_586_boundary_accepts_post_584_live_root(self):
+        _validate_config(
+            SmokeConfig(
+                issue_id=ISSUE_586_ID,
+                input_targets=ISSUE_575_INPUT_TARGETS,
+                diagnostic_root=ISSUE_586_DIAGNOSTIC_ROOT,
+                max_calls=ISSUE_575_MAX_CALLS,
+                max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                fake=False,
+                target_metadata_fixture_path=ISSUE_575_TARGET_METADATA_FIXTURE_PATH,
+                paired_glossary_off=True,
+            )
+        )
+
+        with self.assertRaises(ValueError):
+            _validate_config(
+                SmokeConfig(
+                    issue_id=ISSUE_586_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=DEFAULT_DIAGNOSTIC_ROOT,
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=False,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                )
+            )
+
+    def test_issue_586_fake_smoke_reuses_adversarial_txt_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            report_path = tmp_path / "issue-586-report.md"
+            report = run_smoke(
+                SmokeConfig(
+                    issue_id=ISSUE_586_ID,
+                    input_targets=ISSUE_575_INPUT_TARGETS,
+                    diagnostic_root=tmp_path / "diagnostics",
+                    max_calls=ISSUE_575_MAX_CALLS,
+                    max_tokens_total=ISSUE_575_MAX_TOKENS_TOTAL,
+                    fake=True,
+                    target_metadata_fixture_path=(
+                        ISSUE_575_TARGET_METADATA_FIXTURE_PATH
+                    ),
+                    paired_glossary_off=True,
+                ),
+                provider=FakeRuntimeProvider(),
+                repo_root=Path.cwd(),
+                metadata_report_path=report_path,
+            )
+
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["approval"]["issue_id"], ISSUE_586_ID)
+            self.assertEqual(report["calls_made"], 4)
+            self.assertEqual(
+                [call["target_language"] for call in report["calls"]],
+                ["ru", "ru", "uk", "uk"],
+            )
+            self.assertEqual(
+                [call["side"] for call in report["calls"]],
+                [
+                    "glossary_on",
+                    "glossary_off",
+                    "glossary_on",
+                    "glossary_off",
+                ],
+            )
+
+            rendered = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("<glossary_context", rendered)
+            self.assertNotIn("<translation_batch>", rendered)
+            self.assertNotIn("mandatory_term:", rendered)
+            self.assertNotIn("provider_response", rendered)
 
     def test_issue_533_protocol_declares_policy_provider_evidence_boundary(self):
         protocol = provider_evidence_protocol_payload()

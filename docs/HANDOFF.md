@@ -278,6 +278,17 @@ Live provider behavior after this local prompt-context strengthening remains
 default rollout, cache reuse, provider-config change, durable state change,
 RU/UK morphology engine or release/privacy/legal/support evidence.
 
+Issue #588 implementation slice on 2026-06-15: branch
+`codex/issue-588-post-584-diagnostics-root` adds an explicit
+`--issue-586-post-584-adversarial-txt` boundary to
+`tools/glossary_runtime_provider_smoke.py`. The boundary reuses the #575
+adversarial TXT `ru`/`uk` inputs, paired glossary-on/off shape, 4-call cap,
+60k-token cap and committed target-metadata fixture, but writes under the
+post-#584 owner-only diagnostics root
+`outputs/glossary-battle-test/issue-586-post-584-adversarial-live/`. Fake #586
+preflight completed with 4 fake calls. No live provider calls were made in
+#588; live provider behavior after #584 remains `Unknown` until #586 runs.
+
 Issue #30 reliability update on 2026-05-14: GitHub issues
 [#32](https://github.com/ogirkoviylord/folioloom_main/issues/32)-[#35](https://github.com/ogirkoviylord/folioloom_main/issues/35)
 are closed and PRs #36-#39 are merged. The work documented the root cause,
