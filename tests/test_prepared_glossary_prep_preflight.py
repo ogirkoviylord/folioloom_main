@@ -205,6 +205,29 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
             packet["candidate_selector_signature"],
         )
 
+    def test_live_preparation_allows_issue_624_retry_boundary(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-624",
+                    issue_id="624",
+                ),
+                provider=_EntriesOnlyProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+            prepared_package = json.loads(
+                result.prepared_package_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(metadata_report["issue"], "624")
+        self.assertTrue(prepared_package["package_id"].startswith("prepared:issue-624"))
+
     def test_live_preparation_rejects_raw_provider_fields_before_wrapping(self):
         with TemporaryDirectory() as temp_dir:
             result = run_live_preparation(

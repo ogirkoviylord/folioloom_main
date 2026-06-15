@@ -46,6 +46,9 @@ DEFAULT_DIAGNOSTIC_ROOT = Path(
 ISSUE_614_DIAGNOSTIC_ROOT = Path(
     "outputs/glossary-battle-test/issue-614-pro-prep"
 )
+ISSUE_624_DIAGNOSTIC_ROOT = Path(
+    "outputs/glossary-battle-test/issue-624-pro-prep-retry"
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class ChatCallResult:
 @dataclass(frozen=True)
 class PreparedGlossaryPrepLiveConfig(PreparedGlossaryPrepPreflightConfig):
     diagnostic_root: Path = ISSUE_614_DIAGNOSTIC_ROOT
+    issue_id: str = "614"
     provider_base_url: str = DEFAULT_PROVIDER_BASE_URL
     max_calls: int = DEFAULT_MAX_CALLS
     max_tokens_total: int = DEFAULT_MAX_TOKENS_TOTAL
@@ -350,7 +354,7 @@ def run_live_preparation(
     diagnostics_dir = config.diagnostic_root / timestamp
     diagnostics_dir.mkdir(parents=True, exist_ok=False)
 
-    artifacts = _build_preflight_artifacts(config, issue_id="614")
+    artifacts = _build_preflight_artifacts(config, issue_id=config.issue_id)
     fake_validation = validate_prepared_glossary_package(
         artifacts["fake_prepared_package"],
         target_language=config.target_language,
@@ -510,11 +514,20 @@ def _validate_issue_614_boundary(
         raise ValueError("issue_614_token_cap_invalid")
     if config.max_completion_tokens <= 0:
         raise ValueError("issue_614_completion_cap_invalid")
+    if config.issue_id not in {"614", "624"}:
+        raise ValueError("issue_614_live_issue_not_approved")
+    approved_root = _live_diagnostic_root_for_issue(config.issue_id)
     if (
         not allow_test_diagnostic_root
-        and config.diagnostic_root != ISSUE_614_DIAGNOSTIC_ROOT
+        and config.diagnostic_root != approved_root
     ):
         raise ValueError("issue_614_diagnostic_root_not_approved")
+
+
+def _live_diagnostic_root_for_issue(issue_id: str) -> Path:
+    if issue_id == "624":
+        return ISSUE_624_DIAGNOSTIC_ROOT
+    return ISSUE_614_DIAGNOSTIC_ROOT
 
 
 def _build_preflight_artifacts(
@@ -875,7 +888,7 @@ def _live_metadata_report(
         "schema_version": ISSUE_614_SCHEMA_VERSION,
         "metadata_only": True,
         "raw_payload_included": False,
-        "issue": "614",
+        "issue": config.issue_id,
         "input_path": str(config.input_path),
         "target_language": config.target_language,
         "provider_model": config.provider_model,
@@ -1084,7 +1097,7 @@ def _adjudicate_provider_package_payload(
     envelope = {
         "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
         "package_id": _package_id_for_issue(
-            "614",
+            config.issue_id,
             source_document_fingerprint,
             config.target_language,
             len(entries),
@@ -1422,9 +1435,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Run the owner-approved #614 bounded live Pro-prep path.",
     )
+    parser.add_argument(
+        "--issue-624-retry",
+        action="store_true",
+        help="Run the owner-approved #624 bounded live Pro-prep retry path.",
+    )
     parser.add_argument("--timestamp")
     args = parser.parse_args(argv)
-    if args.issue_614_live:
+    if args.issue_614_live and args.issue_624_retry:
+        parser.error("--issue-614-live and --issue-624-retry are mutually exclusive")
+    if args.issue_614_live or args.issue_624_retry:
+        issue_id = "624" if args.issue_624_retry else "614"
+        diagnostic_root = (
+            _live_diagnostic_root_for_issue(issue_id)
+            if args.diagnostic_root == str(DEFAULT_DIAGNOSTIC_ROOT)
+            else Path(args.diagnostic_root)
+        )
         api_key = load_env_api_key()
         if not api_key:
             raise SystemExit(
@@ -1435,7 +1461,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             PreparedGlossaryPrepLiveConfig(
                 input_path=Path(args.input),
                 target_language=args.target,
-                diagnostic_root=Path(args.diagnostic_root),
+                diagnostic_root=diagnostic_root,
+                issue_id=issue_id,
                 max_candidates=args.max_candidates,
                 max_excerpt_chars=args.max_excerpt_chars,
                 provider_model=args.model,
