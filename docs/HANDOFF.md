@@ -246,6 +246,24 @@ not Telegram operation, runtime translation, rollout, cache reuse,
 provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim.
 
+Issue #622 implementation slice on 2026-06-15: branch
+`codex/issue-622-prep-envelope-hardening` hardens the #614 prepared-glossary
+prep runner after the live provider returned valid-looking entries but omitted
+required top-level package metadata. The runner can now apply a deterministic
+local envelope only for locally known fields such as package id, provider role,
+provider model, owner approval, diagnostics ref, source fingerprint and
+candidate selector signature, then still validates through #610. Provider
+target metadata remains provider-supplied; local code does not invent target
+canonical/variants or semantic facts. Responses with raw/secret fields,
+invalid/missing entries, source entry ids outside the approved packet or
+evidence refs outside the approved packet are rejected with metadata-only
+reason codes. A local fake preflight at
+`outputs/glossary-battle-test/issue-622-prep-envelope-fake/20260615T172000Z/`
+remained `ready` with 8 selected candidates and 0 live calls. This is not a
+fresh live retry, Telegram operation, runtime translation, rollout, cache
+reuse, provider-config, DB/schema/storage/admin/retention change or
+release/privacy/legal/support claim.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`

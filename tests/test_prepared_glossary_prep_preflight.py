@@ -166,6 +166,105 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
         self.assertEqual(metadata_report["live_validation"]["status"], "invalid")
         self.assertNotIn("not json", metadata_text)
 
+    def test_live_preparation_wraps_entries_only_provider_package(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-614",
+                ),
+                provider=_EntriesOnlyProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+            prepared_package = json.loads(
+                result.prepared_package_path.read_text(encoding="utf-8")
+            )
+            packet = json.loads(
+                (result.diagnostics_dir / "raw_preflight_packet.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.validation_status, "ready")
+        self.assertEqual(
+            metadata_report["package_adjudication"]["mode"],
+            "local_envelope_applied",
+        )
+        self.assertEqual(prepared_package["owner_approved"], True)
+        self.assertEqual(
+            prepared_package["provider_role_id"],
+            "deepseek-pro-glossary-prep-v1",
+        )
+        self.assertEqual(
+            prepared_package["candidate_selector_signature"],
+            packet["candidate_selector_signature"],
+        )
+
+    def test_live_preparation_rejects_raw_provider_fields_before_wrapping(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-614",
+                ),
+                provider=_RawFieldProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+            metadata_report = json.loads(
+                result.metadata_report_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("provider_package_raw_field_rejected", result.reason_codes)
+        self.assertEqual(
+            metadata_report["package_adjudication"]["mode"],
+            "rejected",
+        )
+
+    def test_live_preparation_rejects_evidence_refs_outside_packet(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-614",
+                ),
+                provider=_BadEvidenceProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn(
+            "provider_package_evidence_ref_not_in_packet",
+            result.reason_codes,
+        )
+
+    def test_live_preparation_rejects_top_level_boundary_mismatch(self):
+        with TemporaryDirectory() as temp_dir:
+            result = run_live_preparation(
+                PreparedGlossaryPrepLiveConfig(
+                    diagnostic_root=Path(temp_dir) / "issue-614",
+                ),
+                provider=_TopLevelMismatchProvider(),
+                timestamp="20260615T010000Z",
+                allow_test_diagnostic_root=True,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn(
+            "provider_package_target_language_mismatch",
+            result.reason_codes,
+        )
+        self.assertIn(
+            "provider_package_unsupported_top_level_field",
+            result.reason_codes,
+        )
+
 
 class _PreparedPackageProvider:
     def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
@@ -204,6 +303,104 @@ class _PreparedPackageProvider:
                 },
             },
             response_text=json.dumps({"choices": [{"finish_reason": "stop"}]}),
+        )
+
+
+class _EntriesOnlyProvider(_PreparedPackageProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        package = json.loads(result.content)
+        entries_only = {
+            "schema_version": package["schema_version"],
+            "source_language": package["source_language"],
+            "target_language": package["target_language"],
+            "entries": package["entries"],
+        }
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(entries_only, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _RawFieldProvider(_EntriesOnlyProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["raw_source_text"] = "do not accept this raw source field"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _BadEvidenceProvider(_EntriesOnlyProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["entries"][0]["evidence_refs"] = ["not-in-packet"]
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
+        )
+
+
+class _TopLevelMismatchProvider(_EntriesOnlyProvider):
+    def chat(self, *, model, system_prompt, user_prompt, max_completion_tokens):
+        result = super().chat(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
+        payload = json.loads(result.content)
+        payload["target_language"] = "uk"
+        payload["semantic_truth"] = "do not accept unsupported top-level fields"
+        return ChatCallResult(
+            ok=result.ok,
+            content=json.dumps(payload, ensure_ascii=False),
+            usage=result.usage,
+            finish_reason=result.finish_reason,
+            http_status=result.http_status,
+            elapsed_seconds=result.elapsed_seconds,
+            request_payload=result.request_payload,
+            response_payload=result.response_payload,
+            response_text=result.response_text,
         )
 
 
