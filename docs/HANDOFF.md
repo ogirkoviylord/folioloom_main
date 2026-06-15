@@ -264,6 +264,16 @@ fresh live retry, Telegram operation, runtime translation, rollout, cache
 reuse, provider-config, DB/schema/storage/admin/retention change or
 release/privacy/legal/support claim.
 
+Issue #624 boundary slice on 2026-06-15: branch
+`codex/issue-624-pro-prep-retry-boundary` adds an explicit
+`--issue-624-retry` live boundary and diagnostics root for a bounded post-#622
+prepared-glossary Pro-prep retry. A fake/dry preflight at
+`outputs/glossary-battle-test/issue-624-pro-prep-retry/20260615T173500Z/`
+was `ready` with 8 selected candidates and 0 live calls. The boundary does not
+run a provider by itself and does not approve Telegram operation, runtime
+translation, rollout, cache reuse, provider-config, DB/schema/storage/admin/
+retention changes or release/privacy/legal/support claims.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
