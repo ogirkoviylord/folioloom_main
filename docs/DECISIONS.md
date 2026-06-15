@@ -365,6 +365,58 @@ Human approval required to change:
   release-version policy, provider settings or runtime implementation requires
   the matching explicit owner approval gate.
 
+### 2026-06-15 - Architecture clarification: prepared glossary package is a battle-test bridge, not the final glossary product model
+
+Status: Active for #607/#608/#637 owner/test battle-test work
+
+Decision:
+- `prepared_glossary_package` is an internal, job-scoped battle-test bridge
+  between DeepSeek Pro glossary preparation and the runtime worker prompt
+  context. It is not the final product-facing glossary model, glossary UI,
+  durable glossary registry, glossary storage system or release-version
+  glossary artifact.
+- The package exists because real Telegram `with_glossary` jobs need a compact,
+  #610-validated way to carry target-backed glossary entries for the exact
+  uploaded document fingerprint, document kind and target language into the
+  existing #611 worker/#557 resolver path.
+- The product architecture should continue to describe the user-facing
+  capability as a book glossary. `prepared_glossary_package` should be treated
+  as a temporary implementation/transport contract that may later be renamed,
+  absorbed into a future `BookGlossary`/`GlossaryArtifact` design or replaced
+  by an approved durable registry.
+- Until that future design is approved, prepared packages must stay compact,
+  metadata-safe, owner/test scoped, default-off and matched to the job before
+  use. They must not introduce cache reuse, storage/retention/export/delete
+  behavior, release/privacy/legal/support claims or normal/default rollout.
+
+Evidence:
+- Issue #608 selected a no-schema, job-scoped compact prepared-glossary package
+  after owner-only Telegram archive review showed `with_glossary` could be
+  selected while worker prompts still had no rendered `<glossary_context>`.
+- Issue #610 implemented the local validator for this compact contract.
+- Issue #611 implemented worker-side consumption of a nested compact package
+  only for explicit `with_glossary` owner/test paths.
+- Issue #633/#635 add attachment and runtime wiring boundaries, but still do
+  not create a package source or durable registry.
+- The owner asked on 2026-06-15 to pin that this "package" concept is not the
+  final glossary design and should not be over-treated as such.
+
+Consequences:
+- Future #637 work should focus on safely producing this bridge for
+  owner/test `with_glossary` jobs, not on designing a full glossary product
+  registry.
+- Future agents should avoid turning the package name into product language.
+  Use "book glossary" for the product capability and "prepared package" only
+  for the internal handoff contract.
+- A durable glossary artifact/registry, editable glossary UI, user-visible
+  glossary controls, retention/export/delete policy, cache reuse or default
+  rollout require separate architecture review and explicit owner approval.
+
+Human approval required to change:
+- yes; promoting prepared packages into a durable glossary model, storage
+  system, release artifact, cache key source or user-facing product behavior
+  requires a separately approved issue.
+
 ### 2026-06-09 - Architecture decision: JSON provider boundary for multi-block translation batches
 
 Status: Active

@@ -2573,6 +2573,100 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("Дарси", event_lines)
 
+    def test_build_translation_service_wires_prepared_glossary_package_prep_resolver(
+        self,
+    ):
+        from translator_service.scheduler import SchedulerLimits
+        from translator_service.worker import run_next_scheduled_stored_text_work_unit
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            prep_requests = []
+
+            def prep_resolver(request):
+                prep_requests.append(request)
+                return PreparedGlossaryPackageAttachment(
+                    payload=_prepared_glossary_package(),
+                    source_sha256=request.source_sha256,
+                    document_kind=request.document_kind,
+                    target_language=request.target_language,
+                )
+
+            service = build_translation_service(
+                BotRuntimeConfig(
+                    object_storage_root=str(root / "objects"),
+                    persistent_jobs_db_path=str(root / "jobs.sqlite3"),
+                    user_settings_db_path=str(root / "settings.sqlite3"),
+                    admin_db_path=str(root / "admin.sqlite3"),
+                    translation_run_log_root=str(root / "translation-runs"),
+                    max_fragment_chars=200,
+                    defer_persistent_jobs_to_worker=True,
+                    prepared_glossary_package_prep_resolver=prep_resolver,
+                )
+            )
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=_RuntimeRecordingTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(len(prep_requests), 1)
+            self.assertEqual(prep_requests[0].content, content)
+            assert service._persistent_job_store is not None
+            assert service._file_storage is not None
+            persisted = service._persistent_job_store.get_job(job.id)
+            policy = json.loads(persisted.translation_policy)
+            self.assertEqual(policy["glossary_mode"], GLOSSARY_MODE_WITH)
+            self.assertIn("prepared_glossary_package", policy)
+
+            translator = _RuntimeBatchRecordingTranslator()
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=service._persistent_job_store,
+                storage=service._file_storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=root / "translation-runs",
+            )
+
+            self.assertIsNotNone(completed)
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            self.assertIn("Дарси", translator.requests[0][0])
+            event_lines = next((root / "translation-runs").iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text(encoding="utf-8")
+            self.assertIn('"attachment_source": "prep"', event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("Дарси", event_lines)
+
     def test_build_deepseek_translator_uses_key_pool_for_single_env_key(self):
         with patch.dict(
             "os.environ",
