@@ -113,6 +113,13 @@ class PreparedGlossaryPrepLiveResult:
     package_signature: str
 
 
+@dataclass(frozen=True)
+class PreparedPackageAdjudicationResult:
+    payload: Any
+    mode: str
+    reason_codes: tuple[str, ...]
+
+
 class OpenAICompatibleProvider:
     def __init__(self, *, api_key: str, base_url: str, timeout_seconds: float = 90.0):
         self._api_key = api_key
@@ -365,15 +372,20 @@ def run_live_preparation(
         max_completion_tokens=config.max_completion_tokens,
     )
     package_payload, parse_reason_codes = _provider_package_payload(call_result.content)
-    validation = validate_prepared_glossary_package(
+    adjudication = _adjudicate_provider_package_payload(
         package_payload,
+        config=config,
+        packet=artifacts["packet"],
+    )
+    validation = validate_prepared_glossary_package(
+        adjudication.payload,
         target_language=config.target_language,
     )
     observed_tokens = _usage_total_tokens(call_result.usage)
     token_cap_exceeded = (
         observed_tokens is not None and observed_tokens > config.max_tokens_total
     )
-    reason_codes = list(parse_reason_codes)
+    reason_codes = [*parse_reason_codes, *adjudication.reason_codes]
     if not call_result.ok:
         reason_codes.append("issue_614_provider_call_failed")
     if token_cap_exceeded:
@@ -395,6 +407,7 @@ def run_live_preparation(
         reserved_tokens=reserved_tokens,
         observed_tokens=observed_tokens,
         reason_codes=reason_codes,
+        adjudication=adjudication,
     )
     if not _metadata_report_is_safe(metadata_report):
         raise ValueError("metadata report contains unsafe raw or secret material")
@@ -425,8 +438,8 @@ def run_live_preparation(
             validation_metadata=validation.metadata,
         ),
     )
-    if isinstance(package_payload, Mapping):
-        _write_json(prepared_package_path, package_payload)
+    if isinstance(adjudication.payload, Mapping):
+        _write_json(prepared_package_path, adjudication.payload)
     else:
         _write_json(
             prepared_package_path,
@@ -711,6 +724,27 @@ def _live_user_prompt(packet: Mapping[str, Any]) -> str:
                 "no_raw_excerpt_fields": True,
                 "max_entries": packet.get("max_candidates", DEFAULT_MAX_CANDIDATES),
             },
+            "output_package_skeleton": {
+                "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
+                "package_id": "use package_id from local wrapper if unavailable",
+                "source_language": "en",
+                "target_language": packet.get("target_language", APPROVED_TARGET),
+                "glossary_mode": "with_glossary",
+                "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+                "provider_model": packet.get("provider_model", DEFAULT_PROVIDER_MODEL),
+                "provider_run_id": "metadata-only provider run id or Unknown",
+                "diagnostics_ref": "live_provider_diagnostic.json",
+                "source_document_fingerprint": packet.get(
+                    "source_document_fingerprint",
+                    "Unknown",
+                ),
+                "candidate_selector_signature": packet.get(
+                    "candidate_selector_signature",
+                    "Unknown",
+                ),
+                "owner_approved": True,
+                "entries": [],
+            },
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -835,6 +869,7 @@ def _live_metadata_report(
     reserved_tokens: int,
     observed_tokens: int | None,
     reason_codes: Sequence[str],
+    adjudication: PreparedPackageAdjudicationResult,
 ) -> dict[str, Any]:
     return {
         "schema_version": ISSUE_614_SCHEMA_VERSION,
@@ -870,6 +905,10 @@ def _live_metadata_report(
             else "failed"
         ),
         "reason_codes": list(_dedupe(reason_codes)),
+        "package_adjudication": {
+            "mode": adjudication.mode,
+            "reason_codes": list(adjudication.reason_codes),
+        },
         "fake_preflight_validation": dict(fake_validation_metadata),
         "live_validation": dict(validation_metadata),
         "call": {
@@ -966,6 +1005,275 @@ def _provider_package_payload(content: str) -> tuple[Any, tuple[str, ...]]:
         return {}, ("provider_response_invalid_package_json",)
 
 
+def _adjudicate_provider_package_payload(
+    payload: Any,
+    *,
+    config: PreparedGlossaryPrepLiveConfig,
+    packet: Mapping[str, Any],
+) -> PreparedPackageAdjudicationResult:
+    if not isinstance(payload, Mapping):
+        return PreparedPackageAdjudicationResult(
+            payload={},
+            mode="rejected",
+            reason_codes=("provider_package_not_object",),
+        )
+    unsafe_reasons = _unsafe_provider_payload_reasons(payload)
+    if unsafe_reasons:
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=unsafe_reasons,
+        )
+    top_level_reasons = _top_level_boundary_reasons(payload, config=config)
+    if top_level_reasons:
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=top_level_reasons,
+        )
+
+    entries = payload.get("entries")
+    if not isinstance(entries, Sequence) or isinstance(
+        entries,
+        (str, bytes, bytearray),
+    ):
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=("provider_package_entries_invalid",),
+        )
+    entries = list(entries)
+    if not entries:
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=("provider_package_entries_empty",),
+        )
+    if len(entries) > config.max_candidates:
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=("provider_package_entry_count_exceeds_packet_bound",),
+        )
+
+    boundary_reasons = _entry_boundary_reasons(entries, packet=packet)
+    if boundary_reasons:
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="rejected",
+            reason_codes=boundary_reasons,
+        )
+
+    required_top_level = (
+        "package_id",
+        "owner_approved",
+        "provider_role_id",
+        "provider_model",
+        "candidate_selector_signature",
+    )
+    if all(key in payload for key in required_top_level):
+        return PreparedPackageAdjudicationResult(
+            payload=payload,
+            mode="provider_package_as_is",
+            reason_codes=(),
+        )
+
+    source_document_fingerprint = str(
+        packet.get("source_document_fingerprint") or "Unknown"
+    )
+    envelope = {
+        "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
+        "package_id": _package_id_for_issue(
+            "614",
+            source_document_fingerprint,
+            config.target_language,
+            len(entries),
+        ),
+        "source_language": "en",
+        "target_language": config.target_language,
+        "glossary_mode": "with_glossary",
+        "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+        "provider_model": config.provider_model,
+        "provider_run_id": _provider_run_id(payload),
+        "diagnostics_ref": "live_provider_diagnostic.json",
+        "source_document_fingerprint": source_document_fingerprint,
+        "candidate_selector_signature": str(
+            packet.get("candidate_selector_signature") or "Unknown"
+        ),
+        "owner_approved": True,
+        "entries": entries,
+    }
+    return PreparedPackageAdjudicationResult(
+        payload=envelope,
+        mode="local_envelope_applied",
+        reason_codes=("provider_package_missing_local_envelope_fields",),
+    )
+
+
+def _top_level_boundary_reasons(
+    payload: Mapping[str, Any],
+    *,
+    config: PreparedGlossaryPrepLiveConfig,
+) -> tuple[str, ...]:
+    allowed_keys = {
+        "schema_version",
+        "package_id",
+        "source_language",
+        "target_language",
+        "glossary_mode",
+        "provider_role_id",
+        "provider_model",
+        "provider_run_id",
+        "diagnostics_ref",
+        "source_document_fingerprint",
+        "candidate_selector_signature",
+        "glossary_snapshot_signature",
+        "language_policy_package_id",
+        "language_policy_package_version",
+        "owner_approved",
+        "entries",
+    }
+    reasons: list[str] = []
+    if any(key not in allowed_keys for key in payload):
+        reasons.append("provider_package_unsupported_top_level_field")
+    source_language = payload.get("source_language")
+    if isinstance(source_language, str) and source_language.strip() != "en":
+        reasons.append("provider_package_source_language_mismatch")
+    target_language = payload.get("target_language")
+    if (
+        isinstance(target_language, str)
+        and target_language.strip().lower() != config.target_language
+    ):
+        reasons.append("provider_package_target_language_mismatch")
+    return _dedupe(reasons)
+
+
+def _entry_boundary_reasons(
+    entries: Sequence[Any],
+    *,
+    packet: Mapping[str, Any],
+) -> tuple[str, ...]:
+    packet_candidates = packet.get("candidates")
+    if not isinstance(packet_candidates, Sequence) or isinstance(
+        packet_candidates,
+        (str, bytes, bytearray),
+    ):
+        return ("prep_packet_candidates_invalid",)
+    allowed_entry_ids = {
+        str(candidate.get("source_entry_id"))
+        for candidate in packet_candidates
+        if isinstance(candidate, Mapping) and candidate.get("source_entry_id")
+    }
+    allowed_evidence_ids = {
+        str(evidence_id)
+        for candidate in packet_candidates
+        if isinstance(candidate, Mapping)
+        for evidence_id in candidate.get("evidence_refs", ())
+    }
+    reasons: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            reasons.append("provider_package_entry_invalid")
+            continue
+        source_entry_id = str(entry.get("source_entry_id") or "")
+        if source_entry_id not in allowed_entry_ids:
+            reasons.append("provider_package_source_entry_not_in_packet")
+        evidence_refs = entry.get("evidence_refs", ())
+        if not isinstance(evidence_refs, Sequence) or isinstance(
+            evidence_refs,
+            (str, bytes, bytearray),
+        ):
+            reasons.append("provider_package_evidence_refs_invalid")
+            continue
+        if any(
+            str(evidence_id) not in allowed_evidence_ids
+            for evidence_id in evidence_refs
+        ):
+            reasons.append("provider_package_evidence_ref_not_in_packet")
+    return _dedupe(reasons)
+
+
+def _unsafe_provider_payload_reasons(payload: Any) -> tuple[str, ...]:
+    unsafe_keys = {
+        "api_key",
+        "auth_material",
+        "authorization",
+        "bounded_source_excerpt",
+        "excerpt",
+        "message",
+        "messages",
+        "passage",
+        "passage_text",
+        "prompt",
+        "prompt_body",
+        "prompt_messages",
+        "provider_request",
+        "provider_response",
+        "raw_excerpt",
+        "raw_output",
+        "raw_passage",
+        "raw_passages",
+        "raw_prompt",
+        "raw_provider_response",
+        "raw_source",
+        "raw_source_text",
+        "request_body",
+        "response_body",
+        "source_excerpt",
+        "source_passage",
+        "source_text",
+        "target_text",
+        "translated_text",
+        "translation",
+        "translation_text",
+    }
+    secret_key_parts = (
+        "api",
+        "auth",
+        "bearer",
+        "dsn",
+        "key",
+        "password",
+        "secret",
+        "token",
+    )
+    secret_value_needles = ("sk-", "Bearer ", "Authorization:", "BEGIN PRIVATE KEY")
+    reasons: list[str] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                normalized = "".join(ch for ch in str(key).lower() if ch.isalnum())
+                if normalized in {
+                    "".join(ch for ch in unsafe_key if ch.isalnum())
+                    for unsafe_key in unsafe_keys
+                }:
+                    reasons.append("provider_package_raw_field_rejected")
+                if any(part in normalized for part in secret_key_parts):
+                    reasons.append("provider_package_secret_field_rejected")
+                visit(nested)
+        elif isinstance(value, Sequence) and not isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            for item in value:
+                visit(item)
+        elif isinstance(value, str) and any(
+            needle in value for needle in secret_value_needles
+        ):
+            reasons.append("provider_package_secret_value_rejected")
+
+    visit(payload)
+    return _dedupe(reasons)
+
+
+def _provider_run_id(payload: Mapping[str, Any]) -> str:
+    value = payload.get("provider_run_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:180]
+    return "live-provider:issue-614"
+
+
 def _strip_json_fence(content: str) -> str:
     text = content.strip()
     if text.startswith("```"):
@@ -995,10 +1303,24 @@ def _package_id(
     target_language: str,
     entry_count: int,
 ) -> str:
+    return _package_id_for_issue(
+        "619",
+        source_document_fingerprint,
+        target_language,
+        entry_count,
+    )
+
+
+def _package_id_for_issue(
+    issue_id: str,
+    source_document_fingerprint: str,
+    target_language: str,
+    entry_count: int,
+) -> str:
     digest = hashlib.sha256(
         f"{source_document_fingerprint}:{target_language}:{entry_count}".encode()
     ).hexdigest()[:16]
-    return f"prepared:issue-619:{target_language}:{digest}"
+    return f"prepared:issue-{issue_id}:{target_language}:{digest}"
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
