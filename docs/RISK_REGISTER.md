@@ -173,6 +173,17 @@ provider calls, rollout, cache reuse, provider config/key changes,
 DB/schema/state/storage/admin-auth/retention/export/delete changes, deployment
 or release/privacy/legal/support claims.
 
+R-041 update note, 2026-06-16: issue #648 adds a DeepSeek-compatible
+prepared-glossary provider adapter and explicit runtime config wiring for the
+#642/#643 prep service. Fake-provider tests cover READY attachment through
+worker injection, provider usage/cap enforcement, invalid JSON/schema,
+target mismatch and raw/secret metadata failure paths. Treat this as
+provider-boundary wiring only: default runtime still does not read keys/config
+or make live prep calls unless a provider is explicitly supplied, and #646
+remains the first bounded live smoke gate. Cache reuse, provider config/key
+changes, DB/schema/state/storage/admin/retention changes, deployment and
+release/privacy/legal/support claims remain unapproved.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

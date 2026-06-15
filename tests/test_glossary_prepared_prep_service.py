@@ -10,6 +10,7 @@ from translator_service.glossary_prepared_prep_service import (
     PreparedGlossaryPackagePrepRequest,
     PreparedGlossaryPrepService,
     PreparedGlossaryPrepServiceConfig,
+    PreparedGlossaryProviderResponse,
 )
 
 
@@ -162,6 +163,90 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         self.assertEqual(provider_calls, [])
         self.assertIn("prepared_glossary_prep_no_candidates", result.reason_codes)
         self.assertEqual(result.metadata["selected_candidate_count"], 0)
+
+    def test_provider_usage_required_falls_back_metadata_only_when_missing(self):
+        request = _request(_source_content())
+
+        def provider(provider_request):
+            return PreparedGlossaryProviderResponse(
+                payload=_package_from_packet(provider_request.packet),
+                metadata={"provider_status": "ready"},
+            )
+
+        result = PreparedGlossaryPrepService(
+            provider=provider,
+            config=PreparedGlossaryPrepServiceConfig(require_provider_usage=True),
+        ).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertIsNone(result.payload)
+        self.assertIn(
+            "prepared_glossary_prep_provider_usage_missing",
+            result.reason_codes,
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertIn("provider_response", result.metadata)
+        self.assertNotIn("Darcy returned", metadata_text)
+
+    def test_provider_reported_token_cap_falls_back_metadata_only(self):
+        request = _request(_source_content())
+
+        def provider(provider_request):
+            return PreparedGlossaryProviderResponse(
+                payload=_package_from_packet(provider_request.packet),
+                metadata={
+                    "provider_status": "ready",
+                    "provider_usage": {
+                        "prompt_tokens": 50,
+                        "completion_tokens": 75,
+                        "total_tokens": 125,
+                    },
+                },
+            )
+
+        result = PreparedGlossaryPrepService(
+            provider=provider,
+            config=PreparedGlossaryPrepServiceConfig(
+                max_provider_reported_total_tokens=100,
+            ),
+        ).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertIn(
+            "prepared_glossary_prep_provider_token_cap_exceeded",
+            result.reason_codes,
+        )
+        self.assertEqual(
+            result.metadata["provider_response"]["provider_usage"]["total_tokens"],
+            125,
+        )
+
+    def test_provider_metadata_with_raw_or_secret_fields_falls_back(self):
+        request = _request(_source_content())
+
+        def provider(provider_request):
+            return PreparedGlossaryProviderResponse(
+                payload=_package_from_packet(provider_request.packet),
+                metadata={
+                    "raw_prompt": "Darcy returned to Pemberley.",
+                    "api_key": "sk-aaaaaaaaaaaaaaaa",
+                },
+            )
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertIn(
+            "prepared_glossary_prep_provider_metadata_raw_field",
+            result.reason_codes,
+        )
+        self.assertIn(
+            "prepared_glossary_prep_provider_metadata_secret_field",
+            result.reason_codes,
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Darcy returned", metadata_text)
+        self.assertNotIn("sk-aaaaaaaaaaaaaaaa", metadata_text)
 
 
 def _source_content() -> bytes:
