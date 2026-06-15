@@ -100,6 +100,14 @@ jobs remain unchanged, and missing/invalid/non-matching packages fall back with
 metadata-only reason codes. Treat this as local handoff evidence only, not
 provider evidence or glossary quality proof.
 
+R-041 update note, 2026-06-15: issue #635 wires the #633 bridge through
+`BotRuntimeConfig` / `build_translation_service` only for an explicitly injected
+owner/test prepared-package resolver. Focused fake/local evidence proves that a
+queued Telegram job policy can carry a matching #610 READY package into the
+existing #611 worker/#557 resolver path and render glossary context with #465
+cache bypass. This still adds no package registry, storage/config source,
+release/privacy/legal/support readiness.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
