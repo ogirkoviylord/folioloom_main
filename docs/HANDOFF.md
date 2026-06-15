@@ -24,21 +24,24 @@ TXT/DOCX/EPUB adapters, DeepSeek-compatible provider layer, admin visibility,
 beta allowlist, rights confirmation, beta cost/cap guard, Docker Compose stack
 и backup/restore scripts.
 
-Issue #640 docs/policy slice on 2026-06-15 records the owner-approved #639
-direction that the temporary Telegram glossary selector is superseded by
-automatic internal glossary behavior for supported Telegram translation jobs.
-The intended user flow is upload -> rights confirmation -> translation mode ->
-target language -> preview/estimate -> explicit confirmation -> progress/result,
-without `with glossary` / `without glossary` buttons. This is a policy/docs
-change only: implementation remains in child issues #641-#645 and #648, and
-bounded live evidence is gated by #646 after local/fake gates pass. The default
-policy must preserve rights confirmation, beta allowlist, cost/cap guard, kill
-switch, confirmation, progress/cancel/status/history, My Books, #465 cache
-bypass for glossary-injected units, language-neutral glossary core,
-metadata-only ordinary artifacts and `TBD` release-version diagnostic
+Issue #641 implementation slice on 2026-06-15 removes the temporary Telegram
+glossary selector from the normal bot flow. New supported Telegram translation
+attempts now proceed upload -> rights confirmation -> translation mode -> target
+language -> preview/estimate -> explicit confirmation -> progress/result, with
+internal automatic glossary metadata instead of `with glossary` / `without
+glossary` buttons. The service defaults new pending/job policy metadata to
+`with_glossary` as the current internal automatic flag, migrates old `None`
+pending glossary state to the same automatic policy, preserves explicit legacy
+`without_glossary` policies, and stops showing glossary mode in normal pending
+confirmation text. This preserves rights confirmation, beta allowlist,
+cost/cap guard, kill switch, confirmation, progress/cancel/status/history, My
+Books, #465 cache bypass for glossary-injected units, language-neutral glossary
+core, metadata-only ordinary artifacts and `TBD` release-version diagnostic
 retention/export/delete/support/legal policy. It does not approve deployment,
 provider config/key changes, glossary-aware cache reuse, DB/schema/state/
-storage/admin/retention changes or release/privacy/legal/support claims.
+storage/admin/retention changes, live provider calls or release/privacy/legal/
+support claims. Follow-up #642-#645 and #648 remain required before #646 live
+smoke can run.
 
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
@@ -59,7 +62,7 @@ plumbing remains limited to the #551 evidence-repair path described below:
 with-glossary jobs must inject only when approved READY hook data exists or
 record deterministic metadata-only fallback/omission diagnostics.
 This temporary selector behavior is now historical/superseded as product
-direction by #640, but it may remain in code until #641 removes it.
+direction by #640 and removed from the normal Telegram flow by #641.
 
 Issue #549 implementation slice on 2026-06-14: branch
 `codex/issue-549-glossary-archive-diagnostics` adds

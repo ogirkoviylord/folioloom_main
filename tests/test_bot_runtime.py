@@ -1126,7 +1126,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(service.get_pending_upload(42))
         self.assertIn("Choose how to translate this document", message.answers[0][0])
 
-    async def test_language_choice_prompts_glossary_mode_before_preview(self):
+    async def test_language_choice_sends_preview_with_automatic_glossary_policy(self):
         service = build_translation_service(
             BotRuntimeConfig(
                 persistent_jobs_db_path=":memory:",
@@ -1156,96 +1156,19 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         pending = service.get_pending(42)
         self.assertIsNotNone(pending)
-        self.assertIsNone(pending.glossary_mode)
+        self.assertEqual(pending.glossary_mode, GLOSSARY_MODE_WITH)
         self.assertIsNone(service.get_pending_upload(42))
-        self.assertEqual(translator.requests, [])
+        self.assertEqual(len(translator.requests), 1)
         self.assertEqual(len(message.answers), 1)
-        self.assertIn("Choose whether to translate", message.answers[0][0])
+        self.assertIn("Translation preview", message.answers[0][0])
+        self.assertNotIn("Choose whether to translate", message.answers[0][0])
         keyboard_texts = [
             button.text
             for row in message.answers[0][1].keyboard
             for button in row
         ]
-        self.assertIn("Translate with glossary", keyboard_texts)
-        self.assertIn("Translate without glossary", keyboard_texts)
-
-    async def test_glossary_mode_choice_without_sends_preview(self):
-        service = build_translation_service(
-            BotRuntimeConfig(
-                persistent_jobs_db_path=":memory:",
-                user_settings_db_path=":memory:",
-            )
-        )
-        self.addCleanup(service.close)
-        service.store_uploaded_document(
-            user_telegram_id=42,
-            file_name="notes.txt",
-            content=b"One meaningful paragraph for preview.",
-            source_language="en",
-        )
-        service.confirm_pending_upload_rights(user_telegram_id=42)
-        self._select_default_translation_mode(service)
-        service.prepare_pending_upload(
-            user_telegram_id=42,
-            target_language="uk",
-            glossary_mode=None,
-        )
-        translator = _RuntimeRecordingTranslator()
-        message = RecordingMessage()
-        message.text = "Translate without glossary"
-        router = create_router(
-            service=service,
-            translator=translator,
-            config=BotRuntimeConfig(),
-        )
-
-        handler = self._router_message_handler(router, "glossary_mode_text")
-        await handler(message)
-
-        pending = service.get_pending(42)
-        self.assertIsNotNone(pending)
-        self.assertEqual(pending.glossary_mode, GLOSSARY_MODE_WITHOUT)
-        self.assertEqual(len(translator.requests), 1)
-        self.assertIn("Translation preview", message.answers[0][0])
-
-    async def test_glossary_mode_choice_with_sends_preview(self):
-        service = build_translation_service(
-            BotRuntimeConfig(
-                persistent_jobs_db_path=":memory:",
-                user_settings_db_path=":memory:",
-            )
-        )
-        self.addCleanup(service.close)
-        service.store_uploaded_document(
-            user_telegram_id=42,
-            file_name="notes.txt",
-            content=b"One meaningful paragraph for preview.",
-            source_language="en",
-        )
-        service.confirm_pending_upload_rights(user_telegram_id=42)
-        self._select_default_translation_mode(service)
-        service.prepare_pending_upload(
-            user_telegram_id=42,
-            target_language="uk",
-            glossary_mode=None,
-        )
-        translator = _RuntimeRecordingTranslator()
-        message = RecordingMessage()
-        message.text = "Translate with glossary"
-        router = create_router(
-            service=service,
-            translator=translator,
-            config=BotRuntimeConfig(),
-        )
-
-        handler = self._router_message_handler(router, "glossary_mode_text")
-        await handler(message)
-
-        pending = service.get_pending(42)
-        self.assertIsNotNone(pending)
-        self.assertEqual(pending.glossary_mode, GLOSSARY_MODE_WITH)
-        self.assertEqual(len(translator.requests), 1)
-        self.assertIn("Translation preview", message.answers[0][0])
+        self.assertNotIn("Translate with glossary", keyboard_texts)
+        self.assertNotIn("Translate without glossary", keyboard_texts)
 
     async def test_language_choice_shows_preview_without_creating_job(self):
         temp_dir = TemporaryDirectory()
