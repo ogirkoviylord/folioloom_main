@@ -53,6 +53,11 @@ from translator_service.format_adapters import (
 from translator_service.glossary_prepared_package import (
     validate_prepared_glossary_package,
 )
+from translator_service.glossary_prepared_prep_service import (
+    PreparedGlossaryPackageAttachment,
+    PreparedGlossaryPackageAttachmentRequest,
+    PreparedGlossaryPackagePrepRequest,
+)
 from translator_service.job_runner import (
     DocumentKind,
     InMemoryTranslationJobRepository,
@@ -295,41 +300,6 @@ class PreviewCandidate:
     adapter_version: str
     metadata: dict[str, object]
     attempt_id: str | None = None
-
-
-@dataclass(frozen=True)
-class PreparedGlossaryPackageAttachmentRequest:
-    user_telegram_id: int
-    file_name: str
-    document_kind: str
-    source_language: str
-    target_language: str
-    translation_mode: str | None
-    glossary_mode: str | None
-    source_sha256: str
-
-
-@dataclass(frozen=True)
-class PreparedGlossaryPackagePrepRequest:
-    user_telegram_id: int
-    file_name: str
-    document_kind: str
-    source_language: str
-    target_language: str
-    translation_mode: str | None
-    glossary_mode: str | None
-    source_sha256: str
-    content: bytes
-
-
-@dataclass(frozen=True)
-class PreparedGlossaryPackageAttachment:
-    payload: object | None = None
-    source_sha256: str | None = None
-    document_kind: str | None = None
-    target_language: str | None = None
-    enabled: bool = True
-    reason_codes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
