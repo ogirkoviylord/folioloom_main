@@ -170,6 +170,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
                     "fallback_reason": "runtime_glossary_data_unavailable",
                     "diagnostic": {
                         "authorization_header": "Bearer SECRET",
+                        "package_signature": "postgres://secret:user@localhost/db",
                         "prompt_body": "RAW PROMPT",
                         "provider_response_body": "RAW PROVIDER RESPONSE",
                         "response_body": "RAW RESPONSE",
@@ -191,6 +192,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertEqual(payload["status"], "fallback")
             self.assertEqual(payload["prompt_context"], "[redacted]")
             self.assertNotIn("Bearer SECRET", serialized)
+            self.assertNotIn("postgres://secret:user@localhost/db", serialized)
             self.assertNotIn("RAW PROMPT", serialized)
             self.assertNotIn("RAW PROVIDER RESPONSE", serialized)
             self.assertNotIn("RAW RESPONSE", serialized)

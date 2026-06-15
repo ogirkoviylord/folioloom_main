@@ -64,6 +64,7 @@ from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    append_translation_run_event_for_job,
 )
 from translator_service.user_activity import (
     ActivityActorType,
@@ -613,7 +614,11 @@ class AdminRoutesTest(unittest.TestCase):
             },
         )
 
-        html = translations_body((running, ready), operations=operations, csrf_token="csrf")
+        html = translations_body(
+            (running, ready),
+            operations=operations,
+            csrf_token="csrf",
+        )
 
         self.assertIn("<th>Format</th>", html)
         self.assertIn("format-badge-epub", html)
@@ -2555,6 +2560,245 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("provider-secret", archive_text)
         self.assertNotIn("sk-provider-secret", archive_text)
 
+    def test_translation_log_download_includes_prepared_glossary_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-prepared-glossary",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            append_translation_run_event_for_job(
+                run_root,
+                job_id="job-prepared-glossary",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "planned",
+                    "fallback_reason": "none",
+                    "work_unit_sequence": 1,
+                    "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                    "cache_policy": {
+                        "behavior": "bypass_glossary_injected_cache",
+                    },
+                    "prompt_context": {
+                        "included_entry_count": 1,
+                        "included_entry_ids": ["glossary-entry:v1:darcy"],
+                    },
+                    "prepared_package": {
+                        "schema_version": "prepared-glossary-package-v1",
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "status": "ready",
+                        "reason_codes": ["ready"],
+                        "package_id": "prepared:book:ru",
+                        "package_signature": "prepared-signature",
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "provider_role_id": "deepseek-pro-glossary-prep",
+                        "provider_model": "deepseek-v4-pro",
+                        "entry_count": 2,
+                        "ready_entry_count": 2,
+                        "needs_review_entry_count": 0,
+                    },
+                },
+            )
+            logger.finish(status="completed", result_file_name="book.ru.epub")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            names = set(archive.namelist())
+            self.assertIn("glossary_runtime_diagnostics.json", names)
+            diagnostics = json.loads(
+                archive.read("glossary_runtime_diagnostics.json")
+            )
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in names
+            )
+
+        self.assertEqual(diagnostics["glossary_mode"], "with_glossary")
+        self.assertEqual(diagnostics["summary"]["prepared_package_event_count"], 1)
+        self.assertEqual(
+            diagnostics["summary"]["prepared_package_statuses"],
+            ["ready"],
+        )
+        self.assertEqual(
+            diagnostics["summary"]["prepared_package_reason_codes"],
+            ["ready"],
+        )
+        prepared_event = diagnostics["prepared_package_events"][0]
+        self.assertEqual(prepared_event["package_id"], "prepared:book:ru")
+        self.assertEqual(prepared_event["ready_entry_count"], 2)
+        self.assertEqual(prepared_event["needs_review_entry_count"], 0)
+        self.assertEqual(
+            prepared_event["resolver_linkage"]["cache_behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        self.assertTrue(prepared_event["resolver_linkage"]["prompt_context_included"])
+        self.assertNotIn("authorization_header", archive_text)
+        self.assertNotIn("Bearer ", archive_text)
+
+    def test_translation_log_download_omits_glossary_sidecar_without_adapter_event(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-without-glossary",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "without_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.run_dir.joinpath("provider_io_diagnostics.jsonl").write_text(
+                json.dumps(
+                    {
+                        "request_body": {
+                            "text": (
+                                "<glossary_context>should not matter"
+                                "</glossary_context>"
+                            ),
+                        },
+                        "response_body": {"text": "ignored"},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            logger.finish(status="completed", result_file_name="book.ru.epub")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            names = set(archive.namelist())
+
+        self.assertNotIn("glossary_runtime_diagnostics.json", names)
+
+    def test_translation_log_download_redacts_prepared_glossary_secrets(self):
+        with TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-prepared-secret",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            append_translation_run_event_for_job(
+                run_root,
+                job_id="job-prepared-secret",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "fallback",
+                    "fallback_reason": "persistent_epub_prepared_package_invalid",
+                    "prompt_body": "RAW PROMPT SENTINEL",
+                    "provider_response": "RAW PROVIDER SENTINEL",
+                    "source_text": "RAW SOURCE SENTINEL",
+                    "prepared_package": {
+                        "schema_version": "prepared-glossary-package-v1",
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "status": "invalid",
+                        "reason_codes": ["prepared_glossary_package_invalid"],
+                        "package_id": "sk-prepared-secret-value",
+                        "package_signature": "postgres://secret:user@localhost/db",
+                        "target_language": "ru",
+                        "provider_model": "deepseek-v4-pro",
+                        "api_key": "sk-prepared-api-secret",
+                        "authorization_header": "Bearer prepared-secret",
+                        "raw_source_text": "RAW PREP SOURCE SENTINEL",
+                    },
+                },
+            )
+            logger.finish(status="failed", error_message="metadata-only failure")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            diagnostics = json.loads(
+                archive.read("glossary_runtime_diagnostics.json")
+            )
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+            )
+
+        self.assertTrue(diagnostics["secret_material_rejected"])
+        self.assertGreaterEqual(diagnostics["secret_redaction_count"], 1)
+        self.assertIn("[redacted]", archive_text)
+        self.assertNotIn("sk-prepared-secret-value", archive_text)
+        self.assertNotIn("sk-prepared-api-secret", archive_text)
+        self.assertNotIn("postgres://secret:user@localhost/db", archive_text)
+        self.assertNotIn("Bearer prepared-secret", archive_text)
+        self.assertNotIn("RAW PROMPT SENTINEL", archive_text)
+        self.assertNotIn("RAW PROVIDER SENTINEL", archive_text)
+        self.assertNotIn("RAW SOURCE SENTINEL", archive_text)
+        self.assertNotIn("RAW PREP SOURCE SENTINEL", archive_text)
+
     def test_translation_log_download_effective_run_uses_persistent_partial_result_name(
         self,
     ):
@@ -3958,7 +4202,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("&para;", diagnostics_invisibles.text)
         self.assertIn("&#9251;", diagnostics_invisibles.text)
         self.assertIn("ZWSP", diagnostics_invisibles.text)
-        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", diagnostics_invisibles.text)
+        self.assertIn(
+            "&lt;script&gt;alert(1)&lt;/script&gt;",
+            diagnostics_invisibles.text,
+        )
         self.assertNotIn("<script>alert(1)</script>", diagnostics_invisibles.text)
         self.assertEqual(diagnostics_search.status_code, 200)
         self.assertIn("Clear search", diagnostics_search.text)
@@ -4008,7 +4255,10 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("qa=indent", diagnostics_indent_filter.text)
         self.assertIn("Private source paragraph", diagnostics_indent_filter.text)
-        self.assertIn("Paragraph waiting for translation", diagnostics_indent_filter.text)
+        self.assertIn(
+            "Paragraph waiting for translation",
+            diagnostics_indent_filter.text,
+        )
         self.assertNotIn("Tiny source", diagnostics_indent_filter.text)
         self.assertEqual(reader.status_code, 200)
         self.assertEqual(reader.headers["cache-control"], "no-store")
@@ -4174,7 +4424,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Reader review marks", reader.text)
         self.assertIn("Review marks", reader.text)
         self.assertIn("data-reader-review-shortcuts", reader.text)
-        self.assertIn("Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.", reader.text)
+        self.assertIn(
+            "Review shortcuts: 1 Needs review, 2 OK, 3 Ignore, 0 Clear.",
+            reader.text,
+        )
         self.assertIn("Review filter: all rows", reader.text)
         self.assertIn("data-reader-review-filter-status", reader.text)
         self.assertIn("data-reader-review-count", reader.text)
@@ -4235,7 +4488,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("updateReviewStepProgress", reader.text)
         self.assertIn("goToReviewMark", reader.text)
         self.assertIn("currentReviewStepSequence", reader.text)
-        self.assertIn("Marked block ${index + 1} of ${markedSequences.length}", reader.text)
+        self.assertIn(
+            "Marked block ${index + 1} of ${markedSequences.length}",
+            reader.text,
+        )
         self.assertIn("matchingBlocks", reader.text)
         self.assertIn("matchingOutlines", reader.text)
         self.assertIn("data-reader-review-current", reader.text)
@@ -4334,11 +4590,17 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Tiny source", reader_search_hits.text)
         self.assertNotIn("<script>alert(1)</script>", reader_search_hits.text)
         self.assertEqual(diagnostics_search_hits_param.status_code, 200)
-        self.assertIn("Translation Text Diagnostics", diagnostics_search_hits_param.text)
+        self.assertIn(
+            "Translation Text Diagnostics",
+            diagnostics_search_hits_param.text,
+        )
         self.assertNotIn("Show all search context", diagnostics_search_hits_param.text)
         self.assertNotIn("Show search hits only", diagnostics_search_hits_param.text)
         self.assertNotIn("search_hits=1", diagnostics_search_hits_param.text)
-        self.assertIn("Paragraph waiting for translation", diagnostics_search_hits_param.text)
+        self.assertIn(
+            "Paragraph waiting for translation",
+            diagnostics_search_hits_param.text,
+        )
         self.assertIn("Tiny source", diagnostics_search_hits_param.text)
         self.assertEqual(reader_pane_focus.status_code, 200)
         self.assertIn("reader-pane-mode-original", reader_pane_focus.text)
@@ -4403,7 +4665,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("Logical page 3", reader_page.text)
         self.assertIn("sequences 3-3", reader_page.text)
         self.assertIn("QA</span><strong>all</strong>", reader_page.text)
-        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_page.text)
+        self.assertIn(
+            "Search</span><strong>Search &quot;Tiny&quot;</strong>",
+            reader_page.text,
+        )
         self.assertIn("Special chars</span><strong>shown</strong>", reader_page.text)
         self.assertIn("Sync scroll</span><strong>off</strong>", reader_page.text)
         self.assertIn("Indent preview</span><strong>on</strong>", reader_page.text)
@@ -4446,8 +4711,14 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("show_invisibles=1", reader_paragraph_filter.text)
         self.assertIn("sync=0", reader_paragraph_filter.text)
         self.assertIn("indent_preview=1", reader_paragraph_filter.text)
-        self.assertIn("QA</span><strong>paragraph_mismatch</strong>", reader_paragraph_filter.text)
-        self.assertIn("Search</span><strong>Search &quot;Tiny&quot;</strong>", reader_paragraph_filter.text)
+        self.assertIn(
+            "QA</span><strong>paragraph_mismatch</strong>",
+            reader_paragraph_filter.text,
+        )
+        self.assertIn(
+            "Search</span><strong>Search &quot;Tiny&quot;</strong>",
+            reader_paragraph_filter.text,
+        )
         self.assertIn("Tiny", reader_paragraph_filter.text)
         self.assertIn("Paragraph/line break mismatch", reader_paragraph_filter.text)
         self.assertIn("reader-qa-issue-nav", reader_paragraph_filter.text)
@@ -4537,7 +4808,10 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("setActiveIssue", reader_empty_filter.text)
         self.assertNotIn("Private source paragraph", reader_empty_filter.text)
         self.assertEqual(reader_invalid_filter.status_code, 200)
-        self.assertIn('<option value="all" selected>All</option>', reader_invalid_filter.text)
+        self.assertIn(
+            '<option value="all" selected>All</option>',
+            reader_invalid_filter.text,
+        )
         self.assertNotIn("qa=unknown", reader_invalid_filter.text)
         self.assertEqual(download.status_code, 200)
         with ZipFile(BytesIO(download.content)) as archive:
