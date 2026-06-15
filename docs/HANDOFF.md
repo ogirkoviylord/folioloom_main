@@ -152,6 +152,21 @@ prep calls, compact job-state behavior, admin/archive expansion, retention,
 rollout and release/privacy/legal/support claims still require separate exact
 approval.
 
+Issue #610 implementation slice on 2026-06-15: branch
+`codex/issue-610-prepared-glossary-package` adds
+`src/translator_service/glossary_prepared_package.py`, a local-only prepared
+glossary package schema/validator for compact DeepSeek Pro glossary-prep
+metadata before Telegram battle-tests. The validator accepts only metadata-safe
+packages, rejects raw source passages, prompt/provider/translation bodies and
+secret/auth material, preserves `needs_review` as not READY, emits
+metadata-only summaries and can produce a #556-compatible target-metadata
+overlay payload. Focused tests cover ready, invalid schema, target mismatch,
+missing evidence, missing target metadata, `needs_review`, raw/secret
+rejection, entry limits, unsupported fields and overlay compatibility. This
+does not call providers, operate Telegram, inject runtime prompts, hand off
+job state, change admin/archive behavior, enable rollout/cache reuse or make
+release/privacy/legal/support claims.
+
 Issue #559 provider-boundary slice on 2026-06-14: branch
 `codex/issue-559-real-epub-glossary-live-boundary` adds an explicit
 `--issue-559-real-epub` boundary to `tools/glossary_runtime_provider_smoke.py`
