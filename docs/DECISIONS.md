@@ -95,7 +95,12 @@ Consequences:
   validate compact output through #610, and attach READY packages before
   worker injection in fake-tested paths. The default runtime still does not
   read provider keys/config or make live prep calls unless a provider is
-  supplied. #646 remains the first bounded live smoke gate.
+  supplied. After #656, READY prepared-package source refs are preserved and
+  the persistent resolver can build source-present, target-backed runtime
+  glossary entries directly from a prepared package when the current work unit
+  matches those refs, instead of requiring unit-local scanner rediscovery.
+  #646 remains the first bounded live smoke gate and still requires a fresh
+  fake/dry pass before any live call.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.
