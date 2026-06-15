@@ -143,6 +143,17 @@ provider boundary only: live provider calls, provider config/key changes,
 cache reuse, DB/schema/state/storage/admin/retention changes, Telegram
 operation and release/privacy/legal/support claims remain unapproved.
 
+R-041 update note, 2026-06-15: issue #643 gates configured automatic
+prepared-glossary prep resolver calls through the existing beta-safety
+cost/cap guard before the resolver can run. Missing beta-safety guard,
+kill-switch/cap denial or missing provider usage evidence produces
+metadata-only reason codes; provider usage is recorded when supplied, otherwise
+the conservative estimate is accounted while provider-reported usage remains
+`Unknown`. Treat this as a cost-control and metadata boundary only: it does not
+approve live provider calls, payment/billing semantics, provider config/key
+changes, cache reuse, DB/schema/state/storage/admin/retention changes,
+deployment or release/privacy/legal/support claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
