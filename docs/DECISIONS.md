@@ -19,7 +19,8 @@ AI-агенты обязаны читать его перед архитекту
 
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
-Status: Active architecture/product direction; partially implemented through #641/#642/#643/#644/#645/#648
+Status: Active architecture/product direction; implemented locally through
+#641/#642/#643/#644/#645/#648/#656, with #646 failed live-smoke evidence
 
 Decision:
 - The temporary Telegram glossary mode selector from issue #546 is superseded
@@ -41,9 +42,10 @@ Decision:
   supported persistent TXT/DOCX/EPUB work units behind source-useful and budget
   gates. Issue #645 updates owner-only archive diagnostics for automatic
   default glossary runs. Issue #648 adds provider-backed DeepSeek Pro
-  prep-adapter wiring with fake-provider tests. Issue #646 is a separately
-  gated bounded live smoke and may run only after #641-#645 and #648 are
-  merged/reviewed and local/fake gates pass.
+  prep-adapter wiring with fake-provider tests. Issue #656 fixes the local
+  prepared-package runtime bridge needed for the first smoke. Issue #646 is the
+  separately gated bounded live smoke; it ran after local/fake gates and
+  produced failed/no-go evidence, not rollout confidence.
 - Missing, invalid, unsupported, over-budget, not-READY or locally unsafe
   glossary data must not silently create quality/readiness claims. The
   approved default behavior is metadata-only fallback to the existing
@@ -74,8 +76,14 @@ Evidence:
   https://github.com/ogirkoviylord/folioloom_main/issues/639#issuecomment-4712031753.
 - GitHub issue #640 records scoped approval in
   https://github.com/ogirkoviylord/folioloom_main/issues/640#issuecomment-4712036223.
-- Issue #646 has conditional live-smoke approval only after #641-#645 and
-  #648 are merged/reviewed and local/fake gates pass.
+- Issue #646 conditional live-smoke approval was recorded after #641-#645 and
+  #648 were merged/reviewed and local/fake gates passed.
+- Issue #646 metadata-only report
+  `outputs/issue-646-automatic-default-glossary-smoke/20260615T231603Z/metadata_report.json`
+  records failed/no-go evidence: `ru` prepared package failed #610 READY
+  validation with `prepared_glossary_package_needs_review`; `uk` rendered
+  glossary context and used #465 cache bypass, but runtime structural
+  validation failed with `block_count_mismatch`.
 
 Consequences:
 - Future implementers should stop adding new user-facing glossary mode choices
@@ -100,11 +108,13 @@ Consequences:
   the persistent resolver can build source-present, target-backed runtime
   glossary entries directly from a prepared package when the current work unit
   matches those refs, instead of requiring unit-local scanner rediscovery.
-  #646 remains the first bounded live smoke gate and still requires a fresh
-  fake/dry pass before any live call.
+  #646 then ran as the first bounded live smoke gate. It stayed within the
+  approved report-directory call/token bounds, but failed on prepared-package
+  readiness for `ru` and runtime structural validation for `uk`.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.
+  Successful automatic live-smoke evidence is still missing.
 
 Human approval required to change:
 - yes; changing the default glossary rollout posture, cache behavior, provider

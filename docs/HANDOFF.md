@@ -40,8 +40,8 @@ core, metadata-only ordinary artifacts and `TBD` release-version diagnostic
 retention/export/delete/support/legal policy. It does not approve deployment,
 provider config/key changes, glossary-aware cache reuse, DB/schema/state/
 storage/admin/retention changes, live provider calls or release/privacy/legal/
-support claims. Follow-up #642-#645 and #648 remain required before #646 live
-smoke can run.
+support claims. Subsequent #642-#645 and #648 work is now closed; #646 live
+smoke ran after #656 and produced failed/no-go evidence described below.
 
 Issue #642 implementation slice on 2026-06-15 adds
 `src/translator_service/glossary_prepared_prep_service.py`, a reusable
@@ -55,8 +55,9 @@ fallback reason codes. It preserves the existing `BotTranslationService`
 callable hook, keeps default/legacy `without_glossary` behavior dependent on
 the caller policy, and does not call live providers, operate Telegram, change
 provider config/secrets, cache reuse, DB/schema/state/storage/admin/retention
-or make release/privacy/legal/support claims. Follow-up #643-#645 and #648
-remain required before #646 live smoke can run.
+or make release/privacy/legal/support claims. Subsequent #643-#645 and #648
+work is now closed; #646 live smoke ran after #656 and produced failed/no-go
+evidence described below.
 
 Issue #643 implementation slice on 2026-06-15 adds a beta-safety
 cost/cap gate around automatic prepared-glossary prep resolver calls. When a
@@ -73,7 +74,8 @@ kill switch, #465 cache bypass, runtime translation provider/model and
 metadata-only ordinary artifacts. It does not add live provider calls,
 payment/billing semantics, provider config/secrets, DB/schema/storage/admin/
 retention changes, deployment or release/privacy/legal/support claims.
-Follow-up #644-#645 and #648 remain required before #646 live smoke can run.
+Subsequent #644-#645 and #648 work is now closed; #646 live smoke ran after
+#656 and produced failed/no-go evidence described below.
 
 Issue #644 implementation slice on 2026-06-15 generalizes the prepared-package
 runtime glossary resolver from EPUB-only to supported persistent TXT/DOCX/EPUB
@@ -88,7 +90,8 @@ tests cover TXT/DOCX injection, EPUB compatibility and fallback for unsupported
 formats, missing/invalid/targetless/non-useful/over-budget packages. This does
 not add live provider calls, provider config/secrets, cache reuse, DB/schema/
 storage/admin/retention changes, deployment or release/privacy/legal/support
-claims. Follow-up #645 and #648 remain required before #646 live smoke can run.
+claims. Subsequent #645 and #648 work is now closed; #646 live smoke ran after
+#656 and produced failed/no-go evidence described below.
 
 Issue #645 implementation slice on 2026-06-15 extends the owner-only downloaded
 `glossary_runtime_diagnostics.json` archive sidecar for automatic default
@@ -102,8 +105,9 @@ normal admin pages, Telegram/user surfaces, JSON APIs, docs/issues/PRs/support
 and release artifacts remain metadata-only/redacted, with secret/raw rejection
 tests for the new attachment fields. This does not add live provider calls,
 public/admin raw UI expansion, DB/schema/storage/admin-auth/retention changes,
-deployment or release/privacy/legal/support claims. Follow-up #648 remains
-required before #646 live smoke can run.
+deployment or release/privacy/legal/support claims. Subsequent #648 work is now
+closed; #646 live smoke ran after #656 and produced failed/no-go evidence
+described below.
 
 Issue #648 implementation slice on 2026-06-16 adds a DeepSeek-compatible
 prepared-glossary provider adapter and explicit runtime config wiring for
@@ -121,7 +125,8 @@ exceeded, raw/secret metadata and provider-failure paths fail safely with
 metadata-only reason codes. This does not add live provider calls, Telegram
 operation, deployment, provider config/key changes, runtime translation model
 changes, DB/schema/storage/admin/retention changes, cache reuse or
-release/privacy/legal/support claims. #646 live smoke remains conditional.
+release/privacy/legal/support claims. #646 live smoke has now run and produced
+failed/no-go evidence described below.
 
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
@@ -133,8 +138,26 @@ requiring the unit-local deterministic scanner to rediscover the exact same
 candidate key before glossary context can render. Existing non-prepared
 overlay behavior remains available; default runtime, provider config, live
 calls, Telegram operation, cache reuse, DB/schema/storage/admin/retention and
-release/privacy/legal/support claims remain unchanged. #646 live smoke still
-requires a fresh fake/dry pass first.
+release/privacy/legal/support claims remain unchanged. #646 fake/dry preflight
+later passed, and the bounded live smoke produced failed/no-go evidence
+described below.
+
+Issue #646 bounded live smoke on 2026-06-16 ran after #641-#645, #648 and #656
+were merged/reviewed and after fake/dry unit-selection preflight passed. The
+final metadata-only report is
+`outputs/issue-646-automatic-default-glossary-smoke/20260615T231603Z/metadata_report.json`;
+raw prompts, bounded excerpts and provider responses remain only in that
+owner-only untracked diagnostics directory. Result: failed/no-go evidence, not
+a rollout or quality claim. `ru` prep returned HTTP 200 but the prepared
+package failed #610 READY validation with
+`prepared_glossary_package_needs_review`, so runtime translation was not
+called for `ru`. `uk` prep returned a READY package, selected work-unit
+sequence 13, rendered glossary context and used #465 cache bypass, but runtime
+translation structural validation failed with `block_count_mismatch`. The run
+used 3 provider calls in the final report directory, 24,087 provider-reported
+tokens, plus 2 earlier failed auth attempts recorded separately. Follow-up is
+required before claiming successful automatic live smoke, broader/default
+confidence, deployment, release/privacy/legal/support readiness or cache reuse.
 
 Issue #546 implementation slice on 2026-06-14: branch
 `codex/issue-546-bot-glossary-mode-selector` adds a temporary Telegram
