@@ -178,11 +178,14 @@ R-041 update note, 2026-06-16: issue #648 adds a DeepSeek-compatible
 prepared-glossary provider adapter and explicit runtime config wiring for the
 #642/#643 prep service. Fake-provider tests cover READY attachment through
 worker injection, provider usage/cap enforcement, invalid JSON/schema,
-target mismatch and raw/secret metadata failure paths. Treat this as
-provider-boundary wiring only: default runtime still does not read keys/config
-or make live prep calls unless a provider is explicitly supplied, and #646
-remains the first bounded live smoke gate. Cache reuse, provider config/key
-changes, DB/schema/state/storage/admin/retention changes, deployment and
+target mismatch and raw/secret metadata failure paths. Issue #659 then wires
+`bot_runtime_config_from_settings()` to build that provider through the existing
+DeepSeek runtime channel pool when channels are available and marks no-package
+`with_glossary` runs with high-severity `not_effective` metadata instead of
+leaving them as silent glossary-looking fallbacks. Treat this as
+provider-boundary wiring and diagnostic evidence only: #646 remains the first
+bounded live smoke gate. Cache reuse, provider config/key changes,
+DB/schema/state/storage/admin/retention changes, deployment and
 release/privacy/legal/support claims remain unapproved.
 
 R-041 update note, 2026-06-16: issue #656 fixes a #646 fake/dry local blocker

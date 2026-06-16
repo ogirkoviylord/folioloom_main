@@ -54,6 +54,16 @@ Decision:
 - Glossary-injected units must continue to preserve the #465 cache-bypass
   policy. This decision does not approve glossary-aware cache reuse.
 - The runtime translation provider/model remains unchanged by this decision.
+- Issue #659 updates the automatic job-creation wiring: when existing DeepSeek
+  runtime keys/config are available, `bot_runtime_config_from_settings()` builds
+  a pool-aware DeepSeek-compatible prepared-glossary provider for the #642 prep
+  service from the existing DeepSeek runtime channel source, without editing
+  provider config or secrets. If `with_glossary` has no prepared-package source,
+  the run may fall back to the existing translation path, but attachment
+  diagnostics must include high-severity metadata such as
+  `diagnostic_severity=error`, `glossary_effective_status=not_effective` and
+  `prepared_glossary_package_required_for_with_glossary`. This is wiring and
+  diagnostic evidence only, not proof of glossary quality or release readiness.
   DeepSeek Pro remains the glossary-prep provider boundary where separately
   approved; provider config/key changes are not approved.
 - Glossary core remains language-neutral. Target-language morphology,

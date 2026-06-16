@@ -131,6 +131,10 @@ from translator_service.glossary_prepared_prep_service import (
     PreparedGlossaryPrepService,
     PreparedGlossaryPrepServiceConfig,
 )
+from translator_service.glossary_prepared_provider import (
+    DeepSeekPreparedGlossaryProvider,
+    PreparedGlossaryDeepSeekProviderConfig,
+)
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
     TranslationJob,
@@ -419,6 +423,9 @@ def bot_runtime_config_from_settings(settings: Settings) -> BotRuntimeConfig:
         beta_cost_input_usd_per_million=settings.beta_cost_input_usd_per_million,
         beta_cost_output_usd_per_million=settings.beta_cost_output_usd_per_million,
         beta_cost_warning_fraction=settings.beta_cost_warning_fraction,
+        prepared_glossary_prep_provider=_prepared_glossary_prep_provider_from_settings(
+            settings,
+        ),
     )
 
 
@@ -494,6 +501,42 @@ def _prepared_glossary_package_prep_resolver_from_config(
         config=config.prepared_glossary_prep_service_config,
     )
     return service.prepare
+
+
+def _prepared_glossary_prep_provider_from_settings(
+    settings: Settings,
+) -> PreparedGlossaryPackageProvider | None:
+    channels = _deepseek_channel_configs(settings)
+    if not channels:
+        return None
+    provider_config = PreparedGlossaryDeepSeekProviderConfig()
+    base_url = os.getenv("DEEPSEEK_BASE_URL", settings.deepseek_base_url)
+    timeout_seconds = _env_float("DEEPSEEK_TIMEOUT_SECONDS", 120.0)
+    retry_attempts = _env_int("DEEPSEEK_RETRY_ATTEMPTS", 3)
+    retry_delay_seconds = _env_float("DEEPSEEK_RETRY_DELAY_SECONDS", 1.0)
+    cooldown_seconds = _env_float("DEEPSEEK_CHANNEL_COOLDOWN_SECONDS", 30.0)
+    client = DeepSeekKeyPoolTranslator(
+        channels=channels,
+        model=provider_config.provider_model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        retry_attempts=retry_attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        cooldown_seconds=cooldown_seconds,
+        max_cooldown_seconds=_env_float(
+            "DEEPSEEK_CHANNEL_MAX_COOLDOWN_SECONDS",
+            max(300.0, cooldown_seconds),
+        ),
+        throttle_config=_deepseek_throttle_config_from_env(),
+        cooldown_jitter_fraction=_env_float(
+            "DEEPSEEK_CHANNEL_COOLDOWN_JITTER_FRACTION",
+            0.20,
+        ),
+    )
+    return DeepSeekPreparedGlossaryProvider(
+        client=client,
+        config=provider_config,
+    )
 
 
 def build_deepseek_translator(settings: Settings) -> TextTranslator:
