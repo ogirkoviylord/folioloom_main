@@ -3,7 +3,9 @@ import unittest
 
 from translator_service.deepseek_client import (
     DeepSeekApiError,
+    DeepSeekChatResult,
     DeepSeekUnsafeModelOutputError,
+    DeepSeekUsage,
 )
 from translator_service.deepseek_key_pool import (
     CHANNEL_HEALTH_COOLING_DOWN,
@@ -44,6 +46,52 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
 
         self.assertEqual(result, "переклад")
         self.assertEqual(factory.calls, [("key-a", "source"), ("key-b", "source")])
+
+    def test_create_chat_completion_fails_over_to_next_channel(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 429: rate limit")
+                ],
+                "key-b": [
+                    DeepSeekChatResult(
+                        content='{"ok": true}',
+                        usage=DeepSeekUsage(
+                            prompt_tokens=11,
+                            completion_tokens=3,
+                            total_tokens=14,
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+
+        result = pool.create_chat_completion(
+            system_prompt="system",
+            user_text="prep packet",
+            response_format={"type": "json_object"},
+            allow_empty_content=False,
+        )
+
+        self.assertEqual(result.content, '{"ok": true}')
+        self.assertEqual(pool.last_usage.total_tokens, 14)
+        self.assertEqual(
+            factory.chat_calls,
+            [
+                ("key-a", "system", "prep packet", {"type": "json_object"}, False),
+                ("key-b", "system", "prep packet", {"type": "json_object"}, False),
+            ],
+        )
 
     def test_snapshot_exposes_channel_state_without_api_keys(self):
         factory = RecordingClientFactory({"secret-key-a": ["ok"]})
@@ -742,6 +790,7 @@ class RecordingClientFactory:
             for key, results in results_by_key.items()
         }
         self.calls = []
+        self.chat_calls = []
         self.contexts = []
 
     def __call__(self, *, api_key: str):
@@ -769,6 +818,39 @@ class RecordingClient:
             raise result
         self.last_usage = _Usage(prompt_tokens=1)
         return result
+
+    def create_chat_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        response_format: dict[str, str] | None = None,
+        allow_empty_content: bool = False,
+    ):
+        self.factory.chat_calls.append(
+            (
+                self.api_key,
+                system_prompt,
+                user_text,
+                response_format,
+                allow_empty_content,
+            )
+        )
+        result = self.factory.results_by_key[self.api_key].pop(0)
+        if isinstance(result, Exception):
+            raise result
+        if isinstance(result, DeepSeekChatResult):
+            self.last_usage = result.usage
+            return result
+        self.last_usage = _Usage(prompt_tokens=1)
+        return DeepSeekChatResult(
+            content=str(result),
+            usage=DeepSeekUsage(
+                prompt_tokens=1,
+                completion_tokens=0,
+                total_tokens=1,
+            ),
+        )
 
 
 class FakeClock:

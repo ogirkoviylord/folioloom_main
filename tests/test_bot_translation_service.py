@@ -5055,7 +5055,7 @@ class BotTranslationServiceTest(unittest.TestCase):
             self.assertNotIn("prepared_glossary_package_attachment", event_lines)
             self.assertEqual(prep_requests, [])
 
-    def test_with_glossary_missing_attachment_falls_back_safely(self):
+    def test_with_glossary_missing_attachment_records_not_effective_metadata(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             storage = LocalObjectStorage(root / "objects")
@@ -5093,14 +5093,24 @@ class BotTranslationServiceTest(unittest.TestCase):
                 translator=translator,
             )
 
+            self.assertEqual(job.status, TranslationJobStatus.READY)
             policy = json.loads(persistent_store.get_job(job.id).translation_policy)
             self.assertNotIn("prepared_glossary_package", policy)
             self.assertNotIn("<glossary_context", translator.requests[0][0])
             event_lines = next(run_log_root.iterdir()).joinpath(
                 "events.jsonl"
             ).read_text()
-            self.assertIn("prepared_glossary_package_attachment", event_lines)
-            self.assertIn("prepared_glossary_package_attachment_disabled", event_lines)
+            self.assertIn(
+                "prepared_glossary_package_attachment_disabled",
+                event_lines,
+            )
+            self.assertIn(
+                "prepared_glossary_package_required_for_with_glossary",
+                event_lines,
+            )
+            self.assertIn('"diagnostic_severity": "error"', event_lines)
+            self.assertIn('"glossary_effective_status": "not_effective"', event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
 
     def test_with_glossary_prep_missing_fails_closed_before_queueing(self):
         with TemporaryDirectory() as temp_dir:
