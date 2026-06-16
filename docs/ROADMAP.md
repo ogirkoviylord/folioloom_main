@@ -710,9 +710,10 @@ Acceptance criteria:
   diagnostics for automatic policy/prep/fallback/cache/compliance metadata,
   #648 wires an explicit DeepSeek-compatible prep adapter into runtime config
   with fake-provider tests while keeping default runtime free of automatic
-  key/config reads and live prep calls, #646 is the conditional bounded live
-  smoke, and #647 is docs closeout. The new
-  policy still preserves #465 cache bypass for
+  key/config reads and live prep calls, #656 fixes the local prepared-package
+  runtime bridge, #646 has run as a bounded live smoke and produced failed/no-go
+  evidence (`ru` package not READY; `uk` structural validation failed), and
+  #647 is docs closeout. The new policy still preserves #465 cache bypass for
   glossary-injected units and does not approve cache reuse, provider/config
   changes, durable state/storage/admin/retention changes, deployment or
   release/privacy/legal/support claims. Issue #551 repairs the
