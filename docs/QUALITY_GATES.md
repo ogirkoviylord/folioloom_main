@@ -202,7 +202,11 @@ sequence and its verification gates.
   selector, #642 adds fake/local prep service boundaries, #643 adds cost/cap
   accounting, #644 generalizes injection, #645 updates owner-only diagnostics,
   #648 wires provider-backed prep with fake-provider tests, #646 runs only as a
-  bounded live smoke after local/fake gates, and #647 closes docs.
+  bounded live smoke after local/fake gates, and #647 closes docs. Issue #659
+  additionally wires the automatic Telegram runtime config to build the
+  prepared-glossary provider through the existing DeepSeek runtime channel pool
+  when available, and requires high-severity `not_effective` diagnostics when a
+  `with_glossary` run has no prepared-package source.
 - Issue #646 ran after #656 and produced failed/no-go live-smoke evidence:
   `ru` prep failed #610 READY validation with
   `prepared_glossary_package_needs_review`, while `uk` rendered glossary
@@ -218,8 +222,10 @@ sequence and its verification gates.
 - Missing, invalid, unsupported, over-budget or `Unknown` glossary/policy data
   must fall back to the existing non-glossary translation path or metadata-only
   skip/fallback reasons, or fail closed only where a #639 child issue
-  explicitly approves that behavior. It must not produce pass or quality
-  claims.
+  explicitly approves that behavior. A `with_glossary` fallback with no
+  prepared-package source must not look effective: diagnostics must include
+  metadata-only high-severity reason/status fields. It must not produce pass or
+  quality claims.
 - Release-version consent, retention, deletion, support and legal/privacy
   policy for glossary diagnostics remains `TBD` and blocks beta/default
   rollout claims.

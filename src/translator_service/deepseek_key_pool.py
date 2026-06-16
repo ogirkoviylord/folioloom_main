@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from translator_service.deepseek_client import (
     DeepSeekApiError,
@@ -49,7 +49,23 @@ _RECENT_FAILURE_PENALTY_SECONDS = 300.0
 class _PooledClient(Protocol):
     last_usage: object | None
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def create_chat_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        response_format: dict[str, str] | None = None,
+        allow_empty_content: bool = False,
+    ) -> Any:
+        pass
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
         pass
 
 
@@ -347,7 +363,69 @@ class DeepSeekKeyPoolTranslator:
                     )
                     raise
                 if not _is_channel_cooldown_error(error):
-                    self._record_channel_permanent_failure(channel, error, latency_ms=latency_ms)
+                    self._record_channel_permanent_failure(
+                        channel,
+                        error,
+                        latency_ms=latency_ms,
+                    )
+                    raise
+                last_rate_error = error
+                self._cool_down_channel(channel, error, latency_ms=latency_ms)
+            finally:
+                self._release_channel(channel)
+
+        if last_rate_error is not None:
+            raise last_rate_error
+        raise DeepSeekApiError("DeepSeek key pool has no available channels")
+
+    def create_chat_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        response_format: dict[str, str] | None = None,
+        allow_empty_content: bool = False,
+    ) -> Any:
+        attempted_labels: set[str] = set()
+        last_rate_error: DeepSeekApiError | None = None
+        attempt_limit = (
+            1 if self._leased_provider_slot_channel_id() else len(self._channels)
+        )
+
+        while len(attempted_labels) < attempt_limit:
+            channel = self._acquire_channel(exclude_labels=attempted_labels)
+            attempted_labels.add(channel.label)
+            started_at = self._clock()
+            try:
+                result = channel.client.create_chat_completion(
+                    system_prompt=system_prompt,
+                    user_text=user_text,
+                    response_format=response_format,
+                    allow_empty_content=allow_empty_content,
+                )
+                latency_ms = self._elapsed_ms_since(started_at)
+                self._record_channel_success(channel, latency_ms=latency_ms)
+                self._last_usage.value = getattr(
+                    channel.client,
+                    "last_usage",
+                    None,
+                ) or getattr(result, "usage", None)
+                return result
+            except DeepSeekApiError as error:
+                latency_ms = self._elapsed_ms_since(started_at)
+                if _is_unsafe_model_output_error(error):
+                    self._record_channel_unsafe_model_output(
+                        channel,
+                        error,
+                        latency_ms=latency_ms,
+                    )
+                    raise
+                if not _is_channel_cooldown_error(error):
+                    self._record_channel_permanent_failure(
+                        channel,
+                        error,
+                        latency_ms=latency_ms,
+                    )
                     raise
                 last_rate_error = error
                 self._cool_down_channel(channel, error, latency_ms=latency_ms)
@@ -388,7 +466,10 @@ class DeepSeekKeyPoolTranslator:
                         continue
                     channel = min(
                         candidates,
-                        key=lambda candidate: _channel_selection_key(candidate, now=now),
+                        key=lambda candidate: _channel_selection_key(
+                            candidate,
+                            now=now,
+                        ),
                     )
                     channel.active_requests += 1
                     channel.total_started_requests += 1
@@ -413,7 +494,12 @@ class DeepSeekKeyPoolTranslator:
     def _elapsed_ms_since(self, started_at: float) -> float:
         return max(0.0, (self._clock() - started_at) * 1000.0)
 
-    def _record_channel_success(self, channel: _DeepSeekChannel, *, latency_ms: float) -> None:
+    def _record_channel_success(
+        self,
+        channel: _DeepSeekChannel,
+        *,
+        latency_ms: float,
+    ) -> None:
         with self._condition:
             now = self._clock()
             _record_channel_latency(channel, latency_ms)
@@ -642,7 +728,12 @@ def _is_unsafe_model_output_error(error: DeepSeekApiError) -> bool:
 
 def _redact_channel_error(error: DeepSeekApiError, channel: _DeepSeekChannel) -> str:
     message = str(error).replace(channel.config.api_key, "[redacted-api-key]")
-    message = re.sub(r"\bbearer\b", "[redacted-auth-scheme]", message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"\bbearer\b",
+        "[redacted-auth-scheme]",
+        message,
+        flags=re.IGNORECASE,
+    )
     message = re.sub(r"\bsk-[A-Za-z0-9._-]+", "[redacted-api-key]", message)
     message = re.sub(
         r"\b[A-Za-z0-9._-]*api_keys[A-Za-z0-9._-]*\b",

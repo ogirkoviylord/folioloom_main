@@ -669,6 +669,20 @@ def _glossary_runtime_diagnostics_payload(
                     )
                 }
             ),
+            "diagnostic_severities": sorted(
+                {
+                    str(severity)
+                    for payload in adapter_payloads + attachment_payloads
+                    if (severity := payload.get("diagnostic_severity"))
+                }
+            ),
+            "glossary_effective_statuses": sorted(
+                {
+                    str(status)
+                    for payload in adapter_payloads + attachment_payloads
+                    if (status := payload.get("glossary_effective_status"))
+                }
+            ),
             "prepared_package_event_count": len(prepared_package_events),
             "prepared_package_statuses": sorted(
                 {
@@ -776,6 +790,8 @@ def _prepared_glossary_attachment_event_payload(
         ),
         "attachment_source": payload.get("attachment_source", "Unknown"),
         "fail_closed": bool(payload.get("fail_closed")),
+        "diagnostic_severity": payload.get("diagnostic_severity"),
+        "glossary_effective_status": payload.get("glossary_effective_status"),
         "metadata_only": payload.get("metadata_only", True),
         "raw_payload_included": payload.get("raw_payload_included", "Unknown"),
         "document_kind": payload.get("document_kind"),

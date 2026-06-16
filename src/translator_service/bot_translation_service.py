@@ -3397,11 +3397,14 @@ class BotTranslationService:
                 return resolver_result
 
         if self._prepared_glossary_package_prep_resolver is None:
-            return resolver_result or _prepared_glossary_package_attachment_result(
-                status="skipped",
-                reason_codes=("prepared_glossary_package_attachment_disabled",),
-                request=request,
-                source="resolver",
+            return _prepared_glossary_package_required_result(
+                resolver_result
+                or _prepared_glossary_package_attachment_result(
+                    status="skipped",
+                    reason_codes=("prepared_glossary_package_attachment_disabled",),
+                    request=request,
+                    source="resolver",
+                )
             )
 
         prep_request = PreparedGlossaryPackagePrepRequest(
@@ -5162,6 +5165,9 @@ def _prepared_glossary_package_attachment_result(
         "metadata_only": True,
         "raw_payload_included": False,
     }
+    if fail_closed:
+        metadata["diagnostic_severity"] = "error"
+        metadata["glossary_effective_status"] = "not_effective"
     if request is not None:
         metadata.update(
             {
@@ -5179,6 +5185,24 @@ def _prepared_glossary_package_attachment_result(
         payload=None,
         metadata=metadata,
         fail_closed=fail_closed,
+    )
+
+
+def _prepared_glossary_package_required_result(
+    result: _PreparedGlossaryPackageAttachmentResult,
+) -> _PreparedGlossaryPackageAttachmentResult:
+    metadata = dict(result.metadata)
+    reason_codes = list(metadata.get("attachment_reason_codes") or ())
+    if "prepared_glossary_package_required_for_with_glossary" not in reason_codes:
+        reason_codes.append("prepared_glossary_package_required_for_with_glossary")
+    metadata["attachment_reason_codes"] = reason_codes
+    metadata["diagnostic_severity"] = "error"
+    metadata["glossary_effective_status"] = "not_effective"
+    metadata["fail_closed"] = result.fail_closed
+    return _PreparedGlossaryPackageAttachmentResult(
+        payload=None,
+        metadata=metadata,
+        fail_closed=result.fail_closed,
     )
 
 
@@ -5250,6 +5274,9 @@ def _prepared_glossary_package_attachment_result_from(
             "raw_payload_included": False,
         }
     )
+    if fail_closed:
+        metadata["diagnostic_severity"] = "error"
+        metadata["glossary_effective_status"] = "not_effective"
     if extra_metadata is not None:
         metadata.update(dict(extra_metadata))
     if not validation.ready:
