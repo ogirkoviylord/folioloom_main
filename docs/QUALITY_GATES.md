@@ -201,6 +201,12 @@ sequence and its verification gates.
   accounting, #644 generalizes injection, #645 updates owner-only diagnostics,
   #648 wires provider-backed prep with fake-provider tests, #646 runs only as a
   bounded live smoke after local/fake gates, and #647 closes docs.
+- Issue #646 ran after #656 and produced failed/no-go live-smoke evidence:
+  `ru` prep failed #610 READY validation with
+  `prepared_glossary_package_needs_review`, while `uk` rendered glossary
+  context and used #465 cache bypass but failed runtime structural validation
+  with `block_count_mismatch`. Treat this as useful provider-boundary evidence,
+  not successful automatic live-smoke evidence.
 - Promotion outside the #639 child-issue path, or beyond the evidence produced
   by those issues, requires separate owner approval and evidence for structural
   validation, policy-aware compliance, owner-only quality review, provider

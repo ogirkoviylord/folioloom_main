@@ -121,10 +121,11 @@ R-041 update note, 2026-06-15: issue #640 records the owner-approved #639
 policy that the temporary Telegram glossary selector is superseded by automatic
 internal glossary preparation/injection for supported Telegram jobs. Treat #640
 as a policy/docs change only: code removal/default integration is split across
-#641-#645 and #648, and #646 live smoke remains conditionally gated on those
-local/fake gates. This does not approve glossary-aware cache reuse, provider
-config/key changes, deployment, durable DB/schema/state/storage/admin/
-retention/export/delete changes or release/privacy/legal/support readiness.
+#641-#645 and #648, and #646 later ran as a bounded live smoke after local/fake
+gates and produced failed/no-go evidence. This does not approve
+glossary-aware cache reuse, provider config/key changes, deployment, durable
+DB/schema/state/storage/admin/retention/export/delete changes or
+release/privacy/legal/support readiness.
 
 R-041 update note, 2026-06-15: issue #641 removes the user-facing Telegram
 glossary selector from the normal flow and defaults new supported job metadata
@@ -191,7 +192,18 @@ directly from READY prepared package entries when work-unit/source-block refs
 match. Treat this as local/default-off owner/test resolver plumbing only: it
 cache reuse, provider config/key changes, DB/schema/state/storage/admin/
 retention/export/delete changes, deployment or release/privacy/legal/support
-claims. #646 live remains blocked until a fresh fake/dry preflight passes.
+claims.
+
+R-041 update note, 2026-06-16: issue #646 bounded live automatic-default
+glossary smoke ran after #641-#645, #648 and #656 plus a passing fake/dry
+unit-selection preflight. The final metadata-only report records failed/no-go
+evidence: `ru` prep returned HTTP 200 but failed #610 READY validation with
+`prepared_glossary_package_needs_review`, while `uk` prep returned READY,
+rendered glossary context and used #465 cache bypass, but runtime structural
+validation failed with `block_count_mismatch`. Treat #646 as provider-boundary
+failure evidence only; successful automatic live-smoke evidence, broader
+default confidence, cache reuse, deployment and release/privacy/legal/support
+claims remain unapproved.
 
 ### Product risks
 
