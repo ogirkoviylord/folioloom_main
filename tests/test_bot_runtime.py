@@ -2699,6 +2699,169 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("Дарси", event_lines)
 
+    def test_settings_runtime_wires_provider_backed_glossary_prep(self):
+        from translator_service.scheduler import SchedulerLimits
+        from translator_service.worker import run_next_scheduled_stored_text_work_unit
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            content = _make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Darcy returns.</p></body>
+                    </html>
+                    """
+                }
+            )
+            pool_instances = []
+
+            class FakeDeepSeekPool:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+                    self.chat_calls = []
+                    pool_instances.append(self)
+
+                def create_chat_completion(
+                    self,
+                    *,
+                    system_prompt,
+                    user_text,
+                    response_format=None,
+                    allow_empty_content=False,
+                ):
+                    self.chat_calls.append(
+                        (
+                            system_prompt,
+                            user_text,
+                            response_format,
+                            allow_empty_content,
+                        )
+                    )
+                    packet = json.loads(user_text)["packet"]
+                    candidate = packet["candidates"][0]
+                    package = _prepared_glossary_package()
+                    package.update(
+                        {
+                            "candidate_selector_signature": packet[
+                                "candidate_selector_signature"
+                            ],
+                            "source_document_fingerprint": packet[
+                                "source_document_fingerprint"
+                            ],
+                        }
+                    )
+                    package["entries"][0].update(
+                        {
+                            "source_entry_id": candidate["source_entry_id"],
+                            "source_canonical": candidate["source_canonical"],
+                            "aliases": candidate["aliases"],
+                            "evidence_refs": candidate["evidence_refs"],
+                            "source_unit_refs": candidate["source_unit_refs"],
+                            "source_block_refs": candidate["source_block_refs"],
+                        }
+                    )
+                    return SimpleNamespace(
+                        content=json.dumps(package),
+                        usage={
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                        finish_reason="stop",
+                    )
+
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DEEPSEEK_API_KEY": "",
+                        "DEEPSEEK_API_KEYS": "settings-test-key-a,settings-test-key-b",
+                        "DEEPSEEK_BASE_URL": "https://deepseek.test",
+                    },
+                    clear=False,
+                ),
+                patch(
+                    "translator_service.bot.runtime."
+                    "DeepSeekKeyPoolTranslator",
+                    side_effect=FakeDeepSeekPool,
+                ),
+            ):
+                config = bot_runtime_config_from_settings(
+                    Settings(
+                        object_storage_root=str(root / "objects"),
+                        persistent_jobs_db_path=str(root / "jobs.sqlite3"),
+                        user_settings_db_path=str(root / "settings.sqlite3"),
+                        admin_db_path=str(root / "admin.sqlite3"),
+                        translation_run_log_root=str(root / "translation-runs"),
+                        deepseek_base_url="https://settings.deepseek.test",
+                        bot_defer_persistent_jobs_to_worker=True,
+                    )
+                )
+
+            self.assertEqual(len(pool_instances), 1)
+            self.assertEqual(
+                [channel.api_key for channel in pool_instances[0].kwargs["channels"]],
+                ["settings-test-key-a", "settings-test-key-b"],
+            )
+            self.assertEqual(pool_instances[0].kwargs["base_url"], "https://deepseek.test")
+            self.assertEqual(pool_instances[0].kwargs["model"], "deepseek-v4-pro")
+
+            service = build_translation_service(config)
+            self.addCleanup(service.close)
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="book.epub",
+                content=content,
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            self._select_default_translation_mode(service)
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="ru",
+                glossary_mode=GLOSSARY_MODE_WITH,
+            )
+            self._accept_pending_preview(service)
+
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=_RuntimeRecordingTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+            self.assertEqual(len(pool_instances[0].chat_calls), 1)
+            assert service._persistent_job_store is not None
+            assert service._file_storage is not None
+            policy = json.loads(
+                service._persistent_job_store.get_job(job.id).translation_policy
+            )
+            self.assertIn("prepared_glossary_package", policy)
+
+            translator = _RuntimeBatchRecordingTranslator()
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=service._persistent_job_store,
+                storage=service._file_storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=root / "translation-runs",
+            )
+
+            self.assertIsNotNone(completed)
+            self.assertEqual(len(translator.requests), 1)
+            self.assertIn("<glossary_context", translator.requests[0][0])
+            self.assertIn("Дарси", translator.requests[0][0])
+            event_lines = next((root / "translation-runs").iterdir()).joinpath(
+                "events.jsonl"
+            ).read_text(encoding="utf-8")
+            self.assertIn('"attachment_source": "prep"', event_lines)
+            self.assertIn("bypass_glossary_injected_cache", event_lines)
+            self.assertNotIn("Darcy returns.", event_lines)
+            self.assertNotIn("Дарси", event_lines)
+            self.assertNotIn("settings-test-key", event_lines)
+
     def test_build_deepseek_translator_uses_key_pool_for_single_env_key(self):
         with patch.dict(
             "os.environ",

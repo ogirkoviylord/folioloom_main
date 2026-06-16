@@ -729,6 +729,8 @@ class AdminTranslationLogsTest(unittest.TestCase):
                         "prepared_glossary_package_attachment_disabled"
                     ],
                     "attachment_source": "resolver",
+                    "diagnostic_severity": "error",
+                    "glossary_effective_status": "not_effective",
                     "metadata_only": True,
                     "raw_payload_included": False,
                 },
@@ -776,6 +778,11 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn(
             "prepared_glossary_package_attachment_disabled",
             sidecar["summary"]["diagnostic_reason_codes"],
+        )
+        self.assertIn("error", sidecar["summary"]["diagnostic_severities"])
+        self.assertIn(
+            "not_effective",
+            sidecar["summary"]["glossary_effective_statuses"],
         )
         self.assertIn(
             "persistent_glossary_no_useful_glossary_entries",

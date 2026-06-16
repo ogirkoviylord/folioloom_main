@@ -128,6 +128,22 @@ changes, DB/schema/storage/admin/retention changes, cache reuse or
 release/privacy/legal/support claims. #646 live smoke has now run and produced
 failed/no-go evidence described below.
 
+Issue #659 implementation slice on 2026-06-16 repairs the automatic Telegram
+glossary prep wiring observed in an owner archive where `with_glossary` produced
+`prepared_glossary_package_attachment_disabled` and rendered zero glossary
+contexts. `bot_runtime_config_from_settings()` now builds the existing #648
+DeepSeek-compatible prepared-glossary provider through the existing DeepSeek
+runtime channel pool when channels are available, without editing provider
+config or secrets and without changing the runtime translation provider/model.
+If a `with_glossary` job still has no package source, the existing translation
+path may continue, but attachment diagnostics now carry high-severity metadata:
+`diagnostic_severity=error`, `glossary_effective_status=not_effective` and
+`prepared_glossary_package_required_for_with_glossary`. Focused fake-provider
+tests prove settings-based package attachment reaches worker injection and #465
+cache bypass only when glossary context renders. This is wiring/diagnostic
+evidence only; live glossary quality, release readiness, cache reuse and
+provider/config changes remain unapproved.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
