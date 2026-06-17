@@ -603,20 +603,57 @@ def _glossary_runtime_diagnostics_payload(
         for payload in adapter_payloads
         if (summary := _prompt_context_summary_payload(payload)) is not None
     )
-    diagnostic_reason_codes = _diagnostic_reason_codes(
+    diagnostic_reason_code_counts = _diagnostic_reason_code_counts(
         adapter_payloads=adapter_payloads,
         attachment_payloads=attachment_payloads,
         prepared_package_events=prepared_package_events,
         prompt_context_summaries=prompt_context_summaries,
         compliance_summaries=compliance_summaries,
     )
-    cache_behaviors = sorted(
+    diagnostic_reason_codes = sorted(diagnostic_reason_code_counts)
+    cache_behavior_counts = _cache_behavior_counts(adapter_payloads)
+    cache_behaviors = sorted(cache_behavior_counts)
+    automatic_glossary_policy = _automatic_glossary_policy_payload(details)
+    prompt_context_included_event_count = sum(
+        1
+        for prompt_context in prompt_context_summaries
+        if prompt_context.get("included")
+    )
+    effectiveness_diagnostic = _glossary_effectiveness_diagnostic(
+        automatic_glossary_policy=automatic_glossary_policy,
+        attachment_payloads=attachment_payloads,
+        prepared_package_events=prepared_package_events,
+        adapter_payloads=adapter_payloads,
+        prompt_context_summaries=prompt_context_summaries,
+        rendered_prompt_context_count=len(rendered_contexts),
+        prompt_context_included_event_count=prompt_context_included_event_count,
+        compliance_summary_count=len(compliance_summaries),
+        diagnostic_reason_code_counts=diagnostic_reason_code_counts,
+        cache_behavior_counts=cache_behavior_counts,
+    )
+    diagnostic_severities = sorted(
         {
-            str(cache_policy.get("behavior"))
-            for payload in adapter_payloads
-            if isinstance(cache_policy := payload.get("cache_policy"), dict)
-            and cache_policy.get("behavior")
+            str(severity)
+            for payload in adapter_payloads + attachment_payloads
+            if (severity := payload.get("diagnostic_severity"))
         }
+        | _effectiveness_summary_values(
+            effectiveness_diagnostic,
+            key="diagnostic_severity",
+            include_values={"warning", "error"},
+        )
+    )
+    glossary_effective_statuses = sorted(
+        {
+            str(status)
+            for payload in adapter_payloads + attachment_payloads
+            if (status := payload.get("glossary_effective_status"))
+        }
+        | _effectiveness_summary_values(
+            effectiveness_diagnostic,
+            key="status",
+            exclude_values={"not_applicable", "not_observed"},
+        )
     )
     payload: dict[str, Any] = {
         "schema_version": _GLOSSARY_RUNTIME_DIAGNOSTICS_SCHEMA_VERSION,
@@ -649,7 +686,7 @@ def _glossary_runtime_diagnostics_payload(
         "source_language": details.summary.source_language,
         "target_language": details.summary.target_language,
         "glossary_mode": _translation_policy_value(details, "glossary_mode"),
-        "automatic_glossary_policy": _automatic_glossary_policy_payload(details),
+        "automatic_glossary_policy": automatic_glossary_policy,
         "summary": {
             "adapter_event_count": len(adapter_payloads),
             "attachment_event_count": len(attachment_payloads),
@@ -669,20 +706,12 @@ def _glossary_runtime_diagnostics_payload(
                     )
                 }
             ),
-            "diagnostic_severities": sorted(
-                {
-                    str(severity)
-                    for payload in adapter_payloads + attachment_payloads
-                    if (severity := payload.get("diagnostic_severity"))
-                }
-            ),
-            "glossary_effective_statuses": sorted(
-                {
-                    str(status)
-                    for payload in adapter_payloads + attachment_payloads
-                    if (status := payload.get("glossary_effective_status"))
-                }
-            ),
+            "diagnostic_severities": diagnostic_severities,
+            "glossary_effective_status": effectiveness_diagnostic["status"],
+            "glossary_effective_statuses": glossary_effective_statuses,
+            "glossary_effective_reason_codes": effectiveness_diagnostic[
+                "reason_codes"
+            ],
             "prepared_package_event_count": len(prepared_package_events),
             "prepared_package_statuses": sorted(
                 {
@@ -703,10 +732,8 @@ def _glossary_runtime_diagnostics_payload(
             "rendered_prompt_context_count": len(rendered_contexts),
             "rejected_prompt_context_count": len(rejected_contexts),
             "prompt_context_event_count": len(prompt_context_summaries),
-            "prompt_context_included_event_count": sum(
-                1
-                for prompt_context in prompt_context_summaries
-                if prompt_context.get("included")
+            "prompt_context_included_event_count": (
+                prompt_context_included_event_count
             ),
             "prompt_context_omission_reasons": sorted(
                 {
@@ -721,7 +748,11 @@ def _glossary_runtime_diagnostics_payload(
             "target_metadata_status": _target_metadata_status(
                 prepared_package_events,
             ),
+            "cache_policy_behavior_counts": cache_behavior_counts,
             "cache_policy_behaviors": cache_behaviors,
+            "cache_bypass_event_count": effectiveness_diagnostic[
+                "cache_bypass_event_count"
+            ],
             "compliance_summary_count": len(compliance_summaries),
             "compliance_statuses": sorted(
                 {
@@ -731,6 +762,7 @@ def _glossary_runtime_diagnostics_payload(
                 }
             ),
             "diagnostic_reason_codes": diagnostic_reason_codes,
+            "diagnostic_reason_code_counts": diagnostic_reason_code_counts,
             "related_diagnostic_files": _glossary_related_diagnostic_files(
                 run_dir,
                 raw_text_diagnostics_present=raw_text_diagnostics_present,
@@ -741,6 +773,7 @@ def _glossary_runtime_diagnostics_payload(
         "prepared_package_events": list(prepared_package_events),
         "prompt_context_events": list(prompt_context_summaries),
         "compliance_summaries": list(compliance_summaries),
+        "effectiveness_diagnostic": effectiveness_diagnostic,
         "rendered_prompt_contexts": list(rendered_contexts),
         "rejected_prompt_contexts": list(rejected_contexts),
     }
@@ -767,6 +800,9 @@ def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any
         "battle_test_preflight": _safe_dict(payload.get("battle_test_preflight")),
         "prompt_context": payload.get("prompt_context"),
         "prepared_package": _safe_dict(payload.get("prepared_package")),
+        "prepared_package_runtime_bridge": _prepared_package_runtime_bridge_payload(
+            payload.get("prepared_package_runtime_bridge"),
+        ),
         "glossary_compliance": _safe_dict(payload.get("glossary_compliance")),
         "policy_signature_context": _safe_dict(payload.get("policy_signature_context")),
         "work_unit_selection_signature": payload.get("work_unit_selection_signature"),
@@ -860,6 +896,40 @@ def _prepared_package_event_payload(
         ),
     }
     return result
+
+
+def _prepared_package_runtime_bridge_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    allowed_fields = {
+        "schema_version",
+        "status",
+        "reason_codes",
+        "entry_count",
+        "applicable_entry_count",
+        "target_metadata_missing_count",
+        "source_ref_absent_count",
+        "source_ref_match_count",
+        "source_ref_mismatch_count",
+        "source_term_missing_count",
+        "source_canonical_match_count",
+        "source_safe_alias_match_count",
+        "source_risky_alias_only_count",
+        "metadata_only",
+        "raw_payload_included",
+        "source_refs_required_when_present",
+        "source_refs_used_as_diagnostics",
+        "source_presence_primary_applicability_signal",
+        "risky_alias_only_skipped",
+    }
+    return {
+        key: safe_value
+        for key in allowed_fields
+        if (key in value)
+        and _prepared_package_metadata_value_is_safe(
+            safe_value := _safe_value(value.get(key), key=key),
+        )
+    }
 
 
 def _glossary_prep_beta_safety_payload(value: Any) -> dict[str, Any]:
@@ -1027,38 +1097,201 @@ def _target_metadata_status(
     return "not_observed"
 
 
-def _diagnostic_reason_codes(
+def _diagnostic_reason_code_counts(
     *,
     adapter_payloads: tuple[dict[str, Any], ...],
     attachment_payloads: tuple[dict[str, Any], ...],
     prepared_package_events: tuple[dict[str, Any], ...],
     prompt_context_summaries: tuple[dict[str, Any], ...],
     compliance_summaries: tuple[dict[str, Any], ...],
-) -> list[str]:
-    reason_codes: set[str] = set()
+) -> dict[str, int]:
+    reason_code_counts: dict[str, int] = {}
+
+    def add_reason(reason: Any) -> None:
+        if not reason:
+            return
+        reason_text = str(reason)
+        if reason_text == "none":
+            return
+        reason_code_counts[reason_text] = reason_code_counts.get(reason_text, 0) + 1
+
+    def add_reasons(reasons: Any) -> None:
+        for reason in _string_sequence(reasons):
+            add_reason(reason)
+
     for payload in adapter_payloads:
-        fallback_reason = payload.get("fallback_reason")
-        if fallback_reason and fallback_reason != "none":
-            reason_codes.add(str(fallback_reason))
+        add_reason(payload.get("fallback_reason"))
         preflight = payload.get("battle_test_preflight")
         if isinstance(preflight, dict):
-            reason_codes.update(_string_sequence(preflight.get("reason_codes")))
-            preflight_fallback = preflight.get("fallback_reason")
-            if preflight_fallback and preflight_fallback != "none":
-                reason_codes.add(str(preflight_fallback))
+            add_reasons(preflight.get("reason_codes"))
+            add_reason(preflight.get("fallback_reason"))
+        bridge = payload.get("prepared_package_runtime_bridge")
+        if isinstance(bridge, dict):
+            add_reasons(bridge.get("reason_codes"))
     for payload in attachment_payloads:
-        reason_codes.update(_string_sequence(payload.get("attachment_reason_codes")))
+        add_reasons(payload.get("attachment_reason_codes"))
         prep_safety = payload.get("glossary_prep_beta_safety")
         if isinstance(prep_safety, dict):
-            reason_codes.update(_string_sequence(prep_safety.get("reason_codes")))
+            add_reasons(prep_safety.get("reason_codes"))
     for prepared_package in prepared_package_events:
-        reason_codes.update(_string_sequence(prepared_package.get("reason_codes")))
+        add_reasons(prepared_package.get("reason_codes"))
     for prompt_context in prompt_context_summaries:
-        reason_codes.update(_string_sequence(prompt_context.get("omission_reasons")))
+        add_reasons(prompt_context.get("omission_reasons"))
     for compliance in compliance_summaries:
-        reason_codes.update(_string_sequence(compliance.get("reason_codes")))
-        reason_codes.update(_string_sequence(compliance.get("uncertainty_reason_codes")))
-    return sorted(reason_codes)
+        add_reasons(compliance.get("reason_codes"))
+        add_reasons(compliance.get("uncertainty_reason_codes"))
+    return dict(sorted(reason_code_counts.items()))
+
+
+def _cache_behavior_counts(
+    adapter_payloads: tuple[dict[str, Any], ...],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for payload in adapter_payloads:
+        cache_policy = payload.get("cache_policy")
+        if not isinstance(cache_policy, dict):
+            continue
+        behavior = cache_policy.get("behavior")
+        if not behavior:
+            continue
+        behavior_text = str(behavior)
+        counts[behavior_text] = counts.get(behavior_text, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _glossary_effectiveness_diagnostic(
+    *,
+    automatic_glossary_policy: dict[str, Any],
+    attachment_payloads: tuple[dict[str, Any], ...],
+    prepared_package_events: tuple[dict[str, Any], ...],
+    adapter_payloads: tuple[dict[str, Any], ...],
+    prompt_context_summaries: tuple[dict[str, Any], ...],
+    rendered_prompt_context_count: int,
+    prompt_context_included_event_count: int,
+    compliance_summary_count: int,
+    diagnostic_reason_code_counts: dict[str, int],
+    cache_behavior_counts: dict[str, int],
+) -> dict[str, Any]:
+    glossary_policy_enabled = (
+        automatic_glossary_policy.get("runtime_intent")
+        == "attempt_glossary_when_ready"
+    )
+    ready_prepared_package_events = tuple(
+        event
+        for event in prepared_package_events
+        if str(event.get("status")).casefold() == "ready"
+    )
+    ready_prepared_package_attached = bool(ready_prepared_package_events) and any(
+        attachment.get("attachment_status") == "attached"
+        for attachment in attachment_payloads
+    )
+    event_reported_not_effective = any(
+        payload.get("glossary_effective_status") == "not_effective"
+        for payload in adapter_payloads + attachment_payloads
+    )
+    event_reported_error = any(
+        payload.get("diagnostic_severity") == "error"
+        for payload in adapter_payloads + attachment_payloads
+    )
+    cache_bypass_event_count = cache_behavior_counts.get(
+        "bypass_glossary_injected_cache",
+        0,
+    )
+    prepared_package_entry_count = _max_int_field(
+        prepared_package_events,
+        "entry_count",
+    )
+    prepared_package_ready_entry_count = _max_int_field(
+        prepared_package_events,
+        "ready_entry_count",
+    )
+    bridge_payloads = tuple(
+        bridge
+        for payload in adapter_payloads
+        if isinstance(bridge := payload.get("prepared_package_runtime_bridge"), dict)
+    )
+    applicable_entry_observation_count = sum(
+        _int(bridge.get("applicable_entry_count")) for bridge in bridge_payloads
+    )
+    applicable_entry_event_count = sum(
+        1
+        for bridge in bridge_payloads
+        if _int(bridge.get("applicable_entry_count")) > 0
+    )
+
+    status = "not_observed"
+    diagnostic_severity = "info"
+    reason_codes: list[str] = ["ready_prepared_package_not_observed"]
+    if not glossary_policy_enabled:
+        status = "not_applicable"
+        reason_codes = ["glossary_policy_not_enabled"]
+    elif ready_prepared_package_attached and rendered_prompt_context_count > 0:
+        status = "effective_observed"
+        reason_codes = ["rendered_glossary_context_observed"]
+    elif ready_prepared_package_attached:
+        status = "not_effective"
+        diagnostic_severity = "error"
+        reason_codes = ["ready_prepared_package_zero_rendered_contexts"]
+        if prompt_context_included_event_count == 0:
+            reason_codes.append("zero_prompt_context_included_events")
+        else:
+            reason_codes.append(
+                "rendered_provider_context_missing_despite_prompt_context_event",
+            )
+        if compliance_summary_count == 0:
+            reason_codes.append("zero_compliance_summaries")
+        if cache_bypass_event_count == 0:
+            reason_codes.append("zero_cache_bypass_events")
+    elif event_reported_not_effective:
+        status = "not_effective"
+        diagnostic_severity = "error" if event_reported_error else "warning"
+        reason_codes = ["event_reported_glossary_not_effective"]
+
+    return {
+        "schema_version": "glossary-runtime-effectiveness-diagnostic-v1",
+        "metadata_only": True,
+        "raw_payload_included": False,
+        "status": status,
+        "diagnostic_severity": diagnostic_severity,
+        "reason_codes": reason_codes,
+        "glossary_policy_enabled": glossary_policy_enabled,
+        "ready_prepared_package_attached": ready_prepared_package_attached,
+        "ready_prepared_package_event_count": len(ready_prepared_package_events),
+        "prepared_package_entry_count": prepared_package_entry_count,
+        "prepared_package_ready_entry_count": prepared_package_ready_entry_count,
+        "runtime_applicable_entry_observation_count": (
+            applicable_entry_observation_count
+        ),
+        "runtime_applicable_entry_event_count": applicable_entry_event_count,
+        "rendered_prompt_context_count": rendered_prompt_context_count,
+        "prompt_context_event_count": len(prompt_context_summaries),
+        "prompt_context_included_event_count": prompt_context_included_event_count,
+        "compliance_summary_count": compliance_summary_count,
+        "cache_bypass_event_count": cache_bypass_event_count,
+        "diagnostic_reason_code_counts": dict(diagnostic_reason_code_counts),
+    }
+
+
+def _max_int_field(events: tuple[dict[str, Any], ...], field: str) -> int:
+    return max((_int(event.get(field)) for event in events), default=0)
+
+
+def _effectiveness_summary_values(
+    diagnostic: dict[str, Any],
+    *,
+    key: str,
+    include_values: set[str] | None = None,
+    exclude_values: set[str] | None = None,
+) -> set[str]:
+    value = diagnostic.get(key)
+    if not value:
+        return set()
+    text = str(value)
+    if include_values is not None and text not in include_values:
+        return set()
+    if exclude_values is not None and text in exclude_values:
+        return set()
+    return {text}
 
 
 def _prepared_package_metadata_value_is_safe(value: object) -> bool:

@@ -637,6 +637,181 @@ class AdminTranslationLogsTest(unittest.TestCase):
             sidecar["compliance_summaries"][0]["target_form_present_count"],
             1,
         )
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["status"],
+            "effective_observed",
+        )
+        self.assertNotIn(
+            "not_effective",
+            sidecar["summary"]["glossary_effective_statuses"],
+        )
+        self.assertEqual(sidecar["summary"]["cache_bypass_event_count"], 1)
+
+    def test_effective_archive_marks_ready_package_zero_contexts_not_effective(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-ready-zero-glossary-contexts",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "prepared_glossary_package_attachment",
+                {
+                    "schema_version": "prepared-glossary-package-attachment-v1",
+                    "attachment_status": "attached",
+                    "attachment_reason_codes": ["ready"],
+                    "attachment_source": "prep",
+                    "fail_closed": False,
+                    "metadata_only": True,
+                    "raw_payload_included": False,
+                    "document_kind": "epub",
+                    "source_language": "en",
+                    "target_language": "ru",
+                    "translation_mode": "book",
+                    "glossary_mode": "with_glossary",
+                    "source_sha256_short": "abc123def456",
+                    "status": "ready",
+                    "reason_codes": ["ready"],
+                    "package_id": "prepared:automatic:ru",
+                    "package_signature": "prepared-signature",
+                    "entry_count": 5,
+                    "ready_entry_count": 5,
+                    "needs_review_entry_count": 0,
+                },
+            )
+            append_translation_run_event_for_job(
+                temp_dir,
+                job_id="job-ready-zero-glossary-contexts",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "fallback",
+                    "fallback_reason": (
+                        "persistent_glossary_prepared_package_no_applicable_entries"
+                    ),
+                    "work_unit_sequence": 1,
+                    "document_format": "epub",
+                    "selected_entry_ids": [],
+                    "cache_policy": {
+                        "behavior": "default_runtime_cache",
+                        "cache_get_allowed": True,
+                        "cache_put_allowed": True,
+                    },
+                    "prepared_package": {
+                        "schema_version": "prepared-glossary-package-v1",
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                        "status": "ready",
+                        "reason_codes": ["ready"],
+                        "package_id": "prepared:automatic:ru",
+                        "package_signature": "prepared-signature",
+                        "target_language": "ru",
+                        "entry_count": 5,
+                        "ready_entry_count": 5,
+                        "needs_review_entry_count": 0,
+                    },
+                    "prepared_package_runtime_bridge": {
+                        "schema_version": (
+                            "prepared-glossary-package-runtime-bridge-v1"
+                        ),
+                        "status": "skipped",
+                        "reason_codes": [
+                            (
+                                "prepared_package_runtime_bridge_"
+                                "no_applicable_entries"
+                            )
+                        ],
+                        "entry_count": 5,
+                        "applicable_entry_count": 0,
+                        "target_metadata_missing_count": 0,
+                        "source_ref_mismatch_count": 5,
+                        "source_term_missing_count": 5,
+                        "metadata_only": True,
+                        "raw_payload_included": False,
+                    },
+                    "battle_test_preflight": {
+                        "status": "skipped",
+                        "fallback_reason": "source_match_missing",
+                        "reason_codes": ["source_match_missing"],
+                    },
+                    "raw_source_text": "Forbidden raw source sample",
+                    "prompt_body": "Forbidden prompt body",
+                    "provider_response": "Forbidden provider body",
+                    "translated_text": "Forbidden translated text",
+                    "api_key": "fake-key-for-redaction-test",
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertFalse(sidecar["contains_raw_glossary_diagnostics"])
+        self.assertTrue(sidecar["metadata_only"])
+        self.assertEqual(
+            sidecar["summary"]["glossary_effective_status"],
+            "not_effective",
+        )
+        self.assertIn("error", sidecar["summary"]["diagnostic_severities"])
+        self.assertIn(
+            "not_effective",
+            sidecar["summary"]["glossary_effective_statuses"],
+        )
+        self.assertIn(
+            "ready_prepared_package_zero_rendered_contexts",
+            sidecar["summary"]["glossary_effective_reason_codes"],
+        )
+        diagnostic = sidecar["effectiveness_diagnostic"]
+        self.assertEqual(diagnostic["status"], "not_effective")
+        self.assertEqual(diagnostic["diagnostic_severity"], "error")
+        self.assertTrue(diagnostic["ready_prepared_package_attached"])
+        self.assertEqual(diagnostic["prepared_package_entry_count"], 5)
+        self.assertEqual(
+            diagnostic["runtime_applicable_entry_observation_count"],
+            0,
+        )
+        self.assertEqual(diagnostic["rendered_prompt_context_count"], 0)
+        self.assertEqual(diagnostic["compliance_summary_count"], 0)
+        self.assertEqual(diagnostic["cache_bypass_event_count"], 0)
+        self.assertEqual(sidecar["summary"]["cache_bypass_event_count"], 0)
+        self.assertEqual(
+            sidecar["summary"]["diagnostic_reason_code_counts"][
+                "persistent_glossary_prepared_package_no_applicable_entries"
+            ],
+            2,
+        )
+        self.assertEqual(
+            sidecar["summary"]["diagnostic_reason_code_counts"][
+                "prepared_package_runtime_bridge_no_applicable_entries"
+            ],
+            1,
+        )
+        sidecar_text = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Forbidden raw source sample", sidecar_text)
+        self.assertNotIn("Forbidden prompt body", sidecar_text)
+        self.assertNotIn("Forbidden provider body", sidecar_text)
+        self.assertNotIn("Forbidden translated text", sidecar_text)
+        self.assertNotIn("fake-key-for-redaction-test", sidecar_text)
 
     def test_effective_archive_includes_glossary_fallback_diagnostics(self):
         with TemporaryDirectory() as temp_dir:
@@ -783,6 +958,10 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn(
             "not_effective",
             sidecar["summary"]["glossary_effective_statuses"],
+        )
+        self.assertEqual(
+            sidecar["summary"]["glossary_effective_status"],
+            "not_effective",
         )
         self.assertIn(
             "persistent_glossary_no_useful_glossary_entries",
