@@ -4,9 +4,12 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from translator_service.glossary_candidate_quality import (
+    filter_prepared_glossary_candidates,
+)
 from translator_service.glossary_target_metadata_overlay import (
     GLOSSARY_TARGET_METADATA_OVERLAY_SCHEMA_VERSION,
 )
@@ -220,6 +223,7 @@ class PreparedGlossaryPackageValidationResult:
     entry_count: int = 0
     ready_entry_count: int = 0
     needs_review_entry_count: int = 0
+    quality_metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
@@ -227,7 +231,7 @@ class PreparedGlossaryPackageValidationResult:
 
     @property
     def metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
             "metadata_only": True,
             "raw_payload_included": False,
@@ -243,6 +247,9 @@ class PreparedGlossaryPackageValidationResult:
             "ready_entry_count": self.ready_entry_count,
             "needs_review_entry_count": self.needs_review_entry_count,
         }
+        if self.quality_metadata:
+            metadata["quality"] = dict(self.quality_metadata)
+        return metadata
 
 
 def validate_prepared_glossary_package(
@@ -364,6 +371,13 @@ def validate_prepared_glossary_package(
             needs_review_entry_count=sum(1 for entry in entries if entry.needs_review),
         )
 
+    quality = filter_prepared_glossary_candidates(
+        tuple(entries),
+        upstream_selector_signature=candidate_selector_signature,
+        source_language=source_language,
+    )
+    entries = list(quality.entries)
+    quality_metadata = quality.metadata
     needs_review_count = sum(1 for entry in entries if entry.needs_review)
     package = PreparedGlossaryPackage(
         package_id=package_id,
@@ -393,6 +407,17 @@ def validate_prepared_glossary_package(
         ),
         entries=tuple(entries),
     )
+    if not entries:
+        return _result(
+            status="needs_review",
+            reason_codes=("prepared_glossary_package_quality_no_ready_entries",),
+            package=package,
+            package_signature=_package_signature(payload),
+            entry_count=0,
+            ready_entry_count=0,
+            needs_review_entry_count=0,
+            quality_metadata=quality_metadata,
+        )
     if needs_review_count:
         return _result(
             status="needs_review",
@@ -402,6 +427,7 @@ def validate_prepared_glossary_package(
             entry_count=len(entries),
             ready_entry_count=0,
             needs_review_entry_count=needs_review_count,
+            quality_metadata=quality_metadata,
         )
     return _result(
         status="ready",
@@ -411,6 +437,7 @@ def validate_prepared_glossary_package(
         entry_count=len(entries),
         ready_entry_count=len(entries),
         needs_review_entry_count=0,
+        quality_metadata=quality_metadata,
     )
 
 
@@ -702,6 +729,7 @@ def _result(
     entry_count: int,
     ready_entry_count: int,
     needs_review_entry_count: int,
+    quality_metadata: Mapping[str, Any] | None = None,
 ) -> PreparedGlossaryPackageValidationResult:
     return PreparedGlossaryPackageValidationResult(
         status=status,
@@ -716,6 +744,7 @@ def _result(
         entry_count=entry_count,
         ready_entry_count=ready_entry_count,
         needs_review_entry_count=needs_review_entry_count,
+        quality_metadata=dict(quality_metadata or {}),
     )
 
 
