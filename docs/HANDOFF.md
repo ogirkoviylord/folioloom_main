@@ -160,6 +160,20 @@ claims, and does not prove real-book glossary quality. Follow-ups #664/#665
 and #666 remain required for package-level READY enforcement, metadata-only
 audit evidence and scanner-v2 architecture decision.
 
+Issue #664 implementation slice on 2026-06-17 reuses the #663 candidate-quality
+policy inside #610 prepared package validation before a structurally valid
+package can be accepted as READY. All-low-value prepared packages now return
+`needs_review` with
+`prepared_glossary_package_quality_no_ready_entries`; mixed packages keep only
+valid durable entries, prune low-value aliases, and expose metadata-only
+`quality` counts/reason codes. Structural validation, raw/secret rejection,
+target mismatch and explicit provider `needs_review` semantics remain separate.
+This is local validation/adjudication only: no live provider calls, Telegram
+operation, runtime rollout, cache reuse, provider config, DB/schema/storage/
+admin/retention changes or release/privacy/legal/support claims are approved.
+Follow-ups #665 and #666 remain required for local metadata-only audit evidence
+and scanner-v2 architecture decision.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,

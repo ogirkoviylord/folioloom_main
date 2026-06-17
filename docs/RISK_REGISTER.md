@@ -231,6 +231,16 @@ providers, approve rollout/cache reuse/provider config/storage/admin/retention
 changes or replace #664 package-level READY enforcement and #665 local audit
 evidence.
 
+R-041 update note, 2026-06-17: issue #664 reuses the #663 candidate-quality
+policy inside #610 prepared package validation so structurally valid
+all-low-value packages cannot become READY. Mixed packages keep valid durable
+entries and report quality drops through metadata-only `quality` counts/reason
+codes. Treat this as local package-adjudication risk reduction only: it keeps
+raw/secret rejection and structural invalid semantics separate, and still does
+not prove glossary quality, approve live provider calls, rollout, cache reuse,
+provider config, storage/admin/retention changes or release/privacy/legal/
+support claims. #665 local audit evidence remains required.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

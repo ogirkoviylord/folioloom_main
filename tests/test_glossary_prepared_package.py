@@ -130,6 +130,69 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         self.assertEqual(result.needs_review_entry_count, 1)
         self.assertIsNotNone(result.package)
 
+    def test_low_value_entries_cannot_make_package_ready(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:then-he",
+                    source_canonical="Then He",
+                    aliases=["Then", "He"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:in-god",
+                    source_canonical="In God",
+                    aliases=["God"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertFalse(result.ready)
+        self.assertEqual(result.status, "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        self.assertIsNotNone(result.package)
+        self.assertEqual(result.package.entries, ())
+        self.assertEqual(result.metadata["quality"]["input_candidate_count"], 2)
+        self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 2)
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Then He", metadata_text)
+        self.assertNotIn("In God", metadata_text)
+
+    def test_mixed_quality_package_keeps_valid_entries_metadata_only(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:then-he",
+                    source_canonical="Then He",
+                    aliases=["Then", "He"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:darcy",
+                    source_canonical="Mr Darcy",
+                    aliases=["Darcy", "He"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertTrue(result.ready)
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.ready_entry_count, 1)
+        self.assertEqual(result.metadata["quality"]["input_candidate_count"], 2)
+        self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 1)
+        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 3)
+        self.assertEqual(len(result.package.entries), 1)
+        self.assertEqual(result.package.entries[0].source_canonical, "Mr Darcy")
+        self.assertEqual(result.package.entries[0].aliases, ("Darcy",))
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Then He", metadata_text)
+        self.assertNotIn("Mr Darcy", metadata_text)
+
     def test_bool_confidence_is_rejected(self):
         payload = _prepared_payload(entries=[_entry_payload(confidence=True)])
         result = validate_prepared_glossary_package(payload, target_language="ru")

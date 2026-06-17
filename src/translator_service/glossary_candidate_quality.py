@@ -337,7 +337,7 @@ def _decision(
 ) -> PreparedGlossaryCandidateQualityDecision:
     source = _entry_source(entry)
     return PreparedGlossaryCandidateQualityDecision(
-        entry_id=str(getattr(entry, "entry_id", "Unknown")),
+        entry_id=_entry_id(entry),
         status=status,
         reason_codes=tuple(dict.fromkeys(str(code) for code in reason_codes)),
         alias_omitted_count=alias_omitted_count,
@@ -359,9 +359,7 @@ def _selector_signature(
         "policy_version": PREPARED_GLOSSARY_CANDIDATE_QUALITY_POLICY_VERSION,
         "source_language": source_language or "Unknown",
         "upstream_selector_signature": upstream_selector_signature,
-        "accepted_entry_ids": [
-            str(getattr(entry, "entry_id", "Unknown")) for entry in entries
-        ],
+        "accepted_entry_ids": [_entry_id(entry) for entry in entries],
         "decisions": [
             {
                 "entry_id": decision.entry_id,
@@ -378,3 +376,10 @@ def _selector_signature(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:24]
     return f"prepared-glossary-candidate-quality:v1:{digest}"
+
+
+def _entry_id(entry: Any) -> str:
+    identifier = getattr(entry, "entry_id", None)
+    if identifier is None:
+        identifier = getattr(entry, "source_entry_id", None)
+    return str(identifier or "Unknown")
