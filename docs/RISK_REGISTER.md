@@ -283,6 +283,17 @@ work, change runtime selection/cache behavior, change provider config, expand
 admin/raw surfaces outside the downloaded owner-only archive, or make
 release/privacy/legal/support claims.
 
+R-041 update note, 2026-06-17: issue #674 rebalances prepared-glossary prep
+package sizing from the earlier 8-candidate / 2400 estimated editor-token
+default to 16 candidates / 4800 estimated editor tokens. The change is based on
+#671 metadata-only audit evidence that cap 8 was likely too narrow while cap 24
+carried higher noise/pressure risk. #663/#664 low-value candidate/package
+quality gates remain active, package validation remains separate, and real
+provider behavior plus translation-quality impact remain `Unknown` until #675.
+This does not approve live provider calls, provider config/key changes, cache
+reuse, scanner-v2 rewrite, runtime rollout, durable state/storage/admin/
+retention changes, deployment or release/privacy/legal/support claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
