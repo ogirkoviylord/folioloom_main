@@ -199,6 +199,24 @@ metadata-only v1/v2 comparison metrics, no runtime switch, no live provider
 calls, no cache reuse and no release/privacy/legal/support claims. Details are
 in `docs/superpowers/specs/2026-06-17-glossary-scanner-v2-decision.md`.
 
+Issue #671 implementation slice on 2026-06-17 adds a local metadata-only
+glossary runtime effectiveness audit helper and CLI. The audit summarizes the
+latest owner-provided real EPUB diagnostic archive without copying raw material:
+the attached #610 prepared package was READY with 5 entries, but prompt-context
+included count, rendered-context count and compliance-summary count were all 0.
+Observed fallback counts were 186 no-applicable-entry fallbacks, 78 source-block
+gate fallbacks and 64 source-character gate fallbacks. Current source gates made
+186/328 units size-eligible; relaxed 24-block/4800-char gates would make
+321/328 units size-eligible, but the real package-cap/render effect remains
+`Unknown` because the ordinary archive sidecar does not expose prepared-package
+entries or the upstream candidate pool. Fixture fake/local cap comparison
+recorded increasing applicable unit counts for caps 8/12/16/24, with cap 12 or
+16 as the recommended #674 search space. Details are in
+`docs/superpowers/specs/2026-06-17-glossary-runtime-effectiveness-audit.md`.
+This is evidence only: no runtime behavior, provider calls, cache reuse,
+deployment, durable state/storage/admin/retention changes or release/privacy/
+legal/support claims are approved.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
