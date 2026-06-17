@@ -2036,7 +2036,7 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertNotIn("Darcy returns", serialized)
         self.assertNotIn("translation_batch", serialized)
 
-    def test_docx_glossary_runtime_battle_preflight_skips_source_pressure(
+    def test_docx_glossary_runtime_battle_preflight_records_source_pressure(
         self,
     ):
         translator = RecordingTranslator()
@@ -2081,21 +2081,29 @@ class TranslationRunnerTest(unittest.TestCase):
             glossary_adapter_metadata_callback=metadata.append,
         )
 
-        self.assertEqual(len(translator.requests), 1)
-        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(len(translator.requests), 2)
+        self.assertIn("<glossary_context", translator.requests[0][0])
         self.assertEqual(
             [item["status"] for item in metadata],
-            ["fallback", "fallback"],
+            ["ready", "ready"],
         )
         self.assertTrue(
             all(
-                item["fallback_reason"] == "source_character_count_exceeds_limit"
+                item["battle_test_preflight"]["source_size_gate_status"]
+                == "over_limit"
                 for item in metadata
             )
         )
         self.assertTrue(
             all(
-                item["cache_policy"]["behavior"] == "default_runtime_cache"
+                "source_character_count_exceeds_limit"
+                in item["battle_test_preflight"]["source_size_gate_reason_codes"]
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["cache_policy"]["behavior"] == "bypass_glossary_injected_cache"
                 for item in metadata
             )
         )

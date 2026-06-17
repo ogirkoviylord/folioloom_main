@@ -3077,6 +3077,35 @@ def _glossary_runtime_plan_metadata(
             filtered[str(key)] = value
     if filtered:
         metadata["prepared_package"] = filtered
+    bridge = config.glossary_plan.get("prepared_package_runtime_bridge")
+    if isinstance(bridge, Mapping):
+        bridge_allowed = {
+            "schema_version",
+            "status",
+            "reason_codes",
+            "entry_count",
+            "applicable_entry_count",
+            "target_metadata_missing_count",
+            "source_ref_absent_count",
+            "source_ref_match_count",
+            "source_ref_mismatch_count",
+            "source_term_missing_count",
+            "source_canonical_match_count",
+            "source_safe_alias_match_count",
+            "source_risky_alias_only_count",
+            "metadata_only",
+            "raw_payload_included",
+            "source_refs_required_when_present",
+            "source_refs_used_as_diagnostics",
+            "source_presence_primary_applicability_signal",
+            "risky_alias_only_skipped",
+        }
+        filtered_bridge: dict[str, object] = {}
+        for key, value in bridge.items():
+            if key in bridge_allowed and _glossary_metadata_value_is_safe(value):
+                filtered_bridge[str(key)] = value
+        if filtered_bridge:
+            metadata["prepared_package_runtime_bridge"] = filtered_bridge
     return metadata or None
 
 
@@ -3157,6 +3186,10 @@ def _glossary_runtime_useful_preflight(
         "source_character_count": source_character_count,
         "max_source_blocks": config.battle_test_max_source_blocks,
         "max_source_characters": config.battle_test_max_source_characters,
+        "source_block_limit_exceeded": False,
+        "source_character_limit_exceeded": False,
+        "source_size_gate_status": "within_limit",
+        "source_size_gate_reason_codes": [],
         "selected_entry_count": len(selected_entry_ids),
         "target_metadata_entry_count": 0,
         "source_match_entry_count": 0,
@@ -3172,16 +3205,17 @@ def _glossary_runtime_useful_preflight(
         return _glossary_preflight_skipped(payload, "invalid_source_block_limit")
     if config.battle_test_max_source_characters < 1:
         return _glossary_preflight_skipped(payload, "invalid_source_character_limit")
+
+    source_size_reason_codes: list[str] = []
     if source_block_count > config.battle_test_max_source_blocks:
-        return _glossary_preflight_skipped(
-            payload,
-            "source_block_count_exceeds_limit",
-        )
+        payload["source_block_limit_exceeded"] = True
+        source_size_reason_codes.append("source_block_count_exceeds_limit")
     if source_character_count > config.battle_test_max_source_characters:
-        return _glossary_preflight_skipped(
-            payload,
-            "source_character_count_exceeds_limit",
-        )
+        payload["source_character_limit_exceeded"] = True
+        source_size_reason_codes.append("source_character_count_exceeds_limit")
+    if source_size_reason_codes:
+        payload["source_size_gate_status"] = "over_limit"
+        payload["source_size_gate_reason_codes"] = source_size_reason_codes
 
     source_text = "\n\n".join(source_text_tuple)
     entries_by_id = _glossary_prompt_entries_by_id(config.prompt_context_entries)

@@ -164,7 +164,7 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertNotIn("The chrono-loom hummed once.", serialized_plan)
         self.assertNotIn("хроно-станок", serialized_plan)
 
-    def test_prepared_package_entry_for_other_unit_falls_back(self):
+    def test_prepared_package_entry_for_other_unit_renders_with_ref_diagnostics(self):
         hook = build_persistent_glossary_runtime_hook_from_prepared_package(
             work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
             source_text="The chrono-loom hummed once.",
@@ -182,10 +182,10 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
             config=_generic_enabled_config(),
         )
 
-        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(hook.glossary_plan["status"], "planned")
         self.assertEqual(
-            hook.glossary_plan["fallback_reason"],
-            "persistent_glossary_prepared_package_no_applicable_entries",
+            hook.glossary_plan["prepared_package_runtime_bridge"]["status"],
+            "applied",
         )
         self.assertEqual(
             hook.glossary_plan["prepared_package_runtime_bridge"][
@@ -193,7 +193,69 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
             ],
             1,
         )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package_runtime_bridge"][
+                "source_refs_required_when_present"
+            ],
+            False,
+        )
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+        self.assertEqual(
+            hook.glossary_plan["work_unit_plans"][0]["selected_entry_ids"],
+            ["entry:chrono-loom"],
+        )
+
+    def test_prepared_package_risky_alias_only_match_falls_back(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="The river moved quickly.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:arcadian-society",
+                source_canonical="Arcadian Society",
+                aliases=("river",),
+                evidence_refs=("evidence:arcadian",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="Аркадийское общество",
+                target_variants=("Аркадийское общество",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "fallback")
+        self.assertEqual(
+            hook.glossary_plan["fallback_reason"],
+            "persistent_glossary_prepared_package_no_applicable_entries",
+        )
+        self.assertEqual(
+            hook.glossary_plan["prepared_package_runtime_bridge"][
+                "source_risky_alias_only_count"
+            ],
+            1,
+        )
+        self.assertTrue(
+            hook.glossary_plan["prepared_package_runtime_bridge"][
+                "risky_alias_only_skipped"
+            ]
+        )
+        self.assertIn(
+            "prepared_package_runtime_bridge_risky_alias_only",
+            hook.glossary_plan["prepared_package_runtime_bridge"]["reason_codes"],
+        )
         self.assertEqual(hook.prompt_context_entries, ())
+
+    def test_prepared_package_oversized_source_can_render_small_context(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="Darcy returns with a sentence longer than the old limit.",
+            prepared_package_payload=_prepared_package_payload(),
+            document_kind="epub",
+            config=_generic_enabled_config(max_source_characters=8),
+        )
+
+        self.assertEqual(hook.glossary_plan["status"], "planned")
+        self.assertEqual(len(hook.prompt_context_entries), 1)
 
     def test_prepared_package_target_mismatch_falls_back(self):
         payload = _prepared_package_payload(target_language="uk")
@@ -358,11 +420,13 @@ def _enabled_config() -> PersistentEpubGlossaryResolverConfig:
 def _generic_enabled_config(
     *,
     prompt_context_config: GlossaryPromptContextConfig | None = None,
+    max_source_characters: int = 2_400,
 ) -> PersistentGlossaryResolverConfig:
     return PersistentGlossaryResolverConfig(
         enabled=True,
         owner_battle_test_enabled=True,
         prompt_context_config=prompt_context_config or GlossaryPromptContextConfig(),
+        max_source_characters=max_source_characters,
         reducer_caps=GlossaryCandidateReducerCaps(
             max_editor_entries=20,
             max_diagnostic_entries=20,

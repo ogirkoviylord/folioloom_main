@@ -217,6 +217,21 @@ This is evidence only: no runtime behavior, provider calls, cache reuse,
 deployment, durable state/storage/admin/retention changes or release/privacy/
 legal/support claims are approved.
 
+Issue #672 implementation slice on 2026-06-17 changes the prepared-package
+runtime applicability path so a #610 READY package with target metadata can
+render bounded glossary context when the current work unit contains the source
+canonical term or a safe alias even if provider/prep source refs do not match
+the exact runtime unit refs. Source refs are now kept as metadata/confidence
+diagnostics, not a universal hard blocker. Risky alias-only matches are skipped
+with metadata-only counts. Prepared-package source-size pressure is recorded in
+runner preflight metadata and no longer automatically vetoes context when the
+bounded glossary context fits. #465 cache bypass remains tied only to rendered
+context. Details are in
+`docs/superpowers/specs/2026-06-17-prepared-glossary-runtime-applicability-fix.md`.
+This does not approve live provider calls, Telegram operation by Codex,
+provider config/key changes, cache reuse, deployment, durable state/storage/
+admin/retention changes or release/privacy/legal/support claims.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
