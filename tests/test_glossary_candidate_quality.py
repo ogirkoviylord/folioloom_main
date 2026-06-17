@@ -1,5 +1,6 @@
 import json
 import unittest
+from types import SimpleNamespace
 
 from translator_service.glossary_candidate_quality import (
     filter_prepared_glossary_candidates,
@@ -103,6 +104,22 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
                 "prepared-glossary-candidate-quality:v1:"
             )
         )
+
+    def test_quality_decisions_use_source_entry_id_when_entry_id_is_absent(self):
+        entry = SimpleNamespace(
+            source_entry_id="entry:prepared-darcy",
+            source_canonical="Darcy",
+            aliases=(),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            (entry,),
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual(result.decisions[0].entry_id, "entry:prepared-darcy")
+        self.assertEqual(result.entries, (entry,))
 
 
 def _entry(
