@@ -144,6 +144,22 @@ cache bypass only when glossary context renders. This is wiring/diagnostic
 evidence only; live glossary quality, release readiness, cache reuse and
 provider/config changes remain unapproved.
 
+Issue #663 implementation slice on 2026-06-17 adds a local/default-safe
+prepared glossary candidate-quality policy before prepared-glossary prep
+packets cross the provider/fake-provider boundary. The policy rejects obvious
+pronoun/function-word/common-phrase and chapter/frontmatter boilerplate
+candidates, prunes low-value aliases, emits metadata-only counts/reason codes,
+and updates the prepared candidate selector signature. If all selected
+candidates are dropped by this local quality gate, prep falls back before
+provider invocation with
+`prepared_glossary_prep_candidate_quality_no_candidates`. This keeps the
+glossary core language-neutral, does not rewrite the scanner, does not call
+live providers, does not operate Telegram, does not change cache reuse,
+provider config, DB/schema/storage/admin/retention behavior or release/privacy
+claims, and does not prove real-book glossary quality. Follow-ups #664/#665
+and #666 remain required for package-level READY enforcement, metadata-only
+audit evidence and scanner-v2 architecture decision.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
