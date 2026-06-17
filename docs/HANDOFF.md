@@ -189,6 +189,16 @@ prove semantic/literary glossary quality, provider behavior, live smoke
 readiness, rollout, cache reuse or release/privacy/legal/support readiness.
 Follow-up #666 remains required for the scanner-v2 architecture decision.
 
+Issue #666 architecture slice on 2026-06-17 records the scanner-v2 decision:
+keep deterministic scanner v1 plus #663/#664 candidate-quality gates for now
+and do not rewrite the scanner in-place. The #665 audit is sufficient to defer
+scanner v2 from this chain, but not sufficient to claim real provider behavior,
+real-book translation quality or broad scanner coverage. Future scanner v2, if
+needed, must be a separately approved versioned shadow extractor with
+metadata-only v1/v2 comparison metrics, no runtime switch, no live provider
+calls, no cache reuse and no release/privacy/legal/support claims. Details are
+in `docs/superpowers/specs/2026-06-17-glossary-scanner-v2-decision.md`.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,

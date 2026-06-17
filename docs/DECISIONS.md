@@ -17,6 +17,54 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-17 - Keep glossary scanner v1 plus candidate-quality gates; defer scanner v2
+
+Status: Active architecture direction for #661 follow-up
+
+Decision:
+- Do not rewrite the deterministic glossary scanner in-place for the #661
+  candidate-quality follow-up.
+- Keep scanner v1 as the active local extractor and rely on the safer
+  post-scanner gates added by #663 and #664:
+  - #663 filters low-value prepared-prep candidates before fake/provider
+    boundaries;
+  - #664 prevents structurally valid all-low-value prepared packages from
+    becoming READY.
+- Use #665 metadata-only audit as the current local evidence baseline.
+- Scanner v2 may be considered later only as a separately approved, versioned,
+  shadow-only extractor if future metadata-only audits, bounded provider
+  evidence, or owner-reviewed battle-tests show v1 plus gates are still
+  insufficient.
+- This decision does not approve scanner-v2 implementation, runtime rollout,
+  prompt rollout, live provider calls, cache reuse, provider config changes,
+  DB/schema/state/storage/admin/retention changes, deployment or
+  release/privacy/legal/support claims.
+
+Evidence:
+- Issue #665 local metadata-only audit over three committed fixtures recorded
+  20 prep input candidates, 18 selected after #663, 2 dropped, 18
+  package-selected entries after #664, 0 package-level drops, 3 ready fake/local
+  cases and low-value candidate rate 0.1.
+- The audit report is documented in
+  `docs/superpowers/specs/2026-06-17-prepared-glossary-candidate-quality-audit.md`.
+- The #666 architecture decision is documented in
+  `docs/superpowers/specs/2026-06-17-glossary-scanner-v2-decision.md`.
+
+Consequences:
+- Future work should tune candidate-quality gates and package adjudication
+  before proposing broad scanner extraction rewrites.
+- A future scanner-v2 issue must be shadow-only first, compare v1/v2 using
+  metadata-only metrics, preserve raw/secret boundaries, and define explicit
+  switch/rollback criteria.
+- Real provider behavior, real-book translation quality and broader scanner
+  coverage remain `Unknown`.
+
+Human approval required to change:
+- yes; scanner-v2 implementation, switching active scanner behavior, runtime
+  rollout, cache reuse, live provider work, provider config changes, durable
+  state/storage/admin/retention changes or release/privacy/legal/support claims
+  require separate explicit owner approval.
+
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
 Status: Active architecture/product direction; implemented locally through
