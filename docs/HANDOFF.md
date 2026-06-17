@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## 1. Текущее состояние проекта
 
@@ -257,8 +257,23 @@ selected-candidate, candidate-quality, validation and package-signature
 metadata. Details are in
 `docs/superpowers/specs/2026-06-17-prepared-glossary-package-cap-rebalance.md`.
 The package validator's broad structural maximum is unchanged, #663/#664
-low-value gates remain active, and real provider/translation-quality impact is
-`Unknown` until #675.
+low-value gates remain active.
+
+Issue #675 bounded live smoke on 2026-06-17 ran after #671-#674 were closed and
+after fake/dry preflight selected a glossary-useful pressure-safe control-EPUB
+unit. The metadata-only live report is
+`outputs/issue-675-glossary-effectiveness-smoke/20260617T170414Z/metadata_report.json`.
+The run used the approved committed Gutenberg control EPUB targeting `ru`,
+completed 2 provider calls and 23164 provider-reported tokens within the
+approved 4-call / 60000-token cap, validated a #610 READY prepared package with
+15 ready entries, selected runtime unit sequence 9, rendered one bounded
+glossary context, observed #465 `bypass_glossary_injected_cache`, passed
+runtime structural validation for 7/7 translated blocks and produced a
+metadata-only glossary compliance `pass` for 1/1 included entry. Details are in
+`docs/superpowers/specs/2026-06-17-glossary-effectiveness-smoke-report.md`.
+This is narrow provider-boundary evidence only: broad real-book quality,
+morphology coverage, cache reuse, deployment and release/privacy/legal/support
+readiness remain `Unknown`/not approved.
 
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package

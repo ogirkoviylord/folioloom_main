@@ -45,12 +45,17 @@ Evidence:
   selector/package signature changes and low-value gate preservation.
 - The #674 contract is documented in
   `docs/superpowers/specs/2026-06-17-prepared-glossary-package-cap-rebalance.md`.
+- Issue #675 later recorded a narrow passing bounded control-EPUB provider
+  smoke after #674: READY package, rendered context, #465 cache bypass,
+  runtime structural pass and metadata-only compliance pass for one included
+  entry.
 
 Consequences:
 - Future fake/provider prep packets will contain up to 16 local selected
   candidates by default before provider/package validation.
-- Real provider behavior and real translation-quality impact remain `Unknown`
-  until #675.
+- Real provider behavior now has one bounded passing control-EPUB smoke after
+  #675, but broad real-book quality, morphology coverage, cache reuse and
+  release readiness remain `Unknown`/not approved.
 - Future cap increases or decreases should be evidence-driven and recorded in
   issue scope/docs.
 
@@ -184,6 +189,12 @@ Evidence:
   validation with `prepared_glossary_package_needs_review`; `uk` rendered
   glossary context and used #465 cache bypass, but runtime structural
   validation failed with `block_count_mismatch`.
+- Issue #675 metadata-only report
+  `outputs/issue-675-glossary-effectiveness-smoke/20260617T170414Z/metadata_report.json`
+  records a later bounded passing control-EPUB smoke after #671-#674:
+  2 provider calls, 23164 provider-reported tokens, #610 READY package,
+  rendered context, #465 cache bypass, runtime structural pass and compliance
+  pass for one included entry.
 
 Consequences:
 - Future implementers should stop adding new user-facing glossary mode choices
@@ -210,11 +221,16 @@ Consequences:
   matches those refs, instead of requiring unit-local scanner rediscovery.
   #646 then ran as the first bounded live smoke gate. It stayed within the
   approved report-directory call/token bounds, but failed on prepared-package
-  readiness for `ru` and runtime structural validation for `uk`.
+  readiness for `ru` and runtime structural validation for `uk`. After #671
+  through #674, #675 recorded a narrow passing provider-boundary smoke on the
+  approved control EPUB targeting `ru`; this improves confidence that the
+  prepared-package -> rendered-context -> cache-bypass -> runtime-provider path
+  can work for one bounded case.
 - Any broader rollout beyond the approved default integration path, cache
   reuse, provider-config change, storage/admin/retention change, deployment or
   release/privacy/legal/support claim still needs separate owner approval.
-  Successful automatic live-smoke evidence is still missing.
+  Broad real-book quality, morphology coverage, cache reuse and release
+  readiness remain `Unknown`/not approved.
 
 Human approval required to change:
 - yes; changing the default glossary rollout posture, cache behavior, provider
