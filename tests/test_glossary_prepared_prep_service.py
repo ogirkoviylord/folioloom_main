@@ -164,6 +164,79 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         self.assertIn("prepared_glossary_prep_no_candidates", result.reason_codes)
         self.assertEqual(result.metadata["selected_candidate_count"], 0)
 
+    def test_low_value_candidates_fall_back_before_provider(self):
+        provider_calls = []
+        content = (
+            b"Then He walked away. Then He returned. "
+            b"Now He waited. Now He spoke. "
+            b"But He listened. But He answered. "
+            b"In God we trust. In God we wait."
+        )
+        request = _request(content)
+
+        result = PreparedGlossaryPrepService(
+            provider=lambda provider_request: provider_calls.append(provider_request),
+        ).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertEqual(provider_calls, [])
+        self.assertIn(
+            "prepared_glossary_prep_candidate_quality_no_candidates",
+            result.reason_codes,
+        )
+        self.assertEqual(result.metadata["selected_candidate_count"], 0)
+        self.assertEqual(
+            result.metadata["candidate_quality"]["selected_candidate_count"],
+            0,
+        )
+        self.assertGreater(
+            result.metadata["candidate_quality"]["dropped_candidate_count"],
+            0,
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Then He", metadata_text)
+        self.assertNotIn("In God", metadata_text)
+
+    def test_candidate_quality_prunes_packet_aliases_and_keeps_valid_candidates(self):
+        content = (
+            b"Then He walked away. Then He returned. "
+            b"Mr. Darcy met Alice at Pemberley. "
+            b"Darcy returned to Pemberley with Alice. "
+            b"Mr. Darcy wrote to Alice again."
+        )
+        request = _request(content)
+        provider_requests = []
+
+        def provider(provider_request):
+            provider_requests.append(provider_request)
+            return _package_from_packet(provider_request.packet)
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(len(provider_requests), 1)
+        packet_candidates = provider_requests[0].packet["candidates"]
+        sources = [candidate["source_canonical"] for candidate in packet_candidates]
+        aliases = {
+            alias
+            for candidate in packet_candidates
+            for alias in candidate["aliases"]
+        }
+        self.assertNotIn("Then He", sources)
+        self.assertNotIn("Then", aliases)
+        self.assertNotIn("He", aliases)
+        self.assertTrue({"Mr Darcy", "Alice", "Pemberley"} & set(sources))
+        self.assertGreater(
+            result.metadata["candidate_quality"]["dropped_candidate_count"],
+            0,
+        )
+        self.assertGreater(
+            result.metadata["candidate_quality"]["alias_omitted_count"],
+            0,
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Then He", metadata_text)
+
     def test_provider_usage_required_falls_back_metadata_only_when_missing(self):
         request = _request(_source_content())
 
