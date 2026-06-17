@@ -108,6 +108,34 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
             "uk",
         )
 
+    def test_provider_low_value_package_is_not_ready(self):
+        request = _request(_source_content(), target_language="ru")
+
+        def provider(provider_request):
+            payload = _package_from_packet(provider_request.packet)
+            payload["entries"][0]["source_entry_id"] = "entry:then-he"
+            payload["entries"][0]["source_canonical"] = "Then He"
+            payload["entries"][0]["aliases"] = ["Then", "He"]
+            return payload
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertIsNone(result.payload)
+        self.assertEqual(result.metadata["validation"]["status"], "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        self.assertEqual(
+            result.metadata["validation"]["quality"]["dropped_candidate_count"],
+            1,
+        )
+        self.assertNotIn(
+            "Then He",
+            json.dumps(result.metadata, ensure_ascii=False),
+        )
+
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())
 
