@@ -204,9 +204,9 @@ evidence: `ru` prep returned HTTP 200 but failed #610 READY validation with
 `prepared_glossary_package_needs_review`, while `uk` prep returned READY,
 rendered glossary context and used #465 cache bypass, but runtime structural
 validation failed with `block_count_mismatch`. Treat #646 as provider-boundary
-failure evidence only; successful automatic live-smoke evidence, broader
-default confidence, cache reuse, deployment and release/privacy/legal/support
-claims remain unapproved.
+failure evidence only. Later #675 records one bounded passing control-EPUB
+smoke, but broader default confidence, cache reuse, deployment and
+release/privacy/legal/support claims remain unapproved.
 
 R-041 update note, 2026-06-17: issue #663 adds a local/default-safe prepared
 glossary candidate-quality policy before prepared-glossary prep packets reach
@@ -289,10 +289,23 @@ default to 16 candidates / 4800 estimated editor tokens. The change is based on
 #671 metadata-only audit evidence that cap 8 was likely too narrow while cap 24
 carried higher noise/pressure risk. #663/#664 low-value candidate/package
 quality gates remain active, package validation remains separate, and real
-provider behavior plus translation-quality impact remain `Unknown` until #675.
+provider behavior now has only the narrow #675 passing control-EPUB smoke;
+broad translation-quality impact remains `Unknown`.
 This does not approve live provider calls, provider config/key changes, cache
 reuse, scanner-v2 rewrite, runtime rollout, durable state/storage/admin/
 retention changes, deployment or release/privacy/legal/support claims.
+
+R-041 update note, 2026-06-17: issue #675 runs the owner-approved bounded
+glossary effectiveness smoke after #671-#674 local gates. The metadata-only
+report records 2 provider calls and 23164 provider-reported tokens within the
+approved cap, a #610 READY package with 15 ready entries, one rendered glossary
+context on selected control-EPUB unit sequence 9, #465 cache bypass, runtime
+structural validation pass for 7/7 translated blocks and glossary compliance
+pass for 1/1 included entry. Treat #675 as narrow provider-boundary evidence
+that the prepared-package -> rendered-context -> cache-bypass -> runtime
+provider path can work for one approved fixture/target. It does not prove broad
+real-book quality, morphology coverage, cache reuse, runtime rollout,
+deployment or release/privacy/legal/support readiness.
 
 ### Product risks
 
