@@ -17,6 +17,76 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-17 - Standing bounded test approval preset for owner-operated development
+
+Status: Active test-approval policy for local/fake/dry tests and narrow
+bounded provider-smoke tests
+
+Decision:
+- For development/testing issues, agents may choose conservative recommended
+  test parameters without asking the owner for a fresh per-run approval when
+  the task is scoped by a GitHub issue or explicit owner request, has
+  acceptance criteria and verification plan, and stays inside the standing
+  bounds below.
+- Local/fake/dry tests are allowed when they use committed fixtures,
+  Project Gutenberg/public-domain or otherwise permissive examples with
+  recorded source, or owner-provided local files already available in the owner
+  workspace. Outputs must stay local or metadata-only unless the owner
+  explicitly asks otherwise.
+- Live provider tests are allowed only when the issue/test scope calls for a
+  bounded provider smoke/evidence run, local/fake/dry preflight runs first,
+  and the run stays within these default caps:
+  - max `4` live calls;
+  - max `60000` provider-reported tokens total;
+  - existing approved test provider/config only as temporary process
+    environment;
+  - DeepSeek-compatible `deepseek-v4-pro` as the default glossary-prep/provider
+    evidence model;
+  - runtime translation provider/model unchanged unless a separate issue
+    explicitly approves otherwise;
+  - diagnostics only under an untracked local owner-only
+    `outputs/<issue-or-purpose>/<timestamp>/` directory;
+  - raw capture limited to bounded excerpts, prompts and provider responses
+    needed for the test.
+- Ordinary logs, GitHub issues/PRs, committed docs, support/release artifacts
+  and normal user/admin surfaces must remain metadata-only/redacted. Raw
+  source text, prompt bodies, provider responses, translated text, API keys,
+  provider auth material and private diagnostics must not be copied into those
+  ordinary artifacts.
+- Runs must stop on cap breach, invalid schema/validation, auth/billing/rate
+  limit blocker, timeout that prevents safe accounting, or secret-pattern
+  findings.
+- This standing preset is not release evidence and does not prove glossary
+  quality, translation quality, provider stability, production readiness,
+  privacy/legal readiness or beta readiness.
+
+Evidence:
+- The owner explicitly requested in the Codex thread on 2026-06-17 that agents
+  choose recommended parameters for tests and stop repeatedly asking for
+  test-run approval.
+- The same owner direction asked to record the policy in docs and agent
+  instructions.
+
+Consequences:
+- Future agents may use the preset for issue-scoped local/fake/dry tests and
+  narrow bounded provider-smoke tests, including glossary evidence tests such
+  as #675, without a fresh approval comment when all bounds are satisfied.
+- If an issue states a lower cap, the lower cap wins. If an issue needs more
+  calls/tokens, new inputs outside the allowed set, a different provider/model,
+  deployment/server operations, Telegram operation by Codex, provider config
+  changes, cache reuse or any durable state/storage/admin/retention change, it
+  still needs exact owner approval.
+- The preset does not weaken rights confirmation, beta allowlist, cost/cap
+  guards, kill switch, SSH-tunnel-only admin, #465 cache bypass, release
+  gates, raw diagnostic boundaries or secret redaction.
+
+Human approval required to change:
+- yes; expanding the caps, allowed inputs, provider/model set, raw diagnostic
+  publication rules, deployment/server/Telegram operation scope, cache reuse,
+  provider config changes, durable state/storage/admin/retention behavior or
+  release/privacy/legal/support claims requires separate explicit owner
+  approval.
+
 ### 2026-06-17 - Keep glossary scanner v1 plus candidate-quality gates; defer scanner v2
 
 Status: Active architecture direction for #661 follow-up

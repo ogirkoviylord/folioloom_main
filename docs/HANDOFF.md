@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## 1. Текущее состояние проекта
 
@@ -23,6 +23,20 @@ health/admin app, persistent job/work-unit foundation, worker/scheduler,
 TXT/DOCX/EPUB adapters, DeepSeek-compatible provider layer, admin visibility,
 beta allowlist, rights confirmation, beta cost/cap guard, Docker Compose stack
 и backup/restore scripts.
+
+Owner-approved standing test preset, 2026-06-17: for issue-scoped
+development/testing work, agents may choose conservative recommended
+parameters for local/fake/dry tests and narrow bounded provider-smoke tests
+without repeatedly asking for per-run approval when they stay inside
+`docs/DECISIONS.md` / `AGENTS.md` bounds. Default live-provider bounds are max
+4 live calls and max 60000 provider-reported tokens total, with fake/dry
+preflight first, existing approved test provider/config only, untracked
+owner-only diagnostics under `outputs/<issue-or-purpose>/<timestamp>/`, and
+metadata-only ordinary artifacts. This does not approve deployment/server
+operations, Telegram operation by Codex, provider config/key changes,
+database/schema/state/storage/admin/retention changes, cache reuse,
+destructive operations, new production dependencies, release/privacy/legal/
+support claims or release readiness.
 
 Issue #641 implementation slice on 2026-06-15 removes the temporary Telegram
 glossary selector from the normal bot flow. New supported Telegram translation

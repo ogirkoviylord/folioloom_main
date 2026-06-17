@@ -16,7 +16,10 @@
 - Тесты добавлены или причина отсутствия тестов объяснена.
 - Docs обновлены, если изменилось поведение, контракт, запуск, эксплуатация или риск.
 - High-risk зоны не изменяются без explicit human approval.
-- Secrets, `.env*`, реальные ключи и runtime user data не трогаются.
+- В Owner local development mode можно читать и обсуждать в owner-чате
+  secrets, `.env*`, реальные ключи, raw text and runtime diagnostics, если это
+  нужно для задачи. Нельзя коммитить, публиковать, внешне отправлять или
+  изменять их без explicit owner approval.
 - Production dependencies не добавляются без explicit human approval.
 - Deployment, payments, pricing, auth, security, legal/privacy, user data handling и database migrations не меняются без explicit human approval.
 - Проект нельзя называть public production-ready без подтвержденного Gate D и human owner approval.
@@ -116,7 +119,9 @@ Provider retry -> runtime architecture-review gate:
 
 - The local/fake output gate above must pass.
 - There must be explicit metadata-only provider retry evidence from an
-  owner-approved bounded run; fake/local results alone are not enough.
+  owner-approved bounded run; fake/local results alone are not enough. The
+  2026-06-17 standing bounded test approval preset in `docs/DECISIONS.md` may
+  provide that approval only when the run stays inside its caps and scope.
 - Observed provider token usage must stay within the owner-approved token cap,
   or the overrun must block readiness and be documented as a failure.
 - Raw prompts, fixture excerpts and provider responses must remain only in the
@@ -127,6 +132,29 @@ Provider retry -> runtime architecture-review gate:
   not approve runtime translation integration, cache changes, storage,
   database/state, admin UI, retention policy, release/privacy claims or live
   provider work.
+
+Standing bounded test approval preset:
+
+- For issue-scoped development/testing work, agents may choose conservative
+  recommended test parameters without asking for a fresh per-run approval when
+  the run fits the active `docs/DECISIONS.md` standing preset.
+- Local/fake/dry preflight remains required before live provider calls.
+- Default live-test caps under the preset are max `4` live calls and max
+  `60000` provider-reported tokens total, or the lower cap stated by the
+  issue/task.
+- Allowed inputs are committed fixtures, Project Gutenberg/public-domain or
+  otherwise permissive examples with recorded source, and owner-provided local
+  files already available in the owner workspace.
+- Diagnostics must stay under an untracked local owner-only `outputs/<issue-or-
+  purpose>/<timestamp>/` directory, with ordinary artifacts metadata-only and
+  redacted.
+- The preset does not approve deployment/server operations, Telegram operation
+  by Codex, provider config/key/secrets edits, database/schema/state/runtime
+  data mutation, retention/export/delete changes, auth/security, payments,
+  legal/privacy/support claims, new production dependencies, destructive
+  operations, cache reuse or release readiness.
+- Stop on cap breach, invalid schema/validation, auth/billing/rate-limit
+  blocker, timeout that prevents safe accounting, or secret-pattern findings.
 
 ### Glossary terminology policy
 
@@ -266,14 +294,14 @@ Recommended:
 | --- | --- | --- | --- | --- | --- |
 | Database migrations | Может изменить durable job/work-unit state, scheduler correctness, SQLite/Postgres compatibility и recoverability. | Human owner approval до schema/state changes. | Targeted DB tests, scheduler/job tests, backup/restore impact check, compileall, relevant full suite. | План отката данных или forward-fix, backup before migration, restore rehearsal для release. | Обновить decisions/runbooks/context docs; указать compatibility и data handling. |
 | Production deployment | Затрагивает VPS, availability, secrets, runtime data, admin exposure и user impact. | Human owner approval перед deploy. | `scripts/predeploy_check.sh`; на сервере `scripts/server_smoke_check.sh`; проверить health/admin tunnel only. | Rollback version/command, backup status, owner contact path. | Deployment notes/runbook update, release evidence. |
-| Secrets | Утечка ключей Telegram/DeepSeek/admin/Postgres может скомпрометировать сервис и пользователей. | Human owner approval; real secrets не читать и не выводить. | Secret redaction checks, admin secrets tests, no real secrets in diff/logs. | Rotation plan for touched/possibly exposed secret. | Документировать только безопасные placeholders и masking rules. |
+| Secrets | Утечка ключей Telegram/DeepSeek/admin/Postgres может скомпрометировать сервис и пользователей. | Human owner approval требуется для изменения, коммита, публикации, внешней отправки или ротации; локальное чтение/debug discussion в owner-чате разрешены, когда нужны для задачи. | Secret redaction checks, admin secrets tests, no real secrets in committed diff/public logs. | Rotation plan for touched/possibly externally exposed secret. | Документировать только безопасные placeholders и masking rules, если owner явно не попросил raw material. |
 | Auth/security | Может ослабить admin access, RBAC, sessions, audit, telemetry или safety boundaries. | Human owner approval and Reviewer pass. | Relevant admin/auth/security tests, negative tests, `scripts/predeploy_check.sh` for release-adjacent changes. | Disable/revert plan, session/key invalidation if needed. | Update `docs/DECISIONS.md` only after approval; preserve SSH-tunnel-only admin rule. |
-| Privacy/legal | Пользователь загружает documents with rights-sensitive content; неверный текст создает legal/privacy risk. | Human owner approval; legal/privacy claims need owner/counsel decision. | Docs review, no raw document text in logs/telemetry/normal admin views or public/support artifacts outside approved owner-only diagnostics and full diagnostic downloads, redaction checks. | Remove/replace unapproved claims before release. | Use `TBD` for human legal decisions; do not invent policies. |
+| Privacy/legal | Пользователь загружает documents with rights-sensitive content; неверный текст создает legal/privacy risk. | Human owner approval нужен для public/legal/privacy claims and external publication; локальное owner-chat использование raw text для разработки/QA разрешено. | Docs review, no raw document text in committed/public logs, telemetry, normal admin views or support artifacts unless explicitly owner-approved for that artifact; redaction checks for public surfaces. | Remove/replace unapproved claims before release. | Use `TBD` for human legal decisions; do not invent policies. |
 | Payments/pricing | Paid beta blocked; payment errors affect money, refunds, support and compliance. | Human owner approval before any payment/pricing changes. | Payment ledger/idempotency/refund/support tests if implemented; Gate C requirements. | Refund/reconciliation rollback path, disable paid path. | Pricing/payment docs marked draft until Gate C approval. |
 | External API providers | Telegram/DeepSeek failures affect user flow, cost, provider keys and safe diagnostics. | Human owner approval for provider contract/user-facing changes, raw provider IO diagnostics or key handling. | Provider runtime/key pool/probe tests, safe error messaging tests, no key/raw text leakage outside approved owner-only diagnostic archives. | Provider disable/circuit breaker or config rollback path. | Keep provider picker non-user-facing; document raw provider IO only inside approved owner-only diagnostic boundaries. |
 | Upload malware/AV scanning | Scanner contract, ClamAV/local daemon integration, quarantine status, scanner errors and any public scanning service can affect privacy, user data, deployment, dependencies and release readiness. | Human owner approval before production dependency, Docker/deployment, external scanning, retention or runtime data changes. | Scanner verdict tests for clean/infected/error/timeout/unavailable; EICAR or equivalent safe AV fixture; upload flow tests proving unscanned/infected files never reach parser/workers; redaction tests; compileall. | Disable scanner gate only by explicit owner-approved beta deferral; retain quarantine state and safe rejection path; rollback scanner adapter/config without exposing files. | Update upload-safety docs, release gates, risk register and handoff; do not claim malware scanning implemented without evidence. |
 | Admin provider controls and diagnostics | Key testing, key weight/max parallel, runtime reload, beta safety, queue controls, text/provider IO diagnostics and provider capacity can affect cost, reliability, scheduler behavior, user data and secrets/admin safety. | Human owner approval for new or expanded writable/provider behavior or raw-text/raw-provider diagnostic access beyond the approved owner-only surface. | Admin rendering/route tests, provider runtime/key-pool/probe tests when behavior changes, redaction tests proving telemetry/normal views/API/support artifacts remain redacted, scheduler/worker tests for capacity/state changes, compileall. | Restore previous setting/control value, runtime reload when applicable, monitor provider/cost/queue state; remove unapproved raw-text/raw-provider surfaces. | Preserve issue #30 guard: bulk key tests pause during active translations/provider requests; keep raw text and raw provider IO confined to approved owner-only diagnostics/downloads; never persist provider `Authorization` headers or API keys in diagnostic artifacts; do not claim production monitoring or paid billing readiness. |
-| User data | Runtime files, object storage, documents, logs, text diagnostics and retention affect privacy and recoverability. | Human owner approval before changing retention, delete, storage, backup behavior or raw-text access beyond the approved owner-only diagnostic surface. | File storage tests, retention/delete tests, backup/restore checks, no raw text leakage outside approved owner-only diagnostics/downloads. | Backup before destructive changes; restore or recovery plan; remove unapproved raw-text exposure. | Update retention/upload-safety/admin diagnostics docs; mark Unknown/TBD where evidence is missing. |
+| User data | Runtime files, object storage, documents, logs, text diagnostics and retention affect privacy and recoverability. | Human owner approval before changing retention, delete, storage, backup behavior or publishing raw text outside the local owner workspace. Local read/debug inspection is allowed when relevant. | File storage tests, retention/delete tests, backup/restore checks, no raw text leakage into committed/public artifacts without owner approval. | Backup before destructive changes; restore or recovery plan; remove unapproved external raw-text exposure. | Update retention/upload-safety/admin diagnostics docs; mark Unknown/TBD where evidence is missing. |
 | Destructive operations | Can delete source/final/partial/quarantine files, DB rows, backups or git work. | Explicit human approval for each destructive action. | Dry run where possible, target path verification, backup status check. | Restore plan before execution. | Record what was deleted, why, approval, and recovery path. |
 | Public API contracts | Contract changes can break bot/admin/worker integrations and future clients. | Human approval for public/user-visible or cross-component contract changes. | Contract tests, affected caller tests, backward compatibility check. | Compatibility shim or rollback path. | Update relevant docs and acceptance criteria. |
 | New dependencies | Adds maintenance, security, licensing, deploy and reproducibility risk. | Human approval before adding production dependencies. | Dependency import tests, lock/install verification if applicable, security/license review if required. | Remove dependency or pin rollback plan. | Update `pyproject.toml` rationale and docs only after approval. |

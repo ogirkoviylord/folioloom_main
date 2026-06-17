@@ -14,6 +14,63 @@
   keep code, commands, file paths, tool names, and quoted source text in their
   original language.
 
+## Owner local development mode
+
+Default assumption in this repository: the current chat is an owner-operated
+local development workspace.
+
+Allowed without extra confirmation when relevant to the task:
+
+- read local project files, fixtures, outputs, `var/`, artifacts, diagnostics
+  and run logs;
+- read real `.env*` files, keys, tokens, passwords, raw provider payloads,
+  prompts, raw document text, translations and diagnostic files;
+- quote or discuss that material in this owner chat;
+- use owner-provided or local files for development, testing, debugging,
+  translation QA and evaluation without repeatedly asking for rights
+  confirmation.
+
+This local permission does not allow publishing or committing private material.
+Do not put raw secrets, raw document text, raw provider bodies, private
+diagnostics or long copyrighted excerpts into GitHub issues/PRs, committed
+docs, release artifacts, public/support/customer surfaces or external services
+unless the owner explicitly asks for that exact action.
+
+## Standing test approval preset
+
+Owner-approved as of 2026-06-17: for development/testing issues, agents may
+choose conservative recommended test parameters without asking the owner for a
+fresh per-run approval when all of these constraints hold:
+
+- the task is scoped by a GitHub issue or explicit owner request with
+  acceptance criteria and verification plan;
+- local/fake/dry tests run before any live provider call;
+- inputs are committed fixtures, Project Gutenberg/public-domain or otherwise
+  permissive examples with recorded source, or owner-provided local files
+  already available in this owner workspace;
+- live provider tests, when in scope, use existing approved test
+  provider/config only as temporary process environment, make at most `4`
+  live calls and use at most `60000` provider-reported tokens total unless the
+  issue states a lower cap;
+- DeepSeek-compatible `deepseek-v4-pro` is the default glossary-prep/provider
+  evidence model, and the runtime translation provider/model remains unchanged
+  unless a separate issue explicitly approves otherwise;
+- diagnostics are written only under an untracked local `outputs/<issue-or-
+  purpose>/<timestamp>/` owner-only directory, with raw capture limited to
+  bounded excerpts, prompts and provider responses needed for the test;
+- ordinary logs, GitHub issues/PRs, committed docs, support/release artifacts
+  and normal user/admin surfaces stay metadata-only/redacted;
+- the run stops on cap breach, invalid schema/validation, auth/billing/rate
+  limit blocker, timeout that prevents safe accounting, or secret-pattern
+  findings.
+
+This standing preset does not approve deployment, server operations, Telegram
+operation by Codex, provider config/key/secrets edits, database/schema/state
+or runtime data mutation, retention/export/delete changes, auth/security,
+payments, legal/privacy/support claims, new production dependencies,
+destructive operations, cache reuse, or release/public-production readiness.
+Any test outside these bounds still requires exact owner approval.
+
 ## Routing rules
 
 Before any task, read this file. Then route by task type:
@@ -66,14 +123,18 @@ ambiguous, cross-role, risky, or multi-step tasks.
 
 ## Human approval gates
 
-Do not change or operate on these areas without explicit human approval:
+Do not change, publish, deploy, destructively operate on, or externalize these
+areas without explicit human approval:
 
-- secrets, real `.env*` files, keys, tokens, passwords, or secret storage;
+- secrets, real `.env*` files, keys, tokens, passwords, or secret storage
+  outside local read/debug/chat use;
 - deployment, Docker, server scripts, production operations, bind addresses, or public admin exposure;
 - payments, pricing, billing, refunds, paid jobs, payment UI, or payment/provider policy;
 - auth, security, RBAC, sessions, admin access, security telemetry, or redaction boundaries;
-- legal/privacy/AUP/refund/support text or user-data handling;
-- database schema/state, migrations, scheduler/job/work-unit state, retention, TTL, backups, restore, runtime `var/`, or destructive operations;
+- legal/privacy/AUP/refund/support text or public user-data handling policy;
+- database schema/state, migrations, scheduler/job/work-unit state, retention,
+  TTL, backups, restore, runtime `var/`, or destructive operations beyond
+  local read/debug inspection;
 - new production dependencies;
 - expanding product scope beyond Telegram-first closed beta, TXT/DOCX/EPUB, or the approved MVP.
 
@@ -91,7 +152,10 @@ If approval is missing, stop at analysis and propose a safe plan. Never treat be
 
 - Start reviews with blockers, risks, missing evidence, and required human decisions.
 - Check scope, diff, tests run, docs impact, high-risk files, approval status, and release gate impact.
-- Verify no raw document text, prompts, translations, API keys, secrets, provider internals, stack traces, or unsafe user data appear in logs, admin views, telemetry, docs, or artifacts outside explicitly owner-approved dedicated diagnostic surfaces.
+- Verify no raw document text, prompts, translations, API keys, secrets,
+  provider internals, stack traces, or unsafe user data are committed or
+  published outside owner-approved local diagnostics, owner chat, or exact
+  owner-requested artifacts.
 - Check that rights confirmation, beta allowlist, cost caps, kill switch, SSH-tunnel-only admin, and payment/public-production gates were not weakened.
 - For docs-only changes, confirm facts are evidenced and `TBD`/`Unknown` are used honestly.
 - For code changes, require focused tests and the relevant gates from `docs/QUALITY_GATES.md`; broader/shared changes need broader verification.
