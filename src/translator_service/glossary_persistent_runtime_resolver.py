@@ -84,6 +84,58 @@ _SUPPORTED_PERSISTENT_GLOSSARY_DOCUMENT_FORMATS = frozenset(
         DocumentFormat.EPUB.value,
     )
 )
+_RISKY_ALIAS_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9']*")
+_RISKY_ALIAS_TOKENS = frozenset(
+    {
+        "a",
+        "about",
+        "all",
+        "an",
+        "and",
+        "as",
+        "at",
+        "by",
+        "for",
+        "from",
+        "he",
+        "her",
+        "him",
+        "his",
+        "i",
+        "in",
+        "it",
+        "its",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "our",
+        "she",
+        "so",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "they",
+        "this",
+        "to",
+        "us",
+        "we",
+        "with",
+        "you",
+        "your",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _PreparedEntrySourceMatch:
+    matched: bool
+    canonical_present: bool
+    safe_alias_present: bool
+    risky_alias_only: bool
 
 
 @dataclass(frozen=True)
@@ -541,10 +593,6 @@ def _build_persistent_glossary_runtime_hook_from_prepared_entries(
     source_character_count = sum(len(block.text) for block in source_blocks)
     if not source_blocks or source_character_count == 0:
         return _fallback_hook(f"{reason_prefix}_source_text_empty")
-    if len(source_blocks) > config.max_source_blocks:
-        return _fallback_hook(f"{reason_prefix}_source_block_limit_exceeded")
-    if source_character_count > config.max_source_characters:
-        return _fallback_hook(f"{reason_prefix}_source_character_limit_exceeded")
 
     unit = FormatTranslationUnit(
         sequence=work_unit.sequence,
@@ -758,19 +806,35 @@ def _prepared_package_snapshot_for_work_unit(
         "entry_count": len(package.entries),
         "applicable_entry_count": 0,
         "target_metadata_missing_count": 0,
+        "source_ref_absent_count": 0,
+        "source_ref_match_count": 0,
         "source_ref_mismatch_count": 0,
         "source_term_missing_count": 0,
+        "source_canonical_match_count": 0,
+        "source_safe_alias_match_count": 0,
+        "source_risky_alias_only_count": 0,
     }
     for entry_index, prepared_entry in enumerate(package.entries):
         if not _prepared_entry_has_target_metadata(prepared_entry):
             counts["target_metadata_missing_count"] += 1
             continue
-        if not _prepared_entry_refs_match(prepared_entry, work_unit):
-            counts["source_ref_mismatch_count"] += 1
-            continue
-        if not _prepared_entry_source_matches(prepared_entry, source_text):
+        source_match = _prepared_entry_source_match(prepared_entry, source_text)
+        if not source_match.matched:
             counts["source_term_missing_count"] += 1
             continue
+        if source_match.risky_alias_only:
+            counts["source_risky_alias_only_count"] += 1
+            continue
+        if source_match.canonical_present:
+            counts["source_canonical_match_count"] += 1
+        if source_match.safe_alias_present:
+            counts["source_safe_alias_match_count"] += 1
+        if not prepared_entry.source_unit_refs and not prepared_entry.source_block_refs:
+            counts["source_ref_absent_count"] += 1
+        elif _prepared_entry_refs_match(prepared_entry, work_unit):
+            counts["source_ref_match_count"] += 1
+        else:
+            counts["source_ref_mismatch_count"] += 1
         entry_evidence_ids: list[str] = []
         for evidence_index, evidence_id in enumerate(prepared_entry.evidence_refs):
             unique_id = _unique_prepared_evidence_id(
@@ -828,21 +892,36 @@ def _prepared_package_snapshot_for_work_unit(
     metadata = {
         "schema_version": "prepared-glossary-package-runtime-bridge-v1",
         "status": "applied" if entries else "skipped",
-        "reason_codes": (
-            []
-            if entries
-            else ["prepared_package_runtime_bridge_no_applicable_entries"]
+        "reason_codes": _prepared_package_runtime_bridge_reason_codes(
+            entries=entries,
+            source_risky_alias_only_count=counts["source_risky_alias_only_count"],
         ),
         **counts,
         "metadata_only": True,
         "raw_payload_included": False,
-        "source_refs_required_when_present": True,
+        "source_refs_required_when_present": False,
+        "source_refs_used_as_diagnostics": True,
+        "source_presence_primary_applicability_signal": True,
+        "risky_alias_only_skipped": counts["source_risky_alias_only_count"] > 0,
         "normal_translation_prompts_changed": False,
         "live_provider_calls_allowed": False,
         "durable_state_mutation_allowed": False,
         "cache_mutation_allowed": False,
     }
     return snapshot, metadata
+
+
+def _prepared_package_runtime_bridge_reason_codes(
+    *,
+    entries: Sequence[GlossaryEntry],
+    source_risky_alias_only_count: int,
+) -> list[str]:
+    reason_codes: list[str] = []
+    if not entries:
+        reason_codes.append("prepared_package_runtime_bridge_no_applicable_entries")
+    if source_risky_alias_only_count > 0:
+        reason_codes.append("prepared_package_runtime_bridge_risky_alias_only")
+    return reason_codes
 
 
 def _prepared_entry_has_target_metadata(entry: PreparedGlossaryEntry) -> bool:
@@ -870,11 +949,46 @@ def _prepared_entry_source_matches(
     entry: PreparedGlossaryEntry,
     source_text: str,
 ) -> bool:
-    return any(
-        _source_term_present(term, source_text)
-        for term in (entry.source_canonical, *entry.aliases)
-        if term.strip()
+    return _prepared_entry_source_match(entry, source_text).matched
+
+
+def _prepared_entry_source_match(
+    entry: PreparedGlossaryEntry,
+    source_text: str,
+) -> _PreparedEntrySourceMatch:
+    canonical_present = _source_term_present(entry.source_canonical, source_text)
+    alias_matches = tuple(
+        alias
+        for alias in entry.aliases
+        if alias.strip() and _source_term_present(alias, source_text)
     )
+    safe_alias_present = any(
+        not _source_alias_is_risky(alias) for alias in alias_matches
+    )
+    risky_alias_only = (
+        bool(alias_matches)
+        and not canonical_present
+        and not safe_alias_present
+    )
+    return _PreparedEntrySourceMatch(
+        matched=canonical_present or safe_alias_present or risky_alias_only,
+        canonical_present=canonical_present,
+        safe_alias_present=safe_alias_present,
+        risky_alias_only=risky_alias_only,
+    )
+
+
+def _source_alias_is_risky(alias: str) -> bool:
+    normalized = alias.strip()
+    if len(normalized) < 4:
+        return True
+    tokens = tuple(
+        match.group(0).casefold()
+        for match in _RISKY_ALIAS_TOKEN_RE.finditer(normalized)
+    )
+    if tokens and all(token in _RISKY_ALIAS_TOKENS for token in tokens):
+        return True
+    return len(tokens) == 1 and normalized.islower() and len(normalized) <= 5
 
 
 def _unique_prepared_evidence_id(

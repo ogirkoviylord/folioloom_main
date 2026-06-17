@@ -260,6 +260,18 @@ it does not approve runtime changes, live provider calls, cache reuse,
 deployment, durable state/storage/admin/retention changes or release/privacy/
 legal/support claims.
 
+R-041 update note, 2026-06-17: issue #672 changes prepared-package runtime
+applicability after #671 zero-render evidence. Source canonical/safe-alias
+presence is now the primary applicability signal, source refs are retained as
+diagnostic/confidence metadata, risky alias-only matches are skipped, and
+source-size pressure is recorded instead of automatically vetoing prepared
+context when the context budget fits. This increases the chance that real book
+units receive glossary context, so reviewers must watch for over-injection and
+ambiguous aliases. #465 cache bypass is still allowed only when context renders,
+and this does not approve live provider calls, cache reuse, deployment,
+provider config/key changes, durable state/storage/admin/retention changes or
+release/privacy/legal/support claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
