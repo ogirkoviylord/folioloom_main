@@ -174,6 +174,21 @@ admin/retention changes or release/privacy/legal/support claims are approved.
 Follow-ups #665 and #666 remain required for local metadata-only audit evidence
 and scanner-v2 architecture decision.
 
+Issue #665 implementation slice on 2026-06-17 adds a local metadata-only
+prepared glossary candidate-quality audit helper and CLI. The audit runs the
+#663/#664 local gates over committed fixtures with fake local prepared-package
+output and emits only status/count/reason-code metadata. The first local run on
+three committed fixtures recorded 20 prep input candidates, 18 selected after
+the prep-input quality gate, 2 dropped, 18 package-selected entries, 0
+package-level drops, 3 ready fake/local cases and low-value candidate rate
+`0.1`. Metadata-only evidence is recorded in
+`docs/superpowers/specs/2026-06-17-prepared-glossary-candidate-quality-audit.md`;
+the generated JSON report remains local/untracked under
+`outputs/issue-665-candidate-quality-audit/metadata_report.json`. This does not
+prove semantic/literary glossary quality, provider behavior, live smoke
+readiness, rollout, cache reuse or release/privacy/legal/support readiness.
+Follow-up #666 remains required for the scanner-v2 architecture decision.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,

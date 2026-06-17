@@ -241,6 +241,16 @@ not prove glossary quality, approve live provider calls, rollout, cache reuse,
 provider config, storage/admin/retention changes or release/privacy/legal/
 support claims. #665 local audit evidence remains required.
 
+R-041 update note, 2026-06-17: issue #665 adds and runs a local metadata-only
+prepared glossary candidate-quality audit over committed fixtures after #663
+and #664. The first fake/local audit recorded 20 prep input candidates, 18
+selected after prep-input quality filtering, 2 dropped, 18 package-selected
+entries, 0 package-level drops, 3 ready fake/local cases and low-value rate
+0.1. Treat this as deterministic local audit evidence only: provider behavior,
+real-book translation quality, scanner-v2 need, rollout, cache reuse and
+release/privacy/legal/support readiness remain Unknown/TBD until separately
+reviewed.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
