@@ -247,6 +247,19 @@ translation quality risks. Any future scanner-v2 work must be separately
 approved, versioned, shadow-only first, metadata-only, and must not switch
 runtime behavior, cache reuse or provider/live behavior without later approval.
 
+R-041 update note, 2026-06-17: issue #671 adds a local metadata-only runtime
+effectiveness audit after a real EPUB run attached a READY prepared package but
+rendered zero glossary contexts. The audit confirms zero rendered contexts and
+shows current source gates made 186/328 units size-eligible while relaxed
+24-block/4800-char gates would make 321/328 units size-eligible. However, the
+ordinary owner archive sidecar does not expose prepared-package entries or the
+upstream candidate pool, so real package-cap impact remains `Unknown`.
+Fixture-only fake/local cap comparison suggests cap 12 or 16 as a conservative
+#674 search space, not cap 24 by default. Treat #671 as threshold evidence only:
+it does not approve runtime changes, live provider calls, cache reuse,
+deployment, durable state/storage/admin/retention changes or release/privacy/
+legal/support claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
