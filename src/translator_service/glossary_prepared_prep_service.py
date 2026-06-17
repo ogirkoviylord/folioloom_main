@@ -11,6 +11,9 @@ from translator_service.format_adapters.contracts import FormatAdapterPlan
 from translator_service.format_adapters.docx import plan_docx_translation
 from translator_service.format_adapters.epub import plan_epub_translation
 from translator_service.format_adapters.txt import plan_txt_translation
+from translator_service.glossary_candidate_quality import (
+    filter_prepared_glossary_candidates,
+)
 from translator_service.glossary_candidate_reducer import (
     GlossaryCandidateDecisionStatus,
     GlossaryCandidateReducerCaps,
@@ -212,12 +215,33 @@ class PreparedGlossaryPrepService:
                 candidate_selector_signature=reduction.reducer_signature,
                 selected_candidate_count=0,
             )
+        candidate_quality = filter_prepared_glossary_candidates(
+            candidates,
+            upstream_selector_signature=reduction.reducer_signature,
+            source_language=request.source_language,
+        )
+        candidates = candidate_quality.entries
+        candidate_selector_signature = candidate_quality.selector_signature
+        candidate_quality_metadata = candidate_quality.metadata
+        if not candidates:
+            return _disabled_attachment(
+                request=request,
+                status="skipped",
+                reason_codes=(
+                    "prepared_glossary_prep_candidate_quality_no_candidates",
+                ),
+                config=config,
+                source_sha256=source_sha256,
+                candidate_selector_signature=candidate_selector_signature,
+                selected_candidate_count=0,
+                candidate_quality_metadata=candidate_quality_metadata,
+            )
 
         packet = _prep_packet(
             request=request,
             config=config,
             source_sha256=source_sha256,
-            candidate_selector_signature=reduction.reducer_signature,
+            candidate_selector_signature=candidate_selector_signature,
             candidates=candidates,
             plan_block_text_by_id=_plan_block_text_by_id(plan),
             evidence_by_id={
@@ -231,8 +255,9 @@ class PreparedGlossaryPrepService:
             status="provider_requested",
             reason_codes=(),
             source_sha256=source_sha256,
-            candidate_selector_signature=reduction.reducer_signature,
+            candidate_selector_signature=candidate_selector_signature,
             selected_candidate_count=len(candidates),
+            candidate_quality_metadata=candidate_quality_metadata,
         )
         try:
             provider_result = self._provider(
@@ -248,8 +273,9 @@ class PreparedGlossaryPrepService:
                 reason_codes=("prepared_glossary_prep_provider_failed",),
                 config=config,
                 source_sha256=source_sha256,
-                candidate_selector_signature=reduction.reducer_signature,
+                candidate_selector_signature=candidate_selector_signature,
                 selected_candidate_count=len(candidates),
+                candidate_quality_metadata=candidate_quality_metadata,
             )
         payload, response_metadata = _provider_payload_and_metadata(provider_result)
         metadata_reasons = _provider_metadata_safety_reasons(response_metadata)
@@ -260,8 +286,9 @@ class PreparedGlossaryPrepService:
                 reason_codes=metadata_reasons,
                 config=config,
                 source_sha256=source_sha256,
-                candidate_selector_signature=reduction.reducer_signature,
+                candidate_selector_signature=candidate_selector_signature,
                 selected_candidate_count=len(candidates),
+                candidate_quality_metadata=candidate_quality_metadata,
             )
         if payload is None:
             return _disabled_attachment(
@@ -270,9 +297,10 @@ class PreparedGlossaryPrepService:
                 reason_codes=("prepared_glossary_prep_provider_empty",),
                 config=config,
                 source_sha256=source_sha256,
-                candidate_selector_signature=reduction.reducer_signature,
+                candidate_selector_signature=candidate_selector_signature,
                 selected_candidate_count=len(candidates),
                 provider_response_metadata=response_metadata,
+                candidate_quality_metadata=candidate_quality_metadata,
             )
 
         usage_reason = _provider_usage_policy_reason(response_metadata, config=config)
@@ -283,9 +311,10 @@ class PreparedGlossaryPrepService:
                 reason_codes=(usage_reason,),
                 config=config,
                 source_sha256=source_sha256,
-                candidate_selector_signature=reduction.reducer_signature,
+                candidate_selector_signature=candidate_selector_signature,
                 selected_candidate_count=len(candidates),
                 provider_response_metadata=response_metadata,
+                candidate_quality_metadata=candidate_quality_metadata,
             )
 
         validation = validate_prepared_glossary_package(
@@ -298,10 +327,11 @@ class PreparedGlossaryPrepService:
             status="ready" if validation.ready else "skipped",
             reason_codes=validation.reason_codes,
             source_sha256=source_sha256,
-            candidate_selector_signature=reduction.reducer_signature,
+            candidate_selector_signature=candidate_selector_signature,
             selected_candidate_count=len(candidates),
             validation_metadata=validation.metadata,
             provider_response_metadata=response_metadata,
+            candidate_quality_metadata=candidate_quality_metadata,
         )
         if not validation.ready:
             return PreparedGlossaryPackageAttachment(
@@ -455,6 +485,7 @@ def _disabled_attachment(
     candidate_selector_signature: str = "Unknown",
     selected_candidate_count: int = 0,
     provider_response_metadata: Mapping[str, Any] | None = None,
+    candidate_quality_metadata: Mapping[str, Any] | None = None,
 ) -> PreparedGlossaryPackageAttachment:
     return PreparedGlossaryPackageAttachment(
         enabled=False,
@@ -471,6 +502,7 @@ def _disabled_attachment(
             candidate_selector_signature=candidate_selector_signature,
             selected_candidate_count=selected_candidate_count,
             provider_response_metadata=provider_response_metadata,
+            candidate_quality_metadata=candidate_quality_metadata,
         ),
     )
 
@@ -486,6 +518,7 @@ def _metadata(
     selected_candidate_count: int = 0,
     validation_metadata: Mapping[str, Any] | None = None,
     provider_response_metadata: Mapping[str, Any] | None = None,
+    candidate_quality_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "schema_version": PREPARED_GLOSSARY_PREP_SERVICE_SCHEMA_VERSION,
@@ -506,6 +539,8 @@ def _metadata(
     }
     if validation_metadata is not None:
         metadata["validation"] = dict(validation_metadata)
+    if candidate_quality_metadata is not None:
+        metadata["candidate_quality"] = dict(candidate_quality_metadata)
     if provider_response_metadata is not None:
         safe_response = _safe_provider_metadata(provider_response_metadata)
         metadata["provider_response"] = safe_response

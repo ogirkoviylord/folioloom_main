@@ -220,6 +220,17 @@ failure evidence only; successful automatic live-smoke evidence, broader
 default confidence, cache reuse, deployment and release/privacy/legal/support
 claims remain unapproved.
 
+R-041 update note, 2026-06-17: issue #663 adds a local/default-safe prepared
+glossary candidate-quality policy before prepared-glossary prep packets reach
+fake/provider boundaries. Obvious pronoun/function-word/common-phrase and
+chapter/frontmatter boilerplate candidates are dropped, low-value aliases are
+pruned, and all-dropped candidate sets fall back before provider invocation
+with metadata-only reason codes. Treat this as prep-input risk reduction only:
+it does not rewrite the scanner, prove semantic/literary quality, call live
+providers, approve rollout/cache reuse/provider config/storage/admin/retention
+changes or replace #664 package-level READY enforcement and #665 local audit
+evidence.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
