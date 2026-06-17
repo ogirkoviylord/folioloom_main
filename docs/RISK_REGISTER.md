@@ -284,6 +284,17 @@ and this does not approve live provider calls, cache reuse, deployment,
 provider config/key changes, durable state/storage/admin/retention changes or
 release/privacy/legal/support claims.
 
+R-041 update note, 2026-06-17: issue #673 adds metadata-only owner-only archive
+diagnostics for READY prepared packages that render zero glossary contexts.
+`glossary_runtime_diagnostics.json` now marks that state as high-severity
+`not_effective` and records safe reason-code, cache-bypass, prepared-entry,
+applicable-entry, rendered-context and compliance-summary counts. This reduces
+the risk that future agents or owner QA mistake package attachment for working
+glossary injection. It does not prove glossary quality, approve live provider
+work, change runtime selection/cache behavior, change provider config, expand
+admin/raw surfaces outside the downloaded owner-only archive, or make
+release/privacy/legal/support claims.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.

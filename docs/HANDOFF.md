@@ -232,6 +232,20 @@ This does not approve live provider calls, Telegram operation by Codex,
 provider config/key changes, cache reuse, deployment, durable state/storage/
 admin/retention changes or release/privacy/legal/support claims.
 
+Issue #673 implementation slice on 2026-06-17 adds owner-only archive
+effectiveness diagnostics for the specific failure mode where automatic /
+`with_glossary` policy attaches a #610 READY prepared package but renders zero
+`<glossary_context>` sections in the approved provider IO diagnostic boundary.
+`glossary_runtime_diagnostics.json` now exposes metadata-only
+`effectiveness_diagnostic`, `glossary_effective_status`, reason-code counts,
+cache-policy counts and cache-bypass counts; the READY-plus-zero-render case is
+marked `diagnostic_severity=error` and `glossary_effective_status=not_effective`.
+Details are in
+`docs/superpowers/specs/2026-06-17-glossary-not-effective-diagnostics.md`.
+This does not change runtime selection, prompt behavior, cache reuse, provider
+calls, Telegram operation, provider config/key handling, durable state/storage/
+admin auth/retention behavior or release/privacy/legal/support claims.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
