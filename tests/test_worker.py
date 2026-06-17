@@ -1128,6 +1128,91 @@ class WorkerTest(unittest.TestCase):
             self.assertNotIn("Darcy returns.", event_lines)
             self.assertNotIn("Дарси", event_lines)
 
+    def test_scheduled_worker_with_prepared_package_ref_mismatch_injects_context(
+        self,
+    ):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Darcy returns.",
+            )
+            policy = json.dumps(
+                {
+                    "glossary_mode": "with_glossary",
+                    "prepared_glossary_package": _prepared_glossary_package(
+                        source_unit_refs=[99],
+                        source_block_refs=["chapter-9:p9"],
+                    ),
+                },
+                ensure_ascii=False,
+            )
+            run_log_root = Path(temp_dir) / "run-logs"
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-1",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=policy,
+                ),
+            )
+            store = self._store()
+            _job_with_stored_unit(
+                store,
+                source.object_key,
+                target_language="ru",
+                translation_policy=policy,
+            )
+            translator = RecordingTranslator()
+
+            completed = run_next_scheduled_stored_text_work_unit(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+                translator=translator,
+                translation_run_log_root=run_log_root,
+            )
+            events = [
+                json.loads(line)
+                for line in run_logger.run_dir.joinpath("events.jsonl").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(len(translator.calls), 1)
+        self.assertIn("<glossary_context", translator.calls[0][0])
+        adapter_event = next(
+            event
+            for event in events
+            if event["event_type"] == "glossary_runtime_adapter"
+        )
+        self.assertEqual(adapter_event["payload"]["status"], "ready")
+        self.assertEqual(
+            adapter_event["payload"]["cache_policy"]["behavior"],
+            "bypass_glossary_injected_cache",
+        )
+        self.assertEqual(
+            adapter_event["payload"]["prepared_package_runtime_bridge"][
+                "source_ref_mismatch_count"
+            ],
+            1,
+        )
+        event_text = json.dumps(events, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns.", event_text)
+        self.assertNotIn("Дарси", event_text)
+
     def test_prepared_package_rehearsal_archive_links_injection_metadata(self):
         from translator_service.scheduler import SchedulerLimits
 
@@ -2951,6 +3036,8 @@ def _prepared_glossary_package(
     *,
     target_language: str = "ru",
     needs_review: bool = False,
+    source_unit_refs: list[int] | None = None,
+    source_block_refs: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
@@ -2969,6 +3056,8 @@ def _prepared_glossary_package(
                 "source_canonical": "Darcy",
                 "aliases": ["Mr. Darcy"],
                 "evidence_refs": ["evidence:darcy"],
+                "source_unit_refs": list(source_unit_refs or []),
+                "source_block_refs": list(source_block_refs or []),
                 "target_canonical": "Дарси",
                 "target_variants": ["мистер Дарси"],
                 "forbidden_variants": ["Дэрси"],
