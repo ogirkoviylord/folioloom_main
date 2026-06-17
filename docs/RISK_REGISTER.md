@@ -239,6 +239,14 @@ real-book translation quality, scanner-v2 need, rollout, cache reuse and
 release/privacy/legal/support readiness remain Unknown/TBD until separately
 reviewed.
 
+R-041 update note, 2026-06-17: issue #666 records a no-code architecture
+verdict to keep scanner v1 plus #663/#664 candidate-quality gates for now and
+defer scanner v2. This reduces rewrite/signature churn risk in the short term,
+but does not close broader scanner coverage, provider behavior or real-book
+translation quality risks. Any future scanner-v2 work must be separately
+approved, versioned, shadow-only first, metadata-only, and must not switch
+runtime behavior, cache reuse or provider/live behavior without later approval.
+
 ### Product risks
 
 - Неясная целевая аудитория: confirmed для trusted beta users и owner/admin; paid-user ICP - TBD.
