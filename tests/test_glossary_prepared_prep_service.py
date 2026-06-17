@@ -7,6 +7,8 @@ from translator_service.glossary_prepared_package import (
     GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
 )
 from translator_service.glossary_prepared_prep_service import (
+    DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS,
+    DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES,
     PreparedGlossaryPackagePrepRequest,
     PreparedGlossaryPrepService,
     PreparedGlossaryPrepServiceConfig,
@@ -39,6 +41,83 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         self.assertEqual(len(provider_requests), 1)
         self.assertIn("candidates", provider_requests[0].packet)
         self.assertNotIn("Darcy", json.dumps(result.metadata, ensure_ascii=False))
+
+    def test_default_cap_keeps_sixteen_bounded_durable_candidates(self):
+        content = _many_place_content()
+        request = _request(content)
+        provider_requests = []
+
+        def provider(provider_request):
+            provider_requests.append(provider_request)
+            return _package_from_all_candidates(provider_request.packet)
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(len(provider_requests), 1)
+        packet = provider_requests[0].packet
+        self.assertEqual(packet["max_candidates"], 16)
+        self.assertEqual(
+            packet["max_candidates"],
+            DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES,
+        )
+        self.assertEqual(len(packet["candidates"]), 16)
+        self.assertEqual(result.metadata["max_candidates"], 16)
+        self.assertEqual(
+            result.metadata["max_estimated_editor_tokens"],
+            DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS,
+        )
+        self.assertEqual(result.metadata["selected_candidate_count"], 16)
+        self.assertEqual(result.metadata["validation"]["ready_entry_count"], 16)
+        self.assertEqual(
+            result.metadata["candidate_quality"]["selected_candidate_count"],
+            16,
+        )
+        self.assertEqual(
+            result.metadata["candidate_quality"]["dropped_candidate_count"],
+            0,
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Aldor Keep", metadata_text)
+        self.assertNotIn("Rhea Garden", metadata_text)
+
+    def test_candidate_cap_changes_selector_and_package_signatures(self):
+        content = _many_place_content()
+        request = _request(content)
+
+        def prepare_with_cap(cap):
+            provider_requests = []
+
+            def provider(provider_request):
+                provider_requests.append(provider_request)
+                return _package_from_all_candidates(provider_request.packet)
+
+            result = PreparedGlossaryPrepService(
+                provider=provider,
+                config=PreparedGlossaryPrepServiceConfig(
+                    max_candidates=cap,
+                    max_estimated_editor_tokens=max(2_400, cap * 300),
+                ),
+            ).prepare(request)
+            return result, provider_requests[0].packet
+
+        cap_8, packet_8 = prepare_with_cap(8)
+        cap_16, packet_16 = prepare_with_cap(16)
+
+        self.assertTrue(cap_8.enabled)
+        self.assertTrue(cap_16.enabled)
+        self.assertEqual(len(packet_8["candidates"]), 8)
+        self.assertEqual(len(packet_16["candidates"]), 16)
+        self.assertNotEqual(
+            cap_8.metadata["candidate_selector_signature"],
+            cap_16.metadata["candidate_selector_signature"],
+        )
+        self.assertNotEqual(
+            cap_8.metadata["validation"]["package_signature"],
+            cap_16.metadata["validation"]["package_signature"],
+        )
+        self.assertEqual(cap_8.metadata["max_candidates"], 8)
+        self.assertEqual(cap_16.metadata["max_candidates"], 16)
 
     def test_missing_provider_returns_metadata_only_fallback(self):
         request = _request(_source_content())
@@ -358,6 +437,38 @@ def _source_content() -> bytes:
     )
 
 
+def _many_place_content() -> bytes:
+    names = (
+        "Aldor Keep",
+        "Beren Gate",
+        "Calion Tower",
+        "Daria Harbor",
+        "Eldrin Road",
+        "Fara Bridge",
+        "Galen Forge",
+        "Helia Shrine",
+        "Ivor Hall",
+        "Jorin Market",
+        "Kara Wood",
+        "Lorin River",
+        "Mira Field",
+        "Nolan Abbey",
+        "Orin Square",
+        "Pavel Mill",
+        "Quinn House",
+        "Rhea Garden",
+    )
+    text = " ".join(
+        (
+            f'Archivists named "{name}" in the old map. '
+            f'The route to "{name}" appears again in the ledger. '
+            f'Travelers remembered "{name}" clearly.'
+        )
+        for name in names
+    )
+    return text.encode()
+
+
 def _request(
     content: bytes,
     *,
@@ -410,6 +521,43 @@ def _package_from_packet(
                 "needs_review": False,
                 "reason_codes": [],
             }
+        ],
+    }
+
+
+def _package_from_all_candidates(
+    packet,
+    *,
+    target_language: str | None = None,
+) -> dict:
+    target = target_language or packet["target_language"]
+    return {
+        "schema_version": GLOSSARY_PREPARED_PACKAGE_SCHEMA_VERSION,
+        "package_id": f"prepared:test:{target}",
+        "source_language": packet["source_language"],
+        "target_language": target,
+        "glossary_mode": "with_glossary",
+        "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+        "provider_model": packet["provider_model"],
+        "provider_run_id": "provider-run:fake",
+        "source_document_fingerprint": packet["source_document_fingerprint"],
+        "candidate_selector_signature": packet["candidate_selector_signature"],
+        "owner_approved": True,
+        "entries": [
+            {
+                "source_entry_id": candidate["source_entry_id"],
+                "source_canonical": candidate["source_canonical"],
+                "aliases": candidate["aliases"][:2],
+                "evidence_refs": candidate["evidence_refs"][:2],
+                "target_canonical": f"Target {index}",
+                "target_variants": [f"Target Variant {index}"],
+                "forbidden_variants": [],
+                "strategy": "fake_provider_only",
+                "confidence": 0.91,
+                "needs_review": False,
+                "reason_codes": [],
+            }
+            for index, candidate in enumerate(packet["candidates"], start=1)
         ],
     }
 

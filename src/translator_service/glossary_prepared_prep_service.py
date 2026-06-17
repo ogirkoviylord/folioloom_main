@@ -32,6 +32,8 @@ PREPARED_GLOSSARY_PREP_PACKET_SCHEMA_VERSION = (
     "prepared-glossary-prep-packet-v1"
 )
 DEFAULT_PREPARED_GLOSSARY_PROVIDER_MODEL = "deepseek-v4-pro"
+DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES = 16
+DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS = 4_800
 
 
 @dataclass(frozen=True)
@@ -73,10 +75,12 @@ class PreparedGlossaryPackageAttachment:
 @dataclass(frozen=True)
 class PreparedGlossaryPrepServiceConfig:
     provider_model: str = DEFAULT_PREPARED_GLOSSARY_PROVIDER_MODEL
-    max_candidates: int = 8
+    max_candidates: int = DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES
     max_excerpt_chars: int = 1_200
     max_fragment_chars: int = 1_200
-    max_estimated_editor_tokens: int = 2_400
+    max_estimated_editor_tokens: int = (
+        DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS
+    )
     min_editor_score: int = 1
     min_diagnostic_score: int = 1
     require_provider_usage: bool = False
@@ -534,6 +538,8 @@ def _metadata(
         "source_sha256_short": source_sha256[:12],
         "provider_model": config.provider_model,
         "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+        "max_candidates": config.max_candidates,
+        "max_estimated_editor_tokens": config.max_estimated_editor_tokens,
         "candidate_selector_signature": candidate_selector_signature,
         "selected_candidate_count": selected_candidate_count,
     }

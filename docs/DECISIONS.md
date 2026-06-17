@@ -17,6 +17,48 @@ AI-агенты обязаны читать его перед архитекту
 
 ## Принятые решения
 
+### 2026-06-17 - Prepared glossary prep default cap is 16 after effectiveness audit
+
+Status: Active implementation default for #674
+
+Decision:
+- Rebalance automatic prepared-glossary prep defaults from the earlier
+  8-candidate / 2400 estimated editor-token packet to:
+  - `max_candidates: 16`
+  - `max_estimated_editor_tokens: 4800`
+- Keep scanner v1 and the #663/#664 candidate/package-quality gates active.
+- Do not jump to cap 24 from the current evidence because #671 marked it as
+  higher noise/pressure risk.
+- Keep the prepared-package validator's broad structural maximum separate from
+  the prep packet default.
+- Treat the cap change as local prep behavior only. It does not approve live
+  provider calls, provider config/key changes, scanner v2, cache reuse,
+  deployment, durable DB/schema/state/storage/admin/retention changes,
+  runtime rollout beyond the approved automatic internal path or
+  release/privacy/legal/support claims.
+
+Evidence:
+- Issue #671 metadata-only audit showed cap 8 was likely too narrow on
+  committed fixtures and recommended cap 12 or 16 as the conservative #674
+  search space; cap 24 remained a higher noise/pressure risk.
+- Issue #674 implements cap 16 plus focused local tests proving deterministic
+  selector/package signature changes and low-value gate preservation.
+- The #674 contract is documented in
+  `docs/superpowers/specs/2026-06-17-prepared-glossary-package-cap-rebalance.md`.
+
+Consequences:
+- Future fake/provider prep packets will contain up to 16 local selected
+  candidates by default before provider/package validation.
+- Real provider behavior and real translation-quality impact remain `Unknown`
+  until #675.
+- Future cap increases or decreases should be evidence-driven and recorded in
+  issue scope/docs.
+
+Human approval required to change:
+- yes; changing cap defaults, provider-prep cost bounds, cache behavior,
+  scanner strategy, live provider scope, deployment or release/privacy/legal/
+  support claims requires separate explicit owner approval.
+
 ### 2026-06-17 - Keep glossary scanner v1 plus candidate-quality gates; defer scanner v2
 
 Status: Active architecture direction for #661 follow-up

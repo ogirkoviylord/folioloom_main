@@ -246,6 +246,20 @@ This does not change runtime selection, prompt behavior, cache reuse, provider
 calls, Telegram operation, provider config/key handling, durable state/storage/
 admin auth/retention behavior or release/privacy/legal/support claims.
 
+Issue #674 implementation slice on 2026-06-17 rebalances prepared-glossary prep
+package sizing after #671 evidence and the #672/#673 runtime/diagnostic fixes.
+`PreparedGlossaryPrepServiceConfig` now defaults to 16 candidates and a 4800
+estimated editor-token cap, rather than the earlier 8-candidate / 2400-token
+prep packet. This follows the #671 recommendation to search the 12/16 range:
+8 looked too narrow on committed fixtures, while 24 remains a higher
+noise/pressure risk. Prep-service metadata now exposes the cap values alongside
+selected-candidate, candidate-quality, validation and package-signature
+metadata. Details are in
+`docs/superpowers/specs/2026-06-17-prepared-glossary-package-cap-rebalance.md`.
+The package validator's broad structural maximum is unchanged, #663/#664
+low-value gates remain active, and real provider/translation-quality impact is
+`Unknown` until #675.
+
 Issue #656 implementation slice on 2026-06-16 bridges a #646 fake/dry blocker
 in the automatic prepared-package runtime path. #610 prepared package
 validation now preserves compact `source_unit_refs` and `source_block_refs`,
