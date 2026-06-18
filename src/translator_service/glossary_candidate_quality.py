@@ -147,6 +147,38 @@ _LOW_VALUE_ALIAS_TOKENS = (
     | _BOILERPLATE_TOKENS
     | _HONORIFIC_TOKENS
 )
+_LOW_VALUE_REPEATED_TERM_START_TOKENS = frozenset(
+    {
+        "came",
+        "cannot",
+        "found",
+        "grew",
+        "looked",
+        "must",
+        "once",
+        "thought",
+        "went",
+    }
+)
+_LOW_VALUE_REPEATED_TERM_END_TOKENS = frozenset(
+    {
+        "back",
+        "been",
+        "down",
+        "myself",
+        "round",
+        "since",
+        "upon",
+    }
+)
+_LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
+    {
+        "moment",
+        "people",
+        "thing",
+        "things",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -169,10 +201,13 @@ class PreparedGlossaryCandidateQualityResult:
     def metadata(self) -> dict[str, Any]:
         reason_codes: list[str] = []
         dropped_count = 0
+        omitted_count = 0
         alias_omitted_count = 0
         for decision in self.decisions:
             if decision.status == "dropped":
                 dropped_count += 1
+            if decision.status == "omitted":
+                omitted_count += 1
             alias_omitted_count += decision.alias_omitted_count
             reason_codes.extend(decision.reason_codes)
         return {
@@ -182,6 +217,7 @@ class PreparedGlossaryCandidateQualityResult:
             "input_candidate_count": len(self.decisions),
             "selected_candidate_count": len(self.entries),
             "dropped_candidate_count": dropped_count,
+            "omitted_candidate_count": omitted_count,
             "alias_omitted_count": alias_omitted_count,
             "reason_codes": list(dict.fromkeys(reason_codes)),
             "selector_signature": self.selector_signature,
@@ -193,6 +229,7 @@ def filter_prepared_glossary_candidates(
     *,
     upstream_selector_signature: str,
     source_language: str = "Unknown",
+    max_selected_candidates: int | None = None,
 ) -> PreparedGlossaryCandidateQualityResult:
     """Filter prepared-glossary prep candidates before provider boundaries.
 
@@ -213,6 +250,22 @@ def filter_prepared_glossary_candidates(
                     entry,
                     status="dropped",
                     reason_codes=(*reason_codes, *alias_reason_codes),
+                    alias_omitted_count=alias_omitted_count,
+                )
+            )
+            continue
+        if (
+            max_selected_candidates is not None
+            and len(accepted) >= max(0, max_selected_candidates)
+        ):
+            decisions.append(
+                _decision(
+                    entry,
+                    status="omitted",
+                    reason_codes=(
+                        "candidate_quality_selection_cap_exhausted",
+                        *alias_reason_codes,
+                    ),
                     alias_omitted_count=alias_omitted_count,
                 )
             )
@@ -266,6 +319,8 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
         and any(token in _COMMON_INVOCATION_TOKENS for token in tokens[1:])
     ):
         reasons.append("candidate_quality_common_phrase")
+    if _is_low_value_repeated_term_phrase(tokens):
+        reasons.append("candidate_quality_low_value_repeated_term_phrase")
     return tuple(dict.fromkeys(reasons))
 
 
@@ -310,6 +365,23 @@ def _is_roman_numeral(token: str) -> bool:
 
 def _has_honorific_name_shape(tokens: tuple[str, ...]) -> bool:
     return len(tokens) >= 2 and tokens[0] in _HONORIFIC_TOKENS
+
+
+def _is_low_value_repeated_term_phrase(tokens: tuple[str, ...]) -> bool:
+    if len(tokens) != 2:
+        return False
+    left, right = tokens
+    if left == right:
+        return True
+    if (
+        left in _LOW_VALUE_REPEATED_TERM_START_TOKENS
+        or right in _LOW_VALUE_REPEATED_TERM_END_TOKENS
+    ):
+        return True
+    return (
+        left in (_DETERMINER_TOKENS | _PRONOUN_TOKENS)
+        or right in _LOW_VALUE_GENERIC_NOUN_TOKENS
+    ) and any(token in _LOW_VALUE_GENERIC_NOUN_TOKENS for token in tokens)
 
 
 def _entry_source(entry: Any) -> str:

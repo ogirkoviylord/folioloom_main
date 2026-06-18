@@ -2,6 +2,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from tools.prepared_glossary_prep_preflight import (
     APPROVED_INPUT,
@@ -10,8 +11,18 @@ from tools.prepared_glossary_prep_preflight import (
     PreparedGlossaryPrepLiveConfig,
     PreparedGlossaryPrepPreflightConfig,
     _fake_prepared_package,
+    _preflight_candidate_selection,
     run_live_preparation,
     run_preflight,
+)
+from translator_service.glossary_candidate_reducer import (
+    GlossaryCandidateDecisionStatus,
+)
+from translator_service.glossary_contracts import (
+    GlossaryEntry,
+    GlossaryEntryCategory,
+    GlossaryEntryStatus,
+    GlossaryLayer,
 )
 from translator_service.glossary_prepared_package import (
     validate_prepared_glossary_package,
@@ -19,6 +30,34 @@ from translator_service.glossary_prepared_package import (
 
 
 class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
+    def test_preflight_selection_filters_mixed_quality_candidates(self):
+        entries = (
+            _glossary_entry("bad", "came upon"),
+            _glossary_entry("good", "Mr Darcy"),
+        )
+        decisions = tuple(
+            SimpleNamespace(
+                entry_id=entry.entry_id,
+                status=GlossaryCandidateDecisionStatus.RETAINED_FOR_EDITOR,
+            )
+            for entry in entries
+        )
+
+        selected, selector_signature = _preflight_candidate_selection(
+            snapshot_entries=entries,
+            retained_entries=entries,
+            decisions=decisions,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+            limit=2,
+        )
+
+        self.assertEqual(
+            [entry.source_canonical for entry in selected],
+            ["Mr Darcy"],
+        )
+        self.assertNotEqual(selector_signature, "reducer:test")
+
     def test_fake_preflight_builds_ready_package_and_metadata_report(self):
         with TemporaryDirectory() as temp_dir:
             result = run_preflight(
@@ -53,6 +92,11 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
         self.assertEqual(metadata_report["live_provider_calls"], 0)
         self.assertEqual(metadata_report["provider_tokens_total"], 0)
         self.assertEqual(metadata_report["validation"]["status"], "ready")
+        self.assertGreater(metadata_report["validation"]["ready_entry_count"], 0)
+        self.assertGreater(
+            metadata_report["validation"]["quality"]["selected_candidate_count"],
+            0,
+        )
         self.assertNotIn("Time Traveller", metadata_text)
         self.assertNotIn("RAW PROMPT", metadata_text)
         self.assertNotIn("Bearer ", metadata_text)
@@ -449,6 +493,18 @@ class _PreparedPackageProvider:
             },
             response_text=json.dumps({"choices": [{"finish_reason": "stop"}]}),
         )
+
+
+def _glossary_entry(entry_id: str, source_canonical: str) -> GlossaryEntry:
+    return GlossaryEntry(
+        entry_id=entry_id,
+        category=GlossaryEntryCategory.NAME,
+        layer=GlossaryLayer.SOFT,
+        status=GlossaryEntryStatus.AUTO_DETECTED,
+        source_canonical=source_canonical,
+        evidence_refs=(f"evidence:{entry_id}",),
+        confidence=0.9,
+    )
 
 
 class _EntriesOnlyProvider(_PreparedPackageProvider):
