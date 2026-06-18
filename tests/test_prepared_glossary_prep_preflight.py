@@ -53,6 +53,11 @@ class PreparedGlossaryPrepPreflightTests(unittest.TestCase):
         self.assertEqual(metadata_report["live_provider_calls"], 0)
         self.assertEqual(metadata_report["provider_tokens_total"], 0)
         self.assertEqual(metadata_report["validation"]["status"], "ready")
+        self.assertGreater(metadata_report["validation"]["ready_entry_count"], 0)
+        self.assertGreater(
+            metadata_report["validation"]["quality"]["selected_candidate_count"],
+            0,
+        )
         self.assertNotIn("Time Traveller", metadata_text)
         self.assertNotIn("RAW PROMPT", metadata_text)
         self.assertNotIn("Bearer ", metadata_text)
