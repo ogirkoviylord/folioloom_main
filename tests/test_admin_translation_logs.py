@@ -438,6 +438,14 @@ class AdminTranslationLogsTest(unittest.TestCase):
             sidecar["adapter_events"][0]["cache_policy"]["behavior"],
             "bypass_glossary_injected_cache",
         )
+        self.assertEqual(
+            sidecar["adapter_events"][0]["automatic_glossary_preflight"],
+            sidecar["adapter_events"][0]["battle_test_preflight"],
+        )
+        self.assertEqual(
+            sidecar["adapter_events"][0]["automatic_glossary_preflight"]["status"],
+            "ready",
+        )
         context_text = sidecar["rendered_prompt_contexts"][0]["text"]
         self.assertIn("<source_canonical>Darcy</source_canonical>", context_text)
         self.assertIn("<target_canonical>Дарси</target_canonical>", context_text)
