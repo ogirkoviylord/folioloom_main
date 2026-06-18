@@ -15,6 +15,9 @@ from urllib.request import Request, urlopen
 
 from translator_service.book_profile import detect_book_profile
 from translator_service.format_adapters.epub import plan_epub_translation
+from translator_service.glossary_candidate_quality import (
+    filter_prepared_glossary_candidates,
+)
 from translator_service.glossary_candidate_reducer import (
     GlossaryCandidateDecisionStatus,
     GlossaryCandidateReducerCaps,
@@ -275,27 +278,30 @@ def run_preflight(
             min_diagnostic_score=1,
         ),
     )
-    candidates = _selected_candidates(
-        reduction.retained_snapshot.entries,
-        reduction.decisions,
+    candidates, candidate_selector_signature = _preflight_candidate_selection(
+        snapshot_entries=snapshot.entries,
+        retained_entries=reduction.retained_snapshot.entries,
+        decisions=reduction.decisions,
+        upstream_selector_signature=reduction.reducer_signature,
+        source_language="en",
         limit=config.max_candidates,
     )
     packet = _prep_packet(
         config=config,
         source_document_fingerprint=_document_fingerprint(source_bytes),
-        reducer_signature=reduction.reducer_signature,
+        reducer_signature=candidate_selector_signature,
         candidates=candidates,
         plan_block_text_by_id=_plan_block_text_by_id(plan),
         evidence_by_id={
             evidence.evidence_id: evidence
-            for evidence in reduction.retained_snapshot.evidence
+            for evidence in snapshot.evidence
         },
     )
     prompt = _fake_prompt(packet)
     prepared_package = _fake_prepared_package(
         config=config,
         packet=packet,
-        reducer_signature=reduction.reducer_signature,
+        reducer_signature=candidate_selector_signature,
         source_document_fingerprint=_document_fingerprint(source_bytes),
     )
     fake_response = {
@@ -570,28 +576,31 @@ def _build_preflight_artifacts(
             min_diagnostic_score=1,
         ),
     )
-    candidates = _selected_candidates(
-        reduction.retained_snapshot.entries,
-        reduction.decisions,
+    candidates, candidate_selector_signature = _preflight_candidate_selection(
+        snapshot_entries=snapshot.entries,
+        retained_entries=reduction.retained_snapshot.entries,
+        decisions=reduction.decisions,
+        upstream_selector_signature=reduction.reducer_signature,
+        source_language="en",
         limit=config.max_candidates,
     )
     source_document_fingerprint = _document_fingerprint(source_bytes)
     packet = _prep_packet(
         config=config,
         source_document_fingerprint=source_document_fingerprint,
-        reducer_signature=reduction.reducer_signature,
+        reducer_signature=candidate_selector_signature,
         candidates=candidates,
         plan_block_text_by_id=_plan_block_text_by_id(plan),
         evidence_by_id={
             evidence.evidence_id: evidence
-            for evidence in reduction.retained_snapshot.evidence
+            for evidence in snapshot.evidence
         },
     )
     fake_prompt = _fake_prompt(packet)
     fake_prepared_package = _fake_prepared_package(
         config=config,
         packet=packet,
-        reducer_signature=reduction.reducer_signature,
+        reducer_signature=candidate_selector_signature,
         source_document_fingerprint=source_document_fingerprint,
     )
     fake_response = {
@@ -623,6 +632,42 @@ def _selected_candidates(
         if decision.status is GlossaryCandidateDecisionStatus.RETAINED_FOR_EDITOR
     }
     return tuple(entry for entry in entries if entry.entry_id in retained_ids)[:limit]
+
+
+def _preflight_candidate_selection(
+    *,
+    snapshot_entries: Sequence[Any],
+    retained_entries: Sequence[Any],
+    decisions: Sequence[Any],
+    upstream_selector_signature: str,
+    source_language: str,
+    limit: int,
+) -> tuple[tuple[Any, ...], str]:
+    selected = _selected_candidates(retained_entries, decisions, limit=limit)
+    selected_quality = filter_prepared_glossary_candidates(
+        selected,
+        upstream_selector_signature=upstream_selector_signature,
+        source_language=source_language,
+    )
+    if selected_quality.entries:
+        return selected, upstream_selector_signature
+
+    fallback_quality = filter_prepared_glossary_candidates(
+        snapshot_entries,
+        upstream_selector_signature=(
+            f"{upstream_selector_signature}:preflight-quality-fallback"
+        ),
+        source_language=source_language,
+    )
+    if fallback_quality.entries:
+        capped_quality = filter_prepared_glossary_candidates(
+            fallback_quality.entries[:limit],
+            upstream_selector_signature=upstream_selector_signature,
+            source_language=source_language,
+        )
+        return capped_quality.entries, capped_quality.selector_signature
+
+    return selected, upstream_selector_signature
 
 
 def _prep_packet(
