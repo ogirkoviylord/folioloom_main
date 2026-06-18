@@ -201,10 +201,13 @@ class PreparedGlossaryCandidateQualityResult:
     def metadata(self) -> dict[str, Any]:
         reason_codes: list[str] = []
         dropped_count = 0
+        omitted_count = 0
         alias_omitted_count = 0
         for decision in self.decisions:
             if decision.status == "dropped":
                 dropped_count += 1
+            if decision.status == "omitted":
+                omitted_count += 1
             alias_omitted_count += decision.alias_omitted_count
             reason_codes.extend(decision.reason_codes)
         return {
@@ -214,6 +217,7 @@ class PreparedGlossaryCandidateQualityResult:
             "input_candidate_count": len(self.decisions),
             "selected_candidate_count": len(self.entries),
             "dropped_candidate_count": dropped_count,
+            "omitted_candidate_count": omitted_count,
             "alias_omitted_count": alias_omitted_count,
             "reason_codes": list(dict.fromkeys(reason_codes)),
             "selector_signature": self.selector_signature,
@@ -225,6 +229,7 @@ def filter_prepared_glossary_candidates(
     *,
     upstream_selector_signature: str,
     source_language: str = "Unknown",
+    max_selected_candidates: int | None = None,
 ) -> PreparedGlossaryCandidateQualityResult:
     """Filter prepared-glossary prep candidates before provider boundaries.
 
@@ -245,6 +250,22 @@ def filter_prepared_glossary_candidates(
                     entry,
                     status="dropped",
                     reason_codes=(*reason_codes, *alias_reason_codes),
+                    alias_omitted_count=alias_omitted_count,
+                )
+            )
+            continue
+        if (
+            max_selected_candidates is not None
+            and len(accepted) >= max(0, max_selected_candidates)
+        ):
+            decisions.append(
+                _decision(
+                    entry,
+                    status="omitted",
+                    reason_codes=(
+                        "candidate_quality_selection_cap_exhausted",
+                        *alias_reason_codes,
+                    ),
                     alias_omitted_count=alias_omitted_count,
                 )
             )

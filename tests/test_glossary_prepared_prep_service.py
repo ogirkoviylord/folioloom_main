@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+from pathlib import Path
 
 from translator_service.glossary_prepared_package import (
     GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
@@ -414,6 +415,71 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         metadata_text = json.dumps(result.metadata, ensure_ascii=False)
         self.assertNotIn("Then He", metadata_text)
 
+    def test_candidate_quality_backfills_from_reducer_diagnostics_after_drops(self):
+        content = Path(
+            "test_samples/gutenberg_time_machine_noimages.en.epub"
+        ).read_bytes()
+        target_payload = json.loads(
+            Path(
+                "test_samples/glossary_targets/"
+                "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+            ).read_text(encoding="utf-8")
+        )
+        expected_terms = {
+            _term_digest(entry["source_canonical"])
+            for entry in target_payload["targets"]["ru"]["entries"]
+        }
+        request = PreparedGlossaryPackagePrepRequest(
+            user_telegram_id=42,
+            file_name="gutenberg_time_machine_noimages.en.epub",
+            document_kind="epub",
+            source_language="en",
+            target_language="ru",
+            translation_mode="book_manuscript",
+            glossary_mode="with_glossary",
+            source_sha256=hashlib.sha256(content).hexdigest(),
+            content=content,
+        )
+        provider_requests = []
+
+        def provider(provider_request):
+            provider_requests.append(provider_request)
+            return _package_from_all_candidates(provider_request.packet)
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(len(provider_requests), 1)
+        packet_candidates = provider_requests[0].packet["candidates"]
+        packet_terms = {
+            _term_digest(candidate["source_canonical"])
+            for candidate in packet_candidates
+        }
+        self.assertTrue(expected_terms & packet_terms)
+        self.assertLessEqual(
+            len(packet_candidates),
+            DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES,
+        )
+        self.assertEqual(
+            len(packet_candidates),
+            result.metadata["candidate_quality"]["selected_candidate_count"],
+        )
+        self.assertEqual(
+            result.metadata["selected_candidate_count"],
+            result.metadata["candidate_quality"]["selected_candidate_count"],
+        )
+        self.assertGreater(
+            result.metadata["candidate_quality"]["dropped_candidate_count"],
+            0,
+        )
+        self.assertGreater(
+            result.metadata["candidate_quality"]["input_candidate_count"],
+            result.metadata["candidate_quality"]["selected_candidate_count"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for entry in target_payload["targets"]["ru"]["entries"]:
+            self.assertNotIn(entry["source_canonical"], metadata_text)
+
     def test_provider_usage_required_falls_back_metadata_only_when_missing(self):
         request = _request(_source_content())
 
@@ -556,6 +622,10 @@ def _request(
         source_sha256=source_sha256 or hashlib.sha256(content).hexdigest(),
         content=content,
     )
+
+
+def _term_digest(term: str) -> str:
+    return hashlib.sha256(term.casefold().encode("utf-8")).hexdigest()[:16]
 
 
 def _package_from_packet(
