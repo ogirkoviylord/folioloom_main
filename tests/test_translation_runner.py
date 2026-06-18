@@ -1796,6 +1796,16 @@ class TranslationRunnerTest(unittest.TestCase):
             "ready",
         )
         self.assertEqual(
+            metadata[0]["automatic_glossary_preflight"],
+            metadata[0]["battle_test_preflight"],
+        )
+        self.assertEqual(
+            metadata[0]["automatic_glossary_preflight"][
+                "automatic_glossary_schema_version"
+            ],
+            "glossary-runtime-automatic-preflight-v1",
+        )
+        self.assertEqual(
             metadata[0]["battle_test_preflight"]["useful_entry_ids"],
             ["glossary-entry:v1:darcy"],
         )
@@ -1803,6 +1813,56 @@ class TranslationRunnerTest(unittest.TestCase):
         serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Darcy returns", serialized)
         self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_glossary_runtime_accepts_automatic_config_names(self):
+        translator = RecordingTranslator()
+        cache = MemoryTranslationCache()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_context_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            automatic_glossary_enabled=True,
+            automatic_glossary_max_source_blocks=12,
+            automatic_glossary_max_source_characters=2_400,
+        )
+
+        result = translate_docx_document(
+            file_name="automatic.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            translation_cache=cache,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertTrue(hook.owner_battle_test_enabled)
+        self.assertTrue(hook.prompt_rehearsal_enabled)
+        self.assertEqual(hook.battle_test_max_source_blocks, 12)
+        self.assertEqual(hook.battle_test_max_source_characters, 2_400)
+        self.assertEqual(extract_text_from_docx(result.content), "[ru] Darcy returns.")
+        self.assertIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(metadata[0]["status"], "ready")
+        self.assertEqual(
+            metadata[0]["automatic_glossary_preflight"]["status"],
+            "ready",
+        )
+        self.assertEqual(
+            metadata[0]["battle_test_preflight"],
+            metadata[0]["automatic_glossary_preflight"],
+        )
 
     def test_docx_glossary_runtime_rehearsal_requires_owner_battle_switch(
         self,
@@ -1838,6 +1898,7 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertEqual(len(translator.requests), 1)
         self.assertNotIn("<glossary_context", translator.requests[0][0])
         self.assertEqual(metadata[0]["status"], "ready")
+        self.assertNotIn("automatic_glossary_preflight", metadata[0])
         self.assertNotIn("battle_test_preflight", metadata[0])
         self.assertNotIn("prompt_context", metadata[0])
 
