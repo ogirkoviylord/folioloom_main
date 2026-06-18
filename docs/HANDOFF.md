@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Scanner v2 shadow work remains deferred
+
+Issue #692 keeps scanner v1 active and does not create a scanner-v2 shadow implementation issue from the expanded #688-#692 chain. The #688 suspected missing target-backed durable candidates were present in scanner v1 output, and #690 resolved the checked missing count through #689 quality filtering plus quality-approved reducer diagnostic backfill. Future scanner-v2 work now requires fresh metadata-only evidence of persistent scanner-level misses after #689/#690 gates; real provider behavior, real-book translation quality and broader fixture coverage remain `Unknown`.
+
 ### 2026-06-18 - Prepared glossary reducer backfill after quality drops
 
 Issue #690 keeps the prepared glossary cap direction but lets reducer `diagnostic_only` candidates backfill after #689 quality drops, still under the final `max_candidates` cap and after the same candidate-quality gate. Post-#690 local evidence recorded 12 of 12 checked target-backed durable candidates selected, with suspected missing count 0. This does not change scanner v1, implement scanner v2, increase the prepared packet cap, call live providers, operate Telegram, approve rollout/cache reuse or make release/privacy/legal/support claims.

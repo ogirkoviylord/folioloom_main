@@ -103,10 +103,13 @@ This file contains active project decisions in summary-first form. Full historic
 - Rationale: RU prep did not produce READY package; UK runtime failed structural validation.
 - Boundary: No runtime rollout, release readiness or quality claims without new evidence.
 
-### Scanner v2 deferred
+### Scanner v2 deferred after expanded audit evidence
 
 - Status: Active.
-- Summary: Keep deterministic scanner v1 plus candidate-quality gates for now; consider scanner v2 only as a future shadow extractor if evidence warrants it.
+- Summary: Keep deterministic scanner v1 plus candidate-quality gates and #690 quality-approved reducer diagnostic backfill for now; do not create a scanner-v2 shadow implementation issue from the #688-#692 evidence.
+- Rationale: #690 attribution showed the #688 suspected missing target-backed durable candidates were present in scanner v1 output and lost at reducer/prep selection, then #690 backfill recorded 12 selected of 12 checked expected candidates with suspected missing count 0.
+- Boundary: Future scanner-v2 work needs fresh metadata-only evidence of persistent scanner-level misses after #689/#690 gates. This does not approve scanner-v2 implementation, scanner v1 rewrite, runtime rollout, cache reuse, live provider work, provider config changes, durable state/storage/admin/retention changes or release/privacy/legal/support claims.
+- Unknown: Real provider behavior, real-book translation quality and broader fixture coverage.
 
 ## Active Release / Safety Decisions
 
