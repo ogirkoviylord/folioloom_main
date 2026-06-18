@@ -1792,6 +1792,15 @@ class TranslationRunnerTest(unittest.TestCase):
             ["glossary-entry:v1:darcy"],
         )
         self.assertEqual(
+            metadata[0]["glossary_effective_status"],
+            "effective_observed",
+        )
+        self.assertEqual(metadata[0]["diagnostic_severity"], "info")
+        self.assertEqual(
+            metadata[0]["glossary_effective_reason_codes"],
+            ["rendered_glossary_context_observed"],
+        )
+        self.assertEqual(
             metadata[0]["battle_test_preflight"]["status"],
             "ready",
         )
@@ -1962,6 +1971,74 @@ class TranslationRunnerTest(unittest.TestCase):
                 for item in metadata
             )
         )
+        self.assertTrue(
+            all(
+                item["glossary_effective_status"] == "not_effective"
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(item["diagnostic_severity"] == "warning" for item in metadata)
+        )
+        self.assertTrue(
+            all(
+                item["glossary_effective_reason_codes"]
+                == ["source_term_or_alias_absent"]
+                for item in metadata
+            )
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Bingley returns", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
+    def test_docx_ready_prepared_package_zero_context_is_not_effective_error(self):
+        translator = RecordingTranslator()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Bingley returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        glossary_plan = dict(_compact_glossary_runtime_hook_plan())
+        glossary_plan["prepared_package"] = {
+            "status": "ready",
+            "ready_entry_count": 1,
+            "metadata_only": True,
+            "raw_payload_included": False,
+        }
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=glossary_plan,
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            owner_battle_test_enabled=True,
+        )
+
+        translate_docx_document(
+            file_name="prepared-zero.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(metadata[0]["status"], "fallback")
+        self.assertEqual(
+            metadata[0]["glossary_effective_status"],
+            "not_effective",
+        )
+        self.assertEqual(metadata[0]["diagnostic_severity"], "error")
+        self.assertEqual(
+            metadata[0]["glossary_effective_reason_codes"],
+            ["source_term_or_alias_absent"],
+        )
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
         serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
         self.assertNotIn("Bingley returns", serialized)
         self.assertNotIn("translation_batch", serialized)
