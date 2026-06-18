@@ -33,7 +33,11 @@ PREPARED_GLOSSARY_PREP_PACKET_SCHEMA_VERSION = (
 )
 DEFAULT_PREPARED_GLOSSARY_PROVIDER_MODEL = "deepseek-v4-pro"
 DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES = 16
+DEFAULT_PREPARED_GLOSSARY_MAX_EXCERPT_CHARS = 1_200
+DEFAULT_PREPARED_GLOSSARY_MAX_FRAGMENT_CHARS = 1_200
 DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS = 4_800
+DEFAULT_PREPARED_GLOSSARY_MIN_EDITOR_SCORE = 1
+DEFAULT_PREPARED_GLOSSARY_MIN_DIAGNOSTIC_SCORE = 1
 
 
 @dataclass(frozen=True)
@@ -76,13 +80,13 @@ class PreparedGlossaryPackageAttachment:
 class PreparedGlossaryPrepServiceConfig:
     provider_model: str = DEFAULT_PREPARED_GLOSSARY_PROVIDER_MODEL
     max_candidates: int = DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES
-    max_excerpt_chars: int = 1_200
-    max_fragment_chars: int = 1_200
+    max_excerpt_chars: int = DEFAULT_PREPARED_GLOSSARY_MAX_EXCERPT_CHARS
+    max_fragment_chars: int = DEFAULT_PREPARED_GLOSSARY_MAX_FRAGMENT_CHARS
     max_estimated_editor_tokens: int = (
         DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS
     )
-    min_editor_score: int = 1
-    min_diagnostic_score: int = 1
+    min_editor_score: int = DEFAULT_PREPARED_GLOSSARY_MIN_EDITOR_SCORE
+    min_diagnostic_score: int = DEFAULT_PREPARED_GLOSSARY_MIN_DIAGNOSTIC_SCORE
     require_provider_usage: bool = False
     max_provider_reported_total_tokens: int | None = None
 
@@ -540,6 +544,7 @@ def _metadata(
         "provider_role_id": GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
         "max_candidates": config.max_candidates,
         "max_estimated_editor_tokens": config.max_estimated_editor_tokens,
+        "caps": _prep_caps_metadata(config),
         "candidate_selector_signature": candidate_selector_signature,
         "selected_candidate_count": selected_candidate_count,
     }
@@ -554,6 +559,21 @@ def _metadata(
         if isinstance(usage, Mapping):
             metadata["provider_usage"] = dict(usage)
     return metadata
+
+
+def _prep_caps_metadata(config: PreparedGlossaryPrepServiceConfig) -> dict[str, Any]:
+    return {
+        "max_candidates": config.max_candidates,
+        "max_excerpt_chars": config.max_excerpt_chars,
+        "max_fragment_chars": config.max_fragment_chars,
+        "max_estimated_editor_tokens": config.max_estimated_editor_tokens,
+        "min_editor_score": config.min_editor_score,
+        "min_diagnostic_score": config.min_diagnostic_score,
+        "require_provider_usage": config.require_provider_usage,
+        "max_provider_reported_total_tokens": (
+            config.max_provider_reported_total_tokens
+        ),
+    }
 
 
 def _provider_payload_and_metadata(

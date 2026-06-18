@@ -8,7 +8,11 @@ from translator_service.glossary_prepared_package import (
 )
 from translator_service.glossary_prepared_prep_service import (
     DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS,
+    DEFAULT_PREPARED_GLOSSARY_MAX_EXCERPT_CHARS,
+    DEFAULT_PREPARED_GLOSSARY_MAX_FRAGMENT_CHARS,
     DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES,
+    DEFAULT_PREPARED_GLOSSARY_MIN_DIAGNOSTIC_SCORE,
+    DEFAULT_PREPARED_GLOSSARY_MIN_EDITOR_SCORE,
     PreparedGlossaryPackagePrepRequest,
     PreparedGlossaryPrepService,
     PreparedGlossaryPrepServiceConfig,
@@ -67,6 +71,30 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
             result.metadata["max_estimated_editor_tokens"],
             DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS,
         )
+        self.assertEqual(
+            result.metadata["caps"]["max_candidates"],
+            DEFAULT_PREPARED_GLOSSARY_MAX_CANDIDATES,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["max_excerpt_chars"],
+            DEFAULT_PREPARED_GLOSSARY_MAX_EXCERPT_CHARS,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["max_fragment_chars"],
+            DEFAULT_PREPARED_GLOSSARY_MAX_FRAGMENT_CHARS,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["max_estimated_editor_tokens"],
+            DEFAULT_PREPARED_GLOSSARY_ESTIMATED_EDITOR_TOKENS,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["min_editor_score"],
+            DEFAULT_PREPARED_GLOSSARY_MIN_EDITOR_SCORE,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["min_diagnostic_score"],
+            DEFAULT_PREPARED_GLOSSARY_MIN_DIAGNOSTIC_SCORE,
+        )
         self.assertEqual(result.metadata["selected_candidate_count"], 16)
         self.assertEqual(result.metadata["validation"]["ready_entry_count"], 16)
         self.assertEqual(
@@ -118,6 +146,48 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         )
         self.assertEqual(cap_8.metadata["max_candidates"], 8)
         self.assertEqual(cap_16.metadata["max_candidates"], 16)
+        self.assertEqual(cap_8.metadata["caps"]["max_candidates"], 8)
+        self.assertEqual(cap_16.metadata["caps"]["max_candidates"], 16)
+
+    def test_configured_prep_caps_are_reflected_in_packet_and_metadata(self):
+        content = _many_place_content()
+        request = _request(content)
+        provider_requests = []
+
+        def provider(provider_request):
+            provider_requests.append(provider_request)
+            return _package_from_all_candidates(provider_request.packet)
+
+        result = PreparedGlossaryPrepService(
+            provider=provider,
+            config=PreparedGlossaryPrepServiceConfig(
+                max_candidates=3,
+                max_excerpt_chars=64,
+                max_fragment_chars=640,
+                max_estimated_editor_tokens=1_800,
+                min_editor_score=1,
+                min_diagnostic_score=1,
+                max_provider_reported_total_tokens=500,
+            ),
+        ).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertEqual(len(provider_requests), 1)
+        packet = provider_requests[0].packet
+        self.assertEqual(packet["max_candidates"], 3)
+        self.assertEqual(packet["max_excerpt_chars"], 64)
+        self.assertLessEqual(len(packet["candidates"]), 3)
+        self.assertEqual(result.metadata["caps"]["max_candidates"], 3)
+        self.assertEqual(result.metadata["caps"]["max_excerpt_chars"], 64)
+        self.assertEqual(result.metadata["caps"]["max_fragment_chars"], 640)
+        self.assertEqual(
+            result.metadata["caps"]["max_estimated_editor_tokens"],
+            1_800,
+        )
+        self.assertEqual(
+            result.metadata["caps"]["max_provider_reported_total_tokens"],
+            500,
+        )
 
     def test_missing_provider_returns_metadata_only_fallback(self):
         request = _request(_source_content())
