@@ -189,6 +189,23 @@ prove semantic/literary glossary quality, provider behavior, live smoke
 readiness, rollout, cache reuse or release/privacy/legal/support readiness.
 Follow-up #666 remains required for the scanner-v2 architecture decision.
 
+Issue #689 implementation slice on 2026-06-18 narrows the #663 prepared
+candidate-quality policy after fresh #688/#690 metadata-only evidence showed
+low-value repeated-term phrase shapes consuming the prepared prep editor cap.
+The new local reason code is
+`candidate_quality_low_value_repeated_term_phrase`; focused tests prove
+representative durable terms still pass and ordinary metadata remains raw-free.
+Post-#689 fake/local audit over the expanded 9-case matrix recorded 105 prep
+input candidates, 71 selected after quality, 34 dropped, 71 package-selected
+entries, 0 package-level drops, 9 ready fake/local cases and 2 suspected
+missing target-backed durable candidates still unresolved. Details are in
+`docs/superpowers/specs/2026-06-18-prepared-glossary-candidate-quality-tuning.md`.
+This does not change scanner v1, reducer scoring, provider/package boundaries,
+runtime rollout, cache reuse, provider config, storage/admin/retention or
+release/privacy/legal/support claims. #690 remains required to decide whether
+prep selection should backfill after quality drops or otherwise adjust
+reducer/prep selection.
+
 Issue #666 architecture slice on 2026-06-17 records the scanner-v2 decision:
 keep deterministic scanner v1 plus #663/#664 candidate-quality gates for now
 and do not rewrite the scanner in-place. The #665 audit is sufficient to defer
