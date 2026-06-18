@@ -650,7 +650,7 @@ def _preflight_candidate_selection(
         source_language=source_language,
     )
     if selected_quality.entries:
-        return selected, upstream_selector_signature
+        return selected_quality.entries, selected_quality.selector_signature
 
     fallback_quality = filter_prepared_glossary_candidates(
         snapshot_entries,
