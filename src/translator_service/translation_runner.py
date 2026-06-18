@@ -87,17 +87,26 @@ class TranslatedDocument:
     is_partial: bool = False
 
 
+DEFAULT_GLOSSARY_RUNTIME_MAX_SELECTED_ENTRIES = 32
+DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_BLOCKS = 12
+DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_CHARACTERS = 2_400
+
+
 @dataclass(frozen=True)
 class GlossaryRuntimeAdapterHookConfig:
     enabled: bool = False
     glossary_plan: Mapping[str, Any] | None = None
-    max_selected_entries: int = 32
+    max_selected_entries: int = DEFAULT_GLOSSARY_RUNTIME_MAX_SELECTED_ENTRIES
     prompt_rehearsal_enabled: bool = False
     prompt_context_entries: Sequence[Mapping[str, Any]] = ()
     prompt_context_config: GlossaryPromptContextConfig | None = None
     owner_battle_test_enabled: bool = False
-    battle_test_max_source_blocks: int = 12
-    battle_test_max_source_characters: int = 2_400
+    battle_test_max_source_blocks: int = (
+        DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_BLOCKS
+    )
+    battle_test_max_source_characters: int = (
+        DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_CHARACTERS
+    )
     automatic_glossary_enabled: bool | None = None
     prompt_context_enabled: bool | None = None
     automatic_glossary_max_source_blocks: int | None = None
@@ -3176,7 +3185,9 @@ def _glossary_runtime_plan_metadata(
 ) -> dict[str, object] | None:
     if config is None or not isinstance(config.glossary_plan, Mapping):
         return None
-    metadata: dict[str, object] = {}
+    metadata: dict[str, object] = {
+        "runtime_caps": _glossary_runtime_caps_metadata(config)
+    }
     document_format = config.glossary_plan.get("document_format")
     if isinstance(document_format, str) and document_format in {"txt", "docx", "epub"}:
         metadata["document_format"] = document_format
@@ -3235,6 +3246,41 @@ def _glossary_runtime_plan_metadata(
         if filtered_bridge:
             metadata["prepared_package_runtime_bridge"] = filtered_bridge
     return metadata or None
+
+
+def _glossary_runtime_caps_metadata(
+    config: GlossaryRuntimeAdapterHookConfig,
+) -> dict[str, object]:
+    return {
+        "max_selected_entries": config.max_selected_entries,
+        "battle_test_max_source_blocks": config.battle_test_max_source_blocks,
+        "battle_test_max_source_characters": (
+            config.battle_test_max_source_characters
+        ),
+        "prompt_context": _prompt_context_config_caps_metadata(
+            config.prompt_context_config or GlossaryPromptContextConfig()
+        ),
+    }
+
+
+def _prompt_context_config_caps_metadata(
+    config: GlossaryPromptContextConfig,
+) -> dict[str, object]:
+    return {
+        "max_entries": config.max_entries,
+        "max_prompt_tokens": config.max_prompt_tokens,
+        "max_characters": config.max_characters,
+        "max_entry_characters": config.max_entry_characters,
+        "max_field_characters": config.max_field_characters,
+        "max_aliases": config.max_aliases,
+        "max_target_variants": config.max_target_variants,
+        "max_forbidden_variants": config.max_forbidden_variants,
+        "max_morphology_notes": config.max_morphology_notes,
+        "max_profile_rule_ids": config.max_profile_rule_ids,
+        "include_terminology_policy_metadata": (
+            config.include_terminology_policy_metadata
+        ),
+    }
 
 
 def _glossary_metadata_value_is_safe(value: object) -> bool:
