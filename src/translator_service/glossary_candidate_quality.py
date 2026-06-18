@@ -147,6 +147,38 @@ _LOW_VALUE_ALIAS_TOKENS = (
     | _BOILERPLATE_TOKENS
     | _HONORIFIC_TOKENS
 )
+_LOW_VALUE_REPEATED_TERM_START_TOKENS = frozenset(
+    {
+        "came",
+        "cannot",
+        "found",
+        "grew",
+        "looked",
+        "must",
+        "once",
+        "thought",
+        "went",
+    }
+)
+_LOW_VALUE_REPEATED_TERM_END_TOKENS = frozenset(
+    {
+        "back",
+        "been",
+        "down",
+        "myself",
+        "round",
+        "since",
+        "upon",
+    }
+)
+_LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
+    {
+        "moment",
+        "people",
+        "thing",
+        "things",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -266,6 +298,8 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
         and any(token in _COMMON_INVOCATION_TOKENS for token in tokens[1:])
     ):
         reasons.append("candidate_quality_common_phrase")
+    if _is_low_value_repeated_term_phrase(tokens):
+        reasons.append("candidate_quality_low_value_repeated_term_phrase")
     return tuple(dict.fromkeys(reasons))
 
 
@@ -310,6 +344,23 @@ def _is_roman_numeral(token: str) -> bool:
 
 def _has_honorific_name_shape(tokens: tuple[str, ...]) -> bool:
     return len(tokens) >= 2 and tokens[0] in _HONORIFIC_TOKENS
+
+
+def _is_low_value_repeated_term_phrase(tokens: tuple[str, ...]) -> bool:
+    if len(tokens) != 2:
+        return False
+    left, right = tokens
+    if left == right:
+        return True
+    if (
+        left in _LOW_VALUE_REPEATED_TERM_START_TOKENS
+        or right in _LOW_VALUE_REPEATED_TERM_END_TOKENS
+    ):
+        return True
+    return (
+        left in (_DETERMINER_TOKENS | _PRONOUN_TOKENS)
+        or right in _LOW_VALUE_GENERIC_NOUN_TOKENS
+    ) and any(token in _LOW_VALUE_GENERIC_NOUN_TOKENS for token in tokens)
 
 
 def _entry_source(entry: Any) -> str:
