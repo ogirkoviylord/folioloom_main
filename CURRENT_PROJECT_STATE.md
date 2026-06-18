@@ -1,256 +1,112 @@
 # FolioLoom Current Project State
 
-Актуальный источник фактического состояния проекта на 2026-05-10.
+Date: 2026-06-18
 
-## Коротко
+## Summary
 
-FolioLoom - это рабочая foundation для closed beta Telegram-first сервиса
-перевода авторизованных длинных документов. Проект уже вышел за рамки
-in-memory prototype: есть persistent jobs/work units, object storage,
-worker loop, admin console, Docker Compose deployment и backup/restore
-workflow.
+FolioLoom is a working closed-beta foundation for Telegram-first translation of authorized long documents. The product path is: trusted beta user uploads TXT/DOCX/EPUB in Telegram, confirms rights, selects translation mode and target language, receives preview/estimate, explicitly continues/confirms, then gets progress/cancel/status/history and a final or partial translated file.
 
-FolioLoom пока не является paid public production service. Ближайшая цель -
-free closed beta после прохождения release gates.
+The project is not paid beta and not public production.
 
-## Текущий стек
+## Stack
 
 - Python 3.13.
 - aiogram Telegram runtime.
 - FastAPI API/admin app.
 - Docker Compose services: `api`, `bot`, `worker`, `postgres`, `redis`.
-- PostgreSQL scheduler storage для server runtime.
-- SQLite fallback/runtime stores там, где это явно настроено.
-- Local object storage через host `./var`, смонтированный в containers как
-  `/app/var` и `/data`.
-- DeepSeek-compatible chat completion providers как внутренний provider layer.
-- TXT/DOCX/EPUB planners, adapters и assembly.
+- PostgreSQL scheduler storage for server runtime.
+- SQLite fallback/runtime stores where explicitly configured.
+- Local object storage under host `./var`.
+- DeepSeek-compatible provider layer.
+- TXT/DOCX/EPUB planners, adapters and assembly.
 
-## Последняя зафиксированная проверка
+## Implemented Foundations
 
-После Phase 3 adaptive provider throttling были пройдены:
+### Bot and User Flow
 
-```bash
-PYTHONPATH=src python3 -m unittest tests.test_provider_throttle tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_bot_runtime tests.test_scheduler_runner tests.test_admin_provider_health tests.test_admin_routes tests.test_admin_live_monitor tests.test_server_deployment_config
-```
-
-Результат: Phase 3 targeted suite `Ran 176 tests`, `OK`; scheduler regression
-`Ran 88 tests`, `OK`, `skipped=13`; Docker/Postgres scheduler `Ran 14 tests`,
-`OK`; predeploy check passed.
-
-После Phase 1 smart scheduler fairness/capacity и Phase 2 provider channel
-observability были пройдены:
-
-```bash
-PYTHONPATH=src python3 -m unittest tests.test_deepseek_key_pool tests.test_ai_provider_runtime tests.test_bot_runtime tests.test_admin_provider_health tests.test_admin_routes tests.test_admin_live_monitor tests.test_server_deployment_config
-PYTHONPATH=src python3 -m unittest tests.test_worker tests.test_scheduler tests.test_scheduler_runner tests.test_persistent_jobs tests.test_postgres_scheduler
-PYTHONPATH=src python3 -m compileall src
-scripts/predeploy_check.sh
-docker compose run --rm --no-deps -v "$PWD:/workspace" -w /workspace -e TEST_POSTGRES_DSN=postgresql://translator:translator@postgres:5432/translator -e PYTHONPATH=src api python -m unittest tests.test_postgres_scheduler
-```
-
-Результаты: Phase 2 targeted suite `Ran 146 tests`, `OK`; scheduler regression
-`Ran 85 tests`, `OK`, `skipped=13`; Docker/Postgres scheduler `Ran 14 tests`,
-`OK`; predeploy check passed.
-
-После добавления rights confirmation gate были пройдены:
-
-```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
-PYTHONPATH=src python3 -m compileall src
-scripts/predeploy_check.sh
-```
-
-Результат последнего полного unittest suite: `Ran 856 tests`, `OK`,
-`skipped=10`.
-
-После добавления DeepSeek balance и фикса совместной работы admin/env ключей
-были пройдены targeted checks:
-
-```bash
-PYTHONPATH=src python3 -m unittest tests.test_admin_provider_balance tests.test_admin_bootstrap_config tests.test_deepseek_key_sources tests.test_bot_runtime tests.test_server_deployment_config
-scripts/predeploy_check.sh
-```
-
-Результат targeted suite: `Ran 71 tests`, `OK`.
-
-После issue #56 preview evidence/docs sync были пройдены:
-
-```bash
-PYTHONPATH=src python3 -m unittest tests.test_bot_translation_service tests.test_bot_runtime tests.test_bot_messages tests.test_translation_jobs
-PYTHONPATH=src python3 -m unittest discover -s tests
-PYTHONPATH=src python3 -m compileall src
-scripts/predeploy_check.sh
-```
-
-Результаты: focused preview/bot/service suite `Ran 237 tests`, `OK`;
-full unittest suite `Ran 1046 tests`, `OK`, `skipped=13`; compileall passed.
-`scripts/predeploy_check.sh` passed. This is local verification evidence for the
-preview slice, not a free closed beta go/no-go.
-
-Важная оговорка: repo-wide `python3 -m ruff check --no-cache src tests scripts`
-пока не является release blocker. Он падает на исторических style/import/line
-length issues. Текущий gate - targeted lint внутри `scripts/predeploy_check.sh`.
-
-## Что реализовано
-
-### Bot and user flow
-
-- aiogram runtime.
 - `/start`, menu/help/language flows.
-- Upload/estimate/confirm/progress/cancel/status/history-oriented flows.
-- Invite-only beta allowlist by Telegram user id, editable from admin settings
-  with per-ID add/remove controls and an explicit admin on/off toggle. The
-  toggle defaults off, so the bot remains open until the owner enables
-  enforcement.
-- Rights confirmation gate after document upload/validation and before target
-  language/estimate/full processing. Confirmation stores safe metadata only:
-  boolean, timestamp, version and source.
-- Free preview before full translation: after rights confirmation, translation
-  mode and target language selection, the bot generates a bounded translated
-  preview, shows Continue/Back controls, and full translation cannot start
-  until the user explicitly continues after seeing the preview.
-- TXT/DOCX/EPUB upload and translation path.
-- Cooperative cancellation with partial output.
-- My Books/history foundations: ownership checks, download, resume/cancel
-  affordances и delete confirmation.
-- UI localization: Russian, Ukrainian, French, Spanish, English, Dutch.
+- TXT/DOCX/EPUB upload and validation path.
+- Rights confirmation before translation work.
+- Translation mode and target language selection.
+- Preview/estimate before full translation.
+- Continue/confirm before full processing.
+- Progress/cancel/status/history-oriented flows.
+- Partial/final output handling.
+- My Books/history foundations.
+- UI localization foundations across supported interface languages.
 
-### Translation core
+### Translation Core
 
-- TXT, DOCX, EPUB extraction/planning/assembly.
-- Separate format adapters for TXT/DOCX/EPUB.
+- TXT, DOCX and EPUB extraction/planning/assembly.
 - Persistent planners and persistent assembly for final and partial outputs.
-- DOCX support includes tables/pseudo-tables, headers, footers, footnotes,
-  endnotes, comments, hyperlinks, basic run formatting, hidden text,
-  subscript/superscript and protected structured text.
-- EPUB support includes spine order, XHTML text blocks, inline formatting,
-  note/footnote anchors, OPF/NCX auxiliary text and repair helpers.
+- Format adapters with structure preservation foundations.
 - Output contract checks and repair path for unsafe provider outputs.
 - Russian and Ukrainian quality/profile foundations.
+- Glossary/prepared-package foundations are in development; current live evidence does not prove rollout readiness.
 
-### Backend, persistence and worker
+### Backend, Persistence and Worker
 
 - Local object storage for source, intermediate, partial and final files.
-- SQLite persistent job/work-unit store for local/fallback paths.
+- SQLite local/fallback job/work-unit storage where configured.
 - PostgreSQL scheduler store for server runtime.
 - Scheduler runner and worker loop.
-- Work-unit leases, retries, attempts, usage accounting, worker heartbeats,
-  partial/final output keys.
-- Worker-side scheduler execution can run multiple distinct scheduled work
-  units concurrently within configured capacity, while provider calls remain
-  capped by DeepSeek key/channel capacity.
-- Scheduler claim ordering is beta-safe and fairness-aware: user/job/document
-  active caps, priority aging and capacity-aware batch claiming prevent one
-  huge document or heavy user from monopolizing worker slots.
-- Phase 4 beta safety is implemented: live admin kill switch, global/user cost
-  caps, reservation-at-enqueue, idempotent work-unit usage accounting and
-  budget warnings. This is an operational beta guard, not a paid billing
-  ledger.
-- Docker Compose stack with `api`, `bot`, `worker`, `postgres`, `redis`.
-- Server env example uses `SCHEDULER_BACKEND=postgres`.
+- Work-unit leases, retries, usage accounting, worker heartbeats and output keys.
+- Beta-safe concurrency and provider-capacity foundations.
+- Beta safety guard: kill switch, cost caps, reservation/accounting and admin visibility.
 
-### Provider layer
+### Provider Layer
 
 - DeepSeek-compatible chat completion client.
 - Multiple internal API channel/key support.
-- Weighted least-loaded key selection with active-load, fairness, recent-error
-  and latency signals.
-- Key cooldown/failover behavior for rate-limit/unavailable/timeout failures.
-- Local per-worker adaptive provider throttling with conservative initial
-  capacity, success-based ramp, multiplicative decrease and provider circuit
-  breaker for sustained provider degradation or auth/billing failures.
-- Admin-visible provider runtime status, reload request flow and per-channel
-  health telemetry.
-- Runtime channel telemetry includes active requests, capacity, cooldown,
-  latency, 429/503/timeout/malformed/auth/billing counters and redacted safe
-  error summaries.
-- Runtime provider telemetry includes adaptive limit, available provider slots,
-  circuit state, reset remaining time and redacted last reason.
-- Provider validation/probe surfaces.
-- Admin-visible DeepSeek account balance snapshot/refresh flow.
-- DeepSeek admin keys and `.env` keys are additive for balance/runtime use.
+- Key selection/failover/cooldown foundations.
+- Adaptive throttling and provider circuit behavior.
+- Admin-visible provider health/runtime/probe/balance surfaces.
 
-### Admin console
+### Admin / Operations
 
-Implemented owner/admin areas include:
+- Owner/admin login/session foundation.
+- Settings, beta allowlist, provider keys/health, operations, live monitor, costs, security/audit surfaces.
+- SSH-tunnel-only admin posture for closed beta.
+- Docker Compose stack and deployment/restore scripts.
+- Backup/restore tooling and runbooks.
 
-- owner login/session auth;
-- RBAC-shaped model;
-- settings;
-- encrypted secret storage;
-- integration registry and connection rows;
-- AI provider keys;
-- DeepSeek account balance snapshot/refresh;
-- provider validation/probe/runtime status/reload;
-- overview action center;
-- live monitor;
-- translation run logs and detail/download;
-- user activity;
-- user list/details;
-- security events;
-- operations/jobs;
-- token/cost analytics;
-- beta safety Costs/Settings/Live visibility for consumed, reserved and
-  remaining budget, cap warnings and the live kill switch state;
-- quality run trigger;
-- audit logging;
-- deployment smoke checks.
-- closed-beta allowlist settings, per-ID add/remove controls and enforcement
-  toggle.
+## Main Gaps Before Free Closed Beta
 
-Admin access is SSH-tunnel-only for closed beta. It is not a public admin
-product yet.
-
-### Deployment and operations
-
-- `docker-compose.yml`.
-- `.env.server.example`.
-- `scripts/deploy_server.sh`.
-- `scripts/predeploy_check.sh`.
-- `scripts/server_smoke_check.sh`.
-- `scripts/server_status.sh`.
-- `scripts/backup_server_data.py`.
-- `scripts/verify_backup_export.py`.
-- VPS runbook and restore runbook under `docs/deployment/`.
-
-## Main gaps against closed beta
-
-- Broader upload safety beyond local malware/AV scanning and the local
-  synthetic upload hardening/quarantine baseline. Owner accepted local
-  malware/AV scanning on 2026-05-22; issue #95 now records metadata-only local
-  malware/AV Gate B evidence. Issue #73 now records local synthetic
-  upload-hardening/quarantine evidence. TTL/quarantine cleanup, approved
-  beta-server smoke, real-file QA and full Gate B readiness remain separate
-  gaps.
 - TTL cleanup/delete verification.
-- Real-file TXT/DOCX/EPUB matrix and release report.
+- Real-file TXT/DOCX/EPUB release matrix and report.
 - EPUBCheck or equivalent release validation.
 - DOCX openability/visual QA.
+- Cancel/resume/restart validation.
+- Backup visibility page and restore rehearsal evidence.
 - Alerts MVP.
-- Backups visibility page.
-- Scheduler/runtime consistency smoke as a release artifact.
+- Approved beta-server smoke evidence.
+- Release-ready legal/privacy/AUP/support materials remain future/public-production work.
 
-## Committed future formats / not approved for implementation yet
+## Current Glossary Posture
 
-- FolioLoom is committed to future support for RTF (#4), FB2
-  ([#23](https://github.com/ogirkoviylord/folioloom_main/issues/23)), PDF/OCR,
-  HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU.
-- These formats remain outside the current TXT/DOCX/EPUB closed-beta scope.
-  Issue #208 owns prioritization and issue breakdown. Authorized fixtures,
-  supported subsets, dependency impact and verification depth remain `TBD` until
-  format-specific architecture review and implementation approval.
+Automatic/internal glossary work is active but not release-ready.
 
-## Paid beta blockers
+Confirmed:
 
-Paid beta is blocked until Telegram Stars/XTR flow, `pre_checkout_query`,
-`successful_payment`, stored `telegram_payment_charge_id`, idempotency,
-persistent ledger, reservation/capture/refund, `/paysupport`, reconciliation
-and support/refund policy are implemented and tested.
+- temporary user-facing glossary selector was superseded by internal automatic policy;
+- local/fake prepared-glossary prep and package validation foundations exist;
+- candidate-quality gates were added locally;
+- scanner v2 was deferred for now;
+- owner-only diagnostics boundaries exist for glossary runtime sidecars.
 
-## Recommended restart decision
+Blocking caveat:
 
-Run free closed beta first. The engineering foundation is strong enough to test
-with trusted users and real authorized documents, but quality, reliability,
-rights flow, upload safety, TTL, backups visibility and payment readiness still
-need gates before paid/public launch.
+- the bounded live automatic glossary smoke after the local/provider wiring was no-go: RU prep did not produce a READY package; UK rendered glossary context but runtime structural validation failed.
+
+Do not claim live glossary quality, runtime rollout readiness, cache reuse readiness or release readiness without new reviewed evidence.
+
+## Common Verification
+
+- Full unit suite: `PYTHONPATH=src python3 -m unittest discover -s tests`
+- Targeted unit tests: `PYTHONPATH=src python3 -m unittest tests.test_<module>`
+- Compile: `PYTHONPATH=src python3 -m compileall src`
+- Local predeploy: `scripts/predeploy_check.sh`
+- Server smoke: `scripts/server_smoke_check.sh` only with owner-approved environment access.
+
+## Historical Detail
+
