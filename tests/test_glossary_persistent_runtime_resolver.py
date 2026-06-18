@@ -4,6 +4,11 @@ from datetime import UTC, datetime
 
 from translator_service.glossary_candidate_reducer import GlossaryCandidateReducerCaps
 from translator_service.glossary_persistent_runtime_resolver import (
+    DEFAULT_PERSISTENT_GLOSSARY_MAX_SELECTED_ENTRIES,
+    DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_BLOCKS,
+    DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_CHARACTERS,
+    DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_ENTRIES,
+    DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_PROMPT_TOKENS,
     PersistentEpubGlossaryResolverConfig,
     PersistentGlossaryResolverConfig,
     build_persistent_epub_glossary_runtime_hook,
@@ -60,6 +65,28 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertEqual(hook.owner_battle_test_enabled, True)
         self.assertEqual(hook.prompt_rehearsal_enabled, True)
         self.assertEqual(len(hook.prompt_context_entries), 1)
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["max_source_blocks"],
+            DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_BLOCKS,
+        )
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["max_source_characters"],
+            DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_CHARACTERS,
+        )
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["max_selected_entries"],
+            DEFAULT_PERSISTENT_GLOSSARY_MAX_SELECTED_ENTRIES,
+        )
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["selection_budget"][
+                "max_prompt_tokens"
+            ],
+            DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_PROMPT_TOKENS,
+        )
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["selection_budget"]["max_entries"],
+            DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_ENTRIES,
+        )
 
         serialized_plan = json.dumps(
             hook.glossary_plan,
@@ -119,6 +146,10 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertEqual(
             hook.glossary_plan["prepared_package"]["ready_entry_count"],
             1,
+        )
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["max_source_characters"],
+            DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_CHARACTERS,
         )
         self.assertEqual(len(hook.prompt_context_entries), 1)
 
@@ -255,6 +286,10 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         )
 
         self.assertEqual(hook.glossary_plan["status"], "planned")
+        self.assertEqual(
+            hook.glossary_plan["resolver_caps"]["max_source_characters"],
+            8,
+        )
         self.assertEqual(len(hook.prompt_context_entries), 1)
 
     def test_prepared_package_target_mismatch_falls_back(self):

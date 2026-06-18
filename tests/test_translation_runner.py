@@ -17,6 +17,9 @@ from translator_service.translation_cache import MemoryTranslationCache
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_jobs import CancellationToken
 from translator_service.translation_runner import (
+    DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_BLOCKS,
+    DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_CHARACTERS,
+    DEFAULT_GLOSSARY_RUNTIME_MAX_SELECTED_ENTRIES,
     GlossaryRuntimeAdapterHookConfig,
     TranslatedDocument,
     translate_docx_document,
@@ -1634,6 +1637,12 @@ class TranslationRunnerTest(unittest.TestCase):
         )
         self.assertTrue(
             all(
+                item["runtime_caps"]["max_selected_entries"] == 0
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
                 item["cache_policy"]["behavior"] == "default_runtime_cache"
                 for item in metadata
             )
@@ -1790,6 +1799,22 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertEqual(
             metadata[0]["prompt_context"]["included_entry_ids"],
             ["glossary-entry:v1:darcy"],
+        )
+        self.assertEqual(
+            metadata[0]["runtime_caps"]["max_selected_entries"],
+            DEFAULT_GLOSSARY_RUNTIME_MAX_SELECTED_ENTRIES,
+        )
+        self.assertEqual(
+            metadata[0]["runtime_caps"]["battle_test_max_source_blocks"],
+            DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_BLOCKS,
+        )
+        self.assertEqual(
+            metadata[0]["runtime_caps"]["battle_test_max_source_characters"],
+            DEFAULT_GLOSSARY_RUNTIME_BATTLE_TEST_MAX_SOURCE_CHARACTERS,
+        )
+        self.assertEqual(
+            metadata[0]["runtime_caps"]["prompt_context"]["max_entries"],
+            GlossaryPromptContextConfig().max_entries,
         )
         self.assertEqual(
             metadata[0]["battle_test_preflight"]["status"],
@@ -2098,6 +2123,12 @@ class TranslationRunnerTest(unittest.TestCase):
             all(
                 "source_character_count_exceeds_limit"
                 in item["battle_test_preflight"]["source_size_gate_reason_codes"]
+                for item in metadata
+            )
+        )
+        self.assertTrue(
+            all(
+                item["runtime_caps"]["battle_test_max_source_characters"] == 8
                 for item in metadata
             )
         )

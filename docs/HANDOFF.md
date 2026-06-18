@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Glossary cap config diagnostics
+
+Glossary prep, runtime adapter and persistent resolver cap defaults are named in code and surfaced in metadata-only diagnostics (`caps`, `runtime_caps`, `resolver_caps`). Defaults and behavior are unchanged; do not raise or remove caps without a separate owner-approved issue.
+
 ### 2026-06-18 - Agent local privacy posture simplified
 
 Owner local development mode allows local reading and owner-chat discussion of raw text, `.env*`, secrets, provider payloads, translations, diagnostics and runtime files when relevant. Publication, commits, external sharing, destructive operations and production-facing changes still need exact owner intent.
