@@ -1,0 +1,21 @@
+# Agent context exclusions
+
+.git/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+
+var/
+outputs/
+handoff/
+epub_audit_output/
+.superpowers/
+
+# Historical implementation plans are available through DOCUMENT_INDEX.md.
+docs/superpowers/plans/
+
+# Archive is for exact lookup, not default context.
+docs/archive/

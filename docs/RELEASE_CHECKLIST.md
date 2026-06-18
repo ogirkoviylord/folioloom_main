@@ -1,66 +1,46 @@
 # Release Checklist
 
-## 1. Назначение
+This is the active go/no-go checklist for beta, deploy, rollback, public launch
+or production-related decisions. Full prior checklist detail is archived at
 
-Этот документ используется перед релизом, деплоем, public launch или любым
-важным production change в FolioLoom.
+## Rules
 
-AI-агенты не имеют права считать релиз готовым без прохождения этого checklist
-`docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md` и
-`docs/restart/release-gates.md`.
+- The owner makes the final GO / NO-GO decision.
+- Agents may collect evidence and identify blockers; they do not approve release
+  readiness by themselves.
+- Documentation-only changes do not require code tests unless they change
+  behavior, release claims, deployment process, safety boundaries or user-data
+  handling.
+- Deploys require exact owner approval for target, ref/commit and command.
+- Server smoke/status checks require an approved target environment.
 
-Финальное решение `GO / NO-GO` всегда принимает человек-владелец проекта. Этот
-файл помогает собрать evidence, но не заменяет human approval.
+## Release Types
 
-## 2. Release types
+| Type | Current posture |
+| --- | --- |
+| Documentation-only | Allowed with evidence review; no code tests unless docs change behavior/claims. |
+| Internal development | Allowed for local/PR work with focused verification. |
+| Closed beta | Current target stage; needs Gate B evidence or owner-approved deferrals. |
+| Public beta | `TBD`; do not claim ready. |
+| Paid beta | Future gated stage; do not claim ready. |
+| Production | Future gated stage; do not claim ready without Gate D and owner approval. |
 
-### Documentation-only release
+## Pre-Release Evidence
 
-Применимо, когда меняются только документы. Для такого релиза code tests можно
-не запускать, если документ не меняет поведение, deployment process, release
-readiness claims, security/privacy/legal/payment claims или user data handling.
-Нужно явно указать, что tests не запускались и почему.
+Before any beta/deploy/release decision, check:
 
-### Internal development release
+- `docs/ROADMAP.md` for stage and scope.
+- `docs/DECISIONS.md` for active boundaries.
+- `docs/RISK_REGISTER.md` for high/critical risks.
+- `docs/QUALITY_GATES.md` for required checks.
+- `docs/restart/release-gates.md` when Gate A/B/C/D evidence is relevant.
 
-Применимо для локального handoff, merge или dev-итерации без production deploy
-и без публичного beta/public launch. Нужны focused tests для измененной зоны и
-проверка, что scope не затрагивает high-risk области без approval.
+Use archive files only when older release rationale or prior checklist detail is
+needed.
 
-### Closed beta release
+## Code And Deploy Checks
 
-Применимо. Текущий подтвержденный milestone проекта - free closed beta для
-trusted Telegram users с форматами TXT, DOCX и EPUB. Перед таким релизом нужен
-Gate B evidence report или явные owner-approved deferrals.
-
-### Public beta release
-
-TBD. В активных документах public beta как отдельная стадия не подтверждена.
-Paid beta и public production описаны как будущие gated стадии, но не готовы.
-
-### Production release
-
-Применимо только как будущий тип релиза. Текущий статус проекта: public
-production not ready. Production release требует Gate D, legal/privacy/support
-готовности, monitoring/alerts, backup/restore evidence, security hardening и
-явного human approval.
-
-## 3. Pre-release checklist
-
-- [ ] Roadmap phase confirmed in `docs/ROADMAP.md`.
-- [ ] Relevant decisions reviewed in `docs/DECISIONS.md`.
-- [ ] Risks reviewed in `docs/RISK_REGISTER.md`.
-- [ ] Quality gates passed in `docs/QUALITY_GATES.md`.
-- [ ] Relevant Gate A/B/C/D items reviewed in `docs/restart/release-gates.md`.
-- [ ] For closed beta, Gate B evidence report exists or owner-approved
-  deferrals are recorded.
-- [ ] No unresolved high/critical risks without explicit acceptance.
-- [ ] No paid/public/production readiness claims added without evidence.
-- [ ] Human owner approved release scope.
-
-## 4. Code readiness
-
-Confirmed project commands:
+Known commands:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
@@ -68,7 +48,7 @@ PYTHONPATH=src python3 -m compileall src
 scripts/predeploy_check.sh
 ```
 
-Confirmed targeted/predeploy checks:
+Targeted checks may include:
 
 ```bash
 PYTHONPATH=src python3 -m unittest tests.test_<module>
@@ -77,271 +57,42 @@ scripts/server_smoke_check.sh
 scripts/server_status.sh
 ```
 
-Notes:
-
-- `scripts/predeploy_check.sh` is the current predeploy gate.
-- Dedicated integration test command: TBD / not found.
-- Dedicated typecheck command: TBD / not found.
-- Dedicated formatting check command: TBD / not found.
-- Repo-wide `python3 -m ruff check --no-cache src tests scripts` is documented
-  as debt signal, not a free closed-beta blocker.
-- Server smoke checks require an approved target environment.
-- Agent-executed deploys are allowed only for an exact owner-approved
-  target/ref/command and must use the documented deploy path, currently
-  `scripts/deploy_server.sh`. This does not approve release readiness or allow
-  secrets/env inspection, deployment-script edits, runtime-data operations,
-  database/state changes, backup/restore changes, auth/security changes,
-  legal/privacy changes, payment changes or provider-setting changes without
-  separate approval.
-
 Checklist:
 
-- [ ] Unit tests pass: `PYTHONPATH=src python3 -m unittest discover -s tests`.
-- [ ] Focused tests for changed areas pass.
-- [ ] Integration tests pass, if available. Current formal command: TBD.
-- [ ] Compile check passes: `PYTHONPATH=src python3 -m compileall src`.
-- [ ] Lint passes, if available: targeted ruff or `scripts/predeploy_check.sh`.
-- [ ] Typecheck passes, if available. Current command: TBD.
-- [ ] Formatting check passes, if available. Current command: TBD.
-- [ ] Predeploy gate passes: `scripts/predeploy_check.sh`.
-- [ ] Smoke test performed: local/predeploy smoke, and server smoke only on an
-  approved target environment.
-- [ ] For agent-executed deploys, exact owner approval, target environment,
-  branch/ref or commit, deploy command, rollback expectations and server
-  smoke/status checks are recorded.
+- [ ] Focused tests for changed areas passed or missing checks are explained.
+- [ ] Compile check passed when code changed, or omission is explained.
+- [ ] `scripts/predeploy_check.sh` passed before deploy, or owner accepted the
+  named missing check.
 - [ ] No unexpected dependency changes.
-- [ ] No secrets committed.
-- [ ] No real `.env*` files read, edited or included in output.
-- [ ] No high-risk files changed without approval.
+- [ ] No secrets/raw private material committed or published.
+- [ ] No high-risk area changed without approval.
+- [ ] Exact deploy target/ref/command is approved when deployment is in scope.
+- [ ] Rollback or forward-fix path is known.
 
-## 5. Product readiness
+## Product And Safety Checks
 
-Confirmed current product shape: Telegram-first translation service for
-authorized long documents. Closed-beta formats are TXT, DOCX and EPUB.
-Current audience is trusted beta users and owner/admin. Paid public SaaS,
-public self-serve signup, public admin, new formats and payment UI are out of
-scope for the next beta.
+- [ ] Current scope remains Telegram-first closed beta for TXT/DOCX/EPUB unless
+  owner approved a scope change.
+- [ ] Rights confirmation, beta allowlist, cost caps and kill switch are not
+  weakened.
+- [ ] User-facing errors do not expose provider internals, secrets or raw private
+  material.
+- [ ] Admin remains owner-only and not publicly exposed.
+- [ ] Provider changes do not introduce unapproved live spend or hidden capacity
+  behavior.
+- [ ] Retention, delete, backup/restore and runtime-data behavior are not changed
+  without approval.
+- [ ] Payment, legal/privacy, support and public policy claims are not added
+  without evidence and owner approval.
 
-Checklist:
+## Output
 
-- [ ] Telegram upload -> validation -> rights confirmation works.
-- [ ] Translation mode selection, target language selection, estimate and
-  explicit confirmation work.
-- [ ] Persistent job/work-unit creation works.
-- [ ] Worker processing produces final or partial result.
-- [ ] Progress, cancel, status/history/My Books flows work.
-- [ ] Automatic final/partial result delivery is not duplicated for the same
-  job/result within a running bot process; durable cross-restart delivery
-  tracking remains Unknown unless separately evidenced.
-- [ ] Core workflow survives bot/worker restart.
-- [ ] User-facing errors are understandable and do not expose provider internals.
-- [ ] Onboarding / instructions are clear for trusted beta users.
-- [ ] Rights confirmation remains visible before full processing.
-- [ ] Beta allowlist can be managed and enabled from SSH-tunneled admin.
-- [ ] Cost caps and kill switch are checked before release.
-- [ ] Admin/debug flow works through SSH tunnel, if applicable.
-- [ ] Admin bulk provider key tests are not run during active translations or
-  active provider requests; PR #38 guards this path and operator docs say to
-  wait until both counters return to 0.
-- [ ] Known limitations are documented.
-- [ ] Out-of-scope features are not presented as ready.
-- [ ] Free preview status is confirmed or explicitly deferred by owner.
-  Current Gate B status: unchecked. Issues #51/#52 are merged and issue #53
-  branch adds Telegram preview rendering; issue #54 preview-acceptance guard and
-  release evidence are still required.
-- [ ] Real TXT/DOCX/EPUB matrix has release evidence. Current Gate B status:
-  unchecked.
+For release-readiness work, report:
 
-## 6. Data and privacy readiness
-
-Confirmed facts:
-
-- User documents and generated files are stored through local object storage and
-  runtime paths under the server `./var` mount / `/data` container paths.
-- PostgreSQL is used for server scheduler/job/work-unit state.
-- Real `.env`, `.env.dev` and `.env.beta` files exist locally and must not be
-  read, edited or printed by agents.
-- Retention/TTL policy is proposed in docs, but Gate B TTL cleanup remains
-  unchecked.
-- Owner approved current/pre-release internal use of all uploaded files for
-  analytics and product improvement on 2026-06-02. Release-version analytics
-  file-use and consent behavior remains TBD and is tracked in issue #207.
-- Owner approved the complex book glossary/profile/DeepSeek Pro discovery
-  direction on 2026-06-12, including broad pre-release raw
-  glossary/profile/provider/prompt/QA diagnostics for owner debugging. Secrets,
-  provider `Authorization` headers, API keys and real `.env*` values remain
-  excluded. Release-version glossary/profile diagnostics, consent, retention,
-  deletion, support and legal/privacy behavior remain TBD.
-- Issue #412 / #204I provides a design-only owner-only glossary/profile
-  diagnostic sidecar boundary with a raw-field manifest and explicit
-  retention/export/deletion `TBD`s. It does not implement storage, admin UI,
-  archive inclusion or release-version privacy behavior.
-- Issue #436 / #204T records the release-version glossary/profile diagnostic
-  privacy, consent, retention, deletion, support and legal/privacy policy as
-  `TBD`/blocking. Pre-release owner-only diagnostics may remain allowed only
-  for explicitly approved bounded local diagnostics or dedicated owner-only
-  diagnostic surfaces; this is not release/privacy readiness evidence.
-
-Checklist:
-
-- [ ] User data handling reviewed.
-- [ ] File/data retention reviewed. Current TTL cleanup evidence: Unknown /
-  Gate B unchecked.
-- [ ] Delete behavior reviewed. Current evidence: Unknown unless release report
-  proves it.
-- [ ] Backup scope reviewed for source, intermediate, partial, final, runtime DB
-  and admin state.
-- [ ] Privacy/legal text reviewed, if applicable. Current public legal/privacy
-  readiness: TBD / not production-ready.
-- [ ] No unnecessary logging of sensitive data.
-- [ ] Logs/admin do not expose raw document text, prompts, translations, raw
-  provider request/response bodies or API keys outside the approved owner-only
-  diagnostic surfaces and full diagnostic downloads; downloaded full diagnostic
-  archives may also contain original uploaded file bytes and final/partial
-  translated result file bytes under `diagnostic_files/`; telemetry, normal
-  admin pages, release artifacts and support artifacts remain redacted.
-- [ ] Access controls reviewed, if applicable.
-- [ ] Destructive operations reviewed and approved by human owner.
-- [ ] Retention or user-data behavior changes have explicit human approval.
-- [ ] Release-version analytics file-use and consent policy is decided or
-  explicitly deferred by the owner before any public/legal/privacy claims.
-- [ ] If glossary/profile/DeepSeek Pro diagnostics are included in release
-  scope, their release-version diagnostic policy is decided, narrowed,
-  implemented where needed and verified before release claims. Current #436
-  status: `TBD`/blocking, not release-ready.
-- [ ] If glossary/profile diagnostic sidecars are implemented or exported,
-  their owner-only boundary, raw-field manifest, secret exclusion,
-  retention/export/deletion behavior and support/legal/privacy posture are
-  approved and verified before release claims. Current #436 status:
-  retention/export/deletion/support/legal policy remains `TBD`/blocking.
-
-## 7. Security readiness
-
-Checklist:
-
-- [ ] Secrets are not committed.
-- [ ] Real env files are not read, edited, copied or printed.
-- [ ] `.env.server.example` and other examples contain placeholders only.
-- [ ] Auth/permissions reviewed, if applicable.
-- [ ] Admin remains SSH-tunnel-only for closed beta.
-- [ ] External integrations reviewed: Telegram Bot API and DeepSeek-compatible
-  provider layer.
-- [ ] Provider details remain internal and are not exposed as user-facing model
-  picker.
-- [ ] Environment config reviewed.
-- [ ] Rate limits / abuse controls reviewed, if applicable.
-- [ ] Cost caps, job limits and kill switch reviewed.
-- [ ] Dependency risks reviewed.
-- [ ] No raw document text, prompts, translations, raw provider
-  request/response bodies or API keys appear in telemetry, release artifacts or
-  normal admin views. Approved owner-only diagnostic surfaces and downloaded
-  full diagnostic archives may show raw source/translated work-unit text and
-  exact provider request/response bodies for incident debugging, and may
-  include original uploaded file bytes plus final/partial translated result
-  file bytes under `diagnostic_files/`. Issue #549 may add
-  `glossary_runtime_diagnostics.json` for owner-only glossary battle-test
-  diagnostics inside downloaded full diagnostic archives. Provider
-  `Authorization` headers and API keys must remain excluded.
-- [ ] Glossary/profile diagnostics, translation contract snapshots and
-  DeepSeek Pro role traces do not expose secrets or provider auth material and
-  are not treated as release telemetry/support artifacts without a later
-  approved release-version policy. Current #436 status: release-version policy
-  remains `TBD`/blocking.
-- [x] Upload hardening/quarantine baseline is confirmed or explicitly deferred.
-  Current Gate B status: checked by issue #73 local synthetic evidence.
-- [x] Local malware/AV scanning gate is confirmed before parsing or explicitly
-  deferred by owner. Current Gate B status: checked by issue #95 metadata-only
-  local evidence.
-- [ ] Public malware scanning services do not receive user documents by default.
-- [ ] Scanner errors/timeouts/unavailable verdicts fail closed for beta unless
-  owner-approved otherwise.
-
-## 8. Operations readiness
-
-Confirmed operational shape:
-
-- Runtime services: `api`, `bot`, `worker`, `postgres`, `redis`, internal-only
-  `clamd`.
-- Deploy command documented: `scripts/deploy_server.sh`.
-- Predeploy gate documented: `scripts/predeploy_check.sh`.
-- Server smoke/status scripts documented: `scripts/server_smoke_check.sh` and
-  `scripts/server_status.sh`.
-- Restore runbook exists in `docs/deployment/restore-runbook.md`.
-- Production deployment requires explicit human approval.
-
-Checklist:
-
-- [ ] Deployment steps documented.
-- [ ] Production deployment explicitly approved by human owner.
-- [ ] Rollback plan exists.
-- [ ] Backup export exists and passes `scripts/verify_backup_export.py`.
-- [ ] Restore rehearsal passed from a backup artifact.
-- [ ] Monitoring/logging reviewed.
-- [ ] Metadata-only owner runbook/report for Alerts MVP exists. Current Gate B
-  status: unchecked; issue #71 chose owner report now and admin UI later.
-- [ ] Metadata-only owner runbook/report for backup visibility exists. Current
-  Gate B status: unchecked; issue #71 chose owner report now and admin UI later.
-- [ ] Backup plan reviewed, if applicable.
-- [ ] Incident response/contact path defined. Current public-production status:
-  TBD / Unknown.
-- [ ] Support/debug procedure documented.
-- [ ] `scripts/server_smoke_check.sh` passed on target server or missing server
-  condition is recorded.
-- [ ] If upload scanning is enabled, `scripts/server_smoke_check.sh` confirms
-  the bot container can reach internal `clamd` and records only safe
-  PING/VERSION/EICAR metadata.
-
-## 9. AI-agent release rules
-
-- AI-агент не деплоит production без явного human approval.
-- AI-агент не меняет release scope сам.
-- AI-агент не принимает high/critical risks сам.
-- AI-агент не меняет pricing, payment, legal, security или privacy без approve.
-- AI-агент не меняет secrets, real env files, deployment files, auth, user data
-  handling, retention, backups, database state или migrations без approve.
-- AI-агент не объявляет paid beta, public beta или production ready без
-  соответствующего gate evidence и human approval.
-- AI-агент обязан записать tests/checks run и честно отметить not run, Unknown
-  или TBD.
-
-## 10. Release decision
-
-Use this format for the final release decision:
-
-```text
-Release name:
-Release type:
-Date:
-Owner:
-Scope:
-Passed checks:
-Known risks:
-Accepted risks:
-Rollback plan:
-Final decision: GO / NO-GO
-Human approval:
-```
-
-Rules:
-
-- `Accepted risks` must name the human approver.
-- `GO` is not valid without human approval.
-- `NO-GO` should list blockers and next actions.
-- For closed beta, Gate B must be complete or explicitly deferred in a signed
-  go/no-go note.
-- For paid beta, Gate C must be complete.
-- For public production, Gate D must be complete.
-
-## 11. Post-release checklist
-
-- [ ] Verify app/service is working.
-- [ ] Check logs.
-- [ ] Check user-facing flow.
-- [ ] Check admin/live/provider/cost surfaces, if applicable.
-- [ ] Check critical metrics, if available.
-- [ ] Check cost caps, kill switch and provider health for beta release.
-- [ ] Document issues.
-- [ ] Update `docs/ROADMAP.md` if phase changed.
-- [ ] Add new decisions to `docs/DECISIONS.md` if needed.
-- [ ] Add or update risks in `docs/RISK_REGISTER.md` if needed.
-- [ ] Record release evidence, commands, artifacts and owner decision.
+1. Verdict: GO candidate, NO-GO, or Needs more verification.
+2. Release type and target.
+3. Evidence checked.
+4. Blockers / `Unknown` / `TBD`.
+5. Required owner approvals.
+6. Rollback/forward-fix readiness.
+7. Next safest action.
