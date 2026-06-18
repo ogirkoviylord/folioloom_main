@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Prepared glossary provider readiness design
+
+`docs/superpowers/specs/2026-06-18-prepared-glossary-provider-readiness-design.md` defines a proposed metadata-only readiness envelope and state matrix for prepared-glossary provider/config/package/runtime diagnostics. Implementation, provider behavior changes, admin visibility and fail-closed policy changes still need separate owner approval.
+
 ### 2026-06-18 - Glossary cache reuse remains deferred
 
 `docs/superpowers/specs/2026-06-18-glossary-cache-reuse-after-465-design.md` updates the future glossary-aware cache reuse design after #465 evidence. Current behavior remains cache bypass for glossary-injected enabled/test-path units; cache reuse, durable cache changes and migration/invalidation still need separate owner approval.

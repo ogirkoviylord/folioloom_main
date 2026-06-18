@@ -68,9 +68,14 @@ from translator_service.translation_postprocess import clean_inline_formatting_a
 
 logger = logging.getLogger(__name__)
 
+_GLOSSARY_AUTOMATIC_PREFLIGHT_VERSION = (
+    "glossary-runtime-automatic-preflight-v1"
+)
 _GLOSSARY_BATTLE_TEST_PREFLIGHT_VERSION = (
     "glossary-runtime-battle-test-preflight-v1"
 )
+_GLOSSARY_AUTOMATIC_PREFLIGHT_KEY = "automatic_glossary_preflight"
+_GLOSSARY_BATTLE_TEST_PREFLIGHT_KEY = "battle_test_preflight"
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,72 @@ class GlossaryRuntimeAdapterHookConfig:
     owner_battle_test_enabled: bool = False
     battle_test_max_source_blocks: int = 12
     battle_test_max_source_characters: int = 2_400
+    automatic_glossary_enabled: bool | None = None
+    prompt_context_enabled: bool | None = None
+    automatic_glossary_max_source_blocks: int | None = None
+    automatic_glossary_max_source_characters: int | None = None
+
+    def __post_init__(self) -> None:
+        automatic_glossary_enabled = (
+            self.automatic_glossary_enabled
+            if self.automatic_glossary_enabled is not None
+            else self.owner_battle_test_enabled
+        )
+        prompt_context_enabled = (
+            self.prompt_context_enabled
+            if self.prompt_context_enabled is not None
+            else self.prompt_rehearsal_enabled
+        )
+        max_source_blocks = (
+            self.automatic_glossary_max_source_blocks
+            if self.automatic_glossary_max_source_blocks is not None
+            else self.battle_test_max_source_blocks
+        )
+        max_source_characters = (
+            self.automatic_glossary_max_source_characters
+            if self.automatic_glossary_max_source_characters is not None
+            else self.battle_test_max_source_characters
+        )
+        object.__setattr__(
+            self,
+            "automatic_glossary_enabled",
+            bool(automatic_glossary_enabled),
+        )
+        object.__setattr__(
+            self,
+            "owner_battle_test_enabled",
+            bool(automatic_glossary_enabled),
+        )
+        object.__setattr__(
+            self,
+            "prompt_context_enabled",
+            bool(prompt_context_enabled),
+        )
+        object.__setattr__(
+            self,
+            "prompt_rehearsal_enabled",
+            bool(prompt_context_enabled),
+        )
+        object.__setattr__(
+            self,
+            "automatic_glossary_max_source_blocks",
+            int(max_source_blocks),
+        )
+        object.__setattr__(
+            self,
+            "battle_test_max_source_blocks",
+            int(max_source_blocks),
+        )
+        object.__setattr__(
+            self,
+            "automatic_glossary_max_source_characters",
+            int(max_source_characters),
+        )
+        object.__setattr__(
+            self,
+            "battle_test_max_source_characters",
+            int(max_source_characters),
+        )
 
 
 def build_fallback_glossary_runtime_hook(
@@ -115,8 +186,8 @@ def build_fallback_glossary_runtime_hook(
                 "fallback_action": "omit_glossary_prompt_context",
             },
         },
-        prompt_rehearsal_enabled=True,
-        owner_battle_test_enabled=True,
+        automatic_glossary_enabled=True,
+        prompt_context_enabled=True,
     )
 
 
@@ -3016,7 +3087,9 @@ def _emit_glossary_adapter_metadata(
         return
     payload = glossary_prompt_policy_adapter_decision_payload(decision)
     if preflight is not None:
-        payload["battle_test_preflight"] = dict(preflight)
+        preflight_payload = dict(preflight)
+        payload[_GLOSSARY_AUTOMATIC_PREFLIGHT_KEY] = dict(preflight_payload)
+        payload[_GLOSSARY_BATTLE_TEST_PREFLIGHT_KEY] = dict(preflight_payload)
         if preflight.get("status") != "ready" and decision.status.value == "ready":
             payload["status"] = "fallback"
             payload["fallback_reason"] = str(
@@ -3040,7 +3113,62 @@ def _emit_glossary_adapter_metadata(
         )
     if plan_metadata:
         payload.update(plan_metadata)
+    _apply_glossary_effective_metadata(
+        payload,
+        decision=decision,
+        prompt_context=prompt_context,
+    )
     callback(payload)
+
+
+def _apply_glossary_effective_metadata(
+    payload: dict[str, object],
+    *,
+    decision: GlossaryPromptPolicyAdapterDecision,
+    prompt_context: GlossaryPromptContextResult | None,
+) -> None:
+    payload["metadata_only"] = True
+    payload["raw_payload_included"] = False
+    if _glossary_prompt_context_included(prompt_context):
+        payload["glossary_effective_status"] = "effective_observed"
+        payload["diagnostic_severity"] = "info"
+        payload["glossary_effective_reason_codes"] = [
+            "rendered_glossary_context_observed"
+        ]
+        return
+    if not decision.enabled:
+        return
+    severity = "error" if _ready_prepared_package_payload(payload) else "warning"
+    reason = str(payload.get("fallback_reason") or "glossary_context_not_rendered")
+    payload["glossary_effective_status"] = "not_effective"
+    payload["diagnostic_severity"] = severity
+    payload["glossary_effective_reason_codes"] = [reason]
+
+
+def _glossary_prompt_context_included(
+    prompt_context: GlossaryPromptContextResult | None,
+) -> bool:
+    if prompt_context is None:
+        return False
+    return bool(prompt_context.included_entries)
+
+
+def _ready_prepared_package_payload(payload: Mapping[str, object]) -> bool:
+    prepared_package = payload.get("prepared_package")
+    return isinstance(prepared_package, Mapping) and (
+        str(prepared_package.get("status")).casefold() == "ready"
+        or _metadata_int(prepared_package.get("ready_entry_count")) > 0
+    )
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return 0
 
 
 def _glossary_runtime_plan_metadata(
@@ -3128,8 +3256,8 @@ def _glossary_runtime_prompt_context(
     if config is None or decision is None:
         return None
     if (
-        not config.prompt_rehearsal_enabled
-        or not config.owner_battle_test_enabled
+        not config.prompt_context_enabled
+        or not config.automatic_glossary_enabled
         or not decision.prompt_planning_allowed
     ):
         return None
@@ -3167,7 +3295,7 @@ def _glossary_runtime_useful_preflight(
     *,
     source_texts: Sequence[str],
 ) -> dict[str, object] | None:
-    if config is None or not config.owner_battle_test_enabled:
+    if config is None or not config.automatic_glossary_enabled:
         return None
 
     source_text_tuple = tuple(text for text in source_texts if text)
@@ -3176,7 +3304,9 @@ def _glossary_runtime_useful_preflight(
     selected_entry_ids = tuple(decision.selected_entry_ids if decision else ())
     payload: dict[str, object] = {
         "schema_version": _GLOSSARY_BATTLE_TEST_PREFLIGHT_VERSION,
+        "automatic_glossary_schema_version": _GLOSSARY_AUTOMATIC_PREFLIGHT_VERSION,
         "enabled": True,
+        "automatic_glossary_enabled": True,
         "status": "skipped",
         "fallback_reason": "none",
         "reason_codes": [],
@@ -3184,8 +3314,8 @@ def _glossary_runtime_useful_preflight(
         "raw_payload_included": False,
         "source_block_count": source_block_count,
         "source_character_count": source_character_count,
-        "max_source_blocks": config.battle_test_max_source_blocks,
-        "max_source_characters": config.battle_test_max_source_characters,
+        "max_source_blocks": config.automatic_glossary_max_source_blocks,
+        "max_source_characters": config.automatic_glossary_max_source_characters,
         "source_block_limit_exceeded": False,
         "source_character_limit_exceeded": False,
         "source_size_gate_status": "within_limit",
@@ -3199,18 +3329,18 @@ def _glossary_runtime_useful_preflight(
 
     if decision is None or not decision.prompt_planning_allowed:
         return _glossary_preflight_skipped(payload, "adapter_not_ready")
-    if not config.prompt_rehearsal_enabled:
+    if not config.prompt_context_enabled:
         return _glossary_preflight_skipped(payload, "prompt_rehearsal_disabled")
-    if config.battle_test_max_source_blocks < 1:
+    if config.automatic_glossary_max_source_blocks < 1:
         return _glossary_preflight_skipped(payload, "invalid_source_block_limit")
-    if config.battle_test_max_source_characters < 1:
+    if config.automatic_glossary_max_source_characters < 1:
         return _glossary_preflight_skipped(payload, "invalid_source_character_limit")
 
     source_size_reason_codes: list[str] = []
-    if source_block_count > config.battle_test_max_source_blocks:
+    if source_block_count > config.automatic_glossary_max_source_blocks:
         payload["source_block_limit_exceeded"] = True
         source_size_reason_codes.append("source_block_count_exceeds_limit")
-    if source_character_count > config.battle_test_max_source_characters:
+    if source_character_count > config.automatic_glossary_max_source_characters:
         payload["source_character_limit_exceeded"] = True
         source_size_reason_codes.append("source_character_count_exceeds_limit")
     if source_size_reason_codes:
