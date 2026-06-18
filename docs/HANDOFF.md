@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Glossary cache reuse remains deferred
+
+`docs/superpowers/specs/2026-06-18-glossary-cache-reuse-after-465-design.md` updates the future glossary-aware cache reuse design after #465 evidence. Current behavior remains cache bypass for glossary-injected enabled/test-path units; cache reuse, durable cache changes and migration/invalidation still need separate owner approval.
+
 ### 2026-06-18 - Agent local privacy posture simplified
 
 Owner local development mode allows local reading and owner-chat discussion of raw text, `.env*`, secrets, provider payloads, translations, diagnostics and runtime files when relevant. Publication, commits, external sharing, destructive operations and production-facing changes still need exact owner intent.
