@@ -255,7 +255,7 @@ class PreparedGlossaryPrepService:
             plan_block_text_by_id=_plan_block_text_by_id(plan),
             evidence_by_id={
                 evidence.evidence_id: evidence
-                for evidence in reduction.retained_snapshot.evidence
+                for evidence in snapshot.evidence
             },
         )
         provider_metadata = _metadata(
