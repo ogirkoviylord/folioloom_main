@@ -112,6 +112,57 @@ Human approval required to change:
   state/storage/admin/retention changes or release/privacy/legal/support claims
   require separate explicit owner approval.
 
+### 2026-06-18 - Scanner v2 remains deferred after expanded #688-#692 evidence
+
+Status: Active architecture direction for #692 follow-up
+
+Decision:
+- Do not create a scanner-v2 shadow implementation issue from the #688-#692
+  evidence.
+- Keep scanner v1 as the active deterministic extractor.
+- Keep #663/#689 candidate-quality filtering, #664 package READY quality
+  enforcement and #690 quality-approved reducer diagnostic backfill as the
+  current safer post-scanner path.
+- Future scanner-v2 work is warranted only if metadata-only evidence shows
+  persistent scanner-level misses after #689/#690 gates, not merely reducer/prep
+  cap omissions.
+- This decision does not approve scanner-v2 implementation, scanner-v1 rewrite,
+  runtime rollout, cache reuse, live provider work, provider config changes,
+  DB/schema/state/storage/admin/retention changes, deployment or
+  release/privacy/legal/support claims.
+
+Evidence:
+- #688 expanded the local audit to 9 committed fixture cases and found 12
+  expected target-backed durable candidates in checked cases, 10 selected and 2
+  suspected missing.
+- #690 attribution showed the suspected missing candidates were present in
+  scanner v1 output and were lost at reducer/prep selection, not scanner
+  extraction.
+- #689 reduced low-value repeated-term cap pressure.
+- #690 quality-approved backfill then recorded 12 selected of 12 expected
+  target-backed durable candidates in checked cases, 0 suspected missing, 9
+  ready fake/local package cases, 0 package-level drops and passing
+  metadata-only raw/secret checks.
+- #691 provider/package-boundary hardening is not indicated by current
+  fake/local evidence.
+
+Consequences:
+- Do not use #688 alone as evidence for scanner-v2 shadow work; #690 supersedes
+  that suspected missing-candidate signal for checked fixtures.
+- A future scanner-v2 issue must first show target-backed durable source terms
+  absent from scanner v1 output, persistent checked missing counts after
+  #689/#690 gates, weak provider/package evidence caused by scanner evidence, or
+  repeated brittle source-language heuristic growth that cannot safely remain in
+  candidate quality or reducer/prep selection.
+- Real provider behavior, real-book translation quality and broader fixture
+  coverage remain `Unknown`.
+
+Human approval required to change:
+- yes; scanner-v2 implementation, switching active scanner behavior, runtime
+  rollout, cache reuse, live provider work, provider config changes, durable
+  state/storage/admin/retention changes or release/privacy/legal/support claims
+  require separate explicit owner approval.
+
 ### 2026-06-15 - Default automatic glossary policy supersedes the temporary Telegram selector
 
 Status: Active architecture/product direction; implemented locally through

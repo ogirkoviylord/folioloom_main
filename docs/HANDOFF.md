@@ -221,6 +221,19 @@ packet cap, call live providers, operate Telegram, approve rollout/cache reuse
 or make release/privacy/legal/support claims. #692 remains required as the
 no-code scanner-v2 shadow decision after #688-#690 evidence.
 
+Issue #692 architecture slice on 2026-06-18 keeps scanner v1 active and does
+not create a scanner-v2 shadow implementation issue from the expanded
+#688-#692 chain. The #688 suspected missing target-backed durable candidates
+were present in scanner v1 output and #690 resolved the checked missing count
+through #689 quality filtering plus quality-approved reducer diagnostic
+backfill, without a scanner rewrite or broad cap increase. Future scanner-v2
+work now requires fresh metadata-only evidence of persistent scanner-level
+misses after #689/#690 gates. Details are in
+`docs/superpowers/specs/2026-06-18-scanner-v2-shadow-decision-after-expanded-audit.md`
+and `docs/DECISIONS.md`. Real provider behavior, real-book translation quality
+and broader fixture coverage remain `Unknown`; live provider/runtime/cache/
+storage/admin/retention/release claims remain unapproved.
+
 Issue #666 architecture slice on 2026-06-17 records the scanner-v2 decision:
 keep deterministic scanner v1 plus #663/#664 candidate-quality gates for now
 and do not rewrite the scanner in-place. The #665 audit is sufficient to defer
