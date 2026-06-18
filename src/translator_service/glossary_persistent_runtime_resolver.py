@@ -168,6 +168,40 @@ class PersistentGlossaryResolverConfig:
     target_metadata_overlay_config: GlossaryTargetMetadataOverlayConfig = field(
         default_factory=lambda: GlossaryTargetMetadataOverlayConfig(enabled=True)
     )
+    automatic_glossary_enabled: bool | None = None
+    prompt_context_enabled: bool | None = None
+
+    def __post_init__(self) -> None:
+        automatic_glossary_enabled = (
+            self.automatic_glossary_enabled
+            if self.automatic_glossary_enabled is not None
+            else self.owner_battle_test_enabled
+        )
+        prompt_context_enabled = (
+            self.prompt_context_enabled
+            if self.prompt_context_enabled is not None
+            else self.prompt_rehearsal_enabled
+        )
+        object.__setattr__(
+            self,
+            "automatic_glossary_enabled",
+            bool(automatic_glossary_enabled),
+        )
+        object.__setattr__(
+            self,
+            "owner_battle_test_enabled",
+            bool(automatic_glossary_enabled),
+        )
+        object.__setattr__(
+            self,
+            "prompt_context_enabled",
+            bool(prompt_context_enabled),
+        )
+        object.__setattr__(
+            self,
+            "prompt_rehearsal_enabled",
+            bool(prompt_context_enabled),
+        )
 
 
 PersistentEpubGlossaryResolverConfig = PersistentGlossaryResolverConfig
@@ -290,7 +324,7 @@ def _build_persistent_glossary_runtime_hook(
 ) -> GlossaryRuntimeAdapterHookConfig:
     if not config.enabled:
         return _fallback_hook(disabled_reason_code)
-    if not config.owner_battle_test_enabled:
+    if not config.automatic_glossary_enabled:
         return _fallback_hook(f"{reason_prefix}_owner_battle_test_not_enabled")
     document_format = _document_format_for_kind(document_kind)
     if (
@@ -445,12 +479,12 @@ def _build_persistent_glossary_runtime_hook(
             "runtime_integration": _runtime_integration_payload(),
         },
         max_selected_entries=config.max_selected_entries,
-        prompt_rehearsal_enabled=config.prompt_rehearsal_enabled,
+        prompt_context_enabled=config.prompt_context_enabled,
         prompt_context_entries=_prompt_context_entries(overlay_result.snapshot),
         prompt_context_config=config.prompt_context_config,
-        owner_battle_test_enabled=config.owner_battle_test_enabled,
-        battle_test_max_source_blocks=config.max_source_blocks,
-        battle_test_max_source_characters=config.max_source_characters,
+        automatic_glossary_enabled=config.automatic_glossary_enabled,
+        automatic_glossary_max_source_blocks=config.max_source_blocks,
+        automatic_glossary_max_source_characters=config.max_source_characters,
     )
 
 
@@ -470,7 +504,7 @@ def build_persistent_glossary_runtime_hook_from_prepared_package(
         config=config
         or PersistentGlossaryResolverConfig(
             enabled=True,
-            owner_battle_test_enabled=True,
+            automatic_glossary_enabled=True,
         ),
         reason_prefix="persistent_glossary",
     )
@@ -492,7 +526,7 @@ def build_persistent_epub_glossary_runtime_hook_from_prepared_package(
         config=config
         or PersistentGlossaryResolverConfig(
             enabled=True,
-            owner_battle_test_enabled=True,
+            automatic_glossary_enabled=True,
         ),
         reason_prefix="persistent_epub",
     )
@@ -589,7 +623,7 @@ def _build_persistent_glossary_runtime_hook_from_prepared_entries(
 ) -> GlossaryRuntimeAdapterHookConfig:
     if not config.enabled:
         return _fallback_hook(f"{reason_prefix}_resolver_disabled")
-    if not config.owner_battle_test_enabled:
+    if not config.automatic_glossary_enabled:
         return _fallback_hook(f"{reason_prefix}_owner_battle_test_not_enabled")
     document_format = _document_format_for_kind(document_kind)
     if (
@@ -724,12 +758,12 @@ def _build_persistent_glossary_runtime_hook_from_prepared_entries(
             "runtime_integration": _runtime_integration_payload(),
         },
         max_selected_entries=config.max_selected_entries,
-        prompt_rehearsal_enabled=config.prompt_rehearsal_enabled,
+        prompt_context_enabled=config.prompt_context_enabled,
         prompt_context_entries=_prompt_context_entries(package_snapshot),
         prompt_context_config=config.prompt_context_config,
-        owner_battle_test_enabled=config.owner_battle_test_enabled,
-        battle_test_max_source_blocks=config.max_source_blocks,
-        battle_test_max_source_characters=config.max_source_characters,
+        automatic_glossary_enabled=config.automatic_glossary_enabled,
+        automatic_glossary_max_source_blocks=config.max_source_blocks,
+        automatic_glossary_max_source_characters=config.max_source_characters,
     )
 
 
@@ -756,12 +790,14 @@ def _hook_with_prepared_package_metadata(
         enabled=hook.enabled,
         glossary_plan=glossary_plan,
         max_selected_entries=hook.max_selected_entries,
-        prompt_rehearsal_enabled=hook.prompt_rehearsal_enabled,
+        prompt_context_enabled=hook.prompt_context_enabled,
         prompt_context_entries=hook.prompt_context_entries,
         prompt_context_config=hook.prompt_context_config,
-        owner_battle_test_enabled=hook.owner_battle_test_enabled,
-        battle_test_max_source_blocks=hook.battle_test_max_source_blocks,
-        battle_test_max_source_characters=hook.battle_test_max_source_characters,
+        automatic_glossary_enabled=hook.automatic_glossary_enabled,
+        automatic_glossary_max_source_blocks=hook.automatic_glossary_max_source_blocks,
+        automatic_glossary_max_source_characters=(
+            hook.automatic_glossary_max_source_characters
+        ),
     )
 
 
@@ -776,12 +812,14 @@ def _hook_with_plan_metadata(
         enabled=hook.enabled,
         glossary_plan=glossary_plan,
         max_selected_entries=hook.max_selected_entries,
-        prompt_rehearsal_enabled=hook.prompt_rehearsal_enabled,
+        prompt_context_enabled=hook.prompt_context_enabled,
         prompt_context_entries=hook.prompt_context_entries,
         prompt_context_config=hook.prompt_context_config,
-        owner_battle_test_enabled=hook.owner_battle_test_enabled,
-        battle_test_max_source_blocks=hook.battle_test_max_source_blocks,
-        battle_test_max_source_characters=hook.battle_test_max_source_characters,
+        automatic_glossary_enabled=hook.automatic_glossary_enabled,
+        automatic_glossary_max_source_blocks=hook.automatic_glossary_max_source_blocks,
+        automatic_glossary_max_source_characters=(
+            hook.automatic_glossary_max_source_characters
+        ),
     )
 
 

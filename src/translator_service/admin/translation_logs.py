@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, date, datetime
 from io import BytesIO
@@ -788,6 +789,7 @@ def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any
     payload, raw_event_redactions = _redact_glossary_event_raw_fields(
         dict(event.payload),
     )
+    automatic_preflight = _glossary_preflight_payload(payload)
     return {
         "timestamp": event.timestamp.isoformat() if event.timestamp else None,
         "event_type": event.event_type,
@@ -797,7 +799,10 @@ def _glossary_adapter_event_payload(event: TranslationRunEvent) -> dict[str, Any
         "document_format": payload.get("document_format"),
         "selected_entry_ids": _string_sequence(payload.get("selected_entry_ids")),
         "cache_policy": _safe_dict(payload.get("cache_policy")),
-        "battle_test_preflight": _safe_dict(payload.get("battle_test_preflight")),
+        "automatic_glossary_preflight": _safe_dict(automatic_preflight),
+        "battle_test_preflight": _safe_dict(
+            payload.get("battle_test_preflight") or automatic_preflight
+        ),
         "prompt_context": payload.get("prompt_context"),
         "prepared_package": _safe_dict(payload.get("prepared_package")),
         "prepared_package_runtime_bridge": _prepared_package_runtime_bridge_payload(
@@ -1121,7 +1126,7 @@ def _diagnostic_reason_code_counts(
 
     for payload in adapter_payloads:
         add_reason(payload.get("fallback_reason"))
-        preflight = payload.get("battle_test_preflight")
+        preflight = _glossary_preflight_payload(payload)
         if isinstance(preflight, dict):
             add_reasons(preflight.get("reason_codes"))
             add_reason(preflight.get("fallback_reason"))
@@ -1306,13 +1311,23 @@ def _prepared_package_metadata_value_is_safe(value: object) -> bool:
 
 def _glossary_selected_entry_ids(payload: dict[str, Any]) -> tuple[str, ...]:
     selected = list(_string_sequence(payload.get("selected_entry_ids")))
-    preflight = payload.get("battle_test_preflight")
+    preflight = _glossary_preflight_payload(payload)
     if isinstance(preflight, dict):
         selected.extend(_string_sequence(preflight.get("useful_entry_ids")))
     prompt_context = payload.get("prompt_context")
     if isinstance(prompt_context, dict):
         selected.extend(_string_sequence(prompt_context.get("included_entry_ids")))
     return tuple(dict.fromkeys(selected))
+
+
+def _glossary_preflight_payload(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    automatic_preflight = payload.get("automatic_glossary_preflight")
+    if isinstance(automatic_preflight, dict):
+        return automatic_preflight
+    legacy_preflight = payload.get("battle_test_preflight")
+    if isinstance(legacy_preflight, dict):
+        return legacy_preflight
+    return None
 
 
 def _provider_io_glossary_contexts(

@@ -97,6 +97,32 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertNotIn("Дарси", serialized_plan)
         self.assertIn("metadata_only", serialized_plan)
 
+    def test_ready_hook_accepts_automatic_config_names(self):
+        hook = build_persistent_epub_glossary_runtime_hook(
+            work_unit=_work_unit(),
+            source_text="Darcy returns.",
+            target_metadata_overlay_payload=_overlay_payload(),
+            config=PersistentEpubGlossaryResolverConfig(
+                enabled=True,
+                automatic_glossary_enabled=True,
+                prompt_context_enabled=True,
+                reducer_caps=GlossaryCandidateReducerCaps(
+                    max_editor_entries=20,
+                    max_diagnostic_entries=20,
+                    max_estimated_editor_tokens=1000,
+                    min_editor_score=1,
+                    min_diagnostic_score=1,
+                ),
+            ),
+        )
+
+        self.assertTrue(hook.automatic_glossary_enabled)
+        self.assertTrue(hook.owner_battle_test_enabled)
+        self.assertTrue(hook.prompt_context_enabled)
+        self.assertTrue(hook.prompt_rehearsal_enabled)
+        self.assertEqual(hook.glossary_plan["status"], "planned")
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+
     def test_missing_target_metadata_falls_back_safely(self):
         payload = dict(_overlay_payload())
         payload["targets"] = {"uk": {"entries": []}}
