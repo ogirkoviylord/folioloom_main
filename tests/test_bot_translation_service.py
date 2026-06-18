@@ -4661,6 +4661,11 @@ class BotTranslationServiceTest(unittest.TestCase):
             event_lines = run_dir.joinpath("events.jsonl").read_text()
             self.assertIn("prepared_glossary_package_attachment", event_lines)
             self.assertIn('"attachment_status": "attached"', event_lines)
+            self.assertIn(
+                '"glossary_effective_status": "effective_observed"',
+                event_lines,
+            )
+            self.assertIn('"diagnostic_severity": "info"', event_lines)
             self.assertIn("bypass_glossary_injected_cache", event_lines)
             self.assertNotIn("Darcy returns.", event_lines)
 

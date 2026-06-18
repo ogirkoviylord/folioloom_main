@@ -110,6 +110,10 @@ This section keeps only the recent changes that affect future agent work. Full o
 
 Glossary prep, runtime adapter and persistent resolver cap defaults are named in code and surfaced in metadata-only diagnostics (`caps`, `runtime_caps`, `resolver_caps`). Defaults and behavior are unchanged; do not raise or remove caps without a separate owner-approved issue.
 
+### 2026-06-18 - Prepared glossary provider readiness design
+
+`docs/superpowers/specs/2026-06-18-prepared-glossary-provider-readiness-design.md` defines a proposed metadata-only readiness envelope and state matrix for prepared-glossary provider/config/package/runtime diagnostics. Implementation, provider behavior changes, admin visibility and fail-closed policy changes still need separate owner approval.
+
 ### 2026-06-18 - Agent local privacy posture simplified
 
 Owner local development mode allows local reading and owner-chat discussion of raw text, `.env*`, secrets, provider payloads, translations, diagnostics and runtime files when relevant. Publication, commits, external sharing, destructive operations and production-facing changes still need exact owner intent.
