@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Prepared glossary reducer backfill after quality drops
+
+Issue #690 keeps the prepared glossary cap direction but lets reducer `diagnostic_only` candidates backfill after #689 quality drops, still under the final `max_candidates` cap and after the same candidate-quality gate. Post-#690 local evidence recorded 12 of 12 checked target-backed durable candidates selected, with suspected missing count 0. This does not change scanner v1, implement scanner v2, increase the prepared packet cap, call live providers, operate Telegram, approve rollout/cache reuse or make release/privacy/legal/support claims.
+
 ### 2026-06-18 - Prepared glossary candidate-quality tuning
 
 Issue #689 narrows the prepared candidate-quality policy after #688/#690 metadata-only evidence showed low-value repeated-term phrase shapes consuming the prepared prep editor cap. The local reason code is `candidate_quality_low_value_repeated_term_phrase`; representative durable terms still pass and ordinary metadata remains raw-free. This does not change scanner v1, reducer scoring, provider/package boundaries, runtime rollout, cache reuse, provider config, storage/admin/retention or release/privacy/legal/support claims.
