@@ -106,6 +106,10 @@ Future / not current:
 
 This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
 
+### 2026-06-18 - Prepared glossary candidate-quality tuning
+
+Issue #689 narrows the prepared candidate-quality policy after #688/#690 metadata-only evidence showed low-value repeated-term phrase shapes consuming the prepared prep editor cap. The local reason code is `candidate_quality_low_value_repeated_term_phrase`; representative durable terms still pass and ordinary metadata remains raw-free. This does not change scanner v1, reducer scoring, provider/package boundaries, runtime rollout, cache reuse, provider config, storage/admin/retention or release/privacy/legal/support claims.
+
 ### 2026-06-18 - Glossary cap config diagnostics
 
 Glossary prep, runtime adapter and persistent resolver cap defaults are named in code and surfaced in metadata-only diagnostics (`caps`, `runtime_caps`, `resolver_caps`). Defaults and behavior are unchanged; do not raise or remove caps without a separate owner-approved issue.

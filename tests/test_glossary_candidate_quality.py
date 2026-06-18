@@ -86,6 +86,65 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
             result.metadata["reason_codes"],
         )
 
+    def test_drops_low_value_repeated_term_phrases_without_dropping_durable_terms(self):
+        entries = (
+            _entry(
+                "came upon",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "work work",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "these people",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "strange thing",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "three dimensions",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "time travelling",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "bronze doors",
+                category=GlossaryEntryCategory.TERM,
+            ),
+            _entry(
+                "great hall",
+                category=GlossaryEntryCategory.TERM,
+            ),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual([entry.source_canonical for entry in result.entries], [
+            "three dimensions",
+            "time travelling",
+            "bronze doors",
+            "great hall",
+        ])
+        self.assertEqual(result.metadata["input_candidate_count"], 8)
+        self.assertEqual(result.metadata["selected_candidate_count"], 4)
+        self.assertEqual(result.metadata["dropped_candidate_count"], 4)
+        self.assertIn(
+            "candidate_quality_low_value_repeated_term_phrase",
+            result.metadata["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("came upon", metadata_text)
+        self.assertNotIn("three dimensions", metadata_text)
+
     def test_selector_signature_changes_with_quality_decisions(self):
         clean = filter_prepared_glossary_candidates(
             (_entry("Mr Darcy", aliases=("Darcy",)),),
