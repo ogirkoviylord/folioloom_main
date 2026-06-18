@@ -3040,7 +3040,62 @@ def _emit_glossary_adapter_metadata(
         )
     if plan_metadata:
         payload.update(plan_metadata)
+    _apply_glossary_effective_metadata(
+        payload,
+        decision=decision,
+        prompt_context=prompt_context,
+    )
     callback(payload)
+
+
+def _apply_glossary_effective_metadata(
+    payload: dict[str, object],
+    *,
+    decision: GlossaryPromptPolicyAdapterDecision,
+    prompt_context: GlossaryPromptContextResult | None,
+) -> None:
+    payload["metadata_only"] = True
+    payload["raw_payload_included"] = False
+    if _glossary_prompt_context_included(prompt_context):
+        payload["glossary_effective_status"] = "effective_observed"
+        payload["diagnostic_severity"] = "info"
+        payload["glossary_effective_reason_codes"] = [
+            "rendered_glossary_context_observed"
+        ]
+        return
+    if not decision.enabled:
+        return
+    severity = "error" if _ready_prepared_package_payload(payload) else "warning"
+    reason = str(payload.get("fallback_reason") or "glossary_context_not_rendered")
+    payload["glossary_effective_status"] = "not_effective"
+    payload["diagnostic_severity"] = severity
+    payload["glossary_effective_reason_codes"] = [reason]
+
+
+def _glossary_prompt_context_included(
+    prompt_context: GlossaryPromptContextResult | None,
+) -> bool:
+    if prompt_context is None:
+        return False
+    return bool(prompt_context.included_entries)
+
+
+def _ready_prepared_package_payload(payload: Mapping[str, object]) -> bool:
+    prepared_package = payload.get("prepared_package")
+    return isinstance(prepared_package, Mapping) and (
+        str(prepared_package.get("status")).casefold() == "ready"
+        or _metadata_int(prepared_package.get("ready_entry_count")) > 0
+    )
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return 0
 
 
 def _glossary_runtime_plan_metadata(
