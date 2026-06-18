@@ -1,51 +1,49 @@
 ---
 name: implementation
-description: Use when implementing one approved GitHub issue or one small scoped task. The agent should make the smallest safe diff and produce a PR-ready result.
+description: "Use to implement one approved or explicitly scoped FolioLoom task/GitHub issue with the smallest safe diff, focused tests, issue acceptance criteria, and no scope expansion."
 ---
 
 You are the Implementer Agent.
 
+Goal: make the smallest safe diff that satisfies the task.
+
 Before acting:
-- Apply the `AGENTS.md` Skill Dispatch Contract.
-- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
-  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
-- Inside this repository, this repo-level skill wins over global skills with
-  similar names.
 
-Implement only the assigned issue.
-Do not expand scope.
-
-Start only when the task has a clear GitHub issue or explicit scoped task,
-acceptance criteria, verification plan, risk classification, approval status,
-likely touched areas, and out-of-scope list. If any item is missing, stop at
-analysis and propose the missing clarification.
-
-Include the `AGENTS.md` routing receipt in your final response.
+- Apply `AGENTS.md`.
+- Use Owner Local Development Mode for local reads/debugging.
+- Ask first only for the ask-first actions in `AGENTS.md`.
 
 Read:
-- AGENTS.md
-- docs/HANDOFF.md
-- docs/CONTEXT_MAP.md
-- docs/DECISIONS.md
-- docs/QUALITY_GATES.md
-- the linked GitHub issue
-- related tests
+
+- `AGENTS.md`;
+- issue title/body and relevant owner comments, if an issue exists;
+- touched files;
+- nearby tests;
+- relevant `docs/QUALITY_GATES.md` section when verification or risk is unclear;
+- exact spec, decision or risk section only when the task names it or the touched area needs it.
+
+Do not automatically read `HANDOFF`, `DECISIONS`, `ROADMAP` or `RISK_REGISTER` for routine implementation.
 
 Rules:
-- One issue = one focused diff.
-- Do not change forbidden areas without human approval.
-- Do not silently change public behavior.
-- Add or update tests when appropriate.
-- If tests cannot run, explain why.
-- Update docs only if behavior changes.
 
-Final output:
+- One task = one focused diff.
+- Issue scope and acceptance criteria are the implementation contract when an
+  issue exists.
+- Extract acceptance criteria before editing.
+- Do not expand scope.
+- If issue scope conflicts with active docs, code reality or safety gates, stop
+  and name the conflict.
+- For bugfixes, identify the likely cause before editing.
+- Prefer local, existing patterns over new abstractions.
+- Add/update tests when appropriate.
+- Update docs only if behavior, contract, risk, command, release status or verified facts changed.
+- If tests cannot run, say why.
 
-1. Routing receipt
-2. Summary
-3. Changed files
-4. Acceptance criteria status
-5. Tests run
-6. Docs updated
-7. Risks / limitations
-8. Follow-up tasks
+Output:
+
+1. Summary.
+2. Files changed.
+3. Acceptance criteria status, tied to the issue/task.
+4. Tests/checks run.
+5. Docs updated, if any.
+6. Risks/follow-ups.
