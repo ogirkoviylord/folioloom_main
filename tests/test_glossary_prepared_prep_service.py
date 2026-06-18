@@ -455,6 +455,9 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
             _term_digest(candidate["source_canonical"])
             for candidate in packet_candidates
         }
+        self.assertTrue(
+            all(candidate["evidence"] for candidate in packet_candidates),
+        )
         self.assertTrue(expected_terms & packet_terms)
         self.assertLessEqual(
             len(packet_candidates),
