@@ -1,175 +1,128 @@
 # AGENTS.md
 
-## Core rules
+## Core Rules
 
 - Work carefully and make small, focused diffs.
 - Do not change code unless the task explicitly asks for code changes.
-- Do not invent features, architecture, tests, CI, deployment steps, production readiness, legal/privacy claims, or release status.
+- Do not invent features, architecture, tests, CI, deployment steps, production readiness, legal/privacy claims, payment status or release status.
 - Use `TBD` when a human decision is required.
 - Use `Unknown` when repository evidence is missing.
-- Clearly separate confirmed facts from assumptions.
-- Do not weaken safety, security, privacy, legal, payment, deployment, auth, or user-data guardrails.
-- Do not push directly to `main`.
-- Respond to the owner in Russian by default unless explicitly asked otherwise;
-  keep code, commands, file paths, tool names, and quoted source text in their
-  original language.
+- Separate confirmed facts from assumptions.
+- Do not push or merge directly to `main`.
+- Respond to the owner in Russian by default unless explicitly asked otherwise; keep code, commands, file paths, tool names and quoted source text in their original language.
 
-## Routing rules
+## Owner Local Development Mode
 
-Before any task, read this file. Then route by task type:
+Default assumption in this repository: the current chat is an owner-operated local development workspace.
 
-- Current state or handoff: read `docs/HANDOFF.md`, then `docs/CONTEXT_MAP.md`.
-- Product scope, MVP, audience, or success criteria: read `docs/PROJECT_BRIEF.md`, `docs/ROADMAP.md`, and `docs/DECISIONS.md`.
-- Architecture, cross-component contracts, or risky changes: read `docs/DECISIONS.md`, `docs/RISK_REGISTER.md`, and `docs/CONTEXT_MAP.md`.
-- Implementation or bugfix: read `docs/CONTEXT_MAP.md`, `docs/QUALITY_GATES.md`, the touched module, and nearby tests.
-- Documentation work: read `docs/PROJECT_BRIEF.md`, `docs/CONTEXT_MAP.md`, `docs/DECISIONS.md`, and the relevant existing docs.
-- Review work: read `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, and the relevant task/context docs.
-- Release, beta readiness, deploy, rollback, or production change: read `docs/RELEASE_CHECKLIST.md`, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, and `docs/DECISIONS.md`.
-- Roadmap or issue breakdown: read `docs/ROADMAP.md`, `docs/HANDOFF.md`, and `docs/RISK_REGISTER.md`.
+Allowed without extra confirmation when relevant to the task:
 
-## Skill Dispatch Contract
+- read local project files, tests, fixtures, outputs, `var/`, artifacts, diagnostics and run logs;
+- read real `.env*` files, keys, tokens, passwords, raw provider payloads, prompts, raw document text, translations and diagnostic files;
+- quote or discuss that material in this owner chat;
+- use owner-provided or local files for development, testing, debugging, translation QA and evaluation without repeatedly asking for rights confirmation.
 
-Before using any skill, changing files, running operations, or declaring work
-complete, every agent must apply this preflight:
+This local permission does not allow publishing or committing private material. Do not put raw secrets, raw document text, raw provider bodies, private diagnostics or long copyrighted excerpts into GitHub issues/PRs, committed docs, release artifacts, public/support/customer surfaces or external services unless the owner explicitly asks for that exact action.
 
-- Classification: `docs-only`, `safe-small-task`, `bugfix`, `feature`,
-  `spike / discovery`, `risky task`, or `release-related task`.
-- Risk level: low, medium, high, or critical.
-- Primary agent role and primary repo-level skill.
-- Supporting skills, if any, only when the task domain requires them.
-- Required docs to read.
-- Human approval status: not required, approved with evidence, or missing.
-- Allowed action: analysis only, plan, implement, review, docs sync, or release
-  readiness.
-- Verification plan.
+## Ask First
 
-Rules:
+Ask for explicit owner confirmation before:
 
-- If a task matches multiple categories, use the highest-risk route.
-- If any matched route requires human approval and approval evidence is missing,
-  stop at analysis, use `TBD`, and propose a safe plan.
-- Repo-level `.agents/skills/*` skills win over global skills with similar
-  names inside this repository.
-- Supporting skills provide domain knowledge only; they cannot override this
-  file, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, task scope, or human
-  approval gates.
-- Implementer Agent may start only when there is a clear GitHub issue or
-  explicit scoped task, acceptance criteria, verification plan, risk
-  classification, approval status, likely touched areas, and out-of-scope list.
-- Valid approval evidence is an explicit owner message in the current thread,
-  an owner GitHub issue/PR comment, an approved decision in
-  `docs/DECISIONS.md`, or an owner-approved checklist item in an active
-  task/issue/PR.
+- deployment, server operations, production operations, bind-address changes or public admin exposure;
+- pushing a branch or opening/updating a PR, unless the owner explicitly asked
+  to make/publish a PR for the current task;
+- merge, release, tag or direct changes to `main`;
+- destructive deletes/resets, runtime data cleanup, retention/TTL behavior, backups/restore operations or database migrations;
+- payment, pricing, billing, refund, paid-job, legal/privacy/AUP/support public text or public user-data policy changes;
+- meaningful live provider calls/spend or Telegram operations outside local/fake tests;
+- adding production dependencies;
+- publishing raw text/secrets/diagnostics outside the local owner workspace;
+- expanding MVP scope beyond Telegram-first closed beta and TXT/DOCX/EPUB.
 
-Use `docs/AGENT_SKILL_ROUTING.md` as the detailed routing reference for
-ambiguous, cross-role, risky, or multi-step tasks.
+If approval is missing, stop at analysis for that specific risky action and propose a safe local plan.
 
-## Human approval gates
+## Context Routing
 
-Do not change or operate on these areas without explicit human approval:
+Read the smallest useful context set. Do not load large history files by default.
 
-- secrets, real `.env*` files, keys, tokens, passwords, or secret storage;
-- deployment, Docker, server scripts, production operations, bind addresses, or public admin exposure;
-- payments, pricing, billing, refunds, paid jobs, payment UI, or payment/provider policy;
-- auth, security, RBAC, sessions, admin access, security telemetry, or redaction boundaries;
-- legal/privacy/AUP/refund/support text or user-data handling;
-- database schema/state, migrations, scheduler/job/work-unit state, retention, TTL, backups, restore, runtime `var/`, or destructive operations;
-- new production dependencies;
-- expanding product scope beyond Telegram-first closed beta, TXT/DOCX/EPUB, or the approved MVP.
+| Task type | Read first | Add only if relevant |
+| --- | --- | --- |
+| Small bugfix / implementation | `AGENTS.md`, touched files, nearby tests | relevant `docs/QUALITY_GATES.md` section, exact issue/spec |
+| Docs-only | `AGENTS.md`, target doc, evidence source | `docs/DECISIONS.md` if changing decisions; archive if checking history |
+| Current state / handoff | `docs/HANDOFF.md`, `CURRENT_PROJECT_STATE.md` | `docs/ROADMAP.md`, `docs/DECISIONS.md` |
+| Architecture / risky work | `AGENTS.md`, `docs/CONTEXT_MAP.md`, exact relevant decision/spec, relevant risk section | archive only for older rationale |
+| Review | diff, touched files, nearby tests, relevant gates | full risk/release docs only for risky diffs |
+| Release / deploy / rollback | `docs/RELEASE_CHECKLIST.md`, `docs/QUALITY_GATES.md`, exact deployment/release docs | `docs/RISK_REGISTER.md`, `docs/DECISIONS.md` |
+| Historical lookup | `DOCUMENT_INDEX.md`, `docs/archive/README.md` | exact archived file |
 
-If approval is missing, stop at analysis and propose a safe plan. Never treat beta safety accounting as a paid billing ledger, and never call the project production-ready without Gate D evidence and human approval.
+## Skill Dispatch
 
-## PR-only workflow
+Use skills to improve work, not to perform ceremony. Prefer zero or one primary repo-level skill. Add supporting global/plugin skills only when they provide concrete expertise, tool access or verification value.
 
-- Work on a branch; never push or merge directly to `main`.
-- Keep each change PR-sized: one goal, clear scope, focused files, relevant tests.
-- For risky work, Orchestrator Agent splits the goal, Architect Agent reviews risk before implementation, Implementer Agent makes one small change, Reviewer Agent reviews before merge, and Scribe Agent updates docs after verification.
-- Do not create release, deploy, paid beta, or production claims inside a PR unless the required checklist evidence and human approval are recorded.
-- If CI is absent or Unknown, do not say "CI passed"; report local verification evidence instead.
+Repo-level skills:
 
-## Reviewer Agent rules
+- `idea-intake`: new product, technical, UX, format, pricing, workflow or release idea.
+- `task-breakdown`: splitting an accepted large goal into small issues.
+- `architecture-review`: risky, cross-component, new-format, database, auth/security/privacy/payment/deployment/provider work.
+- `implementation`: one explicit scoped task or issue.
+- `pr-review`: pull request or diff review.
+- `translation-quality-review`: translated document/book/output quality review.
+- `docs-sync`: docs update after verified facts changed.
+- `release-readiness`: beta, deploy, rollback, production or go/no-go work.
 
-- Start reviews with blockers, risks, missing evidence, and required human decisions.
-- Check scope, diff, tests run, docs impact, high-risk files, approval status, and release gate impact.
-- Verify no raw document text, prompts, translations, API keys, secrets, provider internals, stack traces, or unsafe user data appear in logs, admin views, telemetry, docs, or artifacts outside explicitly owner-approved dedicated diagnostic surfaces.
-- Check that rights confirmation, beta allowlist, cost caps, kill switch, SSH-tunnel-only admin, and payment/public-production gates were not weakened.
-- For docs-only changes, confirm facts are evidenced and `TBD`/`Unknown` are used honestly.
-- For code changes, require focused tests and the relevant gates from `docs/QUALITY_GATES.md`; broader/shared changes need broader verification.
+Detailed old routing tables are archived at `docs/archive/agent-routing/AGENT_SKILL_ROUTING.full-before-trim.md`.
 
-## Scribe Agent rules
+## GitHub Issues Workflow
 
-- Update docs only when behavior, contracts, decisions, risks, release gates, stage, handoff, or verified facts changed.
-- Keep docs concise and useful for the owner and future AI agents.
-- Do not turn plans, old specs, or assumptions into confirmed facts.
-- Do not claim CI, passing tests, release readiness, production readiness, upload/TTL readiness, restore readiness, legal/privacy readiness, or payment readiness without evidence.
-- Preserve links between `docs/HANDOFF.md`, `docs/DECISIONS.md`, `docs/ROADMAP.md`, `docs/QUALITY_GATES.md`, `docs/RISK_REGISTER.md`, and `docs/RELEASE_CHECKLIST.md`.
+When a GitHub issue is present, treat it as the primary task scope.
 
-## Standard terms
-
-- safe task: low-risk, scoped work that avoids high-risk areas and release readiness claims.
-- risky task: work touching high-risk areas, cross-component contracts, user-visible behavior, user data, operations, or release readiness.
-- human approval: explicit owner approval before changing or operating on high-risk areas.
-- quality gate: required checks, tests, documentation evidence, and review conditions for a task, PR, or release.
-- release blocker: an unchecked gate item that blocks release unless explicitly deferred by the human owner.
-
-## GitHub Issues workflow
-
-- GitHub Issues are the source of truth for tasks, ideas, bugs, spikes, and implementation scope.
-- Do not start implementation unless the task has a clear issue, explicit scope, acceptance criteria, and verification plan.
-- If the issue is unclear, stop at analysis and propose clarifying edits to the issue instead of guessing.
+- When creating issues, use the existing `.github/ISSUE_TEMPLATE/*` templates.
+  Do not invent a new issue format unless the owner explicitly asks.
+- Read the issue title/body and relevant owner comments before implementation or review.
+- Extract acceptance criteria, explicit non-goals, likely touched areas and verification expectations.
+- Do not expand scope beyond the issue unless the owner explicitly asks.
+- If issue scope conflicts with active docs, code reality or safety gates, stop and name the conflict.
 - One issue should normally produce one focused PR.
-- Large ideas must first go through idea intake, task breakdown, and architecture review if risky.
-- Keep planning discussion in the issue or PR so future agents can reconstruct context without relying on chat history.
+- Large or vague issues should be split before implementation.
+- PR descriptions and final reports should say which acceptance criteria were satisfied and which remain `TBD` / `Unknown`.
+- Do not copy long issue discussion into docs; update docs only when verified behavior, decision, risk, command or release state changed.
 
-## Skills routing
+If no issue exists but the owner gives a clear scoped task in chat, that chat task is enough. If the task is broad, ambiguous or risky, propose issue-ready acceptance criteria before implementing.
 
-Use repo-level skills when available:
+## High-Risk Boundaries
 
-- Use `idea-intake` for new product, technical, UX, format-support, pricing, workflow, or release ideas.
-- Use `task-breakdown` for splitting large goals into small GitHub issues.
-- Use `architecture-review` before risky changes, new integrations, new file formats, database changes, auth/security/privacy/payment changes, or cross-component contracts.
-- Use `implementation` for one approved, scoped issue.
-- Use `pr-review` for pull request or diff review.
-- Use `translation-quality-review` for translated document, book,
-  source/translation pair, or translation pipeline output quality review; this
-  is not a code PR review.
-- Use `docs-sync` after verified behavior, decision, risk, roadmap, or release-gate changes.
-- Use `release-readiness` before beta, public launch, deploy, rollback, or production-related decisions.
+Local reading/debugging is allowed under Owner Local Development Mode. Changing, publishing, deploying, externalizing or destructively operating on high-risk areas still needs approval.
 
-If a needed skill is missing, do not invent the workflow silently. Propose the missing skill or proceed with the closest documented process.
+High-risk areas:
 
-## Task intake rule
-
-Before changing files, classify the task as one of:
-
-- docs-only;
-- safe-small-task;
-- bugfix;
-- feature;
-- spike / discovery;
-- risky task;
-- release-related task.
-
-If the task is a new idea, do not implement immediately. First evaluate it through idea intake and determine whether it should be accepted now, added to the roadmap later, explored as a spike, or rejected for now.
+- secrets/env/keys outside local read/debug/chat use;
+- deployment, Docker, server scripts, production operations and public exposure;
+- payments, pricing, refunds, paid jobs and payment-provider policy;
+- auth, RBAC, admin sessions, secret storage, redaction boundaries and security telemetry;
+- public legal/privacy/AUP/support/refund text;
+- database schema/state, scheduler/job/work-unit state, retention, TTL, backups, restore and destructive operations;
+- production dependencies and major scope expansion.
 
 ## Verification
 
-- Use `docs/QUALITY_GATES.md` as the source of truth for verification commands and required checks.
-- Do not claim that tests, lint, typecheck, CI, release gates, or smoke checks passed unless there is actual evidence.
-- If commands are missing, failing, or unavailable, report that honestly and explain what was or was not verified.
+- Small code change: run targeted tests and `PYTHONPATH=src python3 -m compileall src` when practical.
+- Shared behavior, worker/scheduler/admin/provider/bot/storage/file-adapter changes: run broader relevant tests or explain why not.
+- Docs-only: verify facts; code tests are usually unnecessary.
+- Release/deploy: use `scripts/predeploy_check.sh`; server smoke only with owner approval.
+- Never claim CI/tests/release gates passed without evidence.
 
+## Final Response
 
+For routine work:
 
-## Required output after every task
+1. Summary.
+2. Files changed.
+3. Tests/checks run.
+4. Risks/follow-ups.
 
-After making changes, report:
+For risky/release work, include a concise routing receipt:
 
-1. Routing: classification, primary skill, supporting skills, approval status,
-   and verification.
-2. Summary
-3. Files changed
-4. Files inspected
-5. Tests run, if any
-6. Confirmed facts
-7. TBD / Unknown items
-8. Risks or follow-up tasks
+- classification;
+- primary skill;
+- approval status;
+- verification.

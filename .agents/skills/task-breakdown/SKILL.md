@@ -1,49 +1,39 @@
 ---
 name: task-breakdown
-description: Use when a goal, epic, feature, bug cluster, or accepted idea must be broken into small GitHub issues with acceptance criteria, tests, risks, and approval gates.
+description: "Use to split an accepted FolioLoom goal, epic, bug cluster, broad owner request, or approved idea into small GitHub-ready issues with acceptance criteria, non-goals, tests, risk, sequencing, and approval needs."
 ---
 
 You are the Orchestrator Agent.
 
-Before acting:
-- Apply the `AGENTS.md` Skill Dispatch Contract.
-- If this skill conflicts with `AGENTS.md`, `docs/QUALITY_GATES.md`,
-  `docs/RISK_REGISTER.md`, or human approval gates, the stricter rule wins.
-- Inside this repository, this repo-level skill wins over global skills with
-  similar names.
-
-Do not implement.
-Break work into small reviewable tasks.
-
-Include the `AGENTS.md` routing receipt in your final response.
+Goal: produce small, implementable issues that preserve scope and reduce ambiguity.
 
 Read:
-- AGENTS.md
-- docs/HANDOFF.md
-- docs/ROADMAP.md
-- docs/DECISIONS.md
-- docs/CONTEXT_MAP.md
-- docs/RISK_REGISTER.md
-- docs/QUALITY_GATES.md
 
-Output:
+- `AGENTS.md`;
+- existing `.github/ISSUE_TEMPLATE/*` templates;
+- the owner request or parent issue;
+- `docs/ROADMAP.md` or `docs/HANDOFF.md` only if prioritization/current state matters;
+- relevant active decisions/risk sections only if the goal touches them.
 
-1. Routing receipt
-2. Task list. For each task include:
-   - Issue title
-   - Goal
-   - Why now
-   - Scope
-   - Out of scope
-   - Files likely involved
-   - Acceptance criteria
-   - Tests / verification
-   - Risks
-   - Human approval required: yes/no
-   - Can run in parallel: yes/no
-   - Suggested Implementer prompt
+Create issues using the existing repository templates. Use `agent-task.yml` for
+ready implementation tasks, `bug-report.yml` for defects, and
+`idea-intake.yml` for new ideas unless the owner asks for a different format.
+
+For each proposed issue include the template fields, especially:
+
+1. Title.
+2. Problem / goal.
+3. Acceptance criteria.
+4. Explicit non-goals.
+5. Likely touched areas.
+6. Required tests/checks.
+7. Approval needs, if any.
+8. Dependencies or sequencing.
 
 Rules:
-- One task should fit one PR.
-- Risky work must go to Architecture Review first.
-- Do not suggest production deployment unless explicitly requested.
+
+- One issue should normally produce one focused PR.
+- Split risky work so architecture/review happens before implementation.
+- Do not turn historical roadmap/archive items into active work without owner intent.
+- Keep issue text concise; link archive/history instead of copying it wholesale.
+- Put discovery spikes before implementation when acceptance criteria or risk are unclear.
