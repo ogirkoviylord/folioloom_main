@@ -206,7 +206,7 @@ class PreparedGlossaryPrepService:
             )
 
         candidates = _selected_candidates(
-            reduction.retained_snapshot.entries,
+            snapshot.entries,
             reduction.decisions,
             limit=config.max_candidates,
         )
@@ -223,6 +223,7 @@ class PreparedGlossaryPrepService:
             candidates,
             upstream_selector_signature=reduction.reducer_signature,
             source_language=request.source_language,
+            max_selected_candidates=config.max_candidates,
         )
         candidates = candidate_quality.entries
         candidate_selector_signature = candidate_quality.selector_signature
@@ -386,12 +387,24 @@ def _selected_candidates(
     *,
     limit: int,
 ) -> tuple[Any, ...]:
-    retained_ids = {
-        decision.entry_id
-        for decision in decisions
-        if decision.status is GlossaryCandidateDecisionStatus.RETAINED_FOR_EDITOR
+    if limit <= 0:
+        return ()
+    entries_by_id = {entry.entry_id: entry for entry in entries}
+    candidate_pool: list[Any] = []
+    allowed_statuses = {
+        GlossaryCandidateDecisionStatus.RETAINED_FOR_EDITOR,
+        GlossaryCandidateDecisionStatus.DIAGNOSTIC_ONLY,
     }
-    return tuple(entry for entry in entries if entry.entry_id in retained_ids)[:limit]
+    for decision in decisions:
+        if decision.status not in allowed_statuses:
+            continue
+        entry = entries_by_id.get(decision.entry_id)
+        if entry is None:
+            continue
+        candidate_pool.append(entry)
+        if len(candidate_pool) >= limit * len(allowed_statuses):
+            break
+    return tuple(candidate_pool)
 
 
 def _prep_packet(

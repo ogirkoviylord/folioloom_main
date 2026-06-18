@@ -248,6 +248,7 @@ def _quality_summary(value: Any) -> dict[str, Any]:
             "input_candidate_count": 0,
             "selected_candidate_count": 0,
             "dropped_candidate_count": 0,
+            "omitted_candidate_count": 0,
             "alias_omitted_count": 0,
             "reason_codes": [],
         }
@@ -263,6 +264,9 @@ def _quality_summary(value: Any) -> dict[str, Any]:
         "dropped_candidate_count": _int_metadata(
             value.get("dropped_candidate_count")
         ),
+        "omitted_candidate_count": _int_metadata(
+            value.get("omitted_candidate_count")
+        ),
         "alias_omitted_count": _int_metadata(value.get("alias_omitted_count")),
         "reason_codes": _string_list(value.get("reason_codes")),
     }
@@ -272,8 +276,10 @@ def _totals(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     prep_input = 0
     prep_selected = 0
     prep_dropped = 0
+    prep_omitted = 0
     package_selected = 0
     package_dropped = 0
+    package_omitted = 0
     alias_omitted = 0
     ready_cases = 0
     provider_called = 0
@@ -294,11 +300,15 @@ def _totals(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         prep_input += _int_metadata(prep_quality.get("input_candidate_count"))
         prep_selected += _int_metadata(prep_quality.get("selected_candidate_count"))
         prep_dropped += _int_metadata(prep_quality.get("dropped_candidate_count"))
+        prep_omitted += _int_metadata(prep_quality.get("omitted_candidate_count"))
         package_selected += _int_metadata(
             package_quality.get("selected_candidate_count")
         )
         package_dropped += _int_metadata(
             package_quality.get("dropped_candidate_count")
+        )
+        package_omitted += _int_metadata(
+            package_quality.get("omitted_candidate_count")
         )
         alias_omitted += _int_metadata(prep_quality.get("alias_omitted_count"))
         alias_omitted += _int_metadata(package_quality.get("alias_omitted_count"))
@@ -338,8 +348,10 @@ def _totals(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "prep_input_candidate_count": prep_input,
         "prep_selected_candidate_count": prep_selected,
         "prep_dropped_candidate_count": prep_dropped,
+        "prep_omitted_candidate_count": prep_omitted,
         "package_selected_candidate_count": package_selected,
         "package_dropped_candidate_count": package_dropped,
+        "package_omitted_candidate_count": package_omitted,
         "alias_omitted_count": alias_omitted,
         "low_value_candidate_rate": _rate(prep_dropped + package_dropped, prep_input),
         "ready_case_count": ready_cases,
@@ -489,8 +501,10 @@ def _confirmed_counts(totals: Mapping[str, Any]) -> dict[str, int | float | bool
         "prep_input_candidate_count",
         "prep_selected_candidate_count",
         "prep_dropped_candidate_count",
+        "prep_omitted_candidate_count",
         "package_selected_candidate_count",
         "package_dropped_candidate_count",
+        "package_omitted_candidate_count",
         "alias_omitted_count",
         "low_value_candidate_rate",
         "package_ready_case_count",
