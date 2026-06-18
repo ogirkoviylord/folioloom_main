@@ -77,6 +77,12 @@ PERSISTENT_GLOSSARY_RESOLVER_SCHEMA_VERSION = "persistent-glossary-runtime-resol
 PERSISTENT_GLOSSARY_RESOLVER_ADAPTER_VERSION = (
     "persistent-work-unit-glossary-adapter-v1"
 )
+DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_BLOCKS = 12
+DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_CHARACTERS = 2_400
+DEFAULT_PERSISTENT_GLOSSARY_MAX_SELECTED_ENTRIES = 32
+DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_PROMPT_TOKENS = 320
+DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_ENTRIES = 12
+DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_DIAGNOSTIC_ENTRIES = 2
 _SUPPORTED_PERSISTENT_GLOSSARY_DOCUMENT_FORMATS = frozenset(
     (
         DocumentFormat.TXT.value,
@@ -143,14 +149,16 @@ class PersistentGlossaryResolverConfig:
     enabled: bool = False
     owner_battle_test_enabled: bool = False
     prompt_rehearsal_enabled: bool = True
-    max_source_blocks: int = 12
-    max_source_characters: int = 2_400
-    max_selected_entries: int = 32
+    max_source_blocks: int = DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_BLOCKS
+    max_source_characters: int = DEFAULT_PERSISTENT_GLOSSARY_MAX_SOURCE_CHARACTERS
+    max_selected_entries: int = DEFAULT_PERSISTENT_GLOSSARY_MAX_SELECTED_ENTRIES
     selection_budget: GlossarySelectionBudget = field(
         default_factory=lambda: GlossarySelectionBudget(
-            max_prompt_tokens=320,
-            max_entries=12,
-            max_diagnostic_entries=2,
+            max_prompt_tokens=DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_PROMPT_TOKENS,
+            max_entries=DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_ENTRIES,
+            max_diagnostic_entries=(
+                DEFAULT_PERSISTENT_GLOSSARY_SELECTION_MAX_DIAGNOSTIC_ENTRIES
+            ),
         )
     )
     prompt_context_config: GlossaryPromptContextConfig = field(
@@ -433,6 +441,7 @@ def _build_persistent_glossary_runtime_hook(
             "selected_rule_ids": list(selected_rule_ids),
             "target_metadata_overlay": overlay_result.metadata,
             "work_unit_plans": [work_unit_plan],
+            "resolver_caps": _resolver_caps_metadata(config),
             "runtime_integration": _runtime_integration_payload(),
         },
         max_selected_entries=config.max_selected_entries,
@@ -711,6 +720,7 @@ def _build_persistent_glossary_runtime_hook_from_prepared_entries(
             "selected_rule_ids": list(selected_rule_ids),
             "prepared_package_runtime_bridge": bridge_metadata,
             "work_unit_plans": [work_unit_plan],
+            "resolver_caps": _resolver_caps_metadata(config),
             "runtime_integration": _runtime_integration_payload(),
         },
         max_selected_entries=config.max_selected_entries,
@@ -1210,6 +1220,70 @@ def _runtime_integration_payload() -> dict[str, object]:
         "durable_state_mutation_allowed": False,
         "cache_mutation_allowed": False,
         "fallback_action": "omit_glossary_prompt_context",
+    }
+
+
+def _resolver_caps_metadata(config: PersistentGlossaryResolverConfig) -> dict[str, Any]:
+    return {
+        "max_source_blocks": config.max_source_blocks,
+        "max_source_characters": config.max_source_characters,
+        "max_selected_entries": config.max_selected_entries,
+        "selection_budget": {
+            "max_prompt_tokens": config.selection_budget.max_prompt_tokens,
+            "max_entries": config.selection_budget.max_entries,
+            "max_diagnostic_entries": config.selection_budget.max_diagnostic_entries,
+        },
+        "prompt_context": {
+            "max_entries": config.prompt_context_config.max_entries,
+            "max_prompt_tokens": config.prompt_context_config.max_prompt_tokens,
+            "max_characters": config.prompt_context_config.max_characters,
+            "max_entry_characters": (
+                config.prompt_context_config.max_entry_characters
+            ),
+            "max_field_characters": (
+                config.prompt_context_config.max_field_characters
+            ),
+            "max_aliases": config.prompt_context_config.max_aliases,
+            "max_target_variants": config.prompt_context_config.max_target_variants,
+            "max_forbidden_variants": (
+                config.prompt_context_config.max_forbidden_variants
+            ),
+            "max_morphology_notes": (
+                config.prompt_context_config.max_morphology_notes
+            ),
+            "max_profile_rule_ids": (
+                config.prompt_context_config.max_profile_rule_ids
+            ),
+            "include_terminology_policy_metadata": (
+                config.prompt_context_config.include_terminology_policy_metadata
+            ),
+        },
+        "candidate_reducer": {
+            "max_editor_entries": config.reducer_caps.max_editor_entries,
+            "max_diagnostic_entries": config.reducer_caps.max_diagnostic_entries,
+            "max_estimated_editor_tokens": (
+                config.reducer_caps.max_estimated_editor_tokens
+            ),
+            "min_editor_score": config.reducer_caps.min_editor_score,
+            "min_diagnostic_score": config.reducer_caps.min_diagnostic_score,
+        },
+        "target_metadata_overlay": {
+            "enabled": config.target_metadata_overlay_config.enabled,
+            "max_entries_per_target": (
+                config.target_metadata_overlay_config.max_entries_per_target
+            ),
+            "max_aliases": config.target_metadata_overlay_config.max_aliases,
+            "max_target_variants": (
+                config.target_metadata_overlay_config.max_target_variants
+            ),
+            "max_forbidden_variants": (
+                config.target_metadata_overlay_config.max_forbidden_variants
+            ),
+            "max_morphology_notes": (
+                config.target_metadata_overlay_config.max_morphology_notes
+            ),
+            "max_field_chars": config.target_metadata_overlay_config.max_field_chars,
+        },
     }
 
 
