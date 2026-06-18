@@ -206,6 +206,21 @@ release/privacy/legal/support claims. #690 remains required to decide whether
 prep selection should backfill after quality drops or otherwise adjust
 reducer/prep selection.
 
+Issue #690 implementation slice on 2026-06-18 keeps the prepared glossary cap
+direction but changes local prep selection so reducer `diagnostic_only`
+candidates can backfill after #689 quality drops, still under the final
+`max_candidates` cap and only after passing the same candidate-quality gate.
+The post-#690 expanded fake/local audit recorded 169 prep candidates considered
+by quality, 87 selected after quality/cap, 50 dropped, 32 omitted by cap, 87
+package-selected entries, 0 package-level drops, 9 ready fake/local cases and
+0 suspected missing target-backed durable candidates in the checked fixtures.
+Details are in
+`docs/superpowers/specs/2026-06-18-prepared-glossary-reducer-backfill-after-quality.md`.
+This does not change scanner v1, implement scanner v2, increase the prepared
+packet cap, call live providers, operate Telegram, approve rollout/cache reuse
+or make release/privacy/legal/support claims. #692 remains required as the
+no-code scanner-v2 shadow decision after #688-#690 evidence.
+
 Issue #666 architecture slice on 2026-06-17 records the scanner-v2 decision:
 keep deterministic scanner v1 plus #663/#664 candidate-quality gates for now
 and do not rewrite the scanner in-place. The #665 audit is sufficient to defer
