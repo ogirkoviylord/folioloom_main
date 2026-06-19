@@ -6,11 +6,13 @@ from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
 from translator_service.admin.translation_logs import (
+    _glossary_participation_status_from_payload,
     build_effective_translation_run_archive,
     build_translation_run_archive,
     get_translation_run_details,
     list_translation_run_summaries,
 )
+from translator_service.admin.views import log_detail_body
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -607,6 +609,7 @@ class AdminTranslationLogsTest(unittest.TestCase):
                 logger.run_dir.name,
                 details=details,
             )
+            detail_html = log_detail_body(details)
 
         self.assertIsNotNone(effective_archive)
         from io import BytesIO
@@ -614,6 +617,7 @@ class AdminTranslationLogsTest(unittest.TestCase):
 
         with ZipFile(BytesIO(effective_archive.content)) as archive:
             sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+            summary_md = archive.read("summary.md").decode("utf-8")
 
         self.assertEqual(
             sidecar["automatic_glossary_policy"]["policy_status"],
@@ -649,6 +653,20 @@ class AdminTranslationLogsTest(unittest.TestCase):
             sidecar["effectiveness_diagnostic"]["status"],
             "effective_observed",
         )
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["glossary_participation_status"],
+            "requested_effective_observed",
+        )
+        self.assertEqual(
+            sidecar["summary"]["glossary_participation_status"],
+            "requested_effective_observed",
+        )
+        self.assertIn(
+            "Glossary participation: `requested_effective_observed`",
+            summary_md,
+        )
+        self.assertIn("Glossary participation", detail_html)
+        self.assertIn("requested_effective_observed", detail_html)
         self.assertNotIn(
             "not_effective",
             sidecar["summary"]["glossary_effective_statuses"],
@@ -791,6 +809,14 @@ class AdminTranslationLogsTest(unittest.TestCase):
         )
         diagnostic = sidecar["effectiveness_diagnostic"]
         self.assertEqual(diagnostic["status"], "not_effective")
+        self.assertEqual(
+            diagnostic["glossary_participation_status"],
+            "requested_not_effective",
+        )
+        self.assertEqual(
+            sidecar["summary"]["glossary_participation_status"],
+            "requested_not_effective",
+        )
         self.assertEqual(diagnostic["diagnostic_severity"], "error")
         self.assertTrue(diagnostic["ready_prepared_package_attached"])
         self.assertEqual(diagnostic["prepared_package_entry_count"], 5)
@@ -885,6 +911,179 @@ class AdminTranslationLogsTest(unittest.TestCase):
             sidecar["adapter_events"][0]["cache_policy"]["behavior"],
             "default_runtime_cache",
         )
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["status"],
+            "not_observed",
+        )
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["glossary_participation_status"],
+            "requested_not_observed",
+        )
+
+    def test_glossary_diagnostics_mark_unknown_policy_as_unknown(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-policy-unknown",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=None,
+                ),
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "fallback",
+                    "fallback_reason": "runtime_glossary_data_unavailable",
+                    "work_unit_sequence": None,
+                    "document_format": "epub",
+                    "cache_policy": {
+                        "behavior": "default_runtime_cache",
+                        "cache_get_allowed": True,
+                        "cache_put_allowed": True,
+                    },
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertEqual(sidecar["glossary_mode"], "Unknown")
+        self.assertEqual(sidecar["effectiveness_diagnostic"]["status"], "unknown")
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["glossary_participation_status"],
+            "unknown",
+        )
+        self.assertEqual(
+            sidecar["summary"]["glossary_participation_status"],
+            "unknown",
+        )
+        self.assertIn(
+            "glossary_policy_unknown",
+            sidecar["effectiveness_diagnostic"]["reason_codes"],
+        )
+
+    def test_glossary_diagnostics_mark_without_glossary_as_not_requested(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-not-requested",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "without_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            logger.record_event(
+                "glossary_runtime_adapter",
+                {
+                    "status": "fallback",
+                    "fallback_reason": "glossary_not_requested",
+                    "work_unit_sequence": None,
+                    "document_format": "epub",
+                    "cache_policy": {
+                        "behavior": "default_runtime_cache",
+                        "cache_get_allowed": True,
+                        "cache_put_allowed": True,
+                    },
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            sidecar = json.loads(archive.read("glossary_runtime_diagnostics.json"))
+
+        self.assertEqual(sidecar["glossary_mode"], "without_glossary")
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["status"],
+            "not_requested",
+        )
+        self.assertEqual(
+            sidecar["effectiveness_diagnostic"]["glossary_participation_status"],
+            "not_requested",
+        )
+        self.assertIn(
+            "glossary_policy_not_requested",
+            sidecar["effectiveness_diagnostic"]["reason_codes"],
+        )
+        self.assertNotIn(
+            "not_requested",
+            sidecar["summary"]["glossary_effective_statuses"],
+        )
+
+    def test_glossary_participation_status_from_payload_handles_edge_cases(self):
+        cases = (
+            (None, None),
+            ({}, None),
+            ({"effectiveness_diagnostic": {}}, None),
+            (
+                {"effectiveness_diagnostic": {"glossary_participation_status": ""}},
+                None,
+            ),
+            (
+                {
+                    "effectiveness_diagnostic": {
+                        "glossary_participation_status": "effective_observed"
+                    }
+                },
+                "effective_observed",
+            ),
+            (
+                {
+                    "effectiveness_diagnostic": {
+                        "glossary_participation_status": "not_requested"
+                    }
+                },
+                "not_requested",
+            ),
+            (
+                {
+                    "effectiveness_diagnostic": {
+                        "glossary_participation_status": "future_status"
+                    }
+                },
+                "future_status",
+            ),
+        )
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    _glossary_participation_status_from_payload(payload),
+                    expected,
+                )
 
     def test_effective_archive_summarizes_automatic_glossary_fallback_reasons(self):
         with TemporaryDirectory() as temp_dir:
