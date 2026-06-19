@@ -43,7 +43,7 @@ Full pre-trim context map, including the long glossary/spec catalog, is archived
 | `docs/restart/` | Release gates, real-file matrix, upload safety and restart docs. | Release/risky context. |
 | `docs/deployment/` | VPS/admin/restore runbooks. | Deployment context only. |
 | `docs/superpowers/specs/` | Design/spec/report archive. | Open exact file only. |
-| `docs/superpowers/plans/` | Mostly historical implementation plans. | Do not treat unchecked items as roadmap. |
+| `docs/superpowers/plans/` | Mostly historical implementation plans. | Do not treat unchecked items as roadmap; do not add new ideas here. Use GitHub Issues and active docs instead. |
 | `.agents/skills/` | Repo-level agent roles. | Use one primary skill when useful. |
 | `outputs/`, `var/` | Runtime outputs, diagnostics, translation runs, DB/object storage. | Local inspection allowed in owner mode; avoid broad reads. |
 | `handoff/` | Restart packages and copied configs. | Usually stale or bundled context. |
