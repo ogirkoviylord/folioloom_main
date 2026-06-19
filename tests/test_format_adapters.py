@@ -66,6 +66,20 @@ class TxtFormatAdapterTest(unittest.TestCase):
 
 
 class DocxFormatAdapterTest(unittest.TestCase):
+    def test_docx_adapter_does_not_import_private_translation_runner_helpers(self):
+        adapter_source = Path(
+            "src/translator_service/format_adapters/docx.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn(
+            "from translator_service.translation_runner import _",
+            adapter_source,
+        )
+        self.assertNotRegex(
+            adapter_source,
+            r"from\s+translator_service\.translation_runner\s+import\s+\(?\s*_",
+        )
+
     def test_plans_docx_blocks_with_stable_order_and_block_ids(self):
         plan = plan_docx_translation(
             content=_make_docx(

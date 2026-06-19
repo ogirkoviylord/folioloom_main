@@ -9,6 +9,7 @@ from translator_service.file_storage import (
     StoredFile,
     StoredFileKind,
 )
+from translator_service.format_adapters.docx_structure import extract_docx_blocks
 from translator_service.format_adapters.epub import (
     assemble_epub_content_from_block_translations,
 )
@@ -22,10 +23,7 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
-from translator_service.translation_runner import (
-    _extract_docx_blocks,
-    _replace_docx_blocks,
-)
+from translator_service.translation_runner import _replace_docx_blocks
 
 _DOCX_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -186,7 +184,7 @@ def assemble_docx_content_from_translated_units(
     source_content: bytes,
     translated_units: Sequence[SandboxTranslationUnit],
 ) -> bytes:
-    blocks = _extract_docx_blocks(source_content)
+    blocks = extract_docx_blocks(source_content)
     translated_by_block_id = _translated_text_by_sandbox_block_id(translated_units)
     translated_blocks = [
         translated_by_block_id.get(_docx_block_id(block), block.text)
