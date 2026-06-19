@@ -123,6 +123,7 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
     finish_running_translation_runs_for_job,
+    safe_glossary_adapter_metadata,
 )
 from translator_service.translation_runner import (
     GlossaryRuntimeAdapterHookConfig,
@@ -4760,44 +4761,10 @@ def _glossary_adapter_metadata_callback(
     def record(payload: dict[str, object]) -> None:
         run_logger.record_event(
             "glossary_runtime_adapter",
-            _safe_glossary_adapter_metadata(payload),
+            safe_glossary_adapter_metadata(payload),
         )
 
     return record
-
-
-_GLOSSARY_METADATA_RAW_KEYS = {
-    "api_key",
-    "auth",
-    "auth_material",
-    "prompt",
-    "prompt_body",
-    "provider_response",
-    "raw",
-    "raw_prompt",
-    "raw_response",
-    "raw_source",
-    "source_text",
-    "source_texts",
-    "translated_text",
-    "translation",
-}
-
-
-def _safe_glossary_adapter_metadata(value):
-    if isinstance(value, dict):
-        safe_payload = {}
-        for key, item in value.items():
-            if str(key).lower() in _GLOSSARY_METADATA_RAW_KEYS:
-                safe_payload[key] = "[redacted]"
-                continue
-            safe_payload[key] = _safe_glossary_adapter_metadata(item)
-        return safe_payload
-    if isinstance(value, list):
-        return [_safe_glossary_adapter_metadata(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_safe_glossary_adapter_metadata(item) for item in value)
-    return value
 
 
 def _fallback_glossary_runtime_hook() -> GlossaryRuntimeAdapterHookConfig:

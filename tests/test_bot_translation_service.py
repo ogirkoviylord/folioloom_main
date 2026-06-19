@@ -39,6 +39,7 @@ from translator_service.bot_translation_service import (
     RightsConfirmationRequired,
     TranslationModeRequired,
     UserBookResult,
+    _glossary_adapter_metadata_callback,
     _translation_job_status_from_persistent_status,
     estimate_translation_seconds,
 )
@@ -4703,6 +4704,74 @@ class BotTranslationServiceTest(unittest.TestCase):
                 "# [uk] Chapter\n\nKEY=value\n- [uk] First item\n[uk] Body text.\n",
             )
             self.assertEqual(guard.consumed, [job.id])
+
+    def test_glossary_adapter_callback_redacts_nested_raw_secret_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-callback-redaction",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            callback = _glossary_adapter_metadata_callback(logger)
+            if callback is None:
+                self.fail("expected glossary adapter metadata callback")
+
+            callback(
+                {
+                    "status": "fallback",
+                    "adapter_metadata": {
+                        "safe_count": 2,
+                        "nested": {
+                            "raw_source_text": "RAW SOURCE SHOULD NOT LEAK",
+                            "provider_response_body": (
+                                "RAW PROVIDER BODY SHOULD NOT LEAK"
+                            ),
+                            "headers": {
+                                "authorization": "Bearer UNIT_TEST_TOKEN_VALUE"
+                            },
+                            "package_signature": "postgres://unit:secret@localhost/db",
+                            "custom_api_token": "UNIT_TEST_API_TOKEN",
+                            "safe_label": "safe metadata",
+                        },
+                        "items": [{"password": "UNIT_TEST_PASSWORD"}],
+                    },
+                }
+            )
+
+            events = [
+                json.loads(line)
+                for line in logger.run_dir.joinpath("events.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            payload = events[-1]["payload"]
+            nested = payload["adapter_metadata"]["nested"]
+            serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            self.assertEqual(payload["status"], "fallback")
+            self.assertEqual(payload["adapter_metadata"]["safe_count"], 2)
+            self.assertEqual(nested["safe_label"], "safe metadata")
+            self.assertEqual(nested["raw_source_text"], "[redacted]")
+            self.assertEqual(nested["provider_response_body"], "[redacted]")
+            self.assertEqual(nested["headers"]["authorization"], "[redacted]")
+            self.assertEqual(nested["package_signature"], "[redacted]")
+            self.assertEqual(nested["custom_api_token"], "[redacted]")
+            self.assertEqual(
+                payload["adapter_metadata"]["items"][0]["password"],
+                "[redacted]",
+            )
+            self.assertNotIn("RAW SOURCE SHOULD NOT LEAK", serialized)
+            self.assertNotIn("RAW PROVIDER BODY SHOULD NOT LEAK", serialized)
+            self.assertNotIn("Bearer UNIT_TEST_TOKEN_VALUE", serialized)
+            self.assertNotIn("postgres://unit:secret@localhost/db", serialized)
+            self.assertNotIn("UNIT_TEST_API_TOKEN", serialized)
+            self.assertNotIn("UNIT_TEST_PASSWORD", serialized)
 
     def test_epub_with_glossary_scheduler_runner_uses_hook_metadata_only(self):
         with TemporaryDirectory() as temp_dir:
