@@ -45,6 +45,10 @@ Use this index to find the right document without loading archives into the firs
 - `.github/ISSUE_TEMPLATE/idea-intake.yml` - new product/technical/UX/workflow/release idea intake.
 - `.github/PULL_REQUEST_TEMPLATE.md` - PR summary, tests and risk checklist.
 
+## Agent / Multi-Model Workflow
+
+- `docs/agent-task-packet-template.md` - bounded Hermes/multi-model task packet template, `rg`-first context search guidance and future model handoff format.
+
 ## Active Quality / Translation References
 
 - `docs/superpowers/specs/translation-language-quality-methodology.md`

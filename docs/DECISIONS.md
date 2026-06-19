@@ -63,6 +63,14 @@ This file contains active project decisions in summary-first form. Full historic
 - Summary: DeepSeek-compatible provider routing/key/capacity behavior is internal. Users should not see a provider/model picker in current scope.
 - Boundary: Provider config/key changes, meaningful live provider calls and user-facing provider behavior require approval.
 
+### Bounded DeepSeek test-smoke standing approval
+
+- Status: Active.
+- Summary: Hermes/Codex agents may autonomously run local bounded DeepSeek smoke/probe tests inside the `AGENTS.md` standing approval envelope.
+- Rationale: The owner wants routine local provider-backed checks to run without repeated micro-approvals while preserving cost, raw-data and release-claim boundaries.
+- Applies to: local development tasks, Hermes/Kanban verification, provider smoke/probe commands, metadata-only reports.
+- Boundary: The envelope allows at most 6 live provider calls and 60000 total reserved tokens per task, using existing repo scripts and current `DEEPSEEK_*` configuration. It does not approve provider configuration changes, new spend paths, Telegram/server/deploy operations, runtime/cache rollout, raw externalization, or release/quality/legal/public claims.
+
 ### Owner-only raw diagnostics are allowed locally
 
 - Status: Active.
