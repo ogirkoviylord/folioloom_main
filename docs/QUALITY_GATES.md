@@ -81,7 +81,8 @@ Ask before changing, publishing, deploying, destructively operating on or extern
 - runtime `var/` destructive operations;
 - payments/pricing/refunds/paid jobs/payment providers;
 - public legal/privacy/AUP/support/refund text;
-- meaningful live provider calls/spend;
+- meaningful live provider calls/spend outside the standing-approved bounded
+  DeepSeek test-smoke envelope in `AGENTS.md`;
 - production dependencies;
 - scope expansion beyond current MVP.
 
@@ -109,7 +110,13 @@ Run bot runtime/service/message tests relevant to the change. Preserve rights co
 
 ### Provider Layer
 
-Run provider runtime/key-pool/probe/client tests. Meaningful live calls need exact approval. Keep provider picker non-user-facing.
+Run provider runtime/key-pool/probe/client tests. Bounded local DeepSeek
+smoke/probe runs may proceed without repeated approval only inside the
+standing-approved envelope in `AGENTS.md`: existing scripts, local/fake or dry
+preflight first when available, at most 6 live calls and 60000 reserved tokens
+per task, local untracked raw diagnostics only, and metadata-only public or
+committed artifacts. Meaningful live calls outside that envelope need exact
+approval. Keep provider picker non-user-facing.
 
 ### Admin / Security
 

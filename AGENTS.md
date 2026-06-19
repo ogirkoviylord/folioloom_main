@@ -34,12 +34,44 @@ Ask for explicit owner confirmation before:
 - merge, release, tag or direct changes to `main`;
 - destructive deletes/resets, runtime data cleanup, retention/TTL behavior, backups/restore operations or database migrations;
 - payment, pricing, billing, refund, paid-job, legal/privacy/AUP/support public text or public user-data policy changes;
-- meaningful live provider calls/spend or Telegram operations outside local/fake tests;
+- meaningful live provider calls/spend outside the standing-approved bounded
+  DeepSeek test-smoke envelope below, or Telegram operations outside local/fake
+  tests;
 - adding production dependencies;
 - publishing raw text/secrets/diagnostics outside the local owner workspace;
 - expanding MVP scope beyond Telegram-first closed beta and TXT/DOCX/EPUB.
 
 If approval is missing, stop at analysis for that specific risky action and propose a safe local plan.
+
+## Standing Approval: Bounded DeepSeek Test Smokes
+
+The owner pre-approves autonomous local DeepSeek smoke/probe runs for
+Hermes/Codex tasks when every condition below holds. Do not ask for a separate
+approval each time if the run stays inside this envelope.
+
+- Scope is local development for this repository only.
+- Use existing repo tests or bounded smoke/probe scripts; do not add a new
+  live-spend path just to use this approval.
+- Run local/fake/unit tests and dry preflight first when the script supports
+  them.
+- Limit live provider use to at most 6 calls and 60000 total reserved tokens
+  per task.
+- Use current configured `DEEPSEEK_*` environment and existing script defaults;
+  do not change provider keys, base URL, model routing, capacity caps or cost
+  controls under this standing approval.
+- Store raw prompts, raw provider responses, source excerpts and diagnostics
+  only in local untracked `outputs/` or `var/` paths.
+- GitHub issues/PRs, committed docs, release notes, support/public text and
+  owner-facing summaries must stay metadata-only unless the owner explicitly
+  asks to publish raw material.
+- Treat results as debugging/planning evidence. They do not prove translation
+  quality, release readiness, runtime rollout readiness, cache-safety or
+  production behavior by themselves.
+
+Stop and ask for explicit owner approval before exceeding those caps, changing
+provider configuration, adding new provider-spend scripts, operating Telegram
+or servers, deploying, changing runtime/cache behavior, externalizing raw
+material or making release/quality/legal/public claims.
 
 ## Context Routing
 
@@ -119,6 +151,9 @@ owner for every small issue.
 - Council work must be explicit: GPT-Orchestrator proposal -> DeepSeek-Critic
   critique -> GPT-Orchestrator synthesis -> owner approval if required ->
   implementation.
+- For multi-model or council work, GPT-Orchestrator should prepare a bounded
+  task packet using `docs/agent-task-packet-template.md`, `DOCUMENT_INDEX.md`
+  and targeted `rg` searches before handing work to another model.
 - Final owner-facing summaries should be written by GPT-Orchestrator and
   include what changed, what passed, what remains risky, what needs an owner
   decision and the next recommended action.
