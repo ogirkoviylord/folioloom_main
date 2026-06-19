@@ -6,13 +6,13 @@ from translator_service.format_adapters.contracts import (
     FormatTextBlock,
     FormatTranslationUnit,
 )
+from translator_service.format_adapters.docx_structure import (
+    extract_docx_blocks,
+    group_docx_blocks,
+)
 from translator_service.structure_optimizer import (
     PromptTier,
     estimate_unit_input_tokens,
-)
-from translator_service.translation_runner import (
-    _extract_docx_blocks,
-    _group_docx_blocks,
 )
 
 DOCX_ADAPTER_VERSION = "docx-adapter-v1"
@@ -30,7 +30,7 @@ def plan_docx_translation(
     translation_mode: str | None = None,
 ) -> FormatAdapterPlan:
     normalized_mode = _normalize_docx_translation_mode(translation_mode)
-    blocks = _extract_docx_blocks(content)
+    blocks = extract_docx_blocks(content)
     units = tuple(
         _docx_translation_unit(
             sequence=sequence,
@@ -38,7 +38,7 @@ def plan_docx_translation(
             translation_mode=normalized_mode,
         )
         for sequence, unit in enumerate(
-            _group_docx_blocks(blocks, max_fragment_chars=max_fragment_chars),
+            group_docx_blocks(blocks, max_fragment_chars=max_fragment_chars),
             start=1,
         )
     )

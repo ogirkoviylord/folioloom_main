@@ -12,6 +12,7 @@ from translator_service.extractors import (
     extract_text_from_docx,
     extract_text_from_epub,
 )
+from translator_service.format_adapters import plan_docx_translation
 from translator_service.glossary_prompt_context import GlossaryPromptContextConfig
 from translator_service.translation_cache import MemoryTranslationCache
 from translator_service.translation_context import TranslationContextMemory
@@ -250,6 +251,84 @@ class TranslationRunnerTest(unittest.TestCase):
                     "fr",
                 ),
             ],
+        )
+
+    def test_docx_runner_batches_match_adapter_plan_for_representative_structure(self):
+        translator = RecordingTranslator()
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:pPr><w:pStyle w:val="Heading1" /></w:pPr>
+                  <w:r><w:t>Contract overview</w:t></w:r>
+                </w:p>
+                <w:p><w:r><w:t>Intro paragraph.</w:t></w:r></w:p>
+                <w:tbl>
+                  <w:tr>
+                    <w:tc><w:p><w:r><w:t>Source</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:p><w:r><w:t>Target</w:t></w:r></w:p></w:tc>
+                  </w:tr>
+                </w:tbl>
+                <w:p>
+                  <w:pPr><w:numPr><w:numId w:val="42" /></w:numPr></w:pPr>
+                  <w:r><w:t>Checklist item</w:t></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """,
+            extra_parts={
+                "word/header1.xml": """
+                <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:p><w:r><w:t>Header note</w:t></w:r></w:p>
+                </w:hdr>
+                """,
+                "word/footer1.xml": """
+                <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:p><w:r><w:t>Footer note</w:t></w:r></w:p>
+                </w:ftr>
+                """,
+            },
+        )
+        plan = plan_docx_translation(content=content, max_fragment_chars=1_000)
+
+        result = translate_docx_document(
+            file_name="representative.docx",
+            content=content,
+            source_language="en",
+            target_language="uk",
+            translator=translator,
+            max_fragment_chars=1_000,
+        )
+
+        self.assertEqual(result.fragment_count, plan.fragment_count)
+        self.assertEqual(
+            _request_batches(translator.requests),
+            tuple(tuple(block.text for block in unit.blocks) for unit in plan.units),
+        )
+        self.assertEqual(
+            tuple(unit.source_block_ids for unit in plan.units),
+            (
+                (
+                    "docx:word/document.xml:0",
+                    "docx:word/document.xml:1",
+                ),
+                ("docx:word/document.xml:2", "docx:word/document.xml:3"),
+                ("docx:word/document.xml:4",),
+                ("docx:word/header1.xml:0", "docx:word/footer1.xml:0"),
+            ),
+        )
+        self.assertEqual(_docx_zip_names(result.content), _docx_zip_names(content))
+        self.assertEqual(_docx_xml_shapes(result.content), _docx_xml_shapes(content))
+        self.assertEqual(
+            extract_text_from_docx(result.content),
+            "[uk] Contract overview\n\n"
+            "[uk] Intro paragraph.\n\n"
+            "[uk] Source\n\n"
+            "[uk] Target\n\n"
+            "[uk] Checklist item\n\n"
+            "[uk] Header note\n\n"
+            "[uk] Footer note",
         )
 
     def test_docx_translation_threads_context_memory_between_units(self):
@@ -3323,6 +3402,33 @@ def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
             """,
         )
     return archive.getvalue()
+
+
+def _request_batches(
+    requests: list[tuple[str, str, str]],
+) -> tuple[tuple[str, ...], ...]:
+    batches: list[tuple[str, ...]] = []
+    for text, _, _ in requests:
+        document = ElementTree.fromstring(text)
+        batches.append(tuple(block.text or "" for block in document))
+    return tuple(batches)
+
+
+def _docx_zip_names(content: bytes) -> tuple[str, ...]:
+    with ZipFile(BytesIO(content)) as docx:
+        return tuple(docx.namelist())
+
+
+def _docx_xml_shapes(content: bytes) -> dict[str, tuple[str, ...]]:
+    with ZipFile(BytesIO(content)) as docx:
+        return {
+            file_name: tuple(
+                _local_name(element.tag)
+                for element in _parse_xml(docx.read(file_name)).iter()
+            )
+            for file_name in docx.namelist()
+            if file_name.endswith(".xml")
+        }
 
 
 def _translate_marked_blocks(text: str, target_language: str) -> str:
