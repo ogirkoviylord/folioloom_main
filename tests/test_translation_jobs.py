@@ -270,10 +270,21 @@ class TranslationJobsTest(unittest.TestCase):
             )
 
             persisted_job = persistent_store.get_job(job.id)
+            self.assertIsNotNone(persisted_job)
+            assert persisted_job is not None
             self.assertEqual(job.status, TranslationJobStatus.CANCELLED)
+            self.assertEqual(job.result_file_name, "notes.uk.partial.txt")
+            self.assertEqual(job.result_content, b"[uk] One.\nTwo.\n")
             self.assertEqual(
                 persisted_job.status,
                 PersistentTranslationJobStatus.CANCELLED,
+            )
+            self.assertIsNotNone(persisted_job.partial_object_key)
+            self.assertIsNone(persisted_job.final_object_key)
+            assert persisted_job.partial_object_key is not None
+            self.assertEqual(
+                storage.get_bytes(persisted_job.partial_object_key),
+                job.result_content,
             )
             self.assertEqual(guard.releases, [(job.id, "cancelled")])
 
