@@ -49,6 +49,7 @@ from translator_service.admin.translation_logs import (
     TranslationRunEvent,
     TranslationRunFragmentDetail,
     TranslationRunSummary,
+    glossary_participation_status_for_details,
 )
 from translator_service.admin.translation_trace import (
     TranslationTrace,
@@ -3253,6 +3254,10 @@ def _eta_label(run: TranslationRunSummary) -> str:
     return _duration(run.eta_seconds)
 
 
+def _glossary_participation_label(details: TranslationRunDetails) -> str:
+    return glossary_participation_status_for_details(details) or "n/a"
+
+
 def _resource_usage_label(resources: dict) -> str:
     if not resources or not resources.get("provider"):
         return "n/a"
@@ -3577,6 +3582,11 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         )}
         {_metric("Fragments", str(summary.fragment_count), field="fragments")}
         {_metric("Tokens", str(summary.total_tokens), field="tokens")}
+        {_metric(
+            "Glossary participation",
+            _glossary_participation_label(details),
+            field="glossary_participation",
+        )}
       </div>
       {_progress_bar(summary)}
     </section>

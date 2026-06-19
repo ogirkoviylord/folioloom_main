@@ -1287,6 +1287,184 @@ class BotTranslationServiceTest(unittest.TestCase):
                 uploaded.upload_safety_id,
             )
 
+    def test_persistent_resume_defaults_missing_glossary_mode_to_without_glossary(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            ledger = InMemoryUploadSafetyLedger()
+            run_log_root = Path(temp_dir) / "runs"
+            seen_glossary_modes: list[str | None] = []
+
+            def hook_builder(pending: PendingTranslation, document_kind: DocumentKind):
+                seen_glossary_modes.append(pending.glossary_mode)
+                return None
+
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                upload_safety_ledger=ledger,
+                glossary_runtime_hook_builder=hook_builder,
+            )
+            uploaded = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First paragraph.",
+                source_language="en",
+            )
+            unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=uploaded.source_object_key,
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=uploaded.source_object_key,
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:1",),
+                        source_text_hash=hashlib.sha256(
+                            b"First paragraph."
+                        ).hexdigest(),
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=unit_source.object_key,
+                    )
+                ],
+            )
+            persistent_store.pause_job(job.id)
+
+            result = service.resume_user_book_translation(
+                user_telegram_id=42,
+                job_id=job.id,
+                translator=RecordingTranslator(),
+            )
+
+            self.assertEqual(result.status, TranslationJobStatus.READY)
+            self.assertEqual(seen_glossary_modes, [])
+            run_json_paths = list(run_log_root.glob("*/run.json"))
+            self.assertEqual(len(run_json_paths), 1)
+            run_snapshot = json.loads(run_json_paths[0].read_text(encoding="utf-8"))
+            run_policy = json.loads(run_snapshot["translation_policy"])
+            self.assertEqual(run_policy["glossary_mode"], GLOSSARY_MODE_WITHOUT)
+
+    def test_persistent_resume_preserves_explicit_without_glossary(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            ledger = InMemoryUploadSafetyLedger()
+            run_log_root = Path(temp_dir) / "runs"
+            seen_glossary_modes: list[str | None] = []
+
+            def hook_builder(pending: PendingTranslation, document_kind: DocumentKind):
+                seen_glossary_modes.append(pending.glossary_mode)
+                return None
+
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                document_scanner=FakeDocumentScanner(
+                    default_verdict=ScannerVerdict.CLEAN
+                ),
+                require_upload_scan=True,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+                upload_safety_ledger=ledger,
+                glossary_runtime_hook_builder=hook_builder,
+            )
+            uploaded = service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"First paragraph.",
+                source_language="en",
+            )
+            unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph.",
+            )
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id=uploaded.source_object_key,
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=uploaded.source_object_key,
+                translation_policy=json.dumps(
+                    {"glossary_mode": GLOSSARY_MODE_WITHOUT},
+                    ensure_ascii=False,
+                ),
+            )
+            persistent_store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:1",),
+                        source_text_hash=hashlib.sha256(
+                            b"First paragraph."
+                        ).hexdigest(),
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=unit_source.object_key,
+                    )
+                ],
+            )
+            persistent_store.pause_job(job.id)
+
+            result = service.resume_user_book_translation(
+                user_telegram_id=42,
+                job_id=job.id,
+                translator=RecordingTranslator(),
+            )
+
+            self.assertEqual(result.status, TranslationJobStatus.READY)
+            self.assertEqual(seen_glossary_modes, [])
+            run_json_paths = list(run_log_root.glob("*/run.json"))
+            self.assertEqual(len(run_json_paths), 1)
+            run_snapshot = json.loads(run_json_paths[0].read_text(encoding="utf-8"))
+            run_policy = json.loads(run_snapshot["translation_policy"])
+            self.assertEqual(run_policy["glossary_mode"], GLOSSARY_MODE_WITHOUT)
+
     def test_uses_persistent_user_settings_when_repository_is_configured(self):
         with TemporaryDirectory() as temp_dir:
             settings = SQLiteUserSettingsRepository(Path(temp_dir) / "settings.sqlite3")
