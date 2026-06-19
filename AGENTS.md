@@ -89,6 +89,49 @@ When a GitHub issue is present, treat it as the primary task scope.
 
 If no issue exists but the owner gives a clear scoped task in chat, that chat task is enough. If the task is broad, ambiguous or risky, propose issue-ready acceptance criteria before implementing.
 
+## Hermes / Kanban Workflow
+
+Use Hermes/Kanban as a durable task graph, not as a reason to interrupt the
+owner for every small issue.
+
+- Done cards are historical records. Do not reopen completed cards for rework;
+  create a new follow-up card instead.
+- When fixing review findings, use the same worktree as the original
+  implementation when appropriate.
+- Do not block the owner for fixable work. Missing tests, changelog/docs notes,
+  lint/format/import fixes, small in-scope regressions and handoff cleanup are
+  agent follow-ups, not owner blockers.
+- Block the owner only for human product decisions, missing access,
+  approval-gated areas, high-risk scope changes, contradictory requirements or
+  unresolved `Unknown` items after disciplined investigation.
+- Reviewers must classify findings as `owner-blocker`, `must-fix-for-coder`,
+  `nice-to-have` or `ignore`.
+- For `must-fix-for-coder` findings, reviewers should create or specify a
+  follow-up implementation card with exact changes, acceptance criteria and
+  verification commands.
+- Implementation cards should complete when the implementation phase is done
+  and a reviewer child already exists. Use `review-required` block only when
+  there is no reviewer child or a human decision is actually needed.
+- Council work must be explicit: GPT-Orchestrator proposal -> DeepSeek-Critic
+  critique -> GPT-Orchestrator synthesis -> owner approval if required ->
+  implementation.
+- Final owner-facing summaries should be written by GPT-Orchestrator and
+  include what changed, what passed, what remains risky, what needs an owner
+  decision and the next recommended action.
+
+## Review Fix Loop
+
+Preferred flow:
+
+1. Implementer completes the implementation card with a clear handoff.
+2. GPT-Reviewer and/or DeepSeek-Reviewer review the same worktree.
+3. If fixes are needed and they are inside approved scope, create a new
+   `gpt-coder` follow-up card.
+4. The follow-up card uses the same worktree as the original implementation
+   unless isolation is safer.
+5. After fixes, create or promote a dependent re-review card.
+6. Ask the owner only for true blockers or final merge/release approval.
+
 ## High-Risk Boundaries
 
 Local reading/debugging is allowed under Owner Local Development Mode. Changing, publishing, deploying, externalizing or destructively operating on high-risk areas still needs approval.
