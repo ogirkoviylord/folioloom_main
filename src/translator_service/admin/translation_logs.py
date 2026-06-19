@@ -364,7 +364,11 @@ def build_effective_translation_run_archive(
             written_paths.add("diagnostic_files/manifest.json")
         archive.writestr(
             "summary.md",
-            _render_effective_summary(details, work_units=work_units),
+            _render_effective_summary(
+                details,
+                work_units=work_units,
+                glossary_runtime_diagnostics=glossary_runtime_diagnostics,
+            ),
         )
         written_paths.add("summary.md")
         archive.writestr(
@@ -653,7 +657,7 @@ def _glossary_runtime_diagnostics_payload(
         | _effectiveness_summary_values(
             effectiveness_diagnostic,
             key="status",
-            exclude_values={"not_applicable", "not_observed"},
+            exclude_values={"not_requested", "not_observed"},
         )
     )
     payload: dict[str, Any] = {
@@ -709,6 +713,9 @@ def _glossary_runtime_diagnostics_payload(
             ),
             "diagnostic_severities": diagnostic_severities,
             "glossary_effective_status": effectiveness_diagnostic["status"],
+            "glossary_participation_status": effectiveness_diagnostic[
+                "glossary_participation_status"
+            ],
             "glossary_effective_statuses": glossary_effective_statuses,
             "glossary_effective_reason_codes": effectiveness_diagnostic[
                 "reason_codes"
@@ -1177,10 +1184,11 @@ def _glossary_effectiveness_diagnostic(
     diagnostic_reason_code_counts: dict[str, int],
     cache_behavior_counts: dict[str, int],
 ) -> dict[str, Any]:
-    glossary_policy_enabled = (
-        automatic_glossary_policy.get("runtime_intent")
-        == "attempt_glossary_when_ready"
+    glossary_runtime_intent = str(
+        automatic_glossary_policy.get("runtime_intent") or "Unknown"
     )
+    glossary_policy_enabled = glossary_runtime_intent == "attempt_glossary_when_ready"
+    glossary_policy_not_requested = glossary_runtime_intent == "do_not_attempt_glossary"
     ready_prepared_package_events = tuple(
         event
         for event in prepared_package_events
@@ -1225,16 +1233,25 @@ def _glossary_effectiveness_diagnostic(
     )
 
     status = "not_observed"
+    glossary_participation_status = "requested_not_observed"
     diagnostic_severity = "info"
     reason_codes: list[str] = ["ready_prepared_package_not_observed"]
-    if not glossary_policy_enabled:
-        status = "not_applicable"
-        reason_codes = ["glossary_policy_not_enabled"]
+    if glossary_policy_not_requested:
+        status = "not_requested"
+        glossary_participation_status = "not_requested"
+        reason_codes = ["glossary_policy_not_requested"]
+    elif not glossary_policy_enabled:
+        status = "unknown"
+        glossary_participation_status = "unknown"
+        diagnostic_severity = "warning"
+        reason_codes = ["glossary_policy_unknown"]
     elif ready_prepared_package_attached and rendered_prompt_context_count > 0:
         status = "effective_observed"
+        glossary_participation_status = "requested_effective_observed"
         reason_codes = ["rendered_glossary_context_observed"]
     elif ready_prepared_package_attached:
         status = "not_effective"
+        glossary_participation_status = "requested_not_effective"
         diagnostic_severity = "error"
         reason_codes = ["ready_prepared_package_zero_rendered_contexts"]
         if prompt_context_included_event_count == 0:
@@ -1249,6 +1266,7 @@ def _glossary_effectiveness_diagnostic(
             reason_codes.append("zero_cache_bypass_events")
     elif event_reported_not_effective:
         status = "not_effective"
+        glossary_participation_status = "requested_not_effective"
         diagnostic_severity = "error" if event_reported_error else "warning"
         reason_codes = ["event_reported_glossary_not_effective"]
 
@@ -1257,6 +1275,7 @@ def _glossary_effectiveness_diagnostic(
         "metadata_only": True,
         "raw_payload_included": False,
         "status": status,
+        "glossary_participation_status": glossary_participation_status,
         "diagnostic_severity": diagnostic_severity,
         "reason_codes": reason_codes,
         "glossary_policy_enabled": glossary_policy_enabled,
@@ -1297,6 +1316,29 @@ def _effectiveness_summary_values(
     if exclude_values is not None and text in exclude_values:
         return set()
     return {text}
+
+
+def glossary_participation_status_for_details(
+    details: TranslationRunDetails,
+) -> str | None:
+    diagnostics = _glossary_runtime_diagnostics_payload(
+        details,
+        run_dir=Path(details.run_dir),
+        raw_text_diagnostics_present=False,
+    )
+    return _glossary_participation_status_from_payload(diagnostics)
+
+
+def _glossary_participation_status_from_payload(
+    diagnostics: dict[str, Any] | None,
+) -> str | None:
+    if not isinstance(diagnostics, dict):
+        return None
+    diagnostic = diagnostics.get("effectiveness_diagnostic")
+    if not isinstance(diagnostic, dict):
+        return None
+    status = diagnostic.get("glossary_participation_status")
+    return str(status) if status else None
 
 
 def _prepared_package_metadata_value_is_safe(value: object) -> bool:
@@ -1627,6 +1669,7 @@ def _render_effective_summary(
     details: TranslationRunDetails,
     *,
     work_units: dict[str, Any],
+    glossary_runtime_diagnostics: dict[str, Any] | None = None,
 ) -> str:
     summary = details.summary
     diagnostic = details.work_unit_diagnostic
@@ -1640,15 +1683,24 @@ def _render_effective_summary(
         f"- Status: `{summary.status}`",
         f"- Progress: `{summary.fragment_count}/{summary.total_fragment_count}`",
         f"- Tokens: `{summary.total_tokens}`",
-        "",
-        "## Effective Scheduler Snapshot",
-        "",
-        f"- total_units: `{work_units['total_units']}`",
-        f"- completed_units: `{work_units['completed_units']}`",
-        f"- failed_units: `{work_units['failed_units']}`",
-        "- counts_by_status: "
-        f"`{json.dumps(work_units['counts_by_status'], sort_keys=True)}`",
     ]
+    participation = _glossary_participation_status_from_payload(
+        glossary_runtime_diagnostics
+    )
+    if participation is not None:
+        lines.append(f"- Glossary participation: `{participation}`")
+    lines.extend(
+        [
+            "",
+            "## Effective Scheduler Snapshot",
+            "",
+            f"- total_units: `{work_units['total_units']}`",
+            f"- completed_units: `{work_units['completed_units']}`",
+            f"- failed_units: `{work_units['failed_units']}`",
+            "- counts_by_status: "
+            f"`{json.dumps(work_units['counts_by_status'], sort_keys=True)}`",
+        ]
+    )
     if diagnostic is not None:
         lines.extend(
             [
