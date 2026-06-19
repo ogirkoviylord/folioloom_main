@@ -58,6 +58,14 @@ extract acceptance criteria, non-goals and verification expectations from the
 issue before implementation or review. If issue scope conflicts with active
 docs or safety gates, stop and report the conflict instead of guessing.
 
+New ideas belong in GitHub Issues first. If the idea needs durable repository
+context, add a concise note to the relevant active document such as
+`docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/HANDOFF.md`, a current
+`docs/superpowers/specs/*` discovery/spec, or another active source of truth.
+Do not create or append new ideas in `docs/superpowers/plans/`; that directory
+is a historical implementation-plan archive, not an idea inbox, roadmap, or
+planning council scratchpad.
+
 ## Final Receipt
 
 Routine work can use a compact report. Risky/release work should include:

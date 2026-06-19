@@ -399,6 +399,74 @@ Important constraints:
 - the system should be able to explain glossary decisions without copying raw
   excerpts into normal admin, telemetry, issues, PRs or support artifacts.
 
+## CAT-Inspired Hybrid Product Idea
+
+Status: idea capture from owner discussion on 2026-06-18, not an approved
+implementation plan or product decision.
+
+Owner intuition: FolioLoom may eventually become something between a CAT tool
+and its own author-first translation workflow. The useful direction is not to
+copy a professional translator workbench, but to adapt selected CAT/glossary
+ideas into a controlled book-translation cockpit that keeps the author-facing
+Telegram flow simple.
+
+Conceptual reference points from Supervertaler-like glossary behavior:
+
+- termbase-style priorities: approved, preferred, forbidden, discouraged,
+  low-confidence and needs-review entries;
+- memory-style decision notes: why a term/name/title choice exists, which
+  alternatives were rejected, what evidence supports the choice and whether it
+  is owner-pinned;
+- segment visibility: for an internal reader or diagnostic view, show which
+  glossary entries were applicable, injected, omitted or blocked for a passage;
+- quick-add behavior: allow an owner/operator to turn an observed name, phrase,
+  title or translation correction into a pinned or rejected glossary decision
+  from an internal review surface;
+- glossary health checks: report conflicts, duplicate entries, forbidden
+  variants in output, missing pinned forms, stale candidates and weak evidence.
+
+FolioLoom adaptation principle:
+
+- Keep the normal user flow author-first: upload -> rights confirmation ->
+  translation choices -> preview/estimate -> confirmation -> result. Do not
+  expose a CAT-style segment grid or glossary workbench to ordinary beta users
+  by default.
+- Build the richer control layer first for owner/operator review, quality
+  diagnosis and founder-led translation service work.
+- Treat the product capability as a book glossary / translation memory cockpit,
+  not as `prepared_glossary_package`. The prepared package remains an internal
+  runtime bridge until a future glossary artifact/registry is approved.
+- Prefer explanation and controllability over opaque automation. A glossary
+  entry should be able to say what it affects, why it exists, how confident it
+  is, and what should happen if it conflicts with translation output.
+- Keep CAT inspiration conceptual only. Do not copy source code, prompts,
+  file layout, UI layout, class/function names, tests or proprietary/AGPL
+  implementation details from external projects.
+
+Possible future capabilities:
+
+- read-only owner glossary artifact for a completed or in-progress book;
+- owner-only review marks: pin, reject, avoid, merge, do-not-merge, needs
+  review and locked;
+- passage-level glossary diagnostics, similar in spirit to term visibility,
+  but shown as metadata-only reason codes unless inside an approved owner-only
+  raw diagnostic surface;
+- glossary lint report before or after translation;
+- optional author-facing summary later, only after privacy, retention, export,
+  deletion and UX rules are approved.
+
+Boundaries:
+
+- This idea does not approve new UI, storage, database schema, retention,
+  export/delete behavior, public user glossary editing, provider calls, cache
+  reuse, deployment changes or release/privacy/legal/support claims.
+- Future implementation should be split through idea intake, architecture
+  review, task breakdown and focused GitHub issues.
+- `TBD`: final glossary artifact shape, owner/user visibility, edit workflow,
+  retention/export/delete policy and author-facing summary.
+- `Unknown`: real-book quality impact, operational cost, review workload and
+  the best boundary between automatic glossary decisions and human control.
+
 ## Owner Follow-Up Design Notes
 
 Owner direction on 2026-06-11: the glossary should be considered a default

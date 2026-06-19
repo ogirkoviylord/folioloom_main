@@ -76,6 +76,10 @@ Detailed old routing tables are archived at `docs/archive/agent-routing/AGENT_SK
 
 When a GitHub issue is present, treat it as the primary task scope.
 
+- New ideas should be captured in GitHub Issues first. If durable repository
+  context is useful, add a concise note to the relevant active doc. Do not add
+  new ideas to `docs/superpowers/plans/`; that directory is a historical
+  implementation-plan archive.
 - When creating issues, use the existing `.github/ISSUE_TEMPLATE/*` templates.
   Do not invent a new issue format unless the owner explicitly asks.
 - Read the issue title/body and relevant owner comments before implementation or review.
