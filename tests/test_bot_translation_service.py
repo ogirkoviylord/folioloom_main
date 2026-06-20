@@ -799,6 +799,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 require_upload_scan=True,
                 file_storage=storage,
             )
+            self.addCleanup(service.close)
 
             with self.assertRaises(FileTooLargeError):
                 service.store_uploaded_document(
@@ -809,6 +810,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                 )
 
             self.assertEqual(sandbox.extract_calls, [])
+            self.assertEqual(scanner.calls, [])
             self.assertIsNone(service.get_pending_upload(42))
             self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
             self.assertFalse((Path(temp_dir) / "objects" / "quarantine").exists())

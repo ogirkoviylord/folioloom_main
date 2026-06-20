@@ -112,7 +112,9 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         )
         summary = self.store.get_budget_summary(user_id="user-1", now=now)
 
-        assert reservation is not None
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
         self.assertEqual(reservation.status, RESERVATION_ACTIVE)
         self.assertEqual(duplicate.reason_code, BETA_SAFETY_RESERVATION_EXISTS)
         self.assertEqual(summary.user_daily_reserved_usd, 0.75)
@@ -127,7 +129,9 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         reservation = self.store.get_reservation("job-a")
         summary = self.store.get_budget_summary(user_id="user-1", now=now)
 
-        assert reservation is not None
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
         self.assertEqual(reservation.status, RESERVATION_RELEASED)
         self.assertEqual(reservation.reason, "cancelled")
         self.assertEqual(summary.user_daily_reserved_usd, 0.0)
@@ -599,7 +603,9 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         reservation = self.store.get_reservation("job-a")
         summary = self.store.get_budget_summary(user_id="telegram:42")
 
-        assert reservation is not None
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
         self.assertEqual(reservation.status, RESERVATION_CONSUMED)
         self.assertEqual(summary.user_daily_reserved_usd, 0.0)
         self.assertEqual(summary.user_daily_completed_work_units, 1)
