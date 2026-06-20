@@ -18,10 +18,16 @@ from translator_service.beta_safety import (
     BETA_SAFETY_ALLOWED,
     BETA_SAFETY_GLOBAL_DAILY_CAP,
     BetaSafetyDecision,
+    JobCostEstimate,
 )
 from translator_service.bot.runtime import build_deepseek_translator
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
+from translator_service.deepseek_client import DeepSeekClient
+from translator_service.deepseek_key_pool import (
+    DeepSeekChannelConfig,
+    DeepSeekKeyPoolTranslator,
+)
 from translator_service.extractors import extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
@@ -620,27 +626,96 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(guard.released_jobs, [])
             self.assertEqual(guard.consumed_jobs, [])
 
-    def test_run_once_does_not_record_beta_usage_for_failed_retry_provider_spend(self):
+    def test_run_once_records_real_pool_repair_fallback_usage_after_failover(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
             store = SQLiteTranslationJobStore(":memory:")
             self.addCleanup(store.close)
-            job = _create_single_unit_txt_job(
+            job = _create_two_block_txt_job(
                 store=store,
                 storage=storage,
                 order_id="order-1",
                 file_id="file-1",
                 user_id="telegram:42",
-                source_text="Private source paragraph",
+                source_text="First paragraph\n\nSecond paragraph",
             )
             guard = RecordingBetaSafetyGuard(allowed=True)
+            factory = InstrumentedRepairFallbackClientFactory(
+                final_xml=_successful_repair_fallback_xml()
+            )
+            translator = SchedulerDeepSeekPoolTranslator(factory=factory)
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=translator,
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                retry_base_delay_seconds=60,
+                retry_max_delay_seconds=60,
+                beta_safety_guard=guard,
+            )
+
+            [unit] = store.list_work_units(job.id)
+            key_pool_channel_attempts = sum(
+                snapshot.total_started_requests
+                for snapshot in translator.pool.snapshot()
+            )
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(summary.failed_units, 0)
+            self.assertEqual(summary.assembled_jobs, 1)
+            self.assertEqual(len(translator.worker_calls), 1)
+            self.assertEqual(key_pool_channel_attempts, 2)
+            self.assertEqual(factory.application_calls("key-a"), 1)
+            self.assertEqual(factory.transport_attempts("key-a"), 3)
+            self.assertEqual(factory.successful_application_calls("key-a"), 0)
+            self.assertEqual(factory.application_calls("key-b"), 3)
+            self.assertEqual(factory.transport_attempts("key-b"), 9)
+            self.assertEqual(factory.successful_application_calls("key-b"), 3)
+            self.assertEqual(unit.prompt_tokens, 41)
+            self.assertEqual(unit.completion_tokens, 14)
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(
+                guard.usage_calls,
+                [
+                    UsageCall(
+                        job_id=job.id,
+                        user_id="telegram:42",
+                        work_unit_id=unit.id,
+                        prompt_tokens=41,
+                        completion_tokens=14,
+                    )
+                ],
+            )
+            self.assertEqual(guard.consumed_jobs, [job.id])
+            self.assertEqual(guard.released_jobs, [])
+
+    def test_run_once_does_not_record_beta_usage_for_failed_real_repair_chain(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_two_block_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="First paragraph\n\nSecond paragraph",
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+            factory = InstrumentedRepairFallbackClientFactory(
+                final_xml=_malformed_repair_fallback_xml()
+            )
+            translator = SchedulerDeepSeekPoolTranslator(factory=factory)
 
             with self.assertLogs("translator_service.worker", level="ERROR"):
                 summary = run_scheduler_once(
                     store=store,
                     storage=storage,
                     worker_id="worker-a",
-                    translator=ProviderUsageFailingRunnerTranslator(),
+                    translator=translator,
                     limits=SchedulerLimits(max_active_units_global=1),
                     lease_seconds=300,
                     retry_base_delay_seconds=60,
@@ -649,9 +724,24 @@ class SchedulerRunnerTest(unittest.TestCase):
                 )
 
             [unit] = store.list_work_units(job.id)
+            failed_client_usage = factory.clients_by_key["key-b"].last_usage
+            if failed_client_usage is None:
+                self.fail("failed repair chain must expose accumulated fake usage")
             self.assertEqual(summary.completed_units, 0)
             self.assertEqual(summary.failed_units, 1)
             self.assertEqual(unit.status.value, "failed_retryable")
+            self.assertEqual(len(translator.worker_calls), 1)
+            self.assertEqual(factory.application_calls("key-a"), 1)
+            self.assertEqual(factory.transport_attempts("key-a"), 3)
+            self.assertEqual(factory.application_calls("key-b"), 3)
+            self.assertEqual(factory.transport_attempts("key-b"), 9)
+            self.assertEqual(failed_client_usage.prompt_tokens, 41)
+            self.assertEqual(failed_client_usage.completion_tokens, 14)
+            self.assertEqual(failed_client_usage.total_tokens, 55)
+            # Current owner policy for failed/retry-path provider spend is TBD:
+            # even with real accumulated fake repair-chain usage above, retryable
+            # failure does not persist work-unit usage and does not call the beta
+            # safety guard's record_work_unit_usage hook.
             self.assertEqual(unit.prompt_tokens, 0)
             self.assertEqual(unit.completion_tokens, 0)
             self.assertEqual(guard.can_start_calls, 1)
@@ -2650,9 +2740,87 @@ class FailingRunnerTranslator:
         )
 
 
-class ProviderUsageFailingRunnerTranslator:
-    def __init__(self) -> None:
-        self.last_usage = ProviderUsage(prompt_tokens=77, completion_tokens=11)
+class InstrumentedRepairFallbackClientFactory:
+    def __init__(self, *, final_xml: str) -> None:
+        self.final_xml = final_xml
+        self.transports_by_key: dict[str, InstrumentedRepairFallbackTransport] = {}
+        self.clients_by_key: dict[str, DeepSeekClient] = {}
+
+    def __call__(self, *, api_key: str):
+        transport = InstrumentedRepairFallbackTransport(
+            api_key=api_key,
+            final_xml=self.final_xml,
+        )
+        client = DeepSeekClient(
+            api_key=api_key,
+            model="fake-model",
+            base_url="https://fake-deepseek.local",
+            transport=transport,
+            retry_delay_seconds=0,
+        )
+        self.transports_by_key[api_key] = transport
+        self.clients_by_key[api_key] = client
+        return client
+
+    def application_calls(self, api_key: str) -> int:
+        return len(self.transports_by_key[api_key].attempts_by_body)
+
+    def successful_application_calls(self, api_key: str) -> int:
+        return len(self.transports_by_key[api_key].successful_bodies)
+
+    def transport_attempts(self, api_key: str) -> int:
+        return sum(self.transports_by_key[api_key].attempts_by_body.values())
+
+
+class InstrumentedRepairFallbackTransport:
+    def __init__(self, *, api_key: str, final_xml: str) -> None:
+        self.api_key = api_key
+        self.attempts_by_body: dict[bytes, int] = {}
+        self.successful_bodies: list[dict[str, object]] = []
+        self.responses = [
+            _broken_json_batch_response(prompt_tokens=11, completion_tokens=4),
+            _broken_json_batch_response(prompt_tokens=13, completion_tokens=4),
+            _xml_batch_response(
+                final_xml,
+                prompt_tokens=17,
+                completion_tokens=6,
+            ),
+        ]
+
+    def __call__(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout_seconds: float,
+    ) -> tuple[int, bytes]:
+        self.attempts_by_body[body] = self.attempts_by_body.get(body, 0) + 1
+        if self.api_key == "key-a" or self.attempts_by_body[body] < 3:
+            return 429, json.dumps({"error": {"message": "rate limit"}}).encode(
+                "utf-8"
+            )
+        self.successful_bodies.append(json.loads(body.decode("utf-8")))
+        response = self.responses[len(self.successful_bodies) - 1]
+        return 200, json.dumps(response).encode("utf-8")
+
+
+class SchedulerDeepSeekPoolTranslator:
+    def __init__(self, *, factory: InstrumentedRepairFallbackClientFactory) -> None:
+        self.pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=0,
+            clock=lambda: 100.0,
+        )
+        self.worker_calls: list[str] = []
+
+    @property
+    def last_usage(self):
+        return self.pool.last_usage
 
     def translate(
         self,
@@ -2660,8 +2828,81 @@ class ProviderUsageFailingRunnerTranslator:
         text: str,
         source_language: str,
         target_language: str,
+        translation_context=None,
+        service_glossary_context_present: bool = False,
     ) -> str:
-        raise RuntimeError("DeepSeek provider read timeout")
+        self.worker_calls.append(text)
+        return self.pool.translate(
+            text=text,
+            source_language=source_language,
+            target_language=target_language,
+            translation_context=translation_context,
+            service_glossary_context_present=service_glossary_context_present,
+        )
+
+
+def _broken_json_batch_response(
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> dict[str, object]:
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '{"translations":[{"id":"0","text":"Первая строка\\n'
+                        'Вторая строка с "неэкранированной цитатой"},'
+                        '{"id":"1","text":"Готово"}]}'
+                    )
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+
+
+def _xml_batch_response(
+    content: str,
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> dict[str, object]:
+    return {
+        "choices": [
+            {
+                "message": {"content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+
+
+def _successful_repair_fallback_xml() -> str:
+    return (
+        "<translation_batch>"
+        '<translation_block id="0">Перший абзац</translation_block>'
+        '<translation_block id="1">Другий абзац</translation_block>'
+        "</translation_batch>"
+    )
+
+
+def _malformed_repair_fallback_xml() -> str:
+    return (
+        "<translation_batch>"
+        '<translation_block id="0">Тільки один абзац</translation_block>'
+        "</translation_batch>"
+    )
 
 
 class UnsafeProviderFailureRunnerTranslator(RunnerTranslator):
@@ -2781,6 +3022,15 @@ class RecordingBetaSafetyGuard:
             safe_message="blocked",
         )
 
+    def reserve_job(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        estimate: JobCostEstimate,
+    ) -> BetaSafetyDecision:
+        return self.can_start_new_work()
+
     def record_work_unit_usage(
         self,
         *,
@@ -2861,6 +3111,57 @@ def _create_single_unit_txt_job(
             WorkUnitPlan(
                 sequence=1,
                 source_block_ids=("txt:segment:1",),
+                source_text_hash=f"hash-{file_id}",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+                source_object_key=source.object_key,
+            )
+        ],
+    )
+    return job
+
+
+def _create_two_block_txt_job(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    order_id: str,
+    file_id: str,
+    user_id: str,
+    source_text: str,
+):
+    original = storage.put_bytes(
+        kind=StoredFileKind.ORIGINAL,
+        file_name=f"{file_id}.txt",
+        content_type="text/plain; charset=utf-8",
+        content=source_text.encode("utf-8"),
+    )
+    source = storage.put_bytes(
+        kind=StoredFileKind.INTERMEDIATE,
+        file_name=f"{file_id}-unit-1.txt",
+        content_type="text/plain; charset=utf-8",
+        content=source_text.encode("utf-8"),
+    )
+    job = store.create_job(
+        order_id=order_id,
+        user_id=user_id,
+        file_id=file_id,
+        file_name=f"{file_id}.txt",
+        document_kind="txt",
+        source_language="en",
+        target_language="uk",
+        adapter_version=TXT_ADAPTER_VERSION,
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        source_object_key=original.object_key,
+    )
+    store.add_work_units(
+        job.id,
+        [
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("txt:segment:1", "txt:segment:2"),
                 source_text_hash=f"hash-{file_id}",
                 prompt_tier="plain",
                 source_language="en",
