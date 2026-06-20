@@ -36,7 +36,13 @@ class PreparedGlossaryCandidateQualityAuditTests(unittest.TestCase):
         case = report["cases"][0]
         self.assertTrue(report["metadata_only"])
         self.assertFalse(report["raw_payload_included"])
+        self.assertFalse(report["live_provider_calls_made"])
+        self.assertIn(
+            "local fake provider callback",
+            report["provider_called_field_meaning"],
+        )
         self.assertTrue(case["provider_called"])
+        self.assertEqual(case["provider_callback_kind"], "local_fake_provider_callback")
         self.assertTrue(case["attachment_enabled"])
         self.assertGreater(
             case["prep_candidate_quality"]["dropped_candidate_count"],
@@ -85,6 +91,7 @@ class PreparedGlossaryCandidateQualityAuditTests(unittest.TestCase):
         case = report["cases"][0]
         self.assertFalse(case["attachment_enabled"])
         self.assertFalse(case["provider_called"])
+        self.assertEqual(case["provider_callback_kind"], "not_called")
         self.assertIn(
             "prepared_glossary_prep_candidate_quality_no_candidates",
             case["reason_codes"],
