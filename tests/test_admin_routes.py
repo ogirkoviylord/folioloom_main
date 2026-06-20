@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 import unittest
@@ -175,9 +176,15 @@ def _provider_capacity_diagnostic() -> ProviderCapacityDiagnostics:
 
 class AdminRoutesTest(unittest.TestCase):
     def setUp(self):
+        self._admin_runtime_dir = TemporaryDirectory()
+        self.addCleanup(self._admin_runtime_dir.cleanup)
+        self.translation_run_log_root = str(
+            Path(self._admin_runtime_dir.name) / "translation-runs"
+        )
         settings = Settings(
             admin_owner_password="owner-pass",
             admin_session_secret="session-secret",
+            translation_run_log_root=self.translation_run_log_root,
         )
         self.client = TestClient(create_app(settings=settings))
 
@@ -880,6 +887,48 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(page.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(page.text))
+
+    def test_reader_explorer_ignores_ambient_translation_run_env(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ambient_root = root / "ambient-runs"
+            isolated_root = root / "isolated-runs"
+            logger = TranslationRunLogger.start(
+                root=ambient_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-ambient-reader-explorer",
+                    order_id="order-ambient-reader-explorer",
+                    user_id="telegram:715",
+                    file_name="ambient-reader-explorer.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.finish(status="ready", result_file_name="ambient.uk.txt")
+
+            with patch.dict(
+                os.environ,
+                {"TRANSLATION_RUN_LOG_ROOT": str(ambient_root)},
+            ):
+                client = TestClient(
+                    create_app(
+                        settings=Settings(
+                            admin_owner_password=("owner-" "pass"),
+                            admin_session_secret=("session-" "secret"),
+                            translation_run_log_root=str(isolated_root),
+                        )
+                    )
+                )
+                client.post("/admin/login", data={"password": "owner-pass"})
+                page = client.get("/admin/internal-reader")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("No translation runs found.", page.text)
+        self.assertIn("Local fixture reader", page.text)
+        self.assertNotIn("job-ambient-reader-explorer", page.text)
+        self.assertNotIn("ambient-reader-explorer.txt", page.text)
 
     def test_reader_explorer_lists_selected_user_runs_without_raw_text(self):
         with TemporaryDirectory() as temp_dir:
