@@ -57,6 +57,17 @@ This file contains active project decisions in summary-first form. Full historic
 - Summary: Admin console is for owner/operator, not a public product surface.
 - Boundary: Public admin exposure, auth/RBAC/security changes and deployment changes require explicit owner approval.
 
+### Secret-store master key remains deployment-held for closed beta
+
+- Status: Active.
+- Issue: #723; owner decision: https://github.com/ogirkoviylord/folioloom_main/issues/723#issuecomment-4755337967.
+- Summary: For the current owner-only / SSH-tunneled closed-beta posture, `ADMIN_SECRET_MASTER_KEY` remains a deployment-held master key outside the repository and outside the admin database. SQLite encrypted admin secret storage is acceptable only inside that boundary.
+- Recovery rule: If the master key is lost or rotated without an owner-approved re-encryption plan, existing admin-managed encrypted secrets are unrecoverable; provider keys/secrets must be re-entered or rotated by the owner.
+- Evidence: Planning Council cited repository evidence that `Settings.admin_secret_master_key` is sourced from `ADMIN_SECRET_MASTER_KEY`, `SQLiteEncryptedSecretStore` uses AES-GCM and fails closed on a missing/invalid key, no repository evidence shows a re-encryption/recovery path, and runtime provider configuration can fall back to environment-held provider keys when admin-store channels are absent.
+- Deferred/TBD: Managed secret stores, master-key rotation/re-encryption, multi-admin recovery, public-production hardening, and backup/restore runbook changes require separate owner-approved work.
+- Boundary: Do not treat this as public-production hardening. This decision does not approve reading, printing, editing, rotating or migrating real secrets; `.env*` changes; server/deploy operations; DB/state/backup/restore operations; managed secret-store integration; or master-key rotation/re-encryption implementation.
+- Unknown: The future managed secret-store provider, rotation/re-encryption workflow, multi-admin recovery design, and backup/restore runbook updates remain Unknown/TBD until separately scoped.
+
 ### External provider layer is internal
 
 - Status: Active.
