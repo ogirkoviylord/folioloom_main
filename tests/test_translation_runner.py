@@ -2063,6 +2063,69 @@ class TranslationRunnerTest(unittest.TestCase):
         )
         self.assertNotIn("prompt_context", metadata[0])
 
+    def test_docx_glossary_runtime_prompt_budget_exhaustion_reports_omissions(
+        self,
+    ):
+        translator = RecordingTranslator()
+        metadata: list[dict[str, object]] = []
+        content = _make_docx(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Darcy returns.</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        hook = GlossaryRuntimeAdapterHookConfig(
+            enabled=True,
+            glossary_plan=_compact_glossary_runtime_hook_plan(),
+            prompt_rehearsal_enabled=True,
+            prompt_context_entries=_compact_glossary_prompt_context_entries(),
+            prompt_context_config=GlossaryPromptContextConfig(max_prompt_tokens=1),
+            owner_battle_test_enabled=True,
+        )
+
+        translate_docx_document(
+            file_name="first.docx",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            glossary_runtime_hook=hook,
+            glossary_adapter_metadata_callback=metadata.append,
+        )
+
+        self.assertEqual(len(translator.requests), 1)
+        self.assertNotIn("<glossary_context", translator.requests[0][0])
+        self.assertEqual(metadata[0]["status"], "fallback")
+        self.assertEqual(
+            metadata[0]["fallback_reason"],
+            "prompt_context_budget_exhausted",
+        )
+        prompt_context = metadata[0]["prompt_context"]
+        self.assertIsInstance(prompt_context, dict)
+        assert isinstance(prompt_context, dict)
+        self.assertEqual(prompt_context["included_entry_count"], 0)
+        self.assertEqual(prompt_context["included_entry_ids"], [])
+        self.assertEqual(prompt_context["omitted_entry_count"], 1)
+        self.assertEqual(
+            prompt_context["omitted_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
+        self.assertEqual(
+            prompt_context["omission_reason_counts"],
+            {"prompt_budget_exhausted": 1},
+        )
+        self.assertEqual(
+            metadata[0]["glossary_effective_reason_codes"],
+            ["prompt_context_budget_exhausted"],
+        )
+        serialized = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("Darcy returns", serialized)
+        self.assertNotIn("Дарси", serialized)
+        self.assertNotIn("translation_batch", serialized)
+
     def test_docx_glossary_runtime_battle_preflight_skips_absent_source_term(
         self,
     ):

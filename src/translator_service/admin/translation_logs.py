@@ -752,6 +752,9 @@ def _glossary_runtime_diagnostics_payload(
                     )
                 }
             ),
+            "prompt_context_omission_reason_counts": (
+                _prompt_context_omission_reason_counts(prompt_context_summaries)
+            ),
             "selected_entry_ids": selected_entry_ids,
             "target_metadata_status": _target_metadata_status(
                 prepared_package_events,
@@ -1035,6 +1038,14 @@ def _prompt_context_summary_payload(
     if not isinstance(omitted_entries, list):
         omitted_entries = []
     included_entry_ids = _string_sequence(prompt_context.get("included_entry_ids"))
+    omitted_entry_ids = _prompt_context_omitted_entry_ids(
+        prompt_context,
+        omitted_entries,
+    )
+    omission_reason_counts = _prompt_context_reason_counts(
+        prompt_context,
+        omitted_entries,
+    )
     return {
         "work_unit_sequence": payload.get("work_unit_sequence"),
         "included": bool(
@@ -1046,14 +1057,14 @@ def _prompt_context_summary_payload(
             _int(prompt_context.get("included_entry_count")),
         ),
         "included_entry_ids": included_entry_ids,
-        "omitted_entry_count": len(omitted_entries),
-        "omission_reasons": sorted(
-            {
-                str(entry.get("reason"))
-                for entry in omitted_entries
-                if isinstance(entry, dict) and entry.get("reason")
-            }
+        "omitted_entry_count": max(
+            len(omitted_entries),
+            len(omitted_entry_ids),
+            _int(prompt_context.get("omitted_entry_count")),
         ),
+        "omitted_entry_ids": omitted_entry_ids,
+        "omission_reasons": sorted(omission_reason_counts),
+        "omission_reason_counts": omission_reason_counts,
         "estimated_prompt_tokens": _int(
             prompt_context.get("estimated_prompt_tokens"),
         ),
@@ -1061,6 +1072,67 @@ def _prompt_context_summary_payload(
         "character_count": _int(prompt_context.get("character_count")),
         "character_budget": _int(prompt_context.get("character_budget")),
     }
+
+
+def _prompt_context_omitted_entry_ids(
+    prompt_context: Mapping[str, Any],
+    omitted_entries: list[Any],
+) -> list[str]:
+    omitted_entry_ids = list(
+        _string_sequence(prompt_context.get("omitted_entry_ids")),
+    )
+    if omitted_entry_ids:
+        return omitted_entry_ids
+    return [
+        str(entry.get("entry_id"))
+        for entry in omitted_entries
+        if isinstance(entry, dict) and entry.get("entry_id")
+    ]
+
+
+def _prompt_context_reason_counts(
+    prompt_context: Mapping[str, Any],
+    omitted_entries: list[Any],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    reason_counts = prompt_context.get("omission_reason_counts")
+    has_reason_counts = False
+    if isinstance(reason_counts, Mapping):
+        for reason, count in reason_counts.items():
+            reason_text = str(reason)
+            reason_count = _int(count)
+            if reason_text and reason_count > 0:
+                counts[reason_text] = counts.get(reason_text, 0) + reason_count
+                has_reason_counts = True
+    if has_reason_counts:
+        return dict(sorted(counts.items()))
+    for entry in omitted_entries:
+        if not isinstance(entry, dict):
+            continue
+        reason = entry.get("reason")
+        if not reason:
+            continue
+        reason_text = str(reason)
+        counts[reason_text] = counts.get(reason_text, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _prompt_context_omission_reason_counts(
+    prompt_context_summaries: tuple[dict[str, Any], ...],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for prompt_context in prompt_context_summaries:
+        reason_counts = prompt_context.get("omission_reason_counts")
+        if isinstance(reason_counts, Mapping):
+            for reason, count in reason_counts.items():
+                reason_text = str(reason)
+                reason_count = _int(count)
+                if reason_text and reason_count > 0:
+                    counts[reason_text] = counts.get(reason_text, 0) + reason_count
+            continue
+        for reason in _string_sequence(prompt_context.get("omission_reasons")):
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _automatic_glossary_policy_payload(

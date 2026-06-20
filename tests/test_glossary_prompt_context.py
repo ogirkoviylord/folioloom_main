@@ -101,6 +101,14 @@ class GlossaryPromptContextTest(unittest.TestCase):
             selected_entry_ids=("entry:one", "entry:two"),
             config=GlossaryPromptContextConfig(max_prompt_tokens=1),
         )
+        token_budget_payload = glossary_prompt_context_metadata_payload(
+            token_budget_result,
+        )
+        serialized_token_budget_payload = json.dumps(
+            token_budget_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         character_budget_result = format_glossary_prompt_context(
             entries,
             selected_entry_ids=("entry:one",),
@@ -131,6 +139,18 @@ class GlossaryPromptContextTest(unittest.TestCase):
                 for item in token_budget_result.omitted_entries
             )
         )
+        self.assertEqual(token_budget_payload["included_entry_count"], 0)
+        self.assertEqual(token_budget_payload["omitted_entry_count"], 2)
+        self.assertEqual(
+            token_budget_payload["omitted_entry_ids"],
+            ["entry:one", "entry:two"],
+        )
+        self.assertEqual(
+            token_budget_payload["omission_reason_counts"],
+            {GlossaryPromptContextOmissionReason.PROMPT_BUDGET_EXHAUSTED.value: 2},
+        )
+        self.assertNotIn("One", serialized_token_budget_payload)
+        self.assertNotIn("Один", serialized_token_budget_payload)
         self.assertLessEqual(
             entry_limit_result.estimated_prompt_tokens,
             entry_limit_result.prompt_budget_tokens,

@@ -229,8 +229,10 @@ def format_glossary_prompt_context(
 def glossary_prompt_context_metadata_payload(
     result: GlossaryPromptContextResult,
 ) -> dict[str, Any]:
+    omission_reason_counts = _omission_reason_counts(result.omitted_entries)
     return {
         "schema_version": result.schema_version,
+        "included_entry_count": len(result.included_entries),
         "included_entry_ids": list(result.included_entry_ids),
         "included_entries": [
             {
@@ -248,6 +250,9 @@ def glossary_prompt_context_metadata_payload(
             }
             for entry in result.included_entries
         ],
+        "omitted_entry_count": len(result.omitted_entries),
+        "omitted_entry_ids": [entry.entry_id for entry in result.omitted_entries],
+        "omission_reason_counts": omission_reason_counts,
         "omitted_entries": [
             {
                 "entry_id": entry.entry_id,
@@ -262,6 +267,16 @@ def glossary_prompt_context_metadata_payload(
         "prompt_budget_tokens": result.prompt_budget_tokens,
         "character_budget": result.character_budget,
     }
+
+
+def _omission_reason_counts(
+    omitted_entries: Sequence[GlossaryPromptContextOmittedEntry],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in omitted_entries:
+        reason = entry.reason.value
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 @dataclass(frozen=True)

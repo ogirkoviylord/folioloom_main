@@ -650,7 +650,12 @@ def _safe_event_payload(payload: dict) -> dict:
     safe = {}
     for key, value in payload.items():
         key_text = str(key)
-        if any(marker in key_text.lower() for marker in _SENSITIVE_PAYLOAD_KEY_MARKERS):
+        if key_text.lower() == "prompt_context":
+            safe[key_text] = safe_glossary_adapter_metadata(value)
+        elif any(
+            marker in key_text.lower()
+            for marker in _SENSITIVE_PAYLOAD_KEY_MARKERS
+        ):
             safe[key_text] = "[redacted]"
         elif key_text.lower() in {"error", "error_message", "last_error"}:
             safe[key_text] = _safe_error_message(value)
