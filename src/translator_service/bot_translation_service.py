@@ -2413,8 +2413,16 @@ class BotTranslationService:
         if self._file_storage is None:
             return None
 
-        object_key = job.final_object_key or job.partial_object_key
-        if object_key is None or not self._file_storage.exists(object_key):
+        object_key = None
+        if job.final_object_key is not None and self._file_storage.exists(
+            job.final_object_key
+        ):
+            object_key = job.final_object_key
+        elif job.partial_object_key is not None and self._file_storage.exists(
+            job.partial_object_key
+        ):
+            object_key = job.partial_object_key
+        if object_key is None:
             return None
 
         metadata = self._file_storage.get_metadata(object_key)
@@ -2424,6 +2432,27 @@ class BotTranslationService:
             content=self._file_storage.get_bytes(object_key),
             content_type=metadata.content_type,
         )
+
+    def _job_output_exists(self, job) -> bool:
+        if self._file_storage is None:
+            return False
+        if job.final_object_key is not None and self._file_storage.exists(
+            job.final_object_key
+        ):
+            return True
+        return (
+            job.partial_object_key is not None
+            and self._file_storage.exists(job.partial_object_key)
+        )
+
+    def _job_partial_output_exists(self, job) -> bool:
+        if self._file_storage is None or job.partial_object_key is None:
+            return False
+        if job.final_object_key is not None and self._file_storage.exists(
+            job.final_object_key
+        ):
+            return False
+        return self._file_storage.exists(job.partial_object_key)
 
     def _translation_job_from_persistent_job(
         self,
@@ -2475,10 +2504,8 @@ class BotTranslationService:
             source_language=job.source_language,
             target_language=job.target_language,
             status=job.status.value,
-            has_result=bool(job.final_object_key or job.partial_object_key),
-            has_partial_result=bool(
-                job.partial_object_key and not job.final_object_key
-            ),
+            has_result=self._job_output_exists(job),
+            has_partial_result=self._job_partial_output_exists(job),
             can_resume=self._persistent_job_can_resume(job),
             can_cancel=_can_cancel_persistent_job(job.status.value),
             created_at=job.created_at.isoformat(timespec="minutes"),
@@ -2551,7 +2578,7 @@ class BotTranslationService:
             job_id=job.id,
             file_name=job.file_name,
             status=status,
-            has_result=bool(job.final_object_key or job.partial_object_key),
+            has_result=self._job_output_exists(job),
             can_download_existing=result is not None,
             can_translate_again=can_translate_again,
             can_open_existing=True,

@@ -6,6 +6,7 @@ from base64 import urlsafe_b64encode
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -2250,6 +2251,219 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
             self.assertEqual(persisted_job.final_object_key, final.object_key)
 
+    def test_assemble_due_jobs_reassembles_when_attached_final_object_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                translated_text="[uk] First paragraph",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            final = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="file-1.uk.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"[uk] First paragraph",
+            )
+            store.attach_job_output(job.id, final_object_key=final.object_key)
+            storage.delete(final.object_key)
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertEqual(persisted_job.final_object_key, final.object_key)
+            self.assertTrue(storage.exists(final.object_key))
+            self.assertEqual(
+                storage.get_bytes(final.object_key).decode("utf-8"),
+                "[uk] First paragraph",
+            )
+
+    def test_assemble_due_jobs_retries_idempotently_after_attach_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+            claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=claim.work_unit_id,
+                claim_token=claim.claim_token,
+                translated_text="[uk] First paragraph",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            expected_key = (
+                "final/"
+                f"{sha256(b'[uk] First paragraph').hexdigest()[:16]}-file-1.uk.txt"
+            )
+            failing_store = AttachFailingStore(store)
+
+            with self.assertRaisesRegex(RuntimeError, "synthetic attach failure"):
+                assemble_due_jobs(store=failing_store, storage=storage)
+
+            after_failure = store.get_job(job.id)
+            self.assertEqual(
+                after_failure.status,
+                PersistentTranslationJobStatus.ASSEMBLING,
+            )
+            self.assertIsNone(after_failure.final_object_key)
+            self.assertTrue(storage.exists(expected_key))
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertEqual(persisted_job.final_object_key, expected_key)
+            self.assertEqual(
+                storage.get_bytes(expected_key).decode("utf-8"),
+                "[uk] First paragraph",
+            )
+
+    def test_assemble_due_jobs_reassembles_when_attached_partial_object_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="notes.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.\n\nSecond.",
+            )
+            first = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First.",
+            )
+            second = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-2.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"Second.",
+            )
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="notes.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version=TXT_ADAPTER_VERSION,
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key=original.object_key,
+            )
+            store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:segment:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=first.object_key,
+                    ),
+                    WorkUnitPlan(
+                        sequence=2,
+                        source_block_ids=("txt:segment:3",),
+                        source_text_hash="hash-2",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=second.object_key,
+                    ),
+                ],
+            )
+            with store._connection:
+                store._connection.execute(
+                    "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                    (job.id,),
+                )
+            first_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.complete_claimed_work_unit(
+                work_unit_id=first_claim.work_unit_id,
+                claim_token=first_claim.claim_token,
+                translated_text="[uk] First.",
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_hit_tokens=0,
+                cache_miss_tokens=10,
+            )
+            failed_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+            store.fail_claimed_work_unit(
+                work_unit_id=failed_claim.work_unit_id,
+                claim_token=failed_claim.claim_token,
+                failure_kind=WorkUnitFailureKind.MALFORMED_PROVIDER_OUTPUT,
+                error_message="provider failure: malformed_response",
+                retry_base_delay_seconds=0,
+                retry_max_delay_seconds=0,
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="notes.uk.partial.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"[uk] First.\n\nSecond.",
+            )
+            store.attach_job_output(job.id, partial_object_key=partial.object_key)
+            storage.delete(partial.object_key)
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.PARTIAL)
+            self.assertEqual(persisted_job.partial_object_key, partial.object_key)
+            self.assertTrue(storage.exists(partial.object_key))
+            self.assertEqual(
+                storage.get_bytes(partial.object_key).decode("utf-8"),
+                "[uk] First.\n\nSecond.",
+            )
+
     def test_assemble_due_jobs_rejects_unsupported_document_kind(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -2489,6 +2703,17 @@ class ProviderSlotLeaseGuardedStore:
                 ),
             )
         return self._store.get_work_unit(work_unit_id)
+
+
+class AttachFailingStore:
+    def __init__(self, store: SQLiteTranslationJobStore) -> None:
+        self._store = store
+
+    def __getattr__(self, name: str):
+        return getattr(self._store, name)
+
+    def attach_job_output(self, *args, **kwargs):
+        raise RuntimeError("synthetic attach failure")
 
 
 class ProviderSlotAwareRunnerTranslator(RunnerTranslator):

@@ -548,7 +548,7 @@ def assemble_due_jobs(
             and not _has_available_translated_work_units(work_units)
         ):
             continue
-        if job.final_object_key is not None:
+        if job.final_object_key is not None and storage.exists(job.final_object_key):
             store.mark_job_assembled(job.id, partial=False)
             _finish_assembled_translation_run(
                 translation_run_log_root,
@@ -563,7 +563,7 @@ def assemble_due_jobs(
             )
             assembled += 1
             continue
-        if job.partial_object_key is not None:
+        if job.partial_object_key is not None and storage.exists(job.partial_object_key):
             store.mark_job_assembled(job.id, partial=True)
             _finish_assembled_translation_run(
                 translation_run_log_root,
@@ -577,6 +577,11 @@ def assemble_due_jobs(
                 partial=True,
             )
             assembled += 1
+            continue
+        if (
+            (job.final_object_key is not None or job.partial_object_key is not None)
+            and not _has_available_translated_work_units(work_units)
+        ):
             continue
         partial = _should_assemble_partial_result(work_units)
         result_name = _translated_file_name(
