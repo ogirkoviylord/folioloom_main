@@ -831,6 +831,28 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
             LimitedConcurrencyDocumentScanner,
         )
 
+    def test_translation_service_receives_runtime_scan_gate(self):
+        with TemporaryDirectory() as temp_dir:
+            config = BotRuntimeConfig(
+                require_upload_scan=True,
+                upload_scanner_backend="clamd",
+                clamd_host="clamd",
+                object_storage_root=str(Path(temp_dir) / "objects"),
+                persistent_jobs_db_path=str(Path(temp_dir) / "jobs.sqlite3"),
+                user_settings_db_path=str(Path(temp_dir) / "users.sqlite3"),
+                admin_db_path=str(Path(temp_dir) / "admin.sqlite3"),
+                translation_run_log_root=str(Path(temp_dir) / "runs"),
+            )
+
+            service = build_translation_service(config)
+
+            self.addCleanup(service.close)
+            self.assertTrue(service._require_upload_scan)
+            self.assertIsInstance(
+                service._document_scanner,
+                LimitedConcurrencyDocumentScanner,
+            )
+
     def test_translation_service_uses_postgres_store_for_postgres_backend(self):
         fake_store = _FakePostgresStore()
 
