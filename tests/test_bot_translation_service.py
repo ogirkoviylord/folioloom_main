@@ -49,7 +49,7 @@ from translator_service.document_sandbox import (
     SandboxTranslationUnit,
 )
 from translator_service.document_scanner import FakeDocumentScanner, ScannerVerdict
-from translator_service.documents import DocumentFormat
+from translator_service.documents import DocumentFormat, FileTooLargeError
 from translator_service.extractors import extract_text_from_docx, extract_text_from_epub
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import (
@@ -783,6 +783,35 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertNotIn("Private source text", str(error.exception))
         self.assertEqual(sandbox.extract_calls, [])
         self.assertIsNone(service.get_pending_upload(42))
+
+    def test_oversized_upload_fails_before_scan_or_accepted_source_object(self):
+        with TemporaryDirectory() as temp_dir:
+            sandbox = RecordingDocumentSandbox()
+            scanner = FakeDocumentScanner(default_verdict=ScannerVerdict.CLEAN)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=1,
+                max_fragment_chars=20,
+                document_sandbox=sandbox,
+                document_scanner=scanner,
+                require_upload_scan=True,
+                file_storage=storage,
+            )
+
+            with self.assertRaises(FileTooLargeError):
+                service.store_uploaded_document(
+                    user_telegram_id=42,
+                    file_name="large.txt",
+                    content=(2 * 1024 * 1024) * b"x",
+                    source_language="auto",
+                )
+
+            self.assertEqual(sandbox.extract_calls, [])
+            self.assertIsNone(service.get_pending_upload(42))
+            self.assertFalse((Path(temp_dir) / "objects" / "original").exists())
+            self.assertFalse((Path(temp_dir) / "objects" / "quarantine").exists())
 
     def test_failed_scan_verdicts_do_not_reach_parser_or_translation_workers(self):
         fail_closed_verdicts = (
@@ -1630,6 +1659,48 @@ class BotTranslationServiceTest(unittest.TestCase):
         self.assertEqual(pending.rights_confirmation_version, "rights-v1")
         self.assertEqual(pending.rights_confirmation_source, "telegram_button")
         self.assertIsNotNone(pending.rights_confirmed_at)
+
+    def test_rights_confirmation_records_activity_metadata_only(self):
+        with TemporaryDirectory() as temp_dir:
+            activity_store = SQLiteUserActivityStore(
+                Path(temp_dir) / "activity.sqlite3"
+            )
+            self.addCleanup(activity_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                activity_store=activity_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"This is an English document.",
+                source_language="auto",
+            )
+
+            confirmed = service.confirm_pending_upload_rights(user_telegram_id=42)
+
+            events = activity_store.list_events(
+                actor_id="telegram:42",
+                event_type="document.rights_confirmed",
+            )
+            self.assertEqual(len(events), 1)
+            event = events[0]
+            self.assertEqual(event.action, "confirmed")
+            self.assertEqual(event.target_type, "document")
+            self.assertEqual(event.target_id, "notes.txt")
+            self.assertIsNotNone(event.created_at)
+            self.assertEqual(
+                event.metadata,
+                {
+                    "confirmed": True,
+                    "source": confirmed.rights_confirmation_source,
+                    "version": confirmed.rights_confirmation_version,
+                },
+            )
+            self.assertNotIn("This is an English document", json.dumps(event.metadata))
 
     def test_translation_mode_is_required_before_language_choice(self):
         service = BotTranslationService(
