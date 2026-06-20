@@ -20,6 +20,7 @@ from translator_service.beta_safety_store import (
     ConfiguredBetaSafetyGuard,
     SQLiteBetaSafetyStore,
 )
+from translator_service.bot.runtime import BotRuntimeConfig, build_beta_safety_guard
 
 
 class SQLiteBetaSafetyStoreTest(unittest.TestCase):
@@ -88,6 +89,51 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         reservation = self.store.get_reservation("job-a")
         summary = self.store.get_budget_summary(user_id="user-1", now=now)
         self.assertEqual(reservation.status, RESERVATION_RELEASED)
+        self.assertEqual(summary.user_daily_reserved_usd, 0.0)
+
+    def test_active_reservation_survives_reopened_store(self):
+        now = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+        self._reserve("job-a", "user-1", 0.75, now)
+        self.store.close()
+
+        self.store = SQLiteBetaSafetyStore(self.db_path)
+        reservation = self.store.get_reservation("job-a")
+        duplicate = self.store.reserve_job(
+            job_id="job-a",
+            user_id="user-1",
+            estimate=JobCostEstimate(
+                prompt_tokens=1000,
+                completion_tokens=1000,
+                estimated_cost_usd=0.75,
+            ),
+            limits=BetaSafetyLimits(),
+            rates=BetaSafetyRates(),
+            now=now,
+        )
+        summary = self.store.get_budget_summary(user_id="user-1", now=now)
+
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
+        self.assertEqual(reservation.status, RESERVATION_ACTIVE)
+        self.assertEqual(duplicate.reason_code, BETA_SAFETY_RESERVATION_EXISTS)
+        self.assertEqual(summary.user_daily_reserved_usd, 0.75)
+
+    def test_released_reservation_survives_reopened_store(self):
+        now = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+        self._reserve("job-a", "user-1", 0.75, now)
+        self.store.release_job(job_id="job-a", reason="cancelled", now=now)
+        self.store.close()
+
+        self.store = SQLiteBetaSafetyStore(self.db_path)
+        reservation = self.store.get_reservation("job-a")
+        summary = self.store.get_budget_summary(user_id="user-1", now=now)
+
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
+        self.assertEqual(reservation.status, RESERVATION_RELEASED)
+        self.assertEqual(reservation.reason, "cancelled")
         self.assertEqual(summary.user_daily_reserved_usd, 0.0)
 
     def test_release_job_only_mutates_active_reservations(self):
@@ -520,6 +566,50 @@ class SQLiteBetaSafetyStoreTest(unittest.TestCase):
         reservation = self.store.get_reservation("job-a")
         self.assertEqual(reservation.status, RESERVATION_CONSUMED)
         self.assertIsNotNone(reservation.consumed_at)
+
+    def test_runtime_guard_consumed_usage_survives_reopened_store(self):
+        admin_db_path = self.db_path
+        guard = build_beta_safety_guard(
+            BotRuntimeConfig(
+                admin_db_path=str(admin_db_path),
+                beta_global_daily_cost_cap_usd=10.0,
+                beta_global_monthly_cost_cap_usd=10.0,
+                beta_user_daily_cost_cap_usd=10.0,
+                beta_user_monthly_cost_cap_usd=10.0,
+                beta_max_job_estimated_cost_usd=10.0,
+            )
+        )
+        guard.reserve_job(
+            job_id="job-a",
+            user_id="telegram:42",
+            estimate=JobCostEstimate(
+                prompt_tokens=1000,
+                completion_tokens=1000,
+                estimated_cost_usd=0.01,
+            ),
+        )
+        guard.record_work_unit_usage(
+            job_id="job-a",
+            user_id="telegram:42",
+            work_unit_id="unit-a",
+            prompt_tokens=1000,
+            completion_tokens=500,
+        )
+        guard.mark_job_consumed(job_id="job-a")
+        guard.close()
+        self.store.close()
+
+        self.store = SQLiteBetaSafetyStore(admin_db_path)
+        reservation = self.store.get_reservation("job-a")
+        summary = self.store.get_budget_summary(user_id="telegram:42")
+
+        self.assertIsNotNone(reservation)
+        if reservation is None:
+            self.fail("reservation should exist")
+        self.assertEqual(reservation.status, RESERVATION_CONSUMED)
+        self.assertEqual(summary.user_daily_reserved_usd, 0.0)
+        self.assertEqual(summary.user_daily_completed_work_units, 1)
+        self.assertGreater(summary.user_daily_consumed_usd, 0.0)
 
     def _reserve(
         self,
