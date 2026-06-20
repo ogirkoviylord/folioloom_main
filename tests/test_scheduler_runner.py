@@ -2183,6 +2183,79 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(store.recover_expired_calls, 1)
             self.assertEqual(store.recovered_expired_total, 1)
 
+    def test_run_once_recovers_expired_work_unit_leases_before_serial_claiming(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = WorkUnitLeaseRecoveringStore(base_store)
+            _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                retry_base_delay_seconds=17,
+                retry_max_delay_seconds=43,
+            )
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(
+                store.events[:2],
+                ["recover_expired_leases", "claim_next_scheduled_work_unit"],
+            )
+            self.assertEqual(store.recover_expired_calls, 1)
+            self.assertEqual(
+                store.recover_expired_retry_args,
+                [(17, 43)],
+            )
+
+    def test_run_once_recovers_expired_work_unit_leases_before_parallel_claiming(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            base_store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(base_store.close)
+            store = WorkUnitLeaseRecoveringStore(base_store)
+            _create_single_unit_txt_job(
+                store=base_store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                source_text="First paragraph",
+            )
+
+            summary = run_scheduler_once(
+                store=store,
+                storage=storage,
+                worker_id="worker-a",
+                translator=RunnerTranslator(),
+                limits=SchedulerLimits(max_active_units_global=1),
+                lease_seconds=300,
+                retry_base_delay_seconds=17,
+                retry_max_delay_seconds=43,
+                max_parallel_units=2,
+            )
+
+            self.assertEqual(summary.completed_units, 1)
+            self.assertEqual(
+                store.events[:2],
+                ["recover_expired_leases", "claim_next_scheduled_work_unit"],
+            )
+            self.assertEqual(store.recover_expired_calls, 1)
+            self.assertEqual(
+                store.recover_expired_retry_args,
+                [(17, 43)],
+            )
+
     def test_assemble_due_jobs_reconciles_existing_final_output(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -2330,6 +2403,35 @@ class RunnerTranslator:
         target_language: str,
     ) -> str:
         return f"[{target_language}] {text}"
+
+
+class WorkUnitLeaseRecoveringStore:
+    def __init__(self, store: SQLiteTranslationJobStore) -> None:
+        self._store = store
+        self.events: list[str] = []
+        self.recover_expired_calls = 0
+        self.recover_expired_retry_args: list[tuple[int, int]] = []
+
+    def __getattr__(self, name: str):
+        return getattr(self._store, name)
+
+    def recover_expired_leases(
+        self,
+        *,
+        now: datetime,
+        retry_base_delay_seconds: int,
+        retry_max_delay_seconds: int,
+    ) -> int:
+        self.events.append("recover_expired_leases")
+        self.recover_expired_calls += 1
+        self.recover_expired_retry_args.append(
+            (retry_base_delay_seconds, retry_max_delay_seconds)
+        )
+        return 0
+
+    def claim_next_scheduled_work_unit(self, **kwargs):
+        self.events.append("claim_next_scheduled_work_unit")
+        return self._store.claim_next_scheduled_work_unit(**kwargs)
 
 
 @dataclass(frozen=True)
