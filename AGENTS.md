@@ -130,6 +130,16 @@ If no issue exists but the owner gives a clear scoped task in chat, that chat ta
 Use Hermes/Kanban as a durable task graph, not as a reason to interrupt the
 owner for every small issue.
 
+`blocked` is only for true owner-blockers: human decision, missing access,
+missing approval for a gated action, high-risk scope expansion, contradictory
+requirements, unsafe security/privacy/auth/payment/deploy/DB/runtime-data issue,
+or unresolved `Unknown` after disciplined investigation.
+
+Do not use `blocked` for `review-required`, `needs owner eyes`, `final sign-off`,
+missing tests, fixable review findings, nice-to-have findings, lint/type/format
+issues, docs notes or ordinary re-review. Route those to coder fix-loop,
+re-review and final PR gate instead.
+
 - Done cards are historical records. Do not reopen completed cards for rework;
   create a new follow-up card instead.
 - When fixing review findings, use the same worktree as the original
