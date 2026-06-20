@@ -125,6 +125,61 @@ class DeepSeekClientTest(unittest.TestCase):
         self.assertEqual(response["choices"][0]["message"]["content"], "Hello")
         self.assertNotIn("secret-key", json.dumps(record, ensure_ascii=False))
 
+    def test_provider_io_capture_redacts_auth_material_from_url_and_error_path(self):
+        class LeakyTransport:
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                raise TimeoutError(
+                    "Authorization: Bearer *** "
+                    "api_key=sk-iss...test "
+                    "secret_id=deepseek.api_keys.primary"
+                )
+
+        redaction_key = "sk-" + "iss...test"
+        client = DeepSeekClient(
+            api_key=redaction_key,
+            model="deepseek-v4-flash",
+            base_url=(
+                "https://api.deepseek.com?"
+                "api_key=sk-iss...test&"
+                "secret_id=deepseek.api_keys.primary"
+            ),
+            transport=LeakyTransport(),
+            retry_attempts=1,
+            retry_delay_seconds=0,
+        )
+        records: list[dict[str, object]] = []
+
+        with self.assertRaises(DeepSeekApiError) as error, capture_provider_io(
+            records.append,
+            job_id="job-1",
+            work_unit_id="job-1:unit-7",
+            sequence=7,
+        ):
+            client.create_chat_completion(
+                system_prompt="Translate accurately.",
+                user_text="RAW BODY SENTINEL",
+            )
+
+        self.assertEqual(len(records), 1)
+        record_text = json.dumps(records[0], ensure_ascii=False, sort_keys=True)
+        error_text = str(error.exception)
+        self.assertIn("RAW BODY SENTINEL", record_text)
+        for forbidden in (
+            "sk-iss...test",
+            "Authorization: Bearer",
+            "api_key=sk-iss...test",
+            "deepseek.api_keys.primary",
+        ):
+            self.assertNotIn(forbidden, record_text)
+            self.assertNotIn(forbidden, error_text)
+
     def test_provider_io_sink_failure_does_not_fail_chat_completion(self):
         transport = RecordingTransport(
             response={

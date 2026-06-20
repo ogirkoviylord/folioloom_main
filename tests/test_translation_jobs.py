@@ -12,6 +12,7 @@ from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
     TranslationJobStatus,
+    run_translation_job,
 )
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
@@ -26,6 +27,7 @@ from translator_service.translation_jobs import (
     TranslationProgress,
     translate_text_fragments,
 )
+from translator_service.user_activity import SQLiteUserActivityStore
 
 
 class RecordingTranslator:
@@ -38,6 +40,18 @@ class RecordingTranslator:
     ) -> str:
         self.requests.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
+
+
+class ProviderAuthFailingTranslator:
+    last_usage = None
+
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
+        raise RuntimeError(
+            "Provider failed: Authorization: Bearer *** "
+            "sk-abc123 api_key=secret secret_id=diagnostic-secret"
+        )
 
 
 class TokenReportingTranslator:
@@ -287,6 +301,101 @@ class TranslationJobsTest(unittest.TestCase):
                 job.result_content,
             )
             self.assertEqual(guard.releases, [(job.id, "cancelled")])
+
+    def test_persistent_translation_failure_redacts_auth_material(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            activity_store = SQLiteUserActivityStore(
+                Path(temp_dir) / "activity.sqlite3"
+            )
+            self.addCleanup(activity_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                activity_store=activity_store,
+            )
+            service.store_uploaded_document(
+                user_telegram_id=42,
+                file_name="notes.txt",
+                content=b"One.\nTwo.\n",
+                source_language="en",
+            )
+            service.confirm_pending_upload_rights(user_telegram_id=42)
+            service.select_pending_upload_translation_mode(
+                user_telegram_id=42,
+                translation_mode=TRANSLATION_MODE_BOOK_MANUSCRIPT,
+            )
+            service.prepare_pending_upload(
+                user_telegram_id=42,
+                target_language="uk",
+            )
+            with service._state_lock:
+                pending = service._pending[42]
+                service._pending[42] = replace(
+                    pending,
+                    preview_id="preview:42:test",
+                    preview_shown=True,
+                    preview_accepted=True,
+                    preview_accepted_at="2026-05-16T00:00:00+00:00",
+                )
+
+            def fail_persistent_translation(**kwargs):
+                raise RuntimeError(
+                    "Provider failed: Authorization: Bearer sk-abc123 "
+                    "sk-abc123 api_key=secret secret_id=diagnostic-secret"
+                )
+
+            service._confirm_persistent_translation = fail_persistent_translation
+            job = service.confirm_pending_translation(
+                user_telegram_id=42,
+                translator=RecordingTranslator(),
+            )
+
+            self.assertEqual(job.status, TranslationJobStatus.FAILED)
+            self.assertIn("[redacted]", job.error_message or "")
+            self.assertNotIn("sk-abc123", job.error_message or "")
+            self.assertNotIn("api_key=secret", job.error_message or "")
+            self.assertNotIn("secret_id=diagnostic-secret", job.error_message or "")
+            failed_events = activity_store.list_events(event_type="translation.failed")
+            self.assertEqual(len(failed_events), 1)
+            event_error = failed_events[0].metadata["error_message"]
+            self.assertIn("[redacted]", event_error)
+            self.assertNotIn("sk-abc123", event_error)
+            self.assertNotIn("api_key=secret", event_error)
+            self.assertNotIn("secret_id=diagnostic-secret", event_error)
+
+    def test_run_translation_job_redacts_auth_material_in_persisted_failure(self):
+        repository = InMemoryTranslationJobRepository()
+        job = repository.create_txt_job(
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"First paragraph",
+            source_language="en",
+            target_language="uk",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Provider failed"):
+            run_translation_job(
+                repository=repository,
+                job_id=job.id,
+                max_fragment_chars=1000,
+                translator=ProviderAuthFailingTranslator(),
+            )
+
+        failed = repository.get(job.id)
+        self.assertEqual(failed.status, TranslationJobStatus.FAILED)
+        self.assertIn("[redacted]", failed.error_message or "")
+        self.assertNotIn("sk-abc123", failed.error_message or "")
+        self.assertNotIn("api_key=secret", failed.error_message or "")
+        self.assertNotIn("secret_id=diagnostic-secret", failed.error_message or "")
 
     def test_preserves_protected_tokens_in_plain_text_fragments(self):
         class TokenBreakingTranslator:

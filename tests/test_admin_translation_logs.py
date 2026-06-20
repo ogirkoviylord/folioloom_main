@@ -13,6 +13,10 @@ from translator_service.admin.translation_logs import (
     list_translation_run_summaries,
 )
 from translator_service.admin.views import log_detail_body
+from translator_service.provider_io_diagnostics import (
+    capture_provider_io,
+    record_provider_io_exchange,
+)
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
@@ -22,6 +26,26 @@ from translator_service.translation_run_logs import (
 
 
 class AdminTranslationLogsTest(unittest.TestCase):
+    def test_safe_support_text_redacts_auth_material(self):
+        from translator_service.admin.views import _safe_support_text
+
+        result = _safe_support_text(
+            "Provider failed: sk-abc123 api_key=secret"
+        )
+
+        self.assertIn("[redacted]", result)
+        self.assertNotIn("Authorization: Bearer", result)
+        self.assertNotIn("sk-abc123", result)
+        self.assertNotIn("api_key=secret", result)
+
+    def test_safe_support_text_preserves_normal_text(self):
+        from translator_service.admin.views import _safe_support_text
+
+        result = _safe_support_text("Translation failed: timeout after 30s")
+
+        self.assertIn("Translation failed", result)
+        self.assertIn("timeout", result)
+
     def test_lists_translation_runs_without_document_text(self):
         with TemporaryDirectory() as temp_dir:
             ready = TranslationRunLogger.start(
@@ -333,6 +357,7 @@ class AdminTranslationLogsTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(effective_archive)
+        assert effective_archive is not None
         archive_text = _archive_text(effective_archive.content)
         self.assertIn("EXACT PROMPT", archive_text)
         self.assertIn("EXACT RESPONSE", archive_text)
@@ -347,6 +372,66 @@ class AdminTranslationLogsTest(unittest.TestCase):
 
         with ZipFile(BytesIO(effective_archive.content)) as archive:
             self.assertIn("provider_io_diagnostics.jsonl", archive.namelist())
+
+    def test_effective_archive_provider_io_redacts_auth_material(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-provider-io-redaction",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="novel.epub",
+                    document_kind="epub",
+                    source_language="auto",
+                    target_language="ru",
+                ),
+            )
+
+            def write_record(record: dict[str, object]) -> None:
+                logger.run_dir.joinpath("provider_io_diagnostics.jsonl").write_text(
+                    json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+
+            with capture_provider_io(write_record, job_id="job-provider-io-redaction"):
+                record_provider_io_exchange(
+                    provider_id="deepseek",
+                    url=(
+                        "https://api.deepseek.com/chat?"
+                        "api_key=sk-iss...test&"
+                        "secret_id=deepseek.api_keys.primary"
+                    ),
+                    request_body=b'{"messages":[{"content":"EXACT PROMPT"}]}',
+                    response_body=(
+                        b'{"choices":[{"message":{"content":"EXACT RESPONSE"}}]}'
+                    ),
+                    error=TimeoutError(
+                        "Authorization: Bearer *** "
+                        "api_key=sk-iss...test "
+                        "secret_id=deepseek.api_keys.primary"
+                    ),
+                )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        assert effective_archive is not None
+        archive_text = _archive_text(effective_archive.content)
+        self.assertIn("EXACT PROMPT", archive_text)
+        self.assertIn("EXACT RESPONSE", archive_text)
+        for forbidden in (
+            "sk-iss...test",
+            "Authorization: Bearer",
+            "api_key=sk-iss...test",
+            "deepseek.api_keys.primary",
+        ):
+            self.assertNotIn(forbidden, archive_text)
 
     def test_effective_archive_includes_glossary_runtime_diagnostics(self):
         with TemporaryDirectory() as temp_dir:
