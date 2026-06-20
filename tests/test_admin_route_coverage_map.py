@@ -219,7 +219,7 @@ ROUTE_COVERAGE_MAP = (
         "csrf_guard": "direct: session_manager.verify_csrf",
         "audit_coverage": "direct: quality.run success/failure",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
-        "future_permission": "VIEW_OPERATIONS",
+        "future_permission": "TBD_QUALITY_RUN_MUTATION",
     },
     {
         "method": "GET",
@@ -920,11 +920,25 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if str(entry["future_permission"]).startswith("TBD")
         }
 
+        quality_run_entry = next(
+            entry
+            for entry in ROUTE_COVERAGE_MAP
+            if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
+        )
+
         self.assertEqual(len(mutating), 24)
         self.assertEqual(len(destructive), 4)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
         self.assertIn("TBD_USER_ACTIVITY_VIEW", tbd_permissions)
+        self.assertIn("TBD_QUALITY_RUN_MUTATION", tbd_permissions)
+        self.assertTrue(quality_run_entry["mutating"])
+        self.assertEqual(quality_run_entry["sensitivity"], "quality_run_mutation")
+        self.assertEqual(
+            quality_run_entry["future_permission"],
+            "TBD_QUALITY_RUN_MUTATION",
+        )
+        self.assertNotEqual(quality_run_entry["future_permission"], "VIEW_OPERATIONS")
 
         for entry in ROUTE_COVERAGE_MAP:
             with self.subTest(route=(entry["method"], entry["path"])):
