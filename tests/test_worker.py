@@ -555,6 +555,29 @@ class WorkerTest(unittest.TestCase):
         )
         self.assertEqual(completed_callbacks, [])
 
+    def test_serial_worker_redacts_auth_material_in_persisted_failure(self):
+        store = self._store()
+        job = _job_with_units(store)
+
+        with self.assertLogs("translator_service.worker", level="ERROR"):
+            failed = run_next_persistent_work_unit(
+                store=store,
+                job_id=job.id,
+                worker_id="worker-a",
+                source_loader=lambda unit: _source_text_for(unit),
+                translator=FailingTranslator(
+                    "Provider failed: Authorization: Bearer *** "
+                    "sk-abc123 api_key=secret secret_id=diagnostic-secret"
+                ),
+            )
+
+        self.assertIsNotNone(failed)
+        self.assertEqual(failed.status, PersistentWorkUnitStatus.FAILED)
+        self.assertIn("[redacted]", failed.last_error or "")
+        self.assertNotIn("sk-abc123", failed.last_error or "")
+        self.assertNotIn("api_key=secret", failed.last_error or "")
+        self.assertNotIn("secret_id=diagnostic-secret", failed.last_error or "")
+
     def test_stored_worker_loads_source_text_from_object_storage(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -2382,6 +2405,39 @@ class WorkerTest(unittest.TestCase):
                 ["[uk] First paragraph", "[uk] Second paragraph"],
             )
 
+    def test_parallel_worker_redacts_auth_material_in_persisted_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"First paragraph",
+            )
+            store = self._store()
+            job = _job_with_stored_unit(store, source.object_key)
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_stored_text_job_parallel_until_idle(
+                    store=store,
+                    storage=storage,
+                    job_id=job.id,
+                    worker_id="worker",
+                    translator=FailingTranslator(
+                        "Provider failed: Authorization: Bearer *** "
+                        "sk-abc123 api_key=secret secret_id=diagnostic-secret"
+                    ),
+                    max_parallel_units=2,
+                )
+
+            failed_unit = store.list_work_units(job.id)[0]
+            self.assertEqual(summary.failed_work_unit_id, failed_unit.id)
+            self.assertEqual(failed_unit.status, PersistentWorkUnitStatus.FAILED)
+            self.assertIn("[redacted]", failed_unit.last_error or "")
+            self.assertNotIn("sk-abc123", failed_unit.last_error or "")
+            self.assertNotIn("api_key=secret", failed_unit.last_error or "")
+            self.assertNotIn("secret_id=diagnostic-secret", failed_unit.last_error or "")
+
     def test_parallel_usage_callback_runs_before_progress_callback_failure(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -2766,6 +2822,9 @@ class InlineArtifactTranslator:
 class FailingTranslator:
     last_usage = None
 
+    def __init__(self, message: str = "provider read timeout") -> None:
+        self._message = message
+
     def translate(
         self,
         *,
@@ -2773,7 +2832,7 @@ class FailingTranslator:
         source_language: str,
         target_language: str,
     ) -> str:
-        raise RuntimeError("provider read timeout")
+        raise RuntimeError(self._message)
 
 
 class ProviderValidationErrorTranslator:
