@@ -30,7 +30,8 @@ Ask for explicit owner confirmation before:
 
 - deployment, server operations, production operations, bind-address changes or public admin exposure;
 - pushing a branch or opening/updating a PR, unless the owner explicitly asked
-  to make/publish a PR for the current task;
+  to make/publish a PR for the current task or the action is a Hermes/Kanban
+  approved implementation/final PR gate covered below;
 - merge, release, tag or direct changes to `main`;
 - destructive deletes/resets, runtime data cleanup, retention/TTL behavior, backups/restore operations or database migrations;
 - payment, pricing, billing, refund, paid-job, legal/privacy/AUP/support public text or public user-data policy changes;
@@ -158,6 +159,15 @@ re-review and final PR gate instead.
 - Implementation cards should complete when the implementation phase is done
   and a reviewer child already exists. Use `review-required` block only when
   there is no reviewer child or a human decision is actually needed.
+- In Hermes/Kanban, opening or updating a focused PR is pre-approved when the
+  card is an approved implementation task or a final PR gate for an approved
+  GitHub issue/task. Do not block the owner only for PR-open approval. The PR
+  must stay within the approved scope, link the issue/task, include verification
+  evidence and risks, and avoid raw private material.
+- Merge remains owner-approved only. Still block before opening/updating a PR
+  if it would include unapproved high-risk scope, deployment/server operations,
+  DB migration/data cleanup, payment/legal/public-policy changes, raw private
+  material publication, production dependency changes, or scope expansion.
 - Council work must be explicit: GPT-Orchestrator proposal -> DeepSeek-Critic
   critique -> GPT-Orchestrator synthesis -> owner approval if required ->
   implementation.
