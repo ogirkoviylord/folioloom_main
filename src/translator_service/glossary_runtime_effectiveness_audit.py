@@ -29,6 +29,10 @@ GLOSSARY_RUNTIME_EFFECTIVENESS_AUDIT_SCHEMA_VERSION = (
     "glossary-runtime-effectiveness-audit-v1"
 )
 DEFAULT_PACKAGE_CAPS = (8, 12, 16, 24)
+PROVIDER_CALLED_FIELD_MEANING = (
+    "provider_called records only the local fake provider callback used by this "
+    "metadata-only audit; live_provider_calls_made remains false."
+)
 
 
 @dataclass(frozen=True)
@@ -130,6 +134,7 @@ def audit_glossary_runtime_effectiveness(
         "ordinary_artifact_safe": True,
         "runtime_behavior_changed": False,
         "live_provider_calls_made": False,
+        "provider_called_field_meaning": PROVIDER_CALLED_FIELD_MEANING,
         "package_caps": list(normalized_caps),
         "runtime_gate_variants": [
             _gate_variant_payload(variant) for variant in normalized_variants
@@ -230,6 +235,9 @@ def _audit_fixture_case(
         "source_sha256_short": source_sha256[:12],
         "unit_count": len(plan.units),
         "provider_called": provider_called,
+        "provider_callback_kind": (
+            "local_fake_provider_callback" if provider_called else "not_called"
+        ),
         "prep_status": metadata.get("status", "Unknown"),
         "attachment_enabled": bool(attachment.enabled),
         "reason_codes": _string_list(attachment.reason_codes),
