@@ -21,6 +21,10 @@ from translator_service.glossary_prepared_prep_service import (
 GLOSSARY_CANDIDATE_QUALITY_AUDIT_SCHEMA_VERSION = (
     "glossary-candidate-quality-audit-v1"
 )
+PROVIDER_CALLED_FIELD_MEANING = (
+    "provider_called records only the local fake provider callback used by this "
+    "metadata-only audit; live_provider_calls_made remains false."
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,8 @@ def audit_prepared_glossary_candidate_quality(
         "schema_version": GLOSSARY_CANDIDATE_QUALITY_AUDIT_SCHEMA_VERSION,
         "metadata_only": True,
         "raw_payload_included": False,
+        "live_provider_calls_made": False,
+        "provider_called_field_meaning": PROVIDER_CALLED_FIELD_MEANING,
         "case_count": len(case_reports),
         "totals": totals,
         "confirmed_counts": _confirmed_counts(totals),
@@ -175,6 +181,9 @@ def _audit_case(case: PreparedGlossaryCandidateQualityAuditCase) -> dict[str, An
         "prep_status": metadata.get("status", "Unknown"),
         "attachment_enabled": bool(attachment.enabled),
         "provider_called": provider_called,
+        "provider_callback_kind": (
+            "local_fake_provider_callback" if provider_called else "not_called"
+        ),
         "reason_codes": list(attachment.reason_codes),
         "selected_candidate_count": _int_metadata(
             metadata.get("selected_candidate_count")
