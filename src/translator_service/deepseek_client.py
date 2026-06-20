@@ -19,7 +19,10 @@ from translator_service.output_contracts import (
     normalize_provider_translation_batch_contract,
     repair_json_translation_batch_control_chars,
 )
-from translator_service.provider_io_diagnostics import record_provider_io_exchange
+from translator_service.provider_io_diagnostics import (
+    record_provider_io_exchange,
+    redact_provider_auth_material,
+)
 from translator_service.security_telemetry import record_security_event
 from translator_service.translation_context import TranslationContextMemory
 from translator_service.translation_policy import (
@@ -181,7 +184,8 @@ class DeepSeekClient:
                     error=error,
                 )
                 last_error = DeepSeekApiError(
-                    f"DeepSeek API request failed while reading response: {error}"
+                    "DeepSeek API request failed while reading response: "
+                    f"{redact_provider_auth_material(str(error))}"
                 )
             else:
                 record_provider_io_exchange(
@@ -841,4 +845,6 @@ def _request_error_from_url_error(error: URLError) -> DeepSeekApiError:
             "'Install Certificates.command' from the Python folder, then retry."
         )
 
-    return DeepSeekApiError(f"DeepSeek API request failed: {reason}")
+    return DeepSeekApiError(
+        f"DeepSeek API request failed: {redact_provider_auth_material(str(reason))}"
+    )

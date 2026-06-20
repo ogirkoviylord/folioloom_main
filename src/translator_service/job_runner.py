@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from translator_service.provider_io_diagnostics import redact_provider_auth_material
 from translator_service.translation_cache import TranslationCache
 from translator_service.translation_jobs import (
     CancellationToken,
@@ -162,7 +163,7 @@ def run_translation_job(
             replace(
                 job,
                 status=TranslationJobStatus.FAILED,
-                error_message=str(error),
+                error_message=redact_provider_auth_material(str(error)),
             )
         )
         raise
