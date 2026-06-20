@@ -49,11 +49,20 @@ class GlossaryRuntimeEffectivenessAuditTests(unittest.TestCase):
 
         self.assertTrue(report["metadata_only"])
         self.assertFalse(report["raw_payload_included"])
+        self.assertFalse(report["live_provider_calls_made"])
+        self.assertIn(
+            "local fake provider callback",
+            report["provider_called_field_meaning"],
+        )
         self.assertEqual(report["package_caps"], [8, 12, 16, 24])
         cap_reports = report["committed_fixture_cap_audit"]
         self.assertEqual([item["package_cap"] for item in cap_reports], [8, 12, 16, 24])
         for cap_report in cap_reports:
             self.assertIn("runtime_gate_totals", cap_report["totals"])
+            self.assertEqual(
+                cap_report["cases"][0]["provider_callback_kind"],
+                "local_fake_provider_callback",
+            )
         serialized = serialize_runtime_effectiveness_audit(report)
         self.assertNotIn("Mr. Darcy", serialized)
         self.assertNotIn("Pemberley", serialized)
