@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -11,6 +12,27 @@ from datetime import UTC, datetime
 
 ProviderIODiagnosticSink = Callable[[dict[str, object]], None]
 logger = logging.getLogger(__name__)
+
+_AUTH_MATERIAL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"Authorization\s*:\s*Bearer\s+[^\s,;\"']+", re.IGNORECASE),
+        "Authorization: [redacted]",
+    ),
+    (re.compile(r"\bBearer\s+[^\s,;\"']+", re.IGNORECASE), "Bearer [redacted]"),
+    (re.compile(r"\bsk-[A-Za-z0-9._-]{3,}\b"), "[redacted-api-key]"),
+    (
+        re.compile(r"\b(api[_-]?key=)[^\s&;,\"']+", re.IGNORECASE),
+        r"\1[redacted]",
+    ),
+    (
+        re.compile(r"\b(secret[_-]?id=)[^\s&;,\"']+", re.IGNORECASE),
+        r"\1[redacted]",
+    ),
+    (
+        re.compile(r"\b[A-Za-z0-9_.-]*api_keys[A-Za-z0-9_.-]*\b", re.IGNORECASE),
+        "[redacted-secret-id]",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -79,7 +101,7 @@ def record_provider_io_exchange(
         "job_id": context.job_id,
         "work_unit_id": context.work_unit_id,
         "sequence": context.sequence,
-        "url": url,
+        "url": redact_provider_auth_material(url),
         "transport_attempt": transport_attempt,
         "request_body": _bytes_payload(request_body),
         "response_body": (
@@ -116,8 +138,15 @@ def _bytes_payload(value: bytes) -> dict[str, object]:
     return payload
 
 
+def redact_provider_auth_material(value: str) -> str:
+    redacted = value
+    for pattern, replacement in _AUTH_MATERIAL_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
 def _safe_error_payload(error: BaseException) -> dict[str, object]:
     return {
         "type": error.__class__.__name__,
-        "message": str(error),
+        "message": redact_provider_auth_material(str(error)),
     }
