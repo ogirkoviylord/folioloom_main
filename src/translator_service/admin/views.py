@@ -6865,6 +6865,7 @@ def _safe_support_text(value: object) -> str:
     if isinstance(value, dict | list | tuple | set):
         return ""
     text = " ".join(str(value).split())
+    text = _redact_sensitive_text(text)
     if not text:
         return ""
     lowered = text.lower()

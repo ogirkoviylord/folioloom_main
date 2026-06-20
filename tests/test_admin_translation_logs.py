@@ -26,6 +26,26 @@ from translator_service.translation_run_logs import (
 
 
 class AdminTranslationLogsTest(unittest.TestCase):
+    def test_safe_support_text_redacts_auth_material(self):
+        from translator_service.admin.views import _safe_support_text
+
+        result = _safe_support_text(
+            "Provider failed: Authorization: Bearer sk-abc123 api_key=secret"
+        )
+
+        self.assertIn("[redacted]", result)
+        self.assertNotIn("Authorization: Bearer", result)
+        self.assertNotIn("sk-abc123", result)
+        self.assertNotIn("api_key=secret", result)
+
+    def test_safe_support_text_preserves_normal_text(self):
+        from translator_service.admin.views import _safe_support_text
+
+        result = _safe_support_text("Translation failed: timeout after 30s")
+
+        self.assertIn("Translation failed", result)
+        self.assertIn("timeout", result)
+
     def test_lists_translation_runs_without_document_text(self):
         with TemporaryDirectory() as temp_dir:
             ready = TranslationRunLogger.start(

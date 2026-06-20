@@ -92,6 +92,7 @@ from translator_service.persistent_planner import (
     create_persistent_txt_job_plan,
 )
 from translator_service.pricing import PricingRules
+from translator_service.provider_io_diagnostics import redact_provider_auth_material
 from translator_service.security_telemetry import (
     SecurityCooldownPolicy,
     SecurityCooldownTracker,
@@ -2231,6 +2232,7 @@ class BotTranslationService:
                 glossary_adapter_metadata_callback=glossary_adapter_metadata_callback,
             )
         except Exception as error:
+            error_message = redact_provider_auth_material(str(error))
             logger.exception(
                 "Resumed translation job failed: job_id=%s user_telegram_id=%s",
                 job_id,
@@ -2246,7 +2248,7 @@ class BotTranslationService:
             failed_job = _failed_translation_job(
                 pending=pending,
                 document_kind=document_kind,
-                error_message=str(error),
+                error_message=error_message,
                 job_id=job_id,
             )
             _finish_run_logger(
@@ -2888,6 +2890,7 @@ class BotTranslationService:
                     cancellation_token=cancellation_token,
                 )
             except Exception as error:
+                error_message = redact_provider_auth_material(str(error))
                 logger.exception(
                     "Translation job failed: file_name=%s user_telegram_id=%s",
                     pending.file_name,
@@ -2913,13 +2916,13 @@ class BotTranslationService:
                         "source_language": pending.source_language,
                         "target_language": pending.target_language,
                         "error_type": error.__class__.__name__,
-                        "error_message": str(error),
+                        "error_message": error_message,
                     },
                 )
                 return _failed_translation_job(
                     pending=pending,
                     document_kind=document_kind,
-                    error_message=str(error),
+                    error_message=error_message,
                 )
             finally:
                 with self._state_lock:
@@ -4299,7 +4302,7 @@ class BotTranslationService:
         failed_job = _failed_translation_job(
             pending=pending,
             document_kind=document_kind,
-            error_message=str(error),
+            error_message=redact_provider_auth_material(str(error)),
             job_id=job_id,
         )
         _finish_run_logger(
