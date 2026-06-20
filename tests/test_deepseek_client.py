@@ -939,6 +939,150 @@ class DeepSeekClientTest(unittest.TestCase):
         for event in events:
             self.assertNotIn("text", event["payload"])
 
+    def test_default_transport_retries_reset_per_repair_and_fallback_app_call(self):
+        archive_shaped_broken_json = (
+            '{"translations":[{"id":"0","text":"Первая строка\\n'
+            'Вторая строка с "неэкранированной цитатой"},'
+            '{"id":"1","text":"Готово"}]}'
+        )
+        successful_responses = [
+            {
+                "choices": [
+                    {
+                        "message": {"content": archive_shaped_broken_json},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 4,
+                    "total_tokens": 15,
+                },
+            },
+            {
+                "choices": [
+                    {
+                        "message": {"content": archive_shaped_broken_json},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 4,
+                    "total_tokens": 17,
+                },
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "<translation_batch>"
+                                '<translation_block id="0">'
+                                "ZXQPROTECTED0QXZ Первая строка"
+                                "</translation_block>"
+                                '<translation_block id="1">'
+                                "Готово"
+                                "</translation_block>"
+                                "</translation_batch>"
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 17,
+                    "completion_tokens": 6,
+                    "total_tokens": 23,
+                },
+            },
+        ]
+
+        class FailTwicePerApplicationCallTransport:
+            def __init__(self) -> None:
+                self.attempts_by_body: dict[bytes, int] = {}
+                self.successful_bodies: list[dict] = []
+
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                self.attempts_by_body[body] = self.attempts_by_body.get(body, 0) + 1
+                if self.attempts_by_body[body] < 3:
+                    return 429, json.dumps({"error": {"message": "rate limit"}}).encode(
+                        "utf-8"
+                    )
+                self.successful_bodies.append(json.loads(body.decode("utf-8")))
+                response = successful_responses[len(self.successful_bodies) - 1]
+                return 200, json.dumps(response).encode("utf-8")
+
+        transport = FailTwicePerApplicationCallTransport()
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_delay_seconds=0,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Keep ZXQPROTECTED0QXZ</translation_block>'
+                '<translation_block id="1">Done</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0">'
+            "ZXQPROTECTED0QXZ Первая строка"
+            "</translation_block>"
+            '<translation_block id="1">Готово</translation_block>'
+            "</translation_batch>",
+        )
+        application_calls = len(transport.successful_bodies)
+        default_transport_attempts_per_call = set(transport.attempts_by_body.values())
+        total_transport_attempts = sum(transport.attempts_by_body.values())
+        useful_xml_fallback_tokens = successful_responses[2]["usage"]["total_tokens"]
+
+        # Local JSON control-character repair runs before the provider repair chain;
+        # it is local-only and therefore adds 0 provider calls. The provider path
+        # exercised here is exactly 3 application calls: initial JSON, JSON repair,
+        # then XML fallback.
+        self.assertEqual(application_calls, 3)
+        self.assertEqual(total_transport_attempts, 9)
+        self.assertEqual(default_transport_attempts_per_call, {3})
+        # With the default DeepSeekClient retry_attempts=3, this chain costs
+        # 3 app calls * 3 transport attempts = 9 transport attempts per key-pool
+        # channel attempt. For N key-pool channel attempts at the worker level,
+        # worst-case transport attempts for this exercised chain derive to 9N.
+        self.assertEqual(
+            [body.get("response_format") for body in transport.successful_bodies],
+            [{"type": "json_object"}, {"type": "json_object"}, None],
+        )
+        usage = client.last_usage
+        if usage is None:
+            self.fail("DeepSeekClient.last_usage must accumulate repair/fallback usage")
+        self.assertEqual(usage.total_tokens, 55)
+        # Usage is accumulated across rejected initial/repair calls plus the useful
+        # XML fallback. It is not interchangeable with the useful final output
+        # tokens alone: 55 / 23 == 55/23 ~= 2.39x additive overhead.
+        self.assertEqual(useful_xml_fallback_tokens, 23)
+        self.assertGreater(usage.total_tokens, useful_xml_fallback_tokens)
+        self.assertEqual(
+            usage.total_tokens / useful_xml_fallback_tokens,
+            55 / 23,
+        )
+
     def test_translate_rejects_xml_fallback_missing_protected_marker(self):
         archive_shaped_broken_json = (
             '{"translations":[{"id":"0","text":"Маркер зник\n'
