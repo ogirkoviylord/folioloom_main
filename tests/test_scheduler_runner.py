@@ -616,8 +616,48 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(snapshot["status"], "running")
             self.assertIsNone(snapshot["finished_at"])
             self.assertNotIn("run_failed", events_jsonl)
+            self.assertEqual(guard.usage_calls, [])
             self.assertEqual(guard.released_jobs, [])
             self.assertEqual(guard.consumed_jobs, [])
+
+    def test_run_once_does_not_record_beta_usage_for_failed_retry_provider_spend(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            job = _create_single_unit_txt_job(
+                store=store,
+                storage=storage,
+                order_id="order-1",
+                file_id="file-1",
+                user_id="telegram:42",
+                source_text="Private source paragraph",
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            with self.assertLogs("translator_service.worker", level="ERROR"):
+                summary = run_scheduler_once(
+                    store=store,
+                    storage=storage,
+                    worker_id="worker-a",
+                    translator=ProviderUsageFailingRunnerTranslator(),
+                    limits=SchedulerLimits(max_active_units_global=1),
+                    lease_seconds=300,
+                    retry_base_delay_seconds=60,
+                    retry_max_delay_seconds=60,
+                    beta_safety_guard=guard,
+                )
+
+            [unit] = store.list_work_units(job.id)
+            self.assertEqual(summary.completed_units, 0)
+            self.assertEqual(summary.failed_units, 1)
+            self.assertEqual(unit.status.value, "failed_retryable")
+            self.assertEqual(unit.prompt_tokens, 0)
+            self.assertEqual(unit.completion_tokens, 0)
+            self.assertEqual(guard.can_start_calls, 1)
+            self.assertEqual(guard.usage_calls, [])
+            self.assertEqual(guard.consumed_jobs, [])
+            self.assertEqual(guard.released_jobs, [])
 
     def test_beta_safety_guard_preserves_capacity_one_serial_success_path(self):
         with TemporaryDirectory() as temp_dir:
@@ -2608,6 +2648,20 @@ class FailingRunnerTranslator:
             "DeepSeek provider read timeout for Private source paragraph "
             "at /var/private/source.txt"
         )
+
+
+class ProviderUsageFailingRunnerTranslator:
+    def __init__(self) -> None:
+        self.last_usage = ProviderUsage(prompt_tokens=77, completion_tokens=11)
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        raise RuntimeError("DeepSeek provider read timeout")
 
 
 class UnsafeProviderFailureRunnerTranslator(RunnerTranslator):

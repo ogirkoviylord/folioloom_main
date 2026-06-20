@@ -884,6 +884,127 @@ class DeepSeekClientTest(unittest.TestCase):
         for event in events:
             self.assertNotIn("text", event["payload"])
 
+    def test_transport_retries_reset_per_repair_and_fallback_app_call(self):
+        archive_shaped_broken_json = (
+            '{"translations":[{"id":"0","text":"Первая строка\\n'
+            'Вторая строка с "неэкранированной цитатой"},'
+            '{"id":"1","text":"Готово"}]}'
+        )
+        successful_responses = [
+            {
+                "choices": [
+                    {
+                        "message": {"content": archive_shaped_broken_json},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 4,
+                    "total_tokens": 15,
+                },
+            },
+            {
+                "choices": [
+                    {
+                        "message": {"content": archive_shaped_broken_json},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 4,
+                    "total_tokens": 17,
+                },
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "<translation_batch>"
+                                '<translation_block id="0">'
+                                "ZXQPROTECTED0QXZ Первая строка"
+                                "</translation_block>"
+                                '<translation_block id="1">'
+                                "Готово"
+                                "</translation_block>"
+                                "</translation_batch>"
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 17,
+                    "completion_tokens": 6,
+                    "total_tokens": 23,
+                },
+            },
+        ]
+
+        class RetryOncePerApplicationCallTransport:
+            def __init__(self) -> None:
+                self.attempts_by_body: dict[bytes, int] = {}
+                self.successful_bodies: list[dict] = []
+
+            def __call__(
+                self,
+                *,
+                url: str,
+                headers: dict[str, str],
+                body: bytes,
+                timeout_seconds: float,
+            ) -> tuple[int, bytes]:
+                self.attempts_by_body[body] = self.attempts_by_body.get(body, 0) + 1
+                if self.attempts_by_body[body] == 1:
+                    return 429, json.dumps({"error": {"message": "rate limit"}}).encode(
+                        "utf-8"
+                    )
+                self.successful_bodies.append(json.loads(body.decode("utf-8")))
+                response = successful_responses[len(self.successful_bodies) - 1]
+                return 200, json.dumps(response).encode("utf-8")
+
+        transport = RetryOncePerApplicationCallTransport()
+        client = DeepSeekClient(
+            api_key="secret-key",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            transport=transport,
+            retry_attempts=2,
+            retry_delay_seconds=0,
+        )
+
+        translated = client.translate(
+            text=(
+                "<translation_batch>"
+                '<translation_block id="0">Keep ZXQPROTECTED0QXZ</translation_block>'
+                '<translation_block id="1">Done</translation_block>'
+                "</translation_batch>"
+            ),
+            source_language="en",
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            translated,
+            "<translation_batch>"
+            '<translation_block id="0">'
+            "ZXQPROTECTED0QXZ Первая строка"
+            "</translation_block>"
+            '<translation_block id="1">Готово</translation_block>'
+            "</translation_batch>",
+        )
+        self.assertEqual(len(transport.successful_bodies), 3)
+        self.assertEqual(sum(transport.attempts_by_body.values()), 6)
+        self.assertEqual(set(transport.attempts_by_body.values()), {2})
+        self.assertEqual(
+            [body.get("response_format") for body in transport.successful_bodies],
+            [{"type": "json_object"}, {"type": "json_object"}, None],
+        )
+        self.assertIsNotNone(client.last_usage)
+        self.assertEqual(client.last_usage.total_tokens, 55)
+
     def test_translate_rejects_xml_fallback_missing_protected_marker(self):
         archive_shaped_broken_json = (
             '{"translations":[{"id":"0","text":"Маркер зник\n'

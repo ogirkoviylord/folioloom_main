@@ -93,6 +93,48 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             ],
         )
 
+    def test_create_chat_completion_provider_slot_lease_prevents_channel_failover(self):
+        factory = RecordingClientFactory(
+            {
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 429: rate limit")
+                ],
+                "key-b": [
+                    DeepSeekChatResult(
+                        content="should-not-run",
+                        usage=DeepSeekUsage(
+                            prompt_tokens=11,
+                            completion_tokens=3,
+                            total_tokens=14,
+                        ),
+                    )
+                ],
+            }
+        )
+        pool = DeepSeekKeyPoolTranslator(
+            channels=[
+                DeepSeekChannelConfig(api_key="key-a", label="a"),
+                DeepSeekChannelConfig(api_key="key-b", label="b"),
+            ],
+            client_factory=factory,
+            cooldown_seconds=30,
+            clock=lambda: 100.0,
+        )
+
+        with self.assertRaisesRegex(DeepSeekApiError, "HTTP 429"):
+            with pool.provider_slot_channel_lease("deepseek-channel-1"):
+                pool.create_chat_completion(
+                    system_prompt="system",
+                    user_text="prep packet",
+                    response_format={"type": "json_object"},
+                    allow_empty_content=False,
+                )
+
+        self.assertEqual(
+            factory.chat_calls,
+            [("key-a", "system", "prep packet", {"type": "json_object"}, False)],
+        )
+
     def test_snapshot_exposes_channel_state_without_api_keys(self):
         factory = RecordingClientFactory({"secret-key-a": ["ok"]})
         pool = DeepSeekKeyPoolTranslator(
