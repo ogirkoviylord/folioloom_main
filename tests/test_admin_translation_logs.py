@@ -630,7 +630,11 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertEqual(sidecar["summary"]["attachment_statuses"], ["attached"])
         self.assertEqual(sidecar["summary"]["target_metadata_status"], "present")
         self.assertEqual(sidecar["summary"]["rendered_prompt_context_count"], 1)
-        self.assertEqual(sidecar["summary"]["prompt_context_event_count"], 0)
+        self.assertEqual(sidecar["summary"]["prompt_context_event_count"], 1)
+        self.assertEqual(
+            sidecar["summary"]["prompt_context_included_event_count"],
+            1,
+        )
         self.assertEqual(sidecar["summary"]["compliance_summary_count"], 1)
         self.assertEqual(sidecar["summary"]["compliance_statuses"], ["pass"])
         self.assertEqual(sidecar["attachment_events"][0]["attachment_source"], "prep")
@@ -644,6 +648,17 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn(
             "<target_canonical>Дарси</target_canonical>",
             rendered_context_text,
+        )
+        prompt_context_event = sidecar["prompt_context_events"][0]
+        self.assertTrue(prompt_context_event["included"])
+        self.assertEqual(prompt_context_event["included_entry_count"], 1)
+        self.assertEqual(
+            prompt_context_event["included_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
+        self.assertNotIn(
+            "source_canonical",
+            json.dumps(prompt_context_event, ensure_ascii=False),
         )
         self.assertEqual(
             sidecar["compliance_summaries"][0]["target_form_present_count"],
