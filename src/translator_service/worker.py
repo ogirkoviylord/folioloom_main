@@ -7,7 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from translator_service.file_storage import (
     LocalObjectStorage,
@@ -520,6 +520,26 @@ def refresh_scheduled_provider_slot_inventory(
         )
 
 
+def recover_expired_scheduled_work_unit_leases(
+    *,
+    store: object,
+    retry_base_delay_seconds: int,
+    retry_max_delay_seconds: int,
+) -> int:
+    recover_expired = getattr(store, "recover_expired_leases", None)
+    if not callable(recover_expired):
+        return 0
+    recovered = cast(
+        int,
+        recover_expired(
+            now=utc_now(),
+            retry_base_delay_seconds=retry_base_delay_seconds,
+            retry_max_delay_seconds=retry_max_delay_seconds,
+        ),
+    )
+    return recovered
+
+
 def _translator_provider_slot_inventory(
     translator: PersistentWorkUnitTranslator,
 ) -> list[ProviderSlotInventoryItem]:
@@ -689,6 +709,11 @@ def run_next_scheduled_stored_text_work_unit(
     encoding: str = "utf-8",
 ) -> PersistentWorkUnit | None:
     refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
+    recover_expired_scheduled_work_unit_leases(
+        store=store,
+        retry_base_delay_seconds=retry_base_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+    )
 
     claim = store.claim_next_scheduled_work_unit(
         worker_id=worker_id,

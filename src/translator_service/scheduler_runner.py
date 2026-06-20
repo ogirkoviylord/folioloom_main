@@ -53,6 +53,7 @@ from translator_service.worker import (
     _scheduled_glossary_adapter_metadata_callback,
     _scheduled_glossary_runtime_hook,
     load_scheduled_work_unit_text,
+    recover_expired_scheduled_work_unit_leases,
     refresh_scheduled_provider_slot_inventory,
     run_next_scheduled_stored_text_work_unit,
     translate_claimed_scheduled_stored_text_work_unit,
@@ -223,6 +224,11 @@ def _run_scheduled_parallel_once(
     glossary_adapter_metadata_callback: Callable[[dict[str, object]], None] | None,
 ) -> tuple[int, int]:
     refresh_scheduled_provider_slot_inventory(store=store, translator=translator)
+    recover_expired_scheduled_work_unit_leases(
+        store=store,
+        retry_base_delay_seconds=retry_base_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+    )
 
     completed_units = 0
     failed_units = 0
