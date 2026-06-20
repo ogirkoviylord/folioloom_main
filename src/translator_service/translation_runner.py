@@ -2821,6 +2821,12 @@ def _emit_glossary_adapter_metadata(
         payload["prompt_context"] = glossary_prompt_context_metadata_payload(
             prompt_context,
         )
+    else:
+        preflight_prompt_context = (
+            preflight.get("prompt_context") if isinstance(preflight, Mapping) else None
+        )
+        if isinstance(preflight_prompt_context, Mapping):
+            payload["prompt_context"] = dict(preflight_prompt_context)
     if plan_metadata:
         payload.update(plan_metadata)
     _apply_glossary_effective_metadata(
@@ -3136,6 +3142,9 @@ def _glossary_runtime_useful_preflight(
     except ValueError:
         return _glossary_preflight_skipped(payload, "prompt_context_config_invalid")
     if not formatted_context.included_entries:
+        payload["prompt_context"] = glossary_prompt_context_metadata_payload(
+            formatted_context,
+        )
         return _glossary_preflight_skipped(payload, "prompt_context_budget_exhausted")
 
     payload["status"] = "ready"

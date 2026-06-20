@@ -2710,6 +2710,96 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("authorization_header", archive_text)
         self.assertNotIn("Bearer ", archive_text)
 
+    def test_translation_log_download_summarizes_prompt_context_budget_omissions(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-glossary-budget-omission",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {"glossary_mode": "with_glossary"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            append_translation_run_event_for_job(
+                run_root,
+                job_id="job-glossary-budget-omission",
+                event_type="glossary_runtime_adapter",
+                payload={
+                    "status": "fallback",
+                    "fallback_reason": "prompt_context_budget_exhausted",
+                    "work_unit_sequence": 1,
+                    "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                    "prompt_context": {
+                        "included_entry_count": 0,
+                        "included_entry_ids": [],
+                        "omitted_entry_count": 1,
+                        "omitted_entry_ids": ["glossary-entry:v1:darcy"],
+                        "omission_reason_counts": {
+                            "prompt_budget_exhausted": 1,
+                        },
+                        "omitted_entries": [
+                            {
+                                "entry_id": "glossary-entry:v1:darcy",
+                                "reason": "prompt_budget_exhausted",
+                                "estimated_prompt_tokens": 99,
+                            }
+                        ],
+                    },
+                },
+            )
+            logger.finish(status="completed", result_file_name="book.ru.docx")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            download = client.get(f"/admin/logs/{logger.run_dir.name}/download")
+
+        self.assertEqual(download.status_code, 200)
+        with ZipFile(BytesIO(download.content)) as archive:
+            diagnostics = json.loads(
+                archive.read("glossary_runtime_diagnostics.json")
+            )
+            archive_text = "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+            )
+
+        self.assertEqual(
+            diagnostics["summary"]["prompt_context_omission_reason_counts"],
+            {"prompt_budget_exhausted": 1},
+        )
+        prompt_context_event = diagnostics["prompt_context_events"][0]
+        self.assertFalse(prompt_context_event["included"])
+        self.assertEqual(prompt_context_event["omitted_entry_count"], 1)
+        self.assertEqual(
+            prompt_context_event["omitted_entry_ids"],
+            ["glossary-entry:v1:darcy"],
+        )
+        self.assertEqual(
+            prompt_context_event["omission_reason_counts"],
+            {"prompt_budget_exhausted": 1},
+        )
+        self.assertNotIn("Darcy returns", archive_text)
+        self.assertNotIn("Дарси", archive_text)
+
     def test_translation_log_download_omits_glossary_sidecar_without_adapter_event(
         self,
     ):

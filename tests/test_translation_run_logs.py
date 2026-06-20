@@ -176,7 +176,15 @@ class TranslationRunLoggerTest(unittest.TestCase):
                         "response_body": "RAW RESPONSE",
                         "source_text": "RAW SOURCE",
                     },
-                    "prompt_context": {"included_entry_ids": ["entry:v1:test"]},
+                    "prompt_context": {
+                        "included_entry_ids": ["entry:v1:test"],
+                        "raw_prompt": "RAW PROMPT FROM PROMPT CONTEXT",
+                        "nested": {
+                            "provider_response_body": (
+                                "RAW PROVIDER RESPONSE FROM PROMPT CONTEXT"
+                            ),
+                        },
+                    },
                 },
             )
 
@@ -190,9 +198,16 @@ class TranslationRunLoggerTest(unittest.TestCase):
             payload = events[-1]["payload"]
             serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
             self.assertEqual(payload["status"], "fallback")
-            self.assertEqual(payload["prompt_context"], "[redacted]")
+            self.assertEqual(
+                payload["prompt_context"],
+                {
+                    "included_entry_ids": ["entry:v1:test"],
+                    "raw_prompt": "[redacted]",
+                    "nested": {"provider_response_body": "[redacted]"},
+                },
+            )
             self.assertNotIn("Bearer SECRET", serialized)
-            self.assertNotIn("postgres://secret:user@localhost/db", serialized)
+            self.assertNotIn("postgres://secret:***@localhost/db", serialized)
             self.assertNotIn("RAW PROMPT", serialized)
             self.assertNotIn("RAW PROVIDER RESPONSE", serialized)
             self.assertNotIn("RAW RESPONSE", serialized)
