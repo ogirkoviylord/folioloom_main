@@ -6304,6 +6304,213 @@ class BotTranslationServiceTest(unittest.TestCase):
                 ),
             )
 
+    def test_persistent_book_summary_is_not_download_ready_when_object_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(service.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/book.txt",
+            )
+            stored = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="book.uk.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"translated",
+            )
+            persistent_store.attach_job_output(
+                job.id, final_object_key=stored.object_key
+            )
+            persistent_store.mark_job_assembled(job.id, partial=False)
+            storage.delete(stored.object_key)
+
+            books = service.list_user_books(user_telegram_id=42)
+            detail = service.get_user_book_detail(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+            result = service.get_user_book_result(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertEqual(len(books), 1)
+            self.assertFalse(books[0].has_result)
+            self.assertFalse(books[0].has_partial_result)
+            self.assertIsNotNone(detail)
+            self.assertFalse(detail.has_result)
+            self.assertIsNone(result)
+
+    def test_persistent_book_summary_shows_partial_when_final_object_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(service.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/book.txt",
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="book.uk.partial.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"partial translated",
+            )
+            final = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="book.uk.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"translated",
+            )
+            persistent_store.attach_job_output(
+                job.id,
+                partial_object_key=partial.object_key,
+                final_object_key=final.object_key,
+            )
+            persistent_store.mark_job_assembled(job.id, partial=True)
+            storage.delete(final.object_key)
+
+            books = service.list_user_books(user_telegram_id=42)
+            detail = service.get_user_book_detail(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+            result = service.get_user_book_result(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertEqual(len(books), 1)
+            self.assertTrue(books[0].has_result)
+            self.assertTrue(books[0].has_partial_result)
+            self.assertIsNotNone(detail)
+            self.assertTrue(detail.has_result)
+            self.assertTrue(detail.has_partial_result)
+            self.assertEqual(
+                result,
+                UserBookResult(
+                    job_id=job.id,
+                    file_name="book.uk.partial.txt",
+                    content=b"partial translated",
+                    content_type="text/plain; charset=utf-8",
+                ),
+            )
+
+    def test_persistent_book_summary_hides_partial_when_final_exists(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=20,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+            )
+            self.addCleanup(service.close)
+            job = persistent_store.create_job(
+                order_id="order-1",
+                user_id="telegram:42",
+                file_id="file-1",
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                source_object_key="original/book.txt",
+            )
+            partial = storage.put_bytes(
+                kind=StoredFileKind.PARTIAL,
+                file_name="book.uk.partial.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"partial translated",
+            )
+            final = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="book.uk.txt",
+                content_type="text/plain; charset=utf-8",
+                content=b"translated",
+            )
+            persistent_store.attach_job_output(
+                job.id,
+                partial_object_key=partial.object_key,
+                final_object_key=final.object_key,
+            )
+            persistent_store.mark_job_assembled(job.id, partial=False)
+
+            books = service.list_user_books(user_telegram_id=42)
+            detail = service.get_user_book_detail(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+            result = service.get_user_book_result(
+                user_telegram_id=42,
+                job_id=job.id,
+            )
+
+            self.assertEqual(len(books), 1)
+            self.assertTrue(books[0].has_result)
+            self.assertFalse(books[0].has_partial_result)
+            self.assertIsNotNone(detail)
+            self.assertTrue(detail.has_result)
+            self.assertFalse(detail.has_partial_result)
+            self.assertEqual(
+                result,
+                UserBookResult(
+                    job_id=job.id,
+                    file_name="book.uk.txt",
+                    content=b"translated",
+                    content_type="text/plain; charset=utf-8",
+                ),
+            )
+
     def test_loads_specific_persistent_book_result_for_owner(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
