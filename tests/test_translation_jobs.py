@@ -12,6 +12,7 @@ from translator_service.file_storage import LocalObjectStorage
 from translator_service.job_runner import (
     InMemoryTranslationJobRepository,
     TranslationJobStatus,
+    run_translation_job,
 )
 from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
@@ -39,6 +40,18 @@ class RecordingTranslator:
     ) -> str:
         self.requests.append((text, source_language, target_language))
         return f"[{target_language}] {text}"
+
+
+class ProviderAuthFailingTranslator:
+    last_usage = None
+
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
+        raise RuntimeError(
+            "Provider failed: Authorization: Bearer *** "
+            "sk-abc123 api_key=secret secret_id=diagnostic-secret"
+        )
 
 
 class TokenReportingTranslator:
@@ -337,7 +350,7 @@ class TranslationJobsTest(unittest.TestCase):
             def fail_persistent_translation(**kwargs):
                 raise RuntimeError(
                     "Provider failed: Authorization: Bearer sk-abc123 "
-                    "api_key=secret secret_id=diagnostic-secret"
+                    "sk-abc123 api_key=secret secret_id=diagnostic-secret"
                 )
 
             service._confirm_persistent_translation = fail_persistent_translation
@@ -358,6 +371,31 @@ class TranslationJobsTest(unittest.TestCase):
             self.assertNotIn("sk-abc123", event_error)
             self.assertNotIn("api_key=secret", event_error)
             self.assertNotIn("secret_id=diagnostic-secret", event_error)
+
+    def test_run_translation_job_redacts_auth_material_in_persisted_failure(self):
+        repository = InMemoryTranslationJobRepository()
+        job = repository.create_txt_job(
+            user_telegram_id=42,
+            file_name="book.txt",
+            content=b"First paragraph",
+            source_language="en",
+            target_language="uk",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Provider failed"):
+            run_translation_job(
+                repository=repository,
+                job_id=job.id,
+                max_fragment_chars=1000,
+                translator=ProviderAuthFailingTranslator(),
+            )
+
+        failed = repository.get(job.id)
+        self.assertEqual(failed.status, TranslationJobStatus.FAILED)
+        self.assertIn("[redacted]", failed.error_message or "")
+        self.assertNotIn("sk-abc123", failed.error_message or "")
+        self.assertNotIn("api_key=secret", failed.error_message or "")
+        self.assertNotIn("secret_id=diagnostic-secret", failed.error_message or "")
 
     def test_preserves_protected_tokens_in_plain_text_fragments(self):
         class TokenBreakingTranslator:

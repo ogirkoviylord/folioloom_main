@@ -37,6 +37,7 @@ from translator_service.provider_failure_diagnostics import (
 from translator_service.provider_io_diagnostics import (
     ProviderIODiagnosticSink,
     capture_provider_io,
+    redact_provider_auth_material,
 )
 from translator_service.russian_quality import detect_russian_quality_track
 from translator_service.russian_quality_checks import check_russian_translation_quality
@@ -191,7 +192,7 @@ def run_next_persistent_work_unit(
         try:
             return store.fail_work_unit(
                 work_unit.id,
-                error_message=str(error),
+                error_message=redact_provider_auth_material(str(error)),
                 retry_count=work_unit.retry_count + 1,
             )
         except ValueError as stale_error:
@@ -398,7 +399,7 @@ def run_stored_text_job_parallel_until_idle(
                     try:
                         failed = store.fail_work_unit(
                             work_unit.id,
-                            error_message=str(error),
+                            error_message=redact_provider_auth_material(str(error)),
                             retry_count=work_unit.retry_count + 1,
                         )
                     except ValueError as stale_error:

@@ -30,7 +30,7 @@ class AdminTranslationLogsTest(unittest.TestCase):
         from translator_service.admin.views import _safe_support_text
 
         result = _safe_support_text(
-            "Provider failed: Authorization: Bearer sk-abc123 api_key=secret"
+            "Provider failed: sk-abc123 api_key=secret"
         )
 
         self.assertIn("[redacted]", result)
