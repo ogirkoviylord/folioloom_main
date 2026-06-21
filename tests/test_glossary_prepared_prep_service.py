@@ -408,6 +408,26 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
                     source_canonical="Mr Darcy's",
                     aliases=["Mr Darcy's"],
                 ),
+                _prepared_package_entry(
+                    source_entry_id="entry:darcy-curly-possessive",
+                    source_canonical="Mr Darcy’s",
+                    aliases=["Mr Darcy’s"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:oh-john",
+                    source_canonical="Oh John",
+                    aliases=["Oh John"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:macy-department-store-curly",
+                    source_canonical="Macy’s Department Store",
+                    aliases=["Macy’s Department Store"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:oh-canada",
+                    source_canonical="Oh Canada",
+                    aliases=["Oh Canada"],
+                ),
             ]
             return payload
 
@@ -418,17 +438,26 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         payload = result.payload
         assert isinstance(payload, dict)
         entries = payload["entries"]
-        self.assertEqual(len(entries), 1)
+        self.assertEqual(len(entries), 3)
         self.assertEqual(entries[0]["source_canonical"], "Alice Winterbourne")
         self.assertEqual(entries[0]["aliases"], ["Winterbourne", "Lizzy"])
+        self.assertEqual(entries[1]["source_canonical"], "Macy’s Department Store")
+        self.assertEqual(entries[1]["aliases"], ["Macy’s Department Store"])
+        self.assertEqual(entries[2]["source_canonical"], "Oh Canada")
+        self.assertEqual(entries[2]["aliases"], ["Oh Canada"])
         quality = result.metadata["validation"]["quality"]
-        self.assertEqual(quality["dropped_candidate_count"], 1)
-        self.assertEqual(quality["alias_omitted_count"], 2)
+        self.assertEqual(quality["dropped_candidate_count"], 3)
+        self.assertEqual(quality["alias_omitted_count"], 4)
         self.assertIn("candidate_quality_possessive_source", quality["reason_codes"])
+        self.assertIn("candidate_quality_vocative_phrase", quality["reason_codes"])
         self.assertIn("candidate_quality_broad_alias_pruned", quality["reason_codes"])
         metadata_text = json.dumps(result.metadata, ensure_ascii=False)
         self.assertNotIn("Mr Darcy's", metadata_text)
+        self.assertNotIn("Mr Darcy’s", metadata_text)
+        self.assertNotIn("Oh John", metadata_text)
         self.assertNotIn("Alice Winterbourne", metadata_text)
+        self.assertNotIn("Macy’s Department Store", metadata_text)
+        self.assertNotIn("Oh Canada", metadata_text)
 
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())

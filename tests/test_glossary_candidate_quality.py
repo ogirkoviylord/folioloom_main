@@ -210,14 +210,21 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
         self.assertNotIn("OF ANY KIND", metadata_text)
         self.assertNotIn("Good God", metadata_text)
 
-    def test_drops_possessive_corrupted_and_safe_vocative_shapes(self):
+    def test_drops_possessive_corrupted_and_unsafe_vocative_shapes(self):
         entries = (
             _entry("Mr Darcy's"),
+            _entry("Mr Darcy’s"),
             _entry("John s"),
             _entry("Oh John"),
+            _entry("Oh John Smith"),
+            _entry("Oh Mr Darcy"),
             _entry("Macy's"),
+            _entry("Macy’s"),
             _entry("King's College"),
+            _entry("King’s College"),
             _entry("Macy's Department Store"),
+            _entry("Macy’s Department Store"),
+            _entry("Oh Canada"),
         )
 
         result = filter_prepared_glossary_candidates(
@@ -228,10 +235,14 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
 
         self.assertEqual([entry.source_canonical for entry in result.entries], [
             "Macy's",
+            "Macy’s",
             "King's College",
+            "King’s College",
             "Macy's Department Store",
+            "Macy’s Department Store",
+            "Oh Canada",
         ])
-        self.assertEqual(result.metadata["dropped_candidate_count"], 3)
+        self.assertEqual(result.metadata["dropped_candidate_count"], 6)
         self.assertIn(
             "candidate_quality_possessive_source",
             result.metadata["reason_codes"],
@@ -245,7 +256,14 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
             result.metadata["reason_codes"],
         )
         metadata_text = json.dumps(result.metadata, ensure_ascii=False)
-        for unsafe in ("Mr Darcy's", "John s", "Oh John"):
+        for unsafe in (
+            "Mr Darcy's",
+            "Mr Darcy’s",
+            "John s",
+            "Oh John",
+            "Oh John Smith",
+            "Oh Mr Darcy",
+        ):
             self.assertNotIn(unsafe, metadata_text)
 
     def test_prunes_broad_first_name_aliases_without_dropping_durable_aliases(self):
