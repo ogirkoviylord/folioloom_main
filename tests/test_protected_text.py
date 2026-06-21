@@ -26,11 +26,15 @@ class ProtectedTextTest(unittest.TestCase):
 
     def test_protects_common_inline_code_expressions(self):
         protected = protect_text(
-            'translated = llm.translate(chapter.text, target="nl"); print(f"{chapter.id}")'
+            'translated = llm.translate(chapter.text, target="nl"); '
+            'print(f"{chapter.id}")'
         )
 
         self.assertIn("translated =", protected.replacements.values())
-        self.assertIn('llm.translate(chapter.text, target="nl")', protected.replacements.values())
+        self.assertIn(
+            'llm.translate(chapter.text, target="nl")',
+            protected.replacements.values(),
+        )
         self.assertIn('print(f"{chapter.id}")', protected.replacements.values())
 
     def test_does_not_globally_protect_note_terms_in_normal_prose(self):
@@ -103,6 +107,25 @@ class ProtectedTextTest(unittest.TestCase):
                 protected = protect_text(label, literary_heading=True)
                 self.assertEqual(protected.text, label)
                 self.assertEqual(protected.replacements, {})
+
+    def test_literary_heading_rejects_mixed_case_source_for_short_words(self):
+        protected = protect_text("Chapter title BOY", literary_heading=True)
+
+        self.assertIn("BOY", protected.replacements.values())
+
+    def test_literary_heading_rejects_technical_source_for_short_words(self):
+        cases = (
+            ("OPS/nav.xhtml BOY", ("OPS", "BOY")),
+            ("config.json BOY", ("BOY",)),
+            ("https://example.org/BOY BOY", ("https://example.org/BOY", "BOY")),
+            ("BOY @ HOME", ("BOY", "HOME")),
+        )
+
+        for source_text, expected_protected in cases:
+            with self.subTest(source_text=source_text):
+                protected = protect_text(source_text, literary_heading=True)
+                for token in expected_protected:
+                    self.assertIn(token, protected.replacements.values())
 
     def test_literary_heading_context_keeps_short_title_controls_protected(self):
         protected = protect_text(
