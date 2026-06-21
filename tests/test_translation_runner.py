@@ -2871,6 +2871,41 @@ class TranslationRunnerTest(unittest.TestCase):
             ["en", "auto"],
         )
 
+    def test_epub_auxiliary_malformed_batch_fallback_retries_surface_residue(self):
+        class MalformedFallbackSurfaceResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "По какому праву?"
+                if "<translation_block" in text:
+                    return "malformed batch without translation blocks"
+                return "QUO WARRANTO?"
+
+        translator = MalformedFallbackSurfaceResidueTranslator()
+
+        translated = _translate_epub_auxiliary_strings(
+            ["QUO WARRANTO?"],
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            literary_heading_flags=(True,),
+        )
+
+        self.assertEqual(translated, ["По какому праву?"])
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["en", "en", "auto"],
+        )
+
     def test_epub_body_heading_retry_uses_surface_audit_for_short_heading_residue(self):
         class BodyHeadingResidueTranslator:
             def __init__(self) -> None:

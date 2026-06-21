@@ -1220,17 +1220,22 @@ def _translate_work_unit_text(
             translated_text,
             target_language=work_unit.target_language,
         )
-        if _needs_secondary_language_retry(
+        retry_reason = _secondary_language_retry_reason(
             source_text=source_text,
+            source_block_id=work_unit.source_block_ids[0]
+            if work_unit.source_block_ids
+            else "",
             translated_text=translated_text,
             protected_replacements=protected_source.replacements,
             source_language=work_unit.source_language,
             target_language=work_unit.target_language,
-        ):
+        )
+        if retry_reason is not None:
             logger.info(
                 "Retrying persistent work unit after translation QA: "
-                "work_unit_id=%s reason=secondary_language_left_untranslated",
+                "work_unit_id=%s reason=%s",
                 work_unit.id,
+                retry_reason,
             )
             retried = translate_with_context(
                 translator,
