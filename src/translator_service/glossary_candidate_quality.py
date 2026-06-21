@@ -11,7 +11,7 @@ PREPARED_GLOSSARY_CANDIDATE_QUALITY_POLICY_VERSION = (
     "prepared-glossary-candidate-quality-v1"
 )
 
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9']*")
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’]*")
 _PRONOUN_TOKENS = frozenset(
     {
         "he",
@@ -445,6 +445,10 @@ def _is_safe_structural_vocative_phrase(tokens: tuple[str, ...]) -> bool:
     return (
         2 <= len(tokens) <= 3
         and tokens[0] in _SAFE_STRUCTURAL_VOCATIVE_PREFIX_TOKENS
+        and (
+            tokens[1] in _BROAD_PERSON_ALIAS_TOKENS
+            or tokens[1] in _HONORIFIC_TOKENS
+        )
     )
 
 

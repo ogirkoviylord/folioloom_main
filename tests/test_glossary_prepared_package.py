@@ -291,6 +291,90 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         for unsafe in ("Mr Darcy's", "John s", "Oh John"):
             self.assertNotIn(unsafe, metadata_text)
 
+    def test_mixed_possessive_and_vocative_package_keeps_durable_entries(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:darcy-possessive",
+                    source_canonical="Mr Darcy's",
+                    aliases=["Mr Darcy's"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:darcy-curly-possessive",
+                    source_canonical="Mr Darcy’s",
+                    aliases=["Mr Darcy’s"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:john-corrupted",
+                    source_canonical="John s",
+                    aliases=["John s"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:oh-john",
+                    source_canonical="Oh John",
+                    aliases=["Oh John"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:macy-curly",
+                    source_canonical="Macy’s",
+                    aliases=["Macy’s"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:kings-college-curly",
+                    source_canonical="King’s College",
+                    aliases=["King’s College"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:macy-department-store-curly",
+                    source_canonical="Macy’s Department Store",
+                    aliases=["Macy’s Department Store"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:oh-canada",
+                    source_canonical="Oh Canada",
+                    aliases=["Oh Canada"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertTrue(result.ready)
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.ready_entry_count, 4)
+        assert result.package is not None
+        self.assertEqual([entry.source_canonical for entry in result.package.entries], [
+            "Macy’s",
+            "King’s College",
+            "Macy’s Department Store",
+            "Oh Canada",
+        ])
+        self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 4)
+        self.assertIn(
+            "candidate_quality_possessive_source",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_corrupted_possessive_source",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_vocative_phrase",
+            result.metadata["quality"]["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in (
+            "Mr Darcy's",
+            "Mr Darcy’s",
+            "John s",
+            "Oh John",
+            "Macy’s",
+            "King’s College",
+            "Macy’s Department Store",
+            "Oh Canada",
+        ):
+            self.assertNotIn(raw_source, metadata_text)
+
     def test_broad_first_name_alias_is_pruned_from_ready_package(self):
         payload = _prepared_payload(
             entries=[
