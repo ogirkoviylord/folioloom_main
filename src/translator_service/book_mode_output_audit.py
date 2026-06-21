@@ -299,6 +299,7 @@ class _ChunkLanguageStats:
     cyrillic_word_count: int
     protected_marker_count: int
     uppercase_latin_word_count: int = 0
+    title_case_latin_word_count: int = 0
 
     @property
     def latin_word_count(self) -> int:
@@ -354,14 +355,23 @@ def _chunk_language_stats(
     protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
     masked = _mask_non_residue_text(text, expected_latin_terms=expected_latin_terms)
     latin_observations = tuple(_meaningful_latin_word_observations(masked))
-    latin_words = tuple(word for word, _is_uppercase in latin_observations)
+    latin_words = tuple(
+        word for word, _is_uppercase, _is_title_case in latin_observations
+    )
     cyrillic_word_count = len(_CYRILLIC_WORD_RE.findall(masked))
     return _ChunkLanguageStats(
         latin_words=latin_words,
         cyrillic_word_count=cyrillic_word_count,
         protected_marker_count=protected_marker_count,
         uppercase_latin_word_count=sum(
-            1 for _word, is_uppercase in latin_observations if is_uppercase
+            1
+            for _word, is_uppercase, _is_title_case in latin_observations
+            if is_uppercase
+        ),
+        title_case_latin_word_count=sum(
+            1
+            for _word, _is_uppercase, is_title_case in latin_observations
+            if is_title_case
         ),
     )
 
@@ -384,20 +394,22 @@ def _mask_non_residue_text(
     return masked
 
 
-def _meaningful_latin_word_observations(text: str) -> tuple[tuple[str, bool], ...]:
-    words: list[tuple[str, bool]] = []
+def _meaningful_latin_word_observations(text: str) -> tuple[tuple[str, bool, bool], ...]:
+    words: list[tuple[str, bool, bool]] = []
     for match in _LATIN_WORD_RE.finditer(text):
         raw_word = match.group(0).strip("'’")
+        title_word = raw_word
         word = raw_word.lower()
         if word.endswith("'s") or word.endswith("’s"):
             word = word[:-2]
+            title_word = raw_word[:-2]
         if len(word) < 2:
             continue
         if word in _TECHNICAL_LATIN_WORDS:
             continue
         if _ROMAN_NUMERAL_RE.fullmatch(word):
             continue
-        words.append((word, raw_word.isupper()))
+        words.append((word, raw_word.isupper(), title_word.istitle()))
     return tuple(words)
 
 
@@ -442,6 +454,7 @@ def _has_high_confidence_mixed_heading_residue(stats: _ChunkLanguageStats) -> bo
         and stats.cyrillic_word_count <= 6
         and (
             stats.uppercase_latin_word_count >= 2
+            or stats.title_case_latin_word_count >= 2
             or stats.english_function_word_count >= 1
         )
     )

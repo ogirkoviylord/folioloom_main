@@ -1355,7 +1355,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                 store,
                 plan.job.id,
                 {
-                    "epub:OPS/chapter.xhtml:0": "Глава: MODERN PILGRIMS",
+                    "epub:OPS/chapter.xhtml:0": "Глава: Modern Pilgrims",
                     "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
                     "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
                     "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
@@ -1364,7 +1364,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                         "Название книги"
                     ),
                     "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": (
-                        "Глава MODERN PILGRIMS"
+                        "Глава Modern Pilgrims"
                     ),
                 },
             )
@@ -1396,7 +1396,7 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertGreaterEqual(gate["blocking_findings"], 2)
             self.assertIn("xhtml_navigation", gate["surface_categories"])
             self.assertIn("toc_ncx", gate["surface_categories"])
-            self.assertNotIn("MODERN PILGRIMS", artifact_text)
+            self.assertNotIn("Modern Pilgrims", artifact_text)
             self.assertNotIn("SIGNS AND WONDERS", artifact_text)
 
     def test_assemble_due_jobs_keeps_clean_book_mode_epub_ready(self):
