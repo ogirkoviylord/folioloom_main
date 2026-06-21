@@ -145,6 +145,71 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
         self.assertNotIn("came upon", metadata_text)
         self.assertNotIn("three dimensions", metadata_text)
 
+    def test_drops_pg17460_low_value_phrase_shapes_metadata_only(self):
+        entries = (
+            _entry("BOY AND"),
+            _entry("OF ANY KIND", category=GlossaryEntryCategory.TERM),
+            _entry("Labour Was"),
+            _entry("Good God"),
+            _entry("Labour Exchange"),
+            _entry("Good Harbor"),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual([entry.source_canonical for entry in result.entries], [
+            "Labour Exchange",
+            "Good Harbor",
+        ])
+        self.assertEqual(result.metadata["input_candidate_count"], 6)
+        self.assertEqual(result.metadata["selected_candidate_count"], 2)
+        self.assertEqual(result.metadata["dropped_candidate_count"], 4)
+        self.assertIn(
+            "candidate_quality_function_word_phrase",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_low_value_source",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_common_phrase",
+            result.metadata["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in ("BOY AND", "OF ANY KIND", "Labour Was", "Good God"):
+            self.assertNotIn(raw_source, metadata_text)
+
+    def test_prunes_pg17460_low_value_alias_shapes(self):
+        entries = (
+            _entry(
+                "Labour Exchange",
+                aliases=("Labour", "Labour Was", "OF ANY KIND", "Good God"),
+            ),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual(result.entries[0].aliases, ("Labour",))
+        self.assertEqual(result.metadata["dropped_candidate_count"], 0)
+        self.assertEqual(result.metadata["alias_omitted_count"], 3)
+        self.assertIn(
+            "candidate_quality_alias_pruned",
+            result.metadata["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Labour Was", metadata_text)
+        self.assertNotIn("OF ANY KIND", metadata_text)
+        self.assertNotIn("Good God", metadata_text)
+
     def test_selection_cap_omits_extra_quality_candidates_without_raw_metadata(self):
         entries = (
             _entry(
