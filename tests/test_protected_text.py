@@ -90,6 +90,42 @@ class ProtectedTextTest(unittest.TestCase):
             self.assertNotIn(word, protected.replacements.values())
         self.assertIn("API_TOKEN", protected.replacements.values())
 
+    def test_literary_heading_keeps_pg17460_short_title_words_translatable(self):
+        labels = (
+            "A BOY AND A GIRL",
+            "JOHN IS BEWITCHED",
+            "JOHN FRY'S ERRAND",
+            "COLD COMFORT",
+        )
+
+        for label in labels:
+            with self.subTest(label=label):
+                protected = protect_text(label, literary_heading=True)
+                self.assertEqual(protected.text, label)
+                self.assertEqual(protected.replacements, {})
+
+    def test_literary_heading_context_keeps_short_title_controls_protected(self):
+        protected = protect_text(
+            "API URL HTTP JSON XML NCX OPF ISBN API_TOKEN I IV OPS/nav.xhtml",
+            literary_heading=True,
+        )
+
+        for token in (
+            "API",
+            "URL",
+            "HTTP",
+            "JSON",
+            "XML",
+            "NCX",
+            "OPF",
+            "ISBN",
+            "API_TOKEN",
+            "I",
+            "IV",
+            "OPS",
+        ):
+            self.assertIn(token, protected.replacements.values())
+
     def test_literary_heading_context_never_creates_empty_replacements(self):
         protected = protect_text("XML", literary_heading=True)
 

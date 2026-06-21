@@ -3008,6 +3008,32 @@ class TranslationRunnerTest(unittest.TestCase):
         self.assertNotIn("API</translation_block>", provider_text)
         self.assertNotIn("XML</translation_block>", provider_text)
 
+    def test_epub_pg17460_short_all_caps_surfaces_reach_provider_unmarked(self):
+        translator = RecordingTranslator()
+        content = _make_epub_with_pg17460_short_all_caps_surfaces()
+
+        translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        provider_text = "\n".join(request[0] for request in translator.requests)
+        for label in (
+            "A BOY AND A GIRL",
+            "JOHN IS BEWITCHED",
+            "JOHN FRY'S ERRAND",
+            "COLD COMFORT",
+        ):
+            with self.subTest(label=label):
+                self.assertIn(label, provider_text)
+        self.assertNotIn("A ZXQPROTECTED", provider_text)
+        self.assertNotIn("ZXQPROTECTED0QXZ IS BEWITCHED", provider_text)
+        self.assertNotIn("ZXQPROTECTED0QXZ ZXQPROTECTED1QXZ'S ERRAND", provider_text)
+        self.assertNotIn("ZXQPROTECTED0QXZ COMFORT", provider_text)
+
     def test_translated_epub_updates_plain_xhtml_contents_page(self):
         translator = RecordingTranslator()
         content = _make_epub(
@@ -3478,6 +3504,80 @@ def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
               <body>
                 <nav epub:type="toc">
                   <ol><li><a href="chapter.xhtml">MODERN PILGRIMS API</a></li></ol>
+                </nav>
+              </body>
+            </html>
+            """,
+        )
+    return archive.getvalue()
+
+
+def _make_epub_with_pg17460_short_all_caps_surfaces() -> bytes:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip")
+        epub.writestr(
+            "META-INF/container.xml",
+            """
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OPS/content.opf"
+                          media-type="application/oebps-package+xml" />
+              </rootfiles>
+            </container>
+            """,
+        )
+        epub.writestr(
+            "OPS/content.opf",
+            """
+            <package xmlns="http://www.idpf.org/2007/opf"
+                     xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>A BOY AND A GIRL</dc:title>
+                <dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="chapter" href="chapter.xhtml"
+                      media-type="application/xhtml+xml" />
+                <item id="nav" href="nav.xhtml"
+                      media-type="application/xhtml+xml" />
+                <item id="ncx" href="toc.ncx"
+                      media-type="application/x-dtbncx+xml" />
+              </manifest>
+              <spine toc="ncx"><itemref idref="chapter" /></spine>
+            </package>
+            """,
+        )
+        epub.writestr(
+            "OPS/toc.ncx",
+            """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+              <docTitle><text>A BOY AND A GIRL</text></docTitle>
+              <navMap>
+                <navPoint id="chapter" playOrder="1">
+                  <navLabel><text>JOHN IS BEWITCHED</text></navLabel>
+                  <content src="chapter.xhtml" />
+                </navPoint>
+              </navMap>
+            </ncx>
+            """,
+        )
+        epub.writestr(
+            "OPS/chapter.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body><h1>COLD COMFORT</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+        epub.writestr(
+            "OPS/nav.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                  xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc">
+                  <ol><li><a href="chapter.xhtml">JOHN FRY'S ERRAND</a></li></ol>
                 </nav>
               </body>
             </html>
