@@ -302,6 +302,128 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         )
         self.assertEqual(hook.prompt_context_entries, ())
 
+    def test_prepared_package_ambiguous_canonical_token_alias_only_falls_back(self):
+        # The applicability guard is intentionally local to the current work unit:
+        # a shared single-token alias from a multi-token canonical term is unsafe
+        # when only the alias appears in this unit and the canonical term is absent.
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="Alice waited beside the gate.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:alice-winterbourne",
+                source_canonical="Alice Winterbourne",
+                aliases=("Alice",),
+                evidence_refs=("evidence:alice-winterbourne",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="Алиса Уинтерборн",
+                target_variants=("Алиса Уинтерборн",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        plan = hook.glossary_plan
+        assert plan is not None
+        self.assertEqual(plan["status"], "fallback")
+        self.assertEqual(hook.prompt_context_entries, ())
+        bridge = plan["prepared_package_runtime_bridge"]
+        self.assertEqual(bridge["source_risky_alias_only_count"], 1)
+        self.assertTrue(bridge["risky_alias_only_skipped"])
+        self.assertIn(
+            "prepared_package_runtime_bridge_risky_alias_only",
+            bridge["reason_codes"],
+        )
+        serialized_plan = json.dumps(
+            plan,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertNotIn("Alice waited beside the gate.", serialized_plan)
+        self.assertNotIn("Алиса Уинтерборн", serialized_plan)
+
+    def test_prepared_package_canonical_presence_allows_single_token_alias(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="Alice Winterbourne waited beside the gate.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:alice-winterbourne",
+                source_canonical="Alice Winterbourne",
+                aliases=("Alice",),
+                evidence_refs=("evidence:alice-winterbourne",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="Алиса Уинтерборн",
+                target_variants=("Алиса Уинтерборн",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        plan = hook.glossary_plan
+        assert plan is not None
+        self.assertEqual(plan["status"], "planned")
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+        bridge = plan["prepared_package_runtime_bridge"]
+        self.assertEqual(bridge["source_canonical_match_count"], 1)
+        self.assertEqual(bridge["source_risky_alias_only_count"], 0)
+        self.assertEqual(
+            plan["work_unit_plans"][0]["selected_entry_ids"],
+            ["entry:alice-winterbourne"],
+        )
+
+    def test_prepared_package_unique_single_token_alias_still_matches(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="Lizzy laughed softly.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:elizabeth-bennet",
+                source_canonical="Elizabeth Bennet",
+                aliases=("Lizzy",),
+                evidence_refs=("evidence:elizabeth-bennet",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="Элизабет Беннет",
+                target_variants=("Элизабет Беннет",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        plan = hook.glossary_plan
+        assert plan is not None
+        self.assertEqual(plan["status"], "planned")
+        bridge = plan["prepared_package_runtime_bridge"]
+        self.assertEqual(bridge["source_safe_alias_match_count"], 1)
+        self.assertEqual(bridge["source_risky_alias_only_count"], 0)
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+
+    def test_prepared_package_multi_token_alias_still_matches(self):
+        hook = build_persistent_glossary_runtime_hook_from_prepared_package(
+            work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
+            source_text="Mr. Collins arrived before breakfast.",
+            prepared_package_payload=_prepared_package_payload(
+                source_entry_id="entry:william-collins",
+                source_canonical="William Collins",
+                aliases=("Mr. Collins",),
+                evidence_refs=("evidence:william-collins",),
+                source_unit_refs=(1,),
+                source_block_refs=("chapter-1:p1",),
+                target_canonical="Уильям Коллинз",
+                target_variants=("мистер Коллинз",),
+            ),
+            document_kind="epub",
+            config=_generic_enabled_config(),
+        )
+
+        plan = hook.glossary_plan
+        assert plan is not None
+        self.assertEqual(plan["status"], "planned")
+        bridge = plan["prepared_package_runtime_bridge"]
+        self.assertEqual(bridge["source_safe_alias_match_count"], 1)
+        self.assertEqual(bridge["source_risky_alias_only_count"], 0)
+        self.assertEqual(len(hook.prompt_context_entries), 1)
+
     def test_prepared_package_oversized_source_can_render_small_context(self):
         hook = build_persistent_glossary_runtime_hook_from_prepared_package(
             work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
