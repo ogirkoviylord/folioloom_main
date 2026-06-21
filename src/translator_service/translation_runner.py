@@ -3631,6 +3631,7 @@ def _translate_texts_individually(
     translated_texts: list[str] = []
     context_memory = translation_context or TranslationContextMemory()
     literary_heading_flags = literary_heading_flags or tuple(False for _ in texts)
+    surface_retry_calls = 0
     for text, literary_heading in zip(texts, literary_heading_flags, strict=True):
         protected_source = protect_text(text, literary_heading=literary_heading)
         translated_text = restore_protected_text(
@@ -3645,12 +3646,26 @@ def _translate_texts_individually(
             ),
             protected_source.replacements,
         )
-        if _has_untranslated_source_language_residue(
+        needs_residue_retry = _has_untranslated_source_language_residue(
             source_text=text,
             translated_text=translated_text,
             source_language=source_language,
             target_language=target_language,
-        ):
+        )
+        needs_surface_retry = (
+            not needs_residue_retry
+            and literary_heading
+            and surface_retry_calls < _EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS
+            and has_english_navigation_heading_residue(
+                translated_text=translated_text,
+                target_language=target_language,
+                block_id="epub:aux:surface-pre-final:navigation-heading",
+                block_kind="navigation",
+            )
+        )
+        if needs_residue_retry or needs_surface_retry:
+            if needs_surface_retry:
+                surface_retry_calls += 1
             translated_text = restore_protected_text(
                 _clean_translated_text(
                     translate_with_context(
@@ -3662,6 +3677,10 @@ def _translate_texts_individually(
                     )
                 ),
                 protected_source.replacements,
+            )
+            translated_text = clean_inline_formatting_artifacts(
+                translated_text,
+                target_language=target_language,
             )
         translated_texts.append(translated_text)
         context_memory = _updated_context_memory(

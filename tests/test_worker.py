@@ -476,7 +476,6 @@ class WorkerTest(unittest.TestCase):
         )
 
         provider_text = translator.calls[0][0]
-        body_heading_provider_text = translator.calls[1][0]
         self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
         self.assertRegex(provider_text, r"CHAPTER ZXQPROTECTED\d+QXZ")
         self.assertNotIn("CHAPTER I API_TOKEN", provider_text)
@@ -486,10 +485,82 @@ class WorkerTest(unittest.TestCase):
             completed_body_heading.status,
             PersistentWorkUnitStatus.TRANSLATED,
         )
+        body_heading_provider_text = translator.calls[2][0]
         self.assertIn("BOOK ONE: 1805", body_heading_provider_text)
         self.assertNotRegex(
             body_heading_provider_text,
             r"ZXQPROTECTED\d+QXZ ZXQPROTECTED\d+QXZ: 1805",
+        )
+
+    def test_single_block_epub_auxiliary_work_unit_retries_surface_residue(self):
+        class SurfaceResidueRetryTranslator:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str, str]] = []
+                self.last_usage: ProviderUsage | None = None
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.calls.append((text, source_language, target_language))
+                self.last_usage = ProviderUsage(
+                    prompt_tokens=21,
+                    completion_tokens=7,
+                    total_tokens=28,
+                    prompt_cache_hit_tokens=4,
+                    prompt_cache_miss_tokens=17,
+                )
+                if source_language == "auto":
+                    return "По какому праву?"
+                return "QUO WARRANTO?"
+
+        store = self._store()
+        job = store.create_job(
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+            file_name="book.epub",
+            document_kind="epub",
+            source_language="en",
+            target_language="ru",
+            adapter_version="epub-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+        )
+        store.add_work_units(
+            job.id,
+            [
+                WorkUnitPlan(
+                    sequence=1,
+                    source_block_ids=("epub:aux:ncx:OPS/toc.ncx:text:36",),
+                    source_text_hash="hash-1",
+                    prompt_tier="plain",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            ],
+        )
+        translator = SurfaceResidueRetryTranslator()
+
+        with self.assertLogs("translator_service.worker", level="INFO") as logs:
+            completed = run_next_persistent_work_unit(
+                store=store,
+                job_id=job.id,
+                worker_id="worker-a",
+                source_loader=lambda unit: "QUO WARRANTO?",
+                translator=translator,
+            )
+
+        self.assertIsNotNone(completed)
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(completed.translated_text, "По какому праву?")
+        self.assertEqual([call[1] for call in translator.calls], ["en", "auto"])
+        self.assertIn(
+            "reason=epub_surface_navigation_heading_residue",
+            "\n".join(logs.output),
         )
 
     def test_returns_none_when_no_pending_work_units_exist(self):
@@ -2291,7 +2362,13 @@ class WorkerTest(unittest.TestCase):
             self.assertIn("<translation_batch>", translator.calls[0][0])
             self.assertEqual(
                 [call[1:] for call in translator.calls],
-                [("en", "uk"), ("en", "uk"), ("en", "uk")],
+                [
+                    ("en", "uk"),
+                    ("en", "uk"),
+                    ("auto", "uk"),
+                    ("en", "uk"),
+                    ("auto", "uk"),
+                ],
             )
 
     def test_persistent_epub_units_receive_job_level_context_memory(self):
