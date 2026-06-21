@@ -6,7 +6,10 @@ from pathlib import PurePosixPath
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from translator_service.book_mode_output_audit import BookModeAuditChunk
+from translator_service.book_mode_output_audit import (
+    _LEGAL_BACKMATTER_TERMS,
+    BookModeAuditChunk,
+)
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     TextExtractionError,
@@ -1366,13 +1369,9 @@ def _is_epub_gutenberg_legal_backmatter_text(text: str) -> bool:
         normalized,
     ):
         return False
-    return bool(
-        re.search(
-            r"\b(?:agreement|boilerplate|copy|copyright|distribute|distribution|"
-            r"donation|donations|ebook|license|permission|refund|terms|"
-            r"trademark)\b",
-            normalized,
-        )
+    return any(
+        re.search(rf"\b{re.escape(term)}\b", normalized)
+        for term in _LEGAL_BACKMATTER_TERMS
     )
 
 

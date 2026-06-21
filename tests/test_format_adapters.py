@@ -19,13 +19,16 @@ from translator_service.format_adapters import (
     plan_epub_translation,
     plan_txt_translation,
 )
+from translator_service.format_adapters.epub import (
+    _is_epub_gutenberg_legal_backmatter_text,
+)
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
 
 
 class TxtFormatAdapterTest(unittest.TestCase):
     def test_plans_txt_fragments_with_stable_order_and_block_ids(self):
         plan = plan_txt_translation(
-            content="# Title\n\nKEY=value\n- First item\nBody text.".encode("utf-8"),
+            content=b"# Title\n\nKEY=value\n- First item\nBody text.",
             max_fragment_chars=100,
         )
 
@@ -258,6 +261,28 @@ class EpubFormatAdapterTest(unittest.TestCase):
             "epub:aux:opf:OPS/content.opf:title:0",
         )
 
+    def test_gutenberg_legal_backmatter_detection_uses_shared_terms(self):
+        cases = [
+            (
+                "The Project Gutenberg ebook license terms apply here.",
+                True,
+            ),
+            (
+                "The Project Gutenberg Literary Archive Foundation is a non-profit.",
+                True,
+            ),
+            ("", False),
+            ("Project Gutenberg", False),
+            ("This license agreement has no Gutenberg legal marker.", False),
+        ]
+
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertIs(
+                    _is_epub_gutenberg_legal_backmatter_text(text),
+                    expected,
+                )
+
     def test_plans_epub_body_blocks_without_note_reference_markers(self):
         plan = plan_epub_translation(
             content=_make_epub(
@@ -358,7 +383,9 @@ class EpubFormatAdapterTest(unittest.TestCase):
                 "OPS/chapter.xhtml": """
                 <html xmlns="http://www.w3.org/1999/xhtml">
                   <body>
-                    <p>Jacob's ladder<a href="notes.xhtml#n_18" title="Note"><sup class="calibre12">[18]</sup></a> is unplugged.</p>
+                    <p>Jacob's ladder<a href="notes.xhtml#n_18"
+                      title="Note"><sup class="calibre12">[18]</sup></a>
+                      is unplugged.</p>
                   </body>
                 </html>
                 """
@@ -377,7 +404,8 @@ class EpubFormatAdapterTest(unittest.TestCase):
 
         self.assertNotIn("<html:", chapter)
         self.assertIn(
-            '<a href="notes.xhtml#n_18" title="Note"><sup class="calibre12">[18]</sup></a>',
+            '<a href="notes.xhtml#n_18" title="Note">'
+            '<sup class="calibre12">[18]</sup></a>',
             chapter,
         )
         self.assertNotIn("знеструмлена</sup>", chapter)
@@ -629,7 +657,10 @@ class EpubFormatAdapterTest(unittest.TestCase):
             target_language="ru",
             translated_by_block_id={
                 "epub:OPS/chapter.xhtml:0": "Первый настоящий абзац книги.",
-                "epub:aux:xhtml-navigation:OPS/Contents_split_000.xhtml:h1:0": "Содержание",
+                (
+                    "epub:aux:xhtml-navigation:"
+                    "OPS/Contents_split_000.xhtml:h1:0"
+                ): "Содержание",
                 "epub:aux:xhtml-navigation:OPS/Contents_split_000.xhtml:p:0": "Глава 1",
                 "epub:aux:xhtml-navigation:OPS/Contents_split_000.xhtml:p:1": "Часть I",
             },
@@ -828,7 +859,8 @@ class EpubFormatAdapterTest(unittest.TestCase):
                           xmlns:epub="http://www.idpf.org/2007/ops">
                       <body>
                         <nav epub:type="toc">
-                          <ol><li><a href="chapter.xhtml">Chapter Navigation</a></li></ol>
+                          <ol><li><a href="chapter.xhtml">Chapter Navigation</a></li>
+                          </ol>
                         </nav>
                       </body>
                     </html>
@@ -847,7 +879,8 @@ class EpubFormatAdapterTest(unittest.TestCase):
                 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
                   <docTitle><text>NCX Book Title</text></docTitle>
                   <navMap>
-                    <navPoint><navLabel><text>NCX Chapter One</text></navLabel></navPoint>
+                    <navPoint><navLabel><text>NCX Chapter One</text></navLabel>
+                    </navPoint>
                   </navMap>
                 </ncx>
                 """,
@@ -1227,7 +1260,8 @@ class EpubFormatAdapterTest(unittest.TestCase):
                 opf_content="""
                 <package xmlns="http://www.idpf.org/2007/opf">
                   <manifest>
-                    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                    <item id="chapter" href="chapter.xhtml"
+                      media-type="application/xhtml+xml" />
                   </manifest>
                   <spine>
                     <itemref idref="chapter" />
@@ -1288,7 +1322,9 @@ class EpubFormatAdapterTest(unittest.TestCase):
             source_content=source_content,
             target_language="ru",
             translated_by_block_id={
-                "epub:OPS/Text/chapter1.xhtml:1": "Карл Россман прибыл в порт Нью-Йорка.",
+                "epub:OPS/Text/chapter1.xhtml:1": (
+                    "Карл Россман прибыл в порт Нью-Йорка."
+                ),
             },
         )
 
