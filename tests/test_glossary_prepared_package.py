@@ -162,6 +162,56 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         self.assertNotIn("Then He", metadata_text)
         self.assertNotIn("In God", metadata_text)
 
+    def test_pg17460_low_value_entries_cannot_make_package_ready(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:boy-and",
+                    source_canonical="BOY AND",
+                    aliases=["BOY AND"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:of-any-kind",
+                    source_canonical="OF ANY KIND",
+                    aliases=["OF ANY KIND"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:labour-was",
+                    source_canonical="Labour Was",
+                    aliases=["Labour Was"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:good-god",
+                    source_canonical="Good God",
+                    aliases=["Good God"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertFalse(result.ready)
+        self.assertEqual(result.status, "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        self.assertIsNotNone(result.package)
+        self.assertEqual(result.package.entries, ())
+        self.assertEqual(result.metadata["quality"]["input_candidate_count"], 4)
+        self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 4)
+        self.assertIn(
+            "candidate_quality_function_word_phrase",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_common_phrase",
+            result.metadata["quality"]["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in ("BOY AND", "OF ANY KIND", "Labour Was", "Good God"):
+            self.assertNotIn(raw_source, metadata_text)
+
     def test_mixed_quality_package_keeps_valid_entries_metadata_only(self):
         payload = _prepared_payload(
             entries=[

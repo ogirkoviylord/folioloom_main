@@ -286,6 +286,56 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
             json.dumps(result.metadata, ensure_ascii=False),
         )
 
+    def test_provider_pg17460_low_value_package_is_not_ready(self):
+        request = _request(_source_content(), target_language="ru")
+
+        def provider(provider_request):
+            payload = _package_from_packet(provider_request.packet)
+            payload["entries"] = [
+                _prepared_package_entry(
+                    source_entry_id="entry:boy-and",
+                    source_canonical="BOY AND",
+                    aliases=["BOY AND"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:of-any-kind",
+                    source_canonical="OF ANY KIND",
+                    aliases=["OF ANY KIND"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:labour-was",
+                    source_canonical="Labour Was",
+                    aliases=["Labour Was"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:good-god",
+                    source_canonical="Good God",
+                    aliases=["Good God"],
+                ),
+            ]
+            return payload
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertFalse(result.enabled)
+        self.assertIsNone(result.payload)
+        self.assertEqual(result.metadata["validation"]["status"], "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        self.assertEqual(
+            result.metadata["validation"]["quality"]["dropped_candidate_count"],
+            4,
+        )
+        self.assertIn(
+            "candidate_quality_function_word_phrase",
+            result.metadata["validation"]["quality"]["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in ("BOY AND", "OF ANY KIND", "Labour Was", "Good God"):
+            self.assertNotIn(raw_source, metadata_text)
+
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())
 
@@ -629,6 +679,27 @@ def _request(
 
 def _term_digest(term: str) -> str:
     return hashlib.sha256(term.casefold().encode("utf-8")).hexdigest()[:16]
+
+
+def _prepared_package_entry(
+    *,
+    source_entry_id: str,
+    source_canonical: str,
+    aliases: list[str],
+) -> dict:
+    return {
+        "source_entry_id": source_entry_id,
+        "source_canonical": source_canonical,
+        "aliases": aliases,
+        "evidence_refs": ["ev:1"],
+        "target_canonical": "Target",
+        "target_variants": ["Target Variant"],
+        "forbidden_variants": [],
+        "strategy": "fake_provider_only",
+        "confidence": 0.91,
+        "needs_review": False,
+        "reason_codes": [],
+    }
 
 
 def _package_from_packet(
