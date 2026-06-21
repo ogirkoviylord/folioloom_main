@@ -1011,7 +1011,11 @@ def _prepared_entry_source_match(
         if alias.strip() and _source_term_present(alias, source_text)
     )
     safe_alias_present = any(
-        not _source_alias_is_risky(alias) for alias in alias_matches
+        not _source_alias_is_risky(
+            alias,
+            source_canonical=entry.source_canonical,
+        )
+        for alias in alias_matches
     )
     risky_alias_only = (
         bool(alias_matches)
@@ -1026,7 +1030,7 @@ def _prepared_entry_source_match(
     )
 
 
-def _source_alias_is_risky(alias: str) -> bool:
+def _source_alias_is_risky(alias: str, *, source_canonical: str = "") -> bool:
     normalized = alias.strip()
     if len(normalized) < 4:
         return True
@@ -1036,7 +1040,34 @@ def _source_alias_is_risky(alias: str) -> bool:
     )
     if tokens and all(token in _RISKY_ALIAS_TOKENS for token in tokens):
         return True
-    return len(tokens) == 1 and normalized.islower() and len(normalized) <= 5
+    if len(tokens) == 1 and normalized.islower() and len(normalized) <= 5:
+        return True
+    return _source_alias_is_ambiguous_canonical_token(
+        tokens,
+        source_canonical=source_canonical,
+    )
+
+
+def _source_alias_is_ambiguous_canonical_token(
+    alias_tokens: Sequence[str],
+    *,
+    source_canonical: str,
+) -> bool:
+    if len(alias_tokens) != 1:
+        return False
+    if not source_canonical or not any(char.isspace() for char in source_canonical):
+        return False
+    canonical_tokens = tuple(
+        match.group(0).casefold()
+        for match in _RISKY_ALIAS_TOKEN_RE.finditer(source_canonical)
+    )
+    if len(canonical_tokens) <= 1:
+        return False
+    # Local applicability is limited to the current work unit: when the
+    # canonical term is absent, a single canonical component (for example a
+    # first name from a full-name term) is not enough evidence to inject the
+    # full prepared hard glossary entry for this unit.
+    return alias_tokens[0] in canonical_tokens
 
 
 def _unique_prepared_evidence_id(
