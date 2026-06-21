@@ -40,6 +40,7 @@ from translator_service.persistent_jobs import (
 )
 from translator_service.persistent_planner import create_persistent_epub_job_plan
 from translator_service.pricing import PricingRules
+from translator_service.protected_text import protect_text
 from translator_service.scheduler import (
     ProviderCapacityCap,
     ProviderCapacityCapScope,
@@ -54,12 +55,51 @@ from translator_service.translation_run_logs import (
     TranslationRunLogger,
     TranslationRunMetadata,
 )
-from translator_service.worker import ProviderUsage
+from translator_service.worker import (
+    ProviderUsage,
+    _retry_untranslated_secondary_source_blocks,
+)
 
 MASTER_KEY = urlsafe_b64encode(b"5" * 32).decode("ascii")
 
 
 class SchedulerRunnerTest(unittest.TestCase):
+    def test_persistent_epub_surface_retry_uses_final_audit_logic(self):
+        class SurfaceResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+                self.last_usage = ProviderUsage(
+                    prompt_tokens=3,
+                    completion_tokens=2,
+                    total_tokens=5,
+                )
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                return "По какому праву?"
+
+        translator = SurfaceResidueTranslator()
+
+        translated, usage = _retry_untranslated_secondary_source_blocks(
+            source_blocks=["QUO WARRANTO?"],
+            source_block_ids=("epub:aux:ncx:OPS/toc.ncx:text:36",),
+            translated_blocks=["QUO WARRANTO?"],
+            protected_blocks=[protect_text("QUO WARRANTO?", literary_heading=True)],
+            translator=translator,
+            source_language="en",
+            target_language="ru",
+        )
+
+        self.assertEqual(translated, ["По какому праву?"])
+        self.assertEqual([request[1] for request in translator.requests], ["auto"])
+        self.assertEqual(usage.total_tokens, 5)
+
     def test_run_once_translates_due_unit_and_assembles_ready_txt_result(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -1271,6 +1311,7 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertGreaterEqual(gate["blocking_findings"], 2)
             self.assertIn("xhtml_navigation", gate["surface_categories"])
             self.assertIn("toc_ncx", gate["surface_categories"])
+            self.assertIn("xhtml_body_heading", gate["surface_categories"])
             self.assertIn("book_mode_audit_gate_failed", events_jsonl)
             self.assertIn("run_failed", events_jsonl)
             self.assertEqual(
@@ -1396,6 +1437,7 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertGreaterEqual(gate["blocking_findings"], 2)
             self.assertIn("xhtml_navigation", gate["surface_categories"])
             self.assertIn("toc_ncx", gate["surface_categories"])
+            self.assertIn("xhtml_body_heading", gate["surface_categories"])
             self.assertNotIn("Modern Pilgrims", artifact_text)
             self.assertNotIn("SIGNS AND WONDERS", artifact_text)
 
