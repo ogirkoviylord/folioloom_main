@@ -165,6 +165,47 @@ class BookModeOutputAuditTest(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.findings, ())
 
+    def test_reports_intentional_latin_title_adjacent_english_residue(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-ncx:OPS/toc.ncx:text:36",
+                    translated_text="The QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:36",
+                    translated_text="A QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:37",
+                    translated_text="Of QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-body-heading:OPS/chapter.xhtml:h1:36",
+                    translated_text="Глава THE QUO WARRANTO?",
+                    block_kind="heading",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            [
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+            ],
+        )
+        self.assertFalse(result.passed)
+        self.assertTrue(
+            all(finding.category == "navigation_heading" for finding in result.findings)
+        )
+
     def test_reports_pg17460_title_navigation_heading_residue_for_cyrillic_target(self):
         result = audit_book_mode_output(
             chunks=(
