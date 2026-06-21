@@ -850,6 +850,7 @@ _BOOK_MODE_AUDIT_CODE_ALIASES = {
 _BOOK_MODE_AUDIT_CODES = {
     "untranslated_source_residue",
     "english_navigation_residue",
+    "gutenberg_legal_backmatter_residue",
     "language_metadata_mismatch",
     "provider_commentary",
 }
