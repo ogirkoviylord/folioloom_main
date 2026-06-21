@@ -444,13 +444,27 @@ def _mask_intentional_latin_foreign_title_phrases(text: str) -> str:
         key=len,
         reverse=True,
     ):
-        masked = re.sub(
+        pattern = re.compile(
             rf"(?<![A-Za-z]){re.escape(phrase)}(?![A-Za-z])",
-            " ",
-            masked,
             flags=re.IGNORECASE,
         )
+        candidate = pattern.sub(" ", masked)
+        if candidate != masked and not _has_latin_residue_outside_title_allowlist(
+            candidate
+        ):
+            masked = candidate
     return masked
+
+
+def _has_latin_residue_outside_title_allowlist(text: str) -> bool:
+    masked = text
+    for pattern in _MASK_RES:
+        masked = pattern.sub(" ", masked)
+    if _meaningful_latin_word_observations(masked):
+        return True
+    return any(
+        match.group(0).lower() == "a" for match in _LATIN_WORD_RE.finditer(masked)
+    )
 
 
 def _meaningful_latin_word_observations(
