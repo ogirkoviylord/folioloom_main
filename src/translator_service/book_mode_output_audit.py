@@ -67,7 +67,6 @@ _MASK_RES = (
     re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\([^()\n]*\)"),
     re.compile(r"\b(?:print|return)\s*\([^()\n]*\)"),
     re.compile(r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:'),
-    re.compile(r"\b[A-Z][A-Z0-9_]{1,}(?:-[A-Z0-9]+)*\b"),
     re.compile(r"\b[A-Z]{2,}_[A-Z0-9_]+\b"),
     re.compile(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b"),
     re.compile(r"\b(?=[A-Za-z0-9]*\d)(?:[A-Z][a-z]?\d*){2,}\b"),
@@ -299,6 +298,7 @@ class _ChunkLanguageStats:
     latin_words: tuple[str, ...]
     cyrillic_word_count: int
     protected_marker_count: int
+    uppercase_latin_word_count: int = 0
 
     @property
     def latin_word_count(self) -> int:
@@ -353,12 +353,16 @@ def _chunk_language_stats(
 ) -> _ChunkLanguageStats:
     protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
     masked = _mask_non_residue_text(text, expected_latin_terms=expected_latin_terms)
-    latin_words = tuple(_meaningful_latin_words(masked))
+    latin_observations = tuple(_meaningful_latin_word_observations(masked))
+    latin_words = tuple(word for word, _is_uppercase in latin_observations)
     cyrillic_word_count = len(_CYRILLIC_WORD_RE.findall(masked))
     return _ChunkLanguageStats(
         latin_words=latin_words,
         cyrillic_word_count=cyrillic_word_count,
         protected_marker_count=protected_marker_count,
+        uppercase_latin_word_count=sum(
+            1 for _word, is_uppercase in latin_observations if is_uppercase
+        ),
     )
 
 
@@ -380,10 +384,11 @@ def _mask_non_residue_text(
     return masked
 
 
-def _meaningful_latin_words(text: str) -> tuple[str, ...]:
-    words: list[str] = []
+def _meaningful_latin_word_observations(text: str) -> tuple[tuple[str, bool], ...]:
+    words: list[tuple[str, bool]] = []
     for match in _LATIN_WORD_RE.finditer(text):
-        word = match.group(0).lower().strip("'’")
+        raw_word = match.group(0).strip("'’")
+        word = raw_word.lower()
         if word.endswith("'s") or word.endswith("’s"):
             word = word[:-2]
         if len(word) < 2:
@@ -392,7 +397,7 @@ def _meaningful_latin_words(text: str) -> tuple[str, ...]:
             continue
         if _ROMAN_NUMERAL_RE.fullmatch(word):
             continue
-        words.append(word)
+        words.append((word, raw_word.isupper()))
     return tuple(words)
 
 
@@ -428,7 +433,18 @@ def _has_heading_navigation_residue(stats: _ChunkLanguageStats) -> bool:
     has_navigation_word = any(word in _NAVIGATION_WORDS for word in stats.latin_words)
     if stats.cyrillic_word_count == 0:
         return stats.latin_word_count >= 2 or has_navigation_word
-    return has_navigation_word
+    return has_navigation_word or _has_high_confidence_mixed_heading_residue(stats)
+
+
+def _has_high_confidence_mixed_heading_residue(stats: _ChunkLanguageStats) -> bool:
+    return (
+        stats.latin_word_count >= 2
+        and stats.cyrillic_word_count <= 6
+        and (
+            stats.uppercase_latin_word_count >= 2
+            or stats.english_function_word_count >= 1
+        )
+    )
 
 
 def _has_suspicious_all_english_chunk(stats: _ChunkLanguageStats) -> bool:
@@ -466,6 +482,12 @@ def _finding(
         latin_word_count=stats.latin_word_count,
         cyrillic_word_count=stats.cyrillic_word_count,
         protected_marker_count=stats.protected_marker_count,
+        details=(
+            ("reason", code),
+            ("latin_word_count", str(stats.latin_word_count)),
+            ("cyrillic_word_count", str(stats.cyrillic_word_count)),
+            ("protected_marker_count", str(stats.protected_marker_count)),
+        ),
     )
 
 

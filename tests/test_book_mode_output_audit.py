@@ -108,6 +108,53 @@ class BookModeOutputAuditTest(unittest.TestCase):
             ],
         )
 
+    def test_reports_mixed_cyrillic_all_caps_title_residue_for_nav_headings(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:0",
+                    translated_text="Глава: MODERN PILGRIMS",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-ncx:OPS/toc.ncx:text:1",
+                    translated_text="Раздел SIGNS AND WONDERS",
+                    block_kind="navigation",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            [
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+            ],
+        )
+        self.assertTrue(
+            all(finding.category == "navigation_heading" for finding in result.findings)
+        )
+        self.assertEqual(result.findings[0].latin_word_count, 2)
+        self.assertEqual(result.findings[0].cyrillic_word_count, 1)
+        self.assertNotIn("MODERN PILGRIMS", repr(result))
+
+    def test_allows_russian_heading_with_expected_english_proper_name(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:0",
+                    translated_text="Встреча с Winston Churchill",
+                    block_kind="navigation",
+                ),
+            ),
+            target_language="ru",
+            expected_latin_terms=("Winston Churchill",),
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.findings, ())
+
     def test_reports_provider_commentary_wrapper_without_raw_text(self):
         result = audit_book_mode_output(
             chunks=(
