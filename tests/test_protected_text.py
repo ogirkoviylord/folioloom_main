@@ -127,6 +127,20 @@ class ProtectedTextTest(unittest.TestCase):
                 for token in expected_protected:
                     self.assertIn(token, protected.replacements.values())
 
+    def test_literary_heading_rejects_code_like_source_for_short_words(self):
+        cases = (
+            ("print(BOY)", "print(BOY)"),
+            ("`BOY`", "`BOY`"),
+            ("return BOY", "BOY"),
+            ("BOY=1", "BOY="),
+        )
+
+        for source_text, expected_protected in cases:
+            with self.subTest(source_text=source_text):
+                protected = protect_text(source_text, literary_heading=True)
+                self.assertNotIn("BOY", protected.text)
+                self.assertIn(expected_protected, protected.replacements.values())
+
     def test_literary_heading_context_keeps_short_title_controls_protected(self):
         protected = protect_text(
             "API URL HTTP JSON XML NCX OPF ISBN API_TOKEN I IV OPS/nav.xhtml",
