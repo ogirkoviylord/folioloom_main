@@ -394,7 +394,9 @@ def _mask_non_residue_text(
     return masked
 
 
-def _meaningful_latin_word_observations(text: str) -> tuple[tuple[str, bool, bool], ...]:
+def _meaningful_latin_word_observations(
+    text: str,
+) -> tuple[tuple[str, bool, bool], ...]:
     words: list[tuple[str, bool, bool]] = []
     for match in _LATIN_WORD_RE.finditer(text):
         raw_word = match.group(0).strip("'’")
