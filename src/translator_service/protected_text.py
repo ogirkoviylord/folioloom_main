@@ -17,33 +17,64 @@ _ROMAN_NUMERAL_PATTERN = re.compile(
 )
 _LITERARY_ALL_CAPS_WORDS = frozenset(
     {
+        "ANOTHER",
+        "AND",
         "BOOK",
         "CHAPTER",
+        "CONTENTS",
         "EIGHT",
         "EIGHTEEN",
         "ELEVEN",
         "FIFTEEN",
         "FIVE",
+        "FOR",
         "FOUR",
         "FOURTEEN",
+        "IN",
         "NINE",
         "NINETEEN",
         "OF",
+        "ON",
         "ONE",
+        "OR",
         "PART",
         "SEVEN",
         "SEVENTEEN",
         "SIX",
         "SIXTEEN",
+        "TABLE",
         "TEN",
+        "THE",
         "THIRTEEN",
         "THREE",
+        "TO",
         "TWELVE",
         "TWENTY",
         "TWO",
-        "TABLE",
         "VOLUME",
-        "CONTENTS",
+        "WITH",
+        "WITHOUT",
+        "WONDERS",
+    }
+)
+_LITERARY_TECHNICAL_ACRONYMS = frozenset(
+    {
+        "API",
+        "CSS",
+        "DOCX",
+        "EPUB",
+        "HTML",
+        "HTTP",
+        "HTTPS",
+        "ID",
+        "ISBN",
+        "JSON",
+        "NCX",
+        "OPF",
+        "TXT",
+        "URL",
+        "XML",
+        "XHTML",
     }
 )
 
@@ -156,7 +187,7 @@ def _collect_non_overlapping_matches(
             if (
                 literary_heading
                 and pattern is _UPPERCASE_TOKEN_PATTERN
-                and _is_literary_all_caps_word(match.group(0))
+                and _is_literary_all_caps_translatable_word(match.group(0))
             ):
                 continue
             candidates.append(match)
@@ -172,5 +203,9 @@ def _collect_non_overlapping_matches(
     return matches
 
 
-def _is_literary_all_caps_word(text: str) -> bool:
-    return text in _LITERARY_ALL_CAPS_WORDS
+def _is_literary_all_caps_translatable_word(text: str) -> bool:
+    if text in _LITERARY_TECHNICAL_ACRONYMS:
+        return False
+    if text in _LITERARY_ALL_CAPS_WORDS:
+        return True
+    return text.isalpha() and len(text) >= 5

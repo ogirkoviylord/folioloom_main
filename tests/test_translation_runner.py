@@ -2997,10 +2997,14 @@ class TranslationRunnerTest(unittest.TestCase):
         provider_text = "\n".join(request[0] for request in translator.requests)
         self.assertIn("BOOK TWO ZXQPROTECTED", provider_text)
         self.assertNotIn("BOOK ZXQPROTECTED", provider_text)
-        self.assertRegex(provider_text, r"TABLE OF CONTENTS ZXQPROTECTED\d+QXZ")
-        self.assertNotIn("TABLE OF CONTENTS API", provider_text)
+        self.assertRegex(provider_text, r"SIGNS AND WONDERS ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("SIGNS ZXQPROTECTED", provider_text)
         self.assertRegex(provider_text, r"CHAPTER ZXQPROTECTED\d+QXZ")
         self.assertNotIn("CHAPTER IV XML", provider_text)
+        self.assertRegex(provider_text, r"A PHANTOM ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("A ZXQPROTECTED", provider_text)
+        self.assertRegex(provider_text, r"MODERN PILGRIMS ZXQPROTECTED\d+QXZ")
+        self.assertNotIn("MODERN ZXQPROTECTED", provider_text)
         self.assertNotIn("API</translation_block>", provider_text)
         self.assertNotIn("XML</translation_block>", provider_text)
 
@@ -3436,6 +3440,8 @@ def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
               </metadata>
               <manifest>
                 <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                <item id="nav" href="nav.xhtml"
+                      media-type="application/xhtml+xml" />
                 <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
               </manifest>
               <spine toc="ncx"><itemref idref="chapter" /></spine>
@@ -3446,7 +3452,7 @@ def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
             "OPS/toc.ncx",
             """
             <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
-              <docTitle><text>TABLE OF CONTENTS API</text></docTitle>
+              <docTitle><text>SIGNS AND WONDERS API</text></docTitle>
               <navMap>
                 <navPoint id="chapter" playOrder="1">
                   <navLabel><text>CHAPTER IV XML</text></navLabel>
@@ -3460,7 +3466,20 @@ def _make_epub_with_all_caps_metadata_and_ncx() -> bytes:
             "OPS/chapter.xhtml",
             """
             <html xmlns="http://www.w3.org/1999/xhtml">
-              <body><p>First paragraph.</p></body>
+              <body><h1>A PHANTOM API</h1><p>First paragraph.</p></body>
+            </html>
+            """,
+        )
+        epub.writestr(
+            "OPS/nav.xhtml",
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                  xmlns:epub="http://www.idpf.org/2007/ops">
+              <body>
+                <nav epub:type="toc">
+                  <ol><li><a href="chapter.xhtml">MODERN PILGRIMS API</a></li></ol>
+                </nav>
+              </body>
             </html>
             """,
         )
