@@ -336,6 +336,62 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         for raw_source in ("BOY AND", "OF ANY KIND", "Labour Was", "Good God"):
             self.assertNotIn(raw_source, metadata_text)
 
+    def test_mixed_ready_provider_package_returns_sanitized_payload(self):
+        request = _request(_source_content(), target_language="ru")
+
+        def provider(provider_request):
+            payload = _package_from_packet(provider_request.packet)
+            payload["entries"] = [
+                _prepared_package_entry(
+                    source_entry_id="entry:labour-exchange",
+                    source_canonical="Labour Exchange",
+                    aliases=[
+                        "Labour Exchange",
+                        "Labour Was",
+                        "OF ANY KIND",
+                        "Good God",
+                    ],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:boy-and",
+                    source_canonical="BOY AND",
+                    aliases=["BOY AND"],
+                ),
+            ]
+            return payload
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertIsInstance(result.payload, dict)
+        payload = result.payload
+        assert isinstance(payload, dict)
+        entries = payload["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["source_entry_id"], "entry:labour-exchange")
+        self.assertEqual(entries[0]["source_canonical"], "Labour Exchange")
+        self.assertEqual(entries[0]["aliases"], ["Labour Exchange"])
+        payload_text = json.dumps(result.payload, ensure_ascii=False)
+        for unsafe in ("BOY AND", "Labour Was", "OF ANY KIND", "Good God"):
+            self.assertNotIn(unsafe, payload_text)
+        quality = result.metadata["validation"]["quality"]
+        self.assertEqual(quality["dropped_candidate_count"], 1)
+        self.assertEqual(quality["alias_omitted_count"], 4)
+        self.assertEqual(quality["selected_candidate_count"], 1)
+        self.assertTrue(result.metadata["metadata_only"])
+        self.assertFalse(result.metadata["raw_payload_included"])
+        self.assertTrue(result.metadata["validation"]["metadata_only"])
+        self.assertFalse(result.metadata["validation"]["raw_payload_included"])
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in (
+            "Labour Exchange",
+            "BOY AND",
+            "Labour Was",
+            "OF ANY KIND",
+            "Good God",
+        ):
+            self.assertNotIn(raw_source, metadata_text)
+
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())
 
