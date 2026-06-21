@@ -87,10 +87,10 @@ class SchedulerRunnerTest(unittest.TestCase):
         translator = SurfaceResidueTranslator()
 
         translated, usage = _retry_untranslated_secondary_source_blocks(
-            source_blocks=["QUO WARRANTO?"],
+            source_blocks=["COLD COMFORT"],
             source_block_ids=("epub:aux:ncx:OPS/toc.ncx:text:36",),
-            translated_blocks=["QUO WARRANTO?"],
-            protected_blocks=[protect_text("QUO WARRANTO?", literary_heading=True)],
+            translated_blocks=["COLD COMFORT"],
+            protected_blocks=[protect_text("COLD COMFORT", literary_heading=True)],
             translator=translator,
             source_language="en",
             target_language="ru",
@@ -1361,6 +1361,43 @@ class SchedulerRunnerTest(unittest.TestCase):
             assembled = assemble_due_jobs(store=store, storage=storage)
 
             persisted_job = store.get_job(plan.job.id)
+            self.assertEqual(assembled, 1)
+            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
+            self.assertIsNotNone(persisted_job.final_object_key)
+
+    def test_assemble_due_jobs_allows_intentional_latin_title_policy(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "QUO WARRANTO?",
+                    "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
+                    "epub:aux:opf:OPS/content.opf:title:0": "QUO WARRANTO?",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "QUO WARRANTO?",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "QUO WARRANTO?",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "QUO WARRANTO?"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": (
+                        "QUO WARRANTO?"
+                    ),
+                },
+            )
+
+            assembled = assemble_due_jobs(store=store, storage=storage)
+
+            persisted_job = store.get_job(plan.job.id)
+            self.assertIsNotNone(persisted_job)
             self.assertEqual(assembled, 1)
             self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
             self.assertIsNotNone(persisted_job.final_object_key)

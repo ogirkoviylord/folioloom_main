@@ -514,8 +514,8 @@ class WorkerTest(unittest.TestCase):
                     prompt_cache_miss_tokens=17,
                 )
                 if source_language == "auto":
-                    return "По какому праву?"
-                return "QUO WARRANTO?"
+                    return "Холодное утешение"
+                return "COLD COMFORT"
 
         store = self._store()
         job = store.create_job(
@@ -550,13 +550,13 @@ class WorkerTest(unittest.TestCase):
                 store=store,
                 job_id=job.id,
                 worker_id="worker-a",
-                source_loader=lambda unit: "QUO WARRANTO?",
+                source_loader=lambda unit: "COLD COMFORT",
                 translator=translator,
             )
 
         self.assertIsNotNone(completed)
         self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
-        self.assertEqual(completed.translated_text, "По какому праву?")
+        self.assertEqual(completed.translated_text, "Холодное утешение")
         self.assertEqual([call[1] for call in translator.calls], ["en", "auto"])
         self.assertIn(
             "reason=epub_surface_navigation_heading_residue",
@@ -2513,7 +2513,10 @@ class WorkerTest(unittest.TestCase):
             self.assertIn("[redacted]", failed_unit.last_error or "")
             self.assertNotIn("sk-abc123", failed_unit.last_error or "")
             self.assertNotIn("api_key=secret", failed_unit.last_error or "")
-            self.assertNotIn("secret_id=diagnostic-secret", failed_unit.last_error or "")
+            self.assertNotIn(
+                "secret_id=diagnostic-secret",
+                failed_unit.last_error or "",
+            )
 
     def test_parallel_usage_callback_runs_before_progress_callback_failure(self):
         with TemporaryDirectory() as temp_dir:

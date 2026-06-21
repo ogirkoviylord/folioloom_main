@@ -185,6 +185,12 @@ _NAVIGATION_KINDS = {
     "title",
     "toc",
 }
+# Explicit #766 policy: short Latin/foreign title labels remain acceptable only
+# when they match a narrow, known non-English title phrase. Everything else in
+# EPUB navigation/title/body-heading surfaces stays fail-closed.
+_INTENTIONAL_LATIN_FOREIGN_TITLE_PHRASES = {
+    "quo warranto",
+}
 _LANGUAGE_METADATA_KEYS = {
     "dc:language",
     "lang",
@@ -250,11 +256,15 @@ def audit_book_mode_output(
         if target_root not in _CYRILLIC_TARGETS:
             continue
 
+        is_navigation_or_heading = _is_navigation_or_heading_chunk(chunk)
+        is_epub_title_allowlist_surface = (
+            _is_epub_intentional_latin_foreign_title_surface(chunk)
+        )
         stats = _chunk_language_stats(
             chunk.translated_text,
             expected_latin_terms=expected_terms,
+            allow_intentional_latin_foreign_titles=is_epub_title_allowlist_surface,
         )
-        is_navigation_or_heading = _is_navigation_or_heading_chunk(chunk)
 
         if _PROVIDER_COMMENTARY_RE.search(chunk.translated_text):
             findings.append(
@@ -379,9 +389,14 @@ def _chunk_language_stats(
     text: str,
     *,
     expected_latin_terms: tuple[str, ...],
+    allow_intentional_latin_foreign_titles: bool = False,
 ) -> _ChunkLanguageStats:
     protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
-    masked = _mask_non_residue_text(text, expected_latin_terms=expected_latin_terms)
+    masked = _mask_non_residue_text(
+        text,
+        expected_latin_terms=expected_latin_terms,
+        allow_intentional_latin_foreign_titles=allow_intentional_latin_foreign_titles,
+    )
     latin_observations = tuple(_meaningful_latin_word_observations(masked))
     latin_words = tuple(
         word for word, _is_uppercase, _is_title_case in latin_observations
@@ -408,8 +423,11 @@ def _mask_non_residue_text(
     text: str,
     *,
     expected_latin_terms: tuple[str, ...],
+    allow_intentional_latin_foreign_titles: bool = False,
 ) -> str:
     masked = _PROVIDER_COMMENTARY_RE.sub(" ", text)
+    if allow_intentional_latin_foreign_titles:
+        masked = _mask_intentional_latin_foreign_title_phrases(masked)
     for term in sorted(expected_latin_terms, key=len, reverse=True):
         masked = re.sub(
             rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])",
@@ -420,6 +438,36 @@ def _mask_non_residue_text(
     for pattern in _MASK_RES:
         masked = pattern.sub(" ", masked)
     return masked
+
+
+def _mask_intentional_latin_foreign_title_phrases(text: str) -> str:
+    masked = text
+    for phrase in sorted(
+        _INTENTIONAL_LATIN_FOREIGN_TITLE_PHRASES,
+        key=len,
+        reverse=True,
+    ):
+        pattern = re.compile(
+            rf"(?<![A-Za-z]){re.escape(phrase)}(?![A-Za-z])",
+            flags=re.IGNORECASE,
+        )
+        candidate = pattern.sub(" ", masked)
+        if candidate != masked and not _has_latin_residue_outside_title_allowlist(
+            candidate
+        ):
+            masked = candidate
+    return masked
+
+
+def _has_latin_residue_outside_title_allowlist(text: str) -> bool:
+    masked = text
+    for pattern in _MASK_RES:
+        masked = pattern.sub(" ", masked)
+    if _meaningful_latin_word_observations(masked):
+        return True
+    return any(
+        match.group(0).lower() == "a" for match in _LATIN_WORD_RE.finditer(masked)
+    )
 
 
 def _meaningful_latin_word_observations(
@@ -467,6 +515,44 @@ def _is_navigation_or_heading_chunk(chunk: BookModeAuditChunk) -> bool:
         "navigation",
         "toc",
     }
+
+
+def _is_epub_intentional_latin_foreign_title_surface(
+    chunk: BookModeAuditChunk,
+) -> bool:
+    kind = chunk.block_kind.strip().lower().replace("-", "_")
+    block_id = chunk.block_id.lower()
+    metadata = {
+        key.strip().lower(): value.strip().lower()
+        for key, value in chunk.metadata
+    }
+    surface = metadata.get("surface", "")
+    aux_kind = metadata.get("epub_aux_kind", "")
+
+    if block_id.startswith(
+        (
+            "epub:aux:ncx:",
+            "epub:surface-ncx:",
+            "epub:aux:surface-ncx:",
+            "epub:aux:xhtml-title:",
+            "epub:surface-xhtml-title:",
+            "epub:aux:surface-xhtml-title:",
+            "epub:aux:xhtml-navigation:",
+            "epub:surface-xhtml-navigation:",
+            "epub:aux:surface-pre-final:",
+            "epub:aux:surface-xhtml-navigation:",
+        )
+    ):
+        return True
+    if block_id.startswith("epub:surface-xhtml-body-heading:"):
+        return True
+    if not block_id.startswith("epub:"):
+        return False
+    if surface in {"toc_ncx", "xhtml_title", "xhtml_navigation"}:
+        return True
+    if surface == "xhtml_body_heading" and kind == "heading":
+        return True
+    return aux_kind in {"ncx_text", "xhtml_title", "xhtml_navigation"}
 
 
 def _has_heading_navigation_residue(stats: _ChunkLanguageStats) -> bool:
