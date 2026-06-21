@@ -187,7 +187,10 @@ def _collect_non_overlapping_matches(
             if (
                 literary_heading
                 and pattern is _UPPERCASE_TOKEN_PATTERN
-                and _is_literary_all_caps_translatable_word(match.group(0))
+                and _is_literary_all_caps_translatable_word(
+                    match.group(0),
+                    source_text=text,
+                )
             ):
                 continue
             candidates.append(match)
@@ -203,9 +206,38 @@ def _collect_non_overlapping_matches(
     return matches
 
 
-def _is_literary_all_caps_translatable_word(text: str) -> bool:
+def _is_literary_all_caps_translatable_word(
+    text: str,
+    *,
+    source_text: str,
+) -> bool:
     if text in _LITERARY_TECHNICAL_ACRONYMS:
+        return False
+    if _ROMAN_NUMERAL_PATTERN.fullmatch(text):
         return False
     if text in _LITERARY_ALL_CAPS_WORDS:
         return True
-    return text.isalpha() and len(text) >= 5
+    if not text.isalpha():
+        return False
+    if len(text) >= 5:
+        return True
+    return (
+        len(text) >= 2
+        and _looks_like_literary_short_all_caps_heading(source_text)
+    )
+
+
+def _looks_like_literary_short_all_caps_heading(text: str) -> bool:
+    stripped = " ".join(text.split())
+    if not stripped:
+        return False
+    if re.search(r"[\\/_`{}<>=$@#%]|https?://", stripped):
+        return False
+    if re.search(
+        r"\b[\w.-]+\."
+        r"(?:css|docx|epub|gif|jpe?g|js|json|ncx|opf|png|svg|txt|x?html|xml)\b",
+        stripped,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(re.fullmatch(r"[A-Z0-9\s:;,.!?'\-]+", stripped))
