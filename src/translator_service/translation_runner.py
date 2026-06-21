@@ -12,6 +12,9 @@ from typing import Any
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
+from translator_service.book_mode_output_audit import (
+    has_english_navigation_heading_residue,
+)
 from translator_service.extractors import (
     TextExtractionError,
     parse_xml_document,
@@ -1401,11 +1404,20 @@ def _translate_epub_auxiliary_strings(
             literary_heading_flags=literary_heading_flags,
         )
     translated_texts = _restore_protected_texts(parsed, protected_texts)
-    return _retry_untranslated_source_residue_texts(
+    translated_texts = _retry_untranslated_source_residue_texts(
         source_texts=texts,
         translated_texts=translated_texts,
         protected_texts=protected_texts,
         source_language=source_language,
+        target_language=target_language,
+        translator=translator,
+        translation_context=TranslationContextMemory(),
+    )
+    return _retry_epub_surface_residue_texts(
+        source_texts=texts,
+        translated_texts=translated_texts,
+        protected_texts=protected_texts,
+        surface_flags=literary_heading_flags,
         target_language=target_language,
         translator=translator,
         translation_context=TranslationContextMemory(),
@@ -2119,6 +2131,57 @@ def _retry_untranslated_source_residue_docx_blocks(
         prompt_cache_hit_tokens=prompt_cache_hit_tokens,
         prompt_cache_miss_tokens=prompt_cache_miss_tokens,
     )
+
+
+_EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS = 3
+
+
+def _retry_epub_surface_residue_texts(
+    *,
+    source_texts: list[str],
+    translated_texts: list[str],
+    protected_texts: list[ProtectedText],
+    surface_flags: tuple[bool, ...] | None = None,
+    target_language: str,
+    translator: TextTranslator,
+    translation_context: TranslationContextMemory | None = None,
+) -> list[str]:
+    retry_texts = list(translated_texts)
+    surface_flags = surface_flags or tuple(True for _ in translated_texts)
+    retry_calls = 0
+    for index, (_source, translated, protected, is_surface) in enumerate(
+        zip(source_texts, retry_texts, protected_texts, surface_flags, strict=True)
+    ):
+        if retry_calls >= _EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS:
+            break
+        if not is_surface:
+            continue
+        if not has_english_navigation_heading_residue(
+            translated_text=translated,
+            target_language=target_language,
+            block_id="epub:aux:surface-pre-final:navigation-heading",
+            block_kind="navigation",
+        ):
+            continue
+
+        retried = restore_protected_text(
+            _clean_translated_text(
+                translate_with_context(
+                    translator,
+                    text=protected.text,
+                    source_language="auto",
+                    target_language=target_language,
+                    translation_context=translation_context,
+                )
+            ),
+            protected.replacements,
+        )
+        retry_texts[index] = clean_inline_formatting_artifacts(
+            retried,
+            target_language=target_language,
+        )
+        retry_calls += 1
+    return retry_texts
 
 
 def _retry_untranslated_source_residue_texts(
@@ -3407,6 +3470,18 @@ def _parse_epub_translation_unit(
         translator=translator,
         translation_context=translation_context,
     )
+    parsed = _retry_epub_surface_residue_texts(
+        source_texts=[source_block.text for source_block in source_blocks],
+        translated_texts=parsed,
+        protected_texts=protected_blocks,
+        surface_flags=tuple(
+            _is_epub_literary_protection_surface(source_block)
+            for source_block in source_blocks
+        ),
+        target_language=target_language,
+        translator=translator,
+        translation_context=translation_context,
+    )
     return [
         FragmentTranslation(
             index=source_block.index,
@@ -3503,6 +3578,14 @@ def _translate_epub_blocks_individually(
             translated_text=translated_text,
             source_language=source_language,
             target_language=target_language,
+        ) or (
+            _is_epub_literary_protection_surface(source_block)
+            and has_english_navigation_heading_residue(
+                translated_text=translated_text,
+                target_language=target_language,
+                block_id="epub:body:surface-pre-final:navigation-heading",
+                block_kind="heading",
+            )
         ):
             translated_text = restore_protected_text(
                 _clean_translated_text(

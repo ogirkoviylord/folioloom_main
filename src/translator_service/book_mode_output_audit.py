@@ -200,6 +200,34 @@ _LANGUAGE_NAME_ROOTS = {
 _ROMAN_NUMERAL_RE = re.compile(r"^[ivxlcdm]+$", flags=re.IGNORECASE)
 
 
+def has_english_navigation_heading_residue(
+    *,
+    translated_text: str,
+    target_language: str,
+    block_id: str = "epub:surface-check",
+    block_kind: str = "navigation",
+    metadata: tuple[tuple[str, str], ...] = (),
+    expected_latin_terms: Iterable[str] = (),
+) -> bool:
+    result = audit_book_mode_output(
+        chunks=(
+            BookModeAuditChunk(
+                block_id=block_id,
+                translated_text=translated_text,
+                block_kind=block_kind,
+                metadata=metadata,
+            ),
+        ),
+        target_language=target_language,
+        expected_latin_terms=expected_latin_terms,
+    )
+    return any(
+        finding.code == "english_navigation_heading_residue"
+        and finding.category == "navigation_heading"
+        for finding in result.findings
+    )
+
+
 def audit_book_mode_output(
     *,
     chunks: Iterable[BookModeAuditChunk],

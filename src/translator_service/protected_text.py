@@ -217,6 +217,17 @@ def _is_literary_all_caps_translatable_word(
         return False
     if text in _LITERARY_ALL_CAPS_WORDS:
         return True
+    if "-" in text:
+        parts = tuple(part for part in text.split("-") if part)
+        if len(parts) < 2 or not all(part.isalpha() for part in parts):
+            return False
+        if any(
+            part in _LITERARY_TECHNICAL_ACRONYMS
+            or _ROMAN_NUMERAL_PATTERN.fullmatch(part)
+            for part in parts
+        ):
+            return False
+        return _looks_like_literary_short_all_caps_heading(source_text)
     if not text.isalpha():
         return False
     if len(text) >= 5:

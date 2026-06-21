@@ -23,6 +23,7 @@ from translator_service.translation_runner import (
     DEFAULT_GLOSSARY_RUNTIME_MAX_SELECTED_ENTRIES,
     GlossaryRuntimeAdapterHookConfig,
     TranslatedDocument,
+    _translate_epub_auxiliary_strings,
     translate_docx_document,
     translate_epub_document,
     translate_txt_document,
@@ -2516,6 +2517,7 @@ class TranslationRunnerTest(unittest.TestCase):
                     "en",
                     "uk",
                 ),
+                ("Chapter One", "auto", "uk"),
             ],
         )
 
@@ -2686,6 +2688,7 @@ class TranslationRunnerTest(unittest.TestCase):
                 '<translation_block id="1">This line is stored in a div.</translation_block>\n'
                 '<translation_block id="2">Another div paragraph with inline text.</translation_block>\n'
                 "</translation_batch>",
+                "Chapter 1",
             ],
         )
 
@@ -2830,6 +2833,95 @@ class TranslationRunnerTest(unittest.TestCase):
         )
         self.assertNotIn("»Воно", extract_text_from_epub(result.content))
         self.assertNotIn("заблукав«", extract_text_from_epub(result.content))
+
+    def test_epub_auxiliary_retry_uses_surface_audit_for_short_heading_residue(self):
+        class SurfaceResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "По какому праву?"
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">QUO WARRANTO?</translation_block>'
+                    "</translation_batch>"
+                )
+
+        translator = SurfaceResidueTranslator()
+
+        translated = _translate_epub_auxiliary_strings(
+            ["QUO WARRANTO?"],
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            literary_heading_flags=(True,),
+        )
+
+        self.assertEqual(translated, ["По какому праву?"])
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["en", "auto"],
+        )
+
+    def test_epub_body_heading_retry_uses_surface_audit_for_short_heading_residue(self):
+        class BodyHeadingResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "По какому праву?"
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">QUO WARRANTO?</translation_block>'
+                    '<translation_block id="1">Переведенный абзац.</translation_block>'
+                    "</translation_batch>"
+                )
+
+        translator = BodyHeadingResidueTranslator()
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body>
+                    <h1>QUO WARRANTO?</h1>
+                    <p>Body paragraph.</p>
+                  </body>
+                </html>
+                """,
+            }
+        )
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertIn("По какому праву?", text)
+        self.assertNotIn("QUO WARRANTO", text)
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["en", "auto"],
+        )
 
     def test_epub_translation_retries_english_drop_cap_residue_for_russian(self):
         class EnglishResidueTranslator:
