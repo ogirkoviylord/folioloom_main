@@ -660,6 +660,9 @@ def _has_gutenberg_legal_backmatter_residue(
 ) -> bool:
     if not _GUTENBERG_LEGAL_BACKMATTER_RE.search(translated_text):
         return False
+    # Threshold: require at least 4 Latin words with 2 English function words
+    # to avoid false positives from short snippets, code artifacts, or isolated
+    # Gutenberg/legal entity names that legitimately appear in translated output.
     if stats.latin_word_count < 4 or stats.english_function_word_count < 2:
         return False
     return any(word in _LEGAL_BACKMATTER_TERMS for word in stats.latin_words)
