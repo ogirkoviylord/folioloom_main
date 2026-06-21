@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
 from translator_service.book_mode_output_audit import (
+    _GUTENBERG_LEGAL_BACKMATTER_RE,
     _LEGAL_BACKMATTER_TERMS,
     BookModeAuditChunk,
 )
@@ -1358,16 +1359,14 @@ def _collect_epub_xhtml_audit_chunks(
                     )
                 )
                 legal_backmatter_index += 1
+                continue
 
 
 def _is_epub_gutenberg_legal_backmatter_text(text: str) -> bool:
     normalized = text.strip().lower()
     if not normalized:
         return False
-    if not re.search(
-        r"\b(?:project\s+gutenberg|gutenberg-tm|literary\s+archive\s+foundation)\b",
-        normalized,
-    ):
+    if not _GUTENBERG_LEGAL_BACKMATTER_RE.search(normalized):
         return False
     return any(
         re.search(rf"\b{re.escape(term)}\b", normalized)
