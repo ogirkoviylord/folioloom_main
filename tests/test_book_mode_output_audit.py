@@ -392,6 +392,49 @@ class BookModeOutputAuditTest(unittest.TestCase):
         self.assertNotIn("Кімната", repr(result.findings[0]))
         self.assertNotIn("Here is the translation", repr(result.findings[0]))
 
+    def test_reports_gutenberg_legal_backmatter_residue_as_explicit_policy(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:OPS/backmatter.xhtml:12",
+                    block_kind="plain",
+                    translated_text=(
+                        "Project Gutenberg: этот раздел лицензии сообщает, что "
+                        "you may copy and distribute this ebook under the terms "
+                        "of the license agreement."
+                    ),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["gutenberg_legal_backmatter_residue"],
+        )
+        self.assertEqual(result.findings[0].category, "legal_backmatter")
+        self.assertEqual(result.findings[0].severity, "error")
+        self.assertNotIn("copy and distribute", repr(result))
+
+    def test_allows_narrow_gutenberg_legal_names_without_clauses(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:OPS/backmatter.xhtml:13",
+                    block_kind="plain",
+                    translated_text=(
+                        "Юридическое уведомление Project Gutenberg-tm и "
+                        "Project Gutenberg Literary Archive Foundation "
+                        "сохранено как название организации."
+                    ),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.findings, ())
+
     def test_reports_suspicious_all_english_chunks_for_russian_output(self):
         result = audit_book_mode_output(
             chunks=(

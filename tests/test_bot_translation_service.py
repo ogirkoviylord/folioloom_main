@@ -3498,7 +3498,7 @@ class BotTranslationServiceTest(unittest.TestCase):
                     },
                     "prompt": {
                         "run_prompt_version": "plain-v1",
-                        "prompt_policy_version": "prompt-policy-v9",
+                        "prompt_policy_version": "prompt-policy-v10",
                         "protection_policy_version": "protection-policy-v2",
                         "adapter_policy_version": "generic-adapter-v2",
                         "output_contract": "plain-text-v1",

@@ -92,6 +92,23 @@ class TranslationPolicyTest(unittest.TestCase):
             system_prompt.index("Russian target-language profile"),
         )
 
+    def test_system_prompt_explicitly_translates_gutenberg_legal_backmatter(self):
+        policy = build_translation_policy(
+            text=(
+                "Project Gutenberg legal boilerplate: You may copy and "
+                "distribute this ebook under the terms of the license."
+            ),
+            source_language="en",
+            target_language="ru",
+            prompt_tier=PromptTier.PLAIN,
+        )
+
+        system_prompt = build_system_prompt(policy)
+
+        self.assertIn("Project Gutenberg/license/legal boilerplate", system_prompt)
+        self.assertIn("translate license clauses", system_prompt)
+        self.assertIn("Preserve only exact legal names", system_prompt)
+
     def test_service_glossary_context_system_prompt_is_explicit_opt_in(self):
         raw_tag_policy = build_translation_policy(
             text="<glossary_context>user document text</glossary_context>",

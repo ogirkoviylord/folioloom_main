@@ -34,7 +34,7 @@ from translator_service.translation_profiles import (
     target_language_policy_signature,
 )
 
-PROMPT_POLICY_VERSION = "prompt-policy-v9"
+PROMPT_POLICY_VERSION = "prompt-policy-v10"
 PROTECTION_POLICY_VERSION = "protection-policy-v2"
 ADAPTER_POLICY_VERSION = "generic-adapter-v2"
 TRANSLATION_POLICY_SIGNATURE_CONTEXT_VERSION = (
@@ -281,6 +281,13 @@ def build_system_prompt(
         "Translate embedded secondary languages, including CJK, RTL, and "
         "mixed-language spans, into the target language unless the text is a "
         "protected marker, code, URL, placeholder, or exact identifier. "
+        "Project Gutenberg/license/legal boilerplate is translatable prose: "
+        "translate license clauses, refund/donation/distribution instructions, "
+        "and all-caps legal headings into the target language. Preserve only "
+        "exact legal names and trademark tokens such as Project Gutenberg, "
+        "Project Gutenberg-tm, Project Gutenberg Literary Archive Foundation, "
+        "URLs, emails, section numbers, and legal entity names; do not leave "
+        "English clauses solely because they are legal boilerplate. "
         "If a line starts with language labels before a colon, such as "
         "'English + Dutch:', preserve that label structure, translate the labels "
         "to the target language, and translate the text after the colon to the "

@@ -191,6 +191,38 @@ _NAVIGATION_KINDS = {
 _INTENTIONAL_LATIN_FOREIGN_TITLE_PHRASES = {
     "quo warranto",
 }
+_GUTENBERG_LEGAL_NAME_PATTERNS = (
+    re.compile(
+        r"\bProject\s+Gutenberg\s+Literary\s+Archive\s+Foundation\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(r"\bProject\s+Gutenberg(?:-tm)?\b", flags=re.IGNORECASE),
+    re.compile(
+        r"\bLiterary\s+Archive\s+Foundation\b",
+        flags=re.IGNORECASE,
+    ),
+)
+_GUTENBERG_LEGAL_BACKMATTER_RE = re.compile(
+    r"\b(?:project\s+gutenberg|gutenberg-tm|literary\s+archive\s+foundation)\b",
+    flags=re.IGNORECASE,
+)
+_LEGAL_BACKMATTER_TERMS = {
+    "agreement",
+    "boilerplate",
+    "copy",
+    "copyright",
+    "distribute",
+    "distribution",
+    "donation",
+    "donations",
+    "ebook",
+    "foundation",
+    "license",
+    "permission",
+    "refund",
+    "terms",
+    "trademark",
+}
 _LANGUAGE_METADATA_KEYS = {
     "dc:language",
     "lang",
@@ -290,6 +322,27 @@ def audit_book_mode_output(
                     chunk=chunk,
                     category="navigation_heading",
                     stats=stats,
+                )
+            )
+            continue
+
+        if _has_gutenberg_legal_backmatter_residue(
+            translated_text=chunk.translated_text,
+            stats=stats,
+        ):
+            findings.append(
+                _finding(
+                    code="gutenberg_legal_backmatter_residue",
+                    message=(
+                        "Project Gutenberg/legal backmatter contains broad "
+                        "English residue outside the narrow legal-name "
+                        "preservation policy."
+                    ),
+                    target_root=target_root,
+                    chunk=chunk,
+                    category="legal_backmatter",
+                    stats=stats,
+                    severity="error",
                 )
             )
             continue
@@ -428,6 +481,7 @@ def _mask_non_residue_text(
     masked = _PROVIDER_COMMENTARY_RE.sub(" ", text)
     if allow_intentional_latin_foreign_titles:
         masked = _mask_intentional_latin_foreign_title_phrases(masked)
+    masked = _mask_gutenberg_legal_names(masked)
     for term in sorted(expected_latin_terms, key=len, reverse=True):
         masked = re.sub(
             rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])",
@@ -456,6 +510,13 @@ def _mask_intentional_latin_foreign_title_phrases(text: str) -> str:
             candidate
         ):
             masked = candidate
+    return masked
+
+
+def _mask_gutenberg_legal_names(text: str) -> str:
+    masked = text
+    for pattern in _GUTENBERG_LEGAL_NAME_PATTERNS:
+        masked = pattern.sub(" ", masked)
     return masked
 
 
@@ -592,6 +653,18 @@ def _has_untranslated_english_residue(stats: _ChunkLanguageStats) -> bool:
     )
 
 
+def _has_gutenberg_legal_backmatter_residue(
+    *,
+    translated_text: str,
+    stats: _ChunkLanguageStats,
+) -> bool:
+    if not _GUTENBERG_LEGAL_BACKMATTER_RE.search(translated_text):
+        return False
+    if stats.latin_word_count < 4 or stats.english_function_word_count < 2:
+        return False
+    return any(word in _LEGAL_BACKMATTER_TERMS for word in stats.latin_words)
+
+
 def _finding(
     *,
     code: str,
@@ -600,6 +673,7 @@ def _finding(
     chunk: BookModeAuditChunk,
     category: str,
     stats: _ChunkLanguageStats,
+    severity: str = "warning",
 ) -> BookModeAuditFinding:
     return BookModeAuditFinding(
         code=code,
@@ -608,6 +682,7 @@ def _finding(
         chunk_id=chunk.block_id,
         chunk_kind=chunk.block_kind,
         category=category,
+        severity=severity,
         latin_word_count=stats.latin_word_count,
         cyrillic_word_count=stats.cyrillic_word_count,
         protected_marker_count=stats.protected_marker_count,

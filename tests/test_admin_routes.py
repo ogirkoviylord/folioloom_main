@@ -2248,7 +2248,7 @@ class AdminRoutesTest(unittest.TestCase):
                     translation_policy=json.dumps(
                         {
                             "adapter_policy_version": "generic-adapter-v2",
-                            "prompt_policy_version": "prompt-policy-v9",
+                            "prompt_policy_version": "prompt-policy-v10",
                             "source_language": "auto",
                             "target_language": "ru",
                         }
