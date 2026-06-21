@@ -451,6 +451,40 @@ class _TranslatingTwiceThenReadyService(_QueuedThenReadyService):
         return _runtime_job(status=TranslationJobStatus.READY)
 
 
+class _ProgressUnavailableThenUpdatingService:
+    def __init__(self) -> None:
+        self.progress_calls = 0
+
+    def get_interface_language(self, user_telegram_id: int) -> str:
+        return "en"
+
+    def get_progress_preview_enabled(self, user_telegram_id: int) -> bool:
+        return True
+
+    def is_translation_cancelling(self, user_telegram_id: int) -> bool:
+        return False
+
+    def get_user_book_progress(self, **kwargs):
+        self.progress_calls += 1
+        if self.progress_calls == 1:
+            return None
+        completed_fragments = 1 if self.progress_calls == 2 else 3
+        return type(
+            "Progress",
+            (),
+            {
+                "completed_fragments": completed_fragments,
+                "total_fragments": 4,
+                "estimated_seconds": 120,
+            },
+        )()
+
+    def get_user_book_translation_job(self, **kwargs):
+        if self.progress_calls < 5:
+            return _runtime_job(status=TranslationJobStatus.TRANSLATING)
+        return _runtime_job(status=TranslationJobStatus.READY)
+
+
 class _CancellingBeforeProgressEditService(_QueuedThenReadyService):
     def __init__(self) -> None:
         super().__init__()
@@ -1905,6 +1939,56 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.edited_texts, [])
         self.assertIsNotNone(watched_job)
         self.assertEqual(watched_job.status, TranslationJobStatus.CANCELLED)
+
+    async def test_worker_progress_watch_recovers_after_initial_missing_progress(self):
+        message = EditableMessage()
+        service = _ProgressUnavailableThenUpdatingService()
+        progress_stats = {
+            "completed": 0,
+            "total": 4,
+            "estimated_total_seconds": None,
+            "last_translated_text": None,
+            "spinner_index": 0,
+            "heartbeat_pattern": "calm_dots",
+            "job_id": "job-1",
+            "last_edit_scheduled_at": 0.0,
+        }
+
+        async def skip_sleep(seconds: float) -> None:
+            return None
+
+        with (
+            patch("translator_service.bot.runtime.asyncio.sleep", skip_sleep),
+            patch(
+                "translator_service.bot.runtime.time.monotonic",
+                side_effect=[30.0, 40.0, 50.0, 60.0],
+            ),
+        ):
+            watched_job = await _watch_worker_translation_progress(
+                message=message,
+                service=service,
+                user_telegram_id=42,
+                job_id="job-1",
+                started_at=0.0,
+                progress_stats=progress_stats,
+                poll_interval_seconds=0.01,
+            )
+
+        self.assertIsNotNone(watched_job)
+        self.assertEqual(watched_job.status, TranslationJobStatus.READY)
+        self.assertGreaterEqual(len(message.edited_texts), 2)
+        self.assertIn("Translation progress: [##--------] 25%", message.edited_texts[0])
+        self.assertTrue(
+            any(
+                "Translation progress: [#######---] 75%" in text
+                for text in message.edited_texts
+            )
+        )
+        time_left_lines = [
+            next(line for line in text.splitlines() if line.startswith("Time left:"))
+            for text in message.edited_texts[:2]
+        ]
+        self.assertNotEqual(time_left_lines[0], time_left_lines[1])
 
     async def test_worker_progress_watch_respects_retry_after_cooldown(self):
         class FakeRetryAfter(Exception):

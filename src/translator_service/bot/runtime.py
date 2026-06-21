@@ -3790,7 +3790,12 @@ async def _watch_worker_translation_progress(
             job_id=job_id,
         )
         if progress is None:
-            break
+            await asyncio.sleep(max(0.1, poll_interval_seconds))
+            current_job = service.get_user_book_translation_job(
+                user_telegram_id=user_telegram_id,
+                job_id=job_id,
+            )
+            continue
 
         interface_language = service.get_interface_language(user_telegram_id)
         progress_stats["job_status"] = current_job.status.value
