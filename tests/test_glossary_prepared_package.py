@@ -243,6 +243,86 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         self.assertNotIn("Then He", metadata_text)
         self.assertNotIn("Mr Darcy", metadata_text)
 
+    def test_possessive_corrupted_and_vocative_entries_cannot_make_package_ready(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:darcy-possessive",
+                    source_canonical="Mr Darcy's",
+                    aliases=["Mr Darcy's"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:john-corrupted",
+                    source_canonical="John s",
+                    aliases=["John s"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:oh-john",
+                    source_canonical="Oh John",
+                    aliases=["Oh John"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertFalse(result.ready)
+        self.assertEqual(result.status, "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        assert result.package is not None
+        self.assertEqual(result.package.entries, ())
+        self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 3)
+        self.assertIn(
+            "candidate_quality_possessive_source",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_corrupted_possessive_source",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_vocative_phrase",
+            result.metadata["quality"]["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for unsafe in ("Mr Darcy's", "John s", "Oh John"):
+            self.assertNotIn(unsafe, metadata_text)
+
+    def test_broad_first_name_alias_is_pruned_from_ready_package(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:alice-winterbourne",
+                    source_canonical="Alice Winterbourne",
+                    aliases=["Alice", "Winterbourne", "Lizzy"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:mr-darcy",
+                    source_canonical="Mr Darcy",
+                    aliases=["Darcy"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertTrue(result.ready)
+        self.assertEqual(result.ready_entry_count, 2)
+        assert result.package is not None
+        self.assertEqual(
+            result.package.entries[0].aliases,
+            ("Winterbourne", "Lizzy"),
+        )
+        self.assertEqual(result.package.entries[1].aliases, ("Darcy",))
+        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 1)
+        self.assertIn(
+            "candidate_quality_broad_alias_pruned",
+            result.metadata["quality"]["reason_codes"],
+        )
+
     def test_bool_confidence_is_rejected(self):
         payload = _prepared_payload(entries=[_entry_payload(confidence=True)])
         result = validate_prepared_glossary_package(payload, target_language="ru")

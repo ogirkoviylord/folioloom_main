@@ -392,6 +392,44 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(raw_source, metadata_text)
 
+    def test_provider_mixed_artifact_package_prunes_broad_aliases(self):
+        request = _request(_source_content(), target_language="ru")
+
+        def provider(provider_request):
+            payload = _package_from_packet(provider_request.packet)
+            payload["entries"] = [
+                _prepared_package_entry(
+                    source_entry_id="entry:alice-winterbourne",
+                    source_canonical="Alice Winterbourne",
+                    aliases=["Alice", "Winterbourne", "Lizzy"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:darcy-possessive",
+                    source_canonical="Mr Darcy's",
+                    aliases=["Mr Darcy's"],
+                ),
+            ]
+            return payload
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertIsInstance(result.payload, dict)
+        payload = result.payload
+        assert isinstance(payload, dict)
+        entries = payload["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["source_canonical"], "Alice Winterbourne")
+        self.assertEqual(entries[0]["aliases"], ["Winterbourne", "Lizzy"])
+        quality = result.metadata["validation"]["quality"]
+        self.assertEqual(quality["dropped_candidate_count"], 1)
+        self.assertEqual(quality["alias_omitted_count"], 2)
+        self.assertIn("candidate_quality_possessive_source", quality["reason_codes"])
+        self.assertIn("candidate_quality_broad_alias_pruned", quality["reason_codes"])
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Mr Darcy's", metadata_text)
+        self.assertNotIn("Alice Winterbourne", metadata_text)
+
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())
 

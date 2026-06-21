@@ -210,6 +210,67 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
         self.assertNotIn("OF ANY KIND", metadata_text)
         self.assertNotIn("Good God", metadata_text)
 
+    def test_drops_possessive_corrupted_and_safe_vocative_shapes(self):
+        entries = (
+            _entry("Mr Darcy's"),
+            _entry("John s"),
+            _entry("Oh John"),
+            _entry("Macy's"),
+            _entry("King's College"),
+            _entry("Macy's Department Store"),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual([entry.source_canonical for entry in result.entries], [
+            "Macy's",
+            "King's College",
+            "Macy's Department Store",
+        ])
+        self.assertEqual(result.metadata["dropped_candidate_count"], 3)
+        self.assertIn(
+            "candidate_quality_possessive_source",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_corrupted_possessive_source",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_vocative_phrase",
+            result.metadata["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for unsafe in ("Mr Darcy's", "John s", "Oh John"):
+            self.assertNotIn(unsafe, metadata_text)
+
+    def test_prunes_broad_first_name_aliases_without_dropping_durable_aliases(self):
+        entries = (
+            _entry("Alice Winterbourne", aliases=("Alice", "Winterbourne", "Lizzy")),
+            _entry("Mr Darcy", aliases=("Darcy",)),
+            _entry("Arcadian Society", aliases=("Arcadian",)),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual(result.entries[0].aliases, ("Winterbourne", "Lizzy"))
+        self.assertEqual(result.entries[1].aliases, ("Darcy",))
+        self.assertEqual(result.entries[2].aliases, ("Arcadian",))
+        self.assertEqual(result.metadata["dropped_candidate_count"], 0)
+        self.assertEqual(result.metadata["alias_omitted_count"], 1)
+        self.assertIn(
+            "candidate_quality_broad_alias_pruned",
+            result.metadata["reason_codes"],
+        )
+
     def test_selection_cap_omits_extra_quality_candidates_without_raw_metadata(self):
         entries = (
             _entry(
