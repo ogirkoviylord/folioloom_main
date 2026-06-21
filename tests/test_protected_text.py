@@ -68,6 +68,28 @@ class ProtectedTextTest(unittest.TestCase):
             self.assertNotIn(word, protected.replacements.values())
         self.assertIn("API", protected.replacements.values())
 
+    def test_literary_heading_context_keeps_ordinary_all_caps_titles_translatable(self):
+        protected = protect_text(
+            "A PHANTOM; MODERN PILGRIMS; SIGNS AND WONDERS; PARTING API_TOKEN",
+            literary_heading=True,
+        )
+
+        self.assertIn("A PHANTOM", protected.text)
+        self.assertIn("MODERN PILGRIMS", protected.text)
+        self.assertIn("SIGNS AND WONDERS", protected.text)
+        self.assertIn("PARTING ", protected.text)
+        for word in (
+            "PHANTOM",
+            "MODERN",
+            "PILGRIMS",
+            "SIGNS",
+            "AND",
+            "WONDERS",
+            "PARTING",
+        ):
+            self.assertNotIn(word, protected.replacements.values())
+        self.assertIn("API_TOKEN", protected.replacements.values())
+
     def test_literary_heading_context_never_creates_empty_replacements(self):
         protected = protect_text("XML", literary_heading=True)
 
