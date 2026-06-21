@@ -257,10 +257,13 @@ def audit_book_mode_output(
             continue
 
         is_navigation_or_heading = _is_navigation_or_heading_chunk(chunk)
+        is_epub_title_allowlist_surface = (
+            _is_epub_intentional_latin_foreign_title_surface(chunk)
+        )
         stats = _chunk_language_stats(
             chunk.translated_text,
             expected_latin_terms=expected_terms,
-            allow_intentional_latin_foreign_titles=is_navigation_or_heading,
+            allow_intentional_latin_foreign_titles=is_epub_title_allowlist_surface,
         )
 
         if _PROVIDER_COMMENTARY_RE.search(chunk.translated_text):
@@ -512,6 +515,44 @@ def _is_navigation_or_heading_chunk(chunk: BookModeAuditChunk) -> bool:
         "navigation",
         "toc",
     }
+
+
+def _is_epub_intentional_latin_foreign_title_surface(
+    chunk: BookModeAuditChunk,
+) -> bool:
+    kind = chunk.block_kind.strip().lower().replace("-", "_")
+    block_id = chunk.block_id.lower()
+    metadata = {
+        key.strip().lower(): value.strip().lower()
+        for key, value in chunk.metadata
+    }
+    surface = metadata.get("surface", "")
+    aux_kind = metadata.get("epub_aux_kind", "")
+
+    if block_id.startswith(
+        (
+            "epub:aux:ncx:",
+            "epub:surface-ncx:",
+            "epub:aux:surface-ncx:",
+            "epub:aux:xhtml-title:",
+            "epub:surface-xhtml-title:",
+            "epub:aux:surface-xhtml-title:",
+            "epub:aux:xhtml-navigation:",
+            "epub:surface-xhtml-navigation:",
+            "epub:aux:surface-pre-final:",
+            "epub:aux:surface-xhtml-navigation:",
+        )
+    ):
+        return True
+    if block_id.startswith("epub:surface-xhtml-body-heading:"):
+        return True
+    if not block_id.startswith("epub:"):
+        return False
+    if surface in {"toc_ncx", "xhtml_title", "xhtml_navigation"}:
+        return True
+    if surface == "xhtml_body_heading" and kind == "heading":
+        return True
+    return aux_kind in {"ncx_text", "xhtml_title", "xhtml_navigation"}
 
 
 def _has_heading_navigation_residue(stats: _ChunkLanguageStats) -> bool:

@@ -154,9 +154,15 @@ class BookModeOutputAuditTest(unittest.TestCase):
                     block_kind="navigation",
                 ),
                 BookModeAuditChunk(
-                    block_id="epub:surface-xhtml-body-heading:OPS/chapter.xhtml:h1:36",
+                    block_id="epub:aux:surface-xhtml-title:OPS/chapter.xhtml:title:36",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="title",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:OPS/chapter.xhtml:0",
                     translated_text="Раздел QUO WARRANTO?",
                     block_kind="heading",
+                    metadata=(("surface", "xhtml_body_heading"),),
                 ),
             ),
             target_language="ru",
@@ -164,6 +170,48 @@ class BookModeOutputAuditTest(unittest.TestCase):
 
         self.assertTrue(result.passed)
         self.assertEqual(result.findings, ())
+
+    def test_rejects_intentional_latin_foreign_title_policy_for_non_epub_headings(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="docx:word/document.xml:7",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="heading",
+                ),
+                BookModeAuditChunk(
+                    block_id="plain:heading:1",
+                    translated_text="Раздел QUO WARRANTO?",
+                    block_kind="heading",
+                ),
+                BookModeAuditChunk(
+                    block_id="plain:navigation:1",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="docx:word/document.xml:8",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="heading",
+                    metadata=(("surface", "xhtml_title"),),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            [
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+                "english_navigation_heading_residue",
+            ],
+        )
+        self.assertFalse(result.passed)
+        self.assertTrue(
+            all(finding.category == "navigation_heading" for finding in result.findings)
+        )
 
     def test_reports_intentional_latin_title_adjacent_english_residue(self):
         result = audit_book_mode_output(
