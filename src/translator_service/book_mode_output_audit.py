@@ -185,6 +185,12 @@ _NAVIGATION_KINDS = {
     "title",
     "toc",
 }
+# Explicit #766 policy: short Latin/foreign title labels remain acceptable only
+# when they match a narrow, known non-English title phrase. Everything else in
+# EPUB navigation/title/body-heading surfaces stays fail-closed.
+_INTENTIONAL_LATIN_FOREIGN_TITLE_PHRASES = {
+    "quo warranto",
+}
 _LANGUAGE_METADATA_KEYS = {
     "dc:language",
     "lang",
@@ -250,11 +256,12 @@ def audit_book_mode_output(
         if target_root not in _CYRILLIC_TARGETS:
             continue
 
+        is_navigation_or_heading = _is_navigation_or_heading_chunk(chunk)
         stats = _chunk_language_stats(
             chunk.translated_text,
             expected_latin_terms=expected_terms,
+            allow_intentional_latin_foreign_titles=is_navigation_or_heading,
         )
-        is_navigation_or_heading = _is_navigation_or_heading_chunk(chunk)
 
         if _PROVIDER_COMMENTARY_RE.search(chunk.translated_text):
             findings.append(
@@ -379,9 +386,14 @@ def _chunk_language_stats(
     text: str,
     *,
     expected_latin_terms: tuple[str, ...],
+    allow_intentional_latin_foreign_titles: bool = False,
 ) -> _ChunkLanguageStats:
     protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
-    masked = _mask_non_residue_text(text, expected_latin_terms=expected_latin_terms)
+    masked = _mask_non_residue_text(
+        text,
+        expected_latin_terms=expected_latin_terms,
+        allow_intentional_latin_foreign_titles=allow_intentional_latin_foreign_titles,
+    )
     latin_observations = tuple(_meaningful_latin_word_observations(masked))
     latin_words = tuple(
         word for word, _is_uppercase, _is_title_case in latin_observations
@@ -408,8 +420,11 @@ def _mask_non_residue_text(
     text: str,
     *,
     expected_latin_terms: tuple[str, ...],
+    allow_intentional_latin_foreign_titles: bool = False,
 ) -> str:
     masked = _PROVIDER_COMMENTARY_RE.sub(" ", text)
+    if allow_intentional_latin_foreign_titles:
+        masked = _mask_intentional_latin_foreign_title_phrases(masked)
     for term in sorted(expected_latin_terms, key=len, reverse=True):
         masked = re.sub(
             rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])",
@@ -419,6 +434,22 @@ def _mask_non_residue_text(
         )
     for pattern in _MASK_RES:
         masked = pattern.sub(" ", masked)
+    return masked
+
+
+def _mask_intentional_latin_foreign_title_phrases(text: str) -> str:
+    masked = text
+    for phrase in sorted(
+        _INTENTIONAL_LATIN_FOREIGN_TITLE_PHRASES,
+        key=len,
+        reverse=True,
+    ):
+        masked = re.sub(
+            rf"(?<![A-Za-z]){re.escape(phrase)}(?![A-Za-z])",
+            " ",
+            masked,
+            flags=re.IGNORECASE,
+        )
     return masked
 
 

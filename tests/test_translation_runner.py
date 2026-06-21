@@ -2848,24 +2848,24 @@ class TranslationRunnerTest(unittest.TestCase):
             ) -> str:
                 self.requests.append((text, source_language, target_language))
                 if source_language == "auto":
-                    return "По какому праву?"
+                    return "Холодное утешение"
                 return (
                     "<translation_batch>"
-                    '<translation_block id="0">QUO WARRANTO?</translation_block>'
+                    '<translation_block id="0">COLD COMFORT</translation_block>'
                     "</translation_batch>"
                 )
 
         translator = SurfaceResidueTranslator()
 
         translated = _translate_epub_auxiliary_strings(
-            ["QUO WARRANTO?"],
+            ["COLD COMFORT"],
             source_language="en",
             target_language="ru",
             translator=translator,
             literary_heading_flags=(True,),
         )
 
-        self.assertEqual(translated, ["По какому праву?"])
+        self.assertEqual(translated, ["Холодное утешение"])
         self.assertEqual(
             [request[1] for request in translator.requests],
             ["en", "auto"],
@@ -2885,22 +2885,22 @@ class TranslationRunnerTest(unittest.TestCase):
             ) -> str:
                 self.requests.append((text, source_language, target_language))
                 if source_language == "auto":
-                    return "По какому праву?"
+                    return "Холодное утешение"
                 if "<translation_block" in text:
                     return "malformed batch without translation blocks"
-                return "QUO WARRANTO?"
+                return "COLD COMFORT"
 
         translator = MalformedFallbackSurfaceResidueTranslator()
 
         translated = _translate_epub_auxiliary_strings(
-            ["QUO WARRANTO?"],
+            ["COLD COMFORT"],
             source_language="en",
             target_language="ru",
             translator=translator,
             literary_heading_flags=(True,),
         )
 
-        self.assertEqual(translated, ["По какому праву?"])
+        self.assertEqual(translated, ["Холодное утешение"])
         self.assertEqual(
             [request[1] for request in translator.requests],
             ["en", "en", "auto"],
@@ -2920,10 +2920,10 @@ class TranslationRunnerTest(unittest.TestCase):
             ) -> str:
                 self.requests.append((text, source_language, target_language))
                 if source_language == "auto":
-                    return "По какому праву?"
+                    return "Холодное утешение"
                 return (
                     "<translation_batch>"
-                    '<translation_block id="0">QUO WARRANTO?</translation_block>'
+                    '<translation_block id="0">COLD COMFORT</translation_block>'
                     '<translation_block id="1">Переведенный абзац.</translation_block>'
                     "</translation_batch>"
                 )
@@ -2934,7 +2934,7 @@ class TranslationRunnerTest(unittest.TestCase):
                 "OPS/chapter.xhtml": """
                 <html xmlns="http://www.w3.org/1999/xhtml">
                   <body>
-                    <h1>QUO WARRANTO?</h1>
+                    <h1>COLD COMFORT</h1>
                     <p>Body paragraph.</p>
                   </body>
                 </html>
@@ -2951,12 +2951,44 @@ class TranslationRunnerTest(unittest.TestCase):
         )
 
         text = extract_text_from_epub(result.content)
-        self.assertIn("По какому праву?", text)
-        self.assertNotIn("QUO WARRANTO", text)
+        self.assertIn("Холодное утешение", text)
+        self.assertNotIn("COLD COMFORT", text)
         self.assertEqual(
             [request[1] for request in translator.requests],
             ["en", "auto"],
         )
+
+    def test_epub_auxiliary_preserves_intentional_latin_title(self):
+        class IntentionalLatinTitleTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">QUO WARRANTO?</translation_block>'
+                    "</translation_batch>"
+                )
+
+        translator = IntentionalLatinTitleTranslator()
+
+        translated = _translate_epub_auxiliary_strings(
+            ["QUO WARRANTO?"],
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+            literary_heading_flags=(True,),
+        )
+
+        self.assertEqual(translated, ["QUO WARRANTO?"])
+        self.assertEqual([request[1] for request in translator.requests], ["en"])
 
     def test_epub_translation_retries_english_drop_cap_residue_for_russian(self):
         class EnglishResidueTranslator:
