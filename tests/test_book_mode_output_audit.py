@@ -4,6 +4,7 @@ from translator_service.book_mode_output_audit import (
     BookModeAuditChunk,
     BookModeAuditFinding,
     audit_book_mode_output,
+    has_english_navigation_heading_residue,
 )
 
 
@@ -81,6 +82,37 @@ class BookModeOutputAuditTest(unittest.TestCase):
         )
         self.assertTrue(
             all(finding.category == "navigation_heading" for finding in result.findings)
+        )
+
+    def test_surface_residue_helper_matches_final_audit_for_short_headings(self):
+        self.assertTrue(
+            has_english_navigation_heading_residue(
+                translated_text="QUO WARRANTO?",
+                target_language="ru",
+                block_id="epub:aux:ncx:OPS/toc.ncx:text:36",
+            )
+        )
+        self.assertTrue(
+            has_english_navigation_heading_residue(
+                translated_text="ЗАГЛАВИЕ WAR-PATH ДУНОВ",
+                target_language="ru",
+                block_id="epub:aux:xhtml-navigation:OPS/toc.xhtml:a:11",
+            )
+        )
+        self.assertTrue(
+            has_english_navigation_heading_residue(
+                translated_text="Раздел SIGNS AND WONDERS",
+                target_language="ru",
+                block_id="epub:OPS/chapter.xhtml:0",
+                block_kind="heading",
+            )
+        )
+        self.assertFalse(
+            has_english_navigation_heading_residue(
+                translated_text="https://example.org/ebooks/12345",
+                target_language="ru",
+                block_id="epub:aux:xhtml-navigation:OPS/toc.xhtml:a:0",
+            )
         )
 
     def test_reports_navigation_labels_with_numbers_for_cyrillic_target(self):

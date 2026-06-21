@@ -100,6 +100,8 @@ class ProtectedTextTest(unittest.TestCase):
             "JOHN IS BEWITCHED",
             "JOHN FRY'S ERRAND",
             "COLD COMFORT",
+            "THE WAR-PATH OF THE DOONES",
+            "QUO WARRANTO?",
         )
 
         for label in labels:
@@ -107,6 +109,13 @@ class ProtectedTextTest(unittest.TestCase):
                 protected = protect_text(label, literary_heading=True)
                 self.assertEqual(protected.text, label)
                 self.assertEqual(protected.replacements, {})
+
+    def test_literary_heading_preserves_hyphenated_technical_controls(self):
+        protected = protect_text("API-KEY WAR-PATH", literary_heading=True)
+
+        self.assertIn("API-KEY", protected.replacements.values())
+        self.assertIn("WAR-PATH", protected.text)
+        self.assertNotIn("WAR-PATH", protected.replacements.values())
 
     def test_literary_heading_rejects_mixed_case_source_for_short_words(self):
         protected = protect_text("Chapter title BOY", literary_heading=True)

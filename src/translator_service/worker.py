@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
+from translator_service.book_mode_output_audit import (
+    has_english_navigation_heading_residue,
+)
 from translator_service.file_storage import (
     LocalObjectStorage,
     StoredFile,
@@ -1217,17 +1220,22 @@ def _translate_work_unit_text(
             translated_text,
             target_language=work_unit.target_language,
         )
-        if _needs_secondary_language_retry(
+        retry_reason = _secondary_language_retry_reason(
             source_text=source_text,
+            source_block_id=work_unit.source_block_ids[0]
+            if work_unit.source_block_ids
+            else "",
             translated_text=translated_text,
             protected_replacements=protected_source.replacements,
             source_language=work_unit.source_language,
             target_language=work_unit.target_language,
-        ):
+        )
+        if retry_reason is not None:
             logger.info(
                 "Retrying persistent work unit after translation QA: "
-                "work_unit_id=%s reason=secondary_language_left_untranslated",
+                "work_unit_id=%s reason=%s",
                 work_unit.id,
+                retry_reason,
             )
             retried = translate_with_context(
                 translator,
@@ -1313,6 +1321,7 @@ def _translate_work_unit_text(
 
     parsed, retry_usage = _retry_untranslated_secondary_source_blocks(
         source_blocks=source_blocks,
+        source_block_ids=work_unit.source_block_ids,
         translated_blocks=parsed,
         protected_blocks=protected_blocks,
         translator=translator,
@@ -1488,6 +1497,9 @@ def _translate_source_blocks_individually(
     return translated_blocks, total_usage
 
 
+_EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS = 3
+
+
 def _retry_untranslated_secondary_source_blocks(
     *,
     source_blocks: list[str],
@@ -1497,25 +1509,41 @@ def _retry_untranslated_secondary_source_blocks(
     source_language: str,
     target_language: str,
     translation_context: TranslationContextMemory | None = None,
+    source_block_ids: tuple[str, ...] | None = None,
 ) -> tuple[list[str], ProviderUsage]:
     retry_blocks = list(translated_blocks)
     total_usage = ProviderUsage()
-    for index, (source, translated, protected) in enumerate(
-        zip(source_blocks, retry_blocks, protected_blocks, strict=True)
+    source_block_ids = source_block_ids or tuple("" for _ in source_blocks)
+    surface_retry_calls = 0
+    for index, (source, source_block_id, translated, protected) in enumerate(
+        zip(
+            source_blocks,
+            source_block_ids,
+            retry_blocks,
+            protected_blocks,
+            strict=True,
+        )
     ):
-        if not _needs_secondary_language_retry(
+        retry_reason = _secondary_language_retry_reason(
             source_text=source,
+            source_block_id=source_block_id,
             translated_text=translated,
             protected_replacements=protected.replacements,
             source_language=source_language,
             target_language=target_language,
-        ):
+        )
+        if retry_reason is None:
             continue
+        if retry_reason == "epub_surface_navigation_heading_residue":
+            if surface_retry_calls >= _EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS:
+                continue
+            surface_retry_calls += 1
 
         logger.info(
             "Retrying persistent block after translation QA: "
-            "block_index=%s reason=secondary_language_left_untranslated",
+            "block_index=%s reason=%s",
             index,
+            retry_reason,
         )
         retried = translate_with_context(
             translator,
@@ -1564,13 +1592,43 @@ def _needs_secondary_language_retry(
     source_language: str,
     target_language: str,
 ) -> bool:
+    return (
+        _secondary_language_retry_reason(
+            source_text=source_text,
+            source_block_id="",
+            translated_text=translated_text,
+            protected_replacements=protected_replacements,
+            source_language=source_language,
+            target_language=target_language,
+        )
+        is not None
+    )
+
+
+def _secondary_language_retry_reason(
+    *,
+    source_text: str,
+    source_block_id: str,
+    translated_text: str,
+    protected_replacements: dict[str, str],
+    source_language: str,
+    target_language: str,
+) -> str | None:
     if _has_untranslated_source_language_residue(
         source_text=source_text,
         translated_text=translated_text,
         source_language=source_language,
         target_language=target_language,
     ):
-        return True
+        return "secondary_language_left_untranslated"
+
+    if _needs_epub_surface_navigation_heading_retry(
+        source_text=source_text,
+        source_block_id=source_block_id,
+        translated_text=translated_text,
+        target_language=target_language,
+    ):
+        return "epub_surface_navigation_heading_residue"
 
     if (
         not _target_language_uses_cjk(target_language)
@@ -1580,27 +1638,56 @@ def _needs_secondary_language_retry(
             protected_replacements=protected_replacements,
         )
     ):
-        return True
+        return "secondary_cjk_left_untranslated"
 
     if _has_untranslated_rtl_text(
         source_text=source_text,
         translated_text=translated_text,
         protected_replacements=protected_replacements,
     ):
-        return True
+        return "secondary_rtl_left_untranslated"
 
-    return _has_untranslated_dutch_text(
+    if _has_untranslated_dutch_text(
         source_text=source_text,
         translated_text=translated_text,
         target_language=target_language,
-    ) or _has_untranslated_ukrainian_text(
+    ):
+        return "secondary_dutch_left_untranslated"
+
+    if _has_untranslated_ukrainian_text(
         source_text=source_text,
         translated_text=translated_text,
         target_language=target_language,
-    ) or _has_lost_mixed_language_label(
+    ):
+        return "secondary_ukrainian_left_untranslated"
+
+    if _has_lost_mixed_language_label(
         source_text=source_text,
         translated_text=translated_text,
         target_language=target_language,
+    ):
+        return "secondary_mixed_language_label_lost"
+
+    return None
+
+
+def _needs_epub_surface_navigation_heading_retry(
+    *,
+    source_text: str,
+    source_block_id: str,
+    translated_text: str,
+    target_language: str,
+) -> bool:
+    if not _is_epub_literary_work_unit_text(
+        text=source_text,
+        source_block_id=source_block_id,
+    ):
+        return False
+    return has_english_navigation_heading_residue(
+        translated_text=translated_text,
+        target_language=target_language,
+        block_id=source_block_id or "epub:surface-check",
+        block_kind="navigation",
     )
 
 
