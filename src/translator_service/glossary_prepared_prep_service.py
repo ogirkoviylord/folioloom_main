@@ -21,6 +21,8 @@ from translator_service.glossary_candidate_reducer import (
 )
 from translator_service.glossary_prepared_package import (
     GLOSSARY_PREPARED_PACKAGE_PROVIDER_ROLE_ID,
+    PreparedGlossaryEntry,
+    PreparedGlossaryPackage,
     validate_prepared_glossary_package,
 )
 from translator_service.glossary_scanner import scan_glossary_candidates
@@ -351,13 +353,63 @@ class PreparedGlossaryPrepService:
                 target_language=request.target_language,
                 metadata=metadata,
             )
+        sanitized_package = validation.package
+        assert sanitized_package is not None
         return PreparedGlossaryPackageAttachment(
-            payload=dict(payload),
+            payload=_validated_package_payload(sanitized_package),
             source_sha256=source_sha256,
             document_kind=request.document_kind,
             target_language=request.target_language,
             metadata=metadata,
         )
+
+
+def _validated_package_payload(
+    package: PreparedGlossaryPackage,
+) -> dict[str, Any]:
+    return {
+        "schema_version": package.schema_version,
+        "package_id": package.package_id,
+        "source_language": package.source_language,
+        "target_language": package.target_language,
+        "glossary_mode": package.glossary_mode,
+        "provider_role_id": package.provider_role_id,
+        "provider_model": package.provider_model,
+        "provider_run_id": package.provider_run_id,
+        "diagnostics_ref": package.diagnostics_ref,
+        "source_document_fingerprint": package.source_document_fingerprint,
+        "candidate_selector_signature": package.candidate_selector_signature,
+        "glossary_snapshot_signature": package.glossary_snapshot_signature,
+        "language_policy_package_id": package.language_policy_package_id,
+        "language_policy_package_version": package.language_policy_package_version,
+        "owner_approved": True,
+        "entries": [
+            _validated_entry_payload(entry) for entry in package.entries
+        ],
+    }
+
+
+def _validated_entry_payload(entry: PreparedGlossaryEntry) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "source_entry_id": entry.source_entry_id,
+        "source_canonical": entry.source_canonical,
+        "aliases": list(entry.aliases),
+        "evidence_refs": list(entry.evidence_refs),
+        "source_unit_refs": list(entry.source_unit_refs),
+        "source_block_refs": list(entry.source_block_refs),
+        "target_canonical": entry.target_canonical,
+        "target_variants": list(entry.target_variants),
+        "forbidden_variants": list(entry.forbidden_variants),
+        "strategy": entry.strategy,
+        "confidence": entry.confidence,
+        "needs_review": entry.needs_review,
+        "reason_codes": list(entry.reason_codes),
+    }
+    if entry.terminology_policy_metadata:
+        payload["terminology_policy_metadata"] = dict(
+            entry.terminology_policy_metadata
+        )
+    return payload
 
 
 def _default_plan_builder(

@@ -78,8 +78,11 @@ _FUNCTION_TOKENS = frozenset(
         "and",
         "as",
         "at",
+        "be",
+        "being",
         "because",
         "before",
+        "been",
         "between",
         "but",
         "by",
@@ -105,6 +108,8 @@ _FUNCTION_TOKENS = frozenset(
         "under",
         "until",
         "up",
+        "was",
+        "were",
         "when",
         "while",
         "with",
@@ -140,12 +145,23 @@ _HONORIFIC_TOKENS = frozenset(
     }
 )
 _COMMON_INVOCATION_TOKENS = frozenset({"god", "lord"})
+_COMMON_INVOCATION_PREFIX_TOKENS = frozenset({"dear", "good", "oh"})
+_LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
+    {
+        "kind",
+        "moment",
+        "people",
+        "thing",
+        "things",
+    }
+)
 _LOW_VALUE_ALIAS_TOKENS = (
     _PRONOUN_TOKENS
     | _DETERMINER_TOKENS
     | _FUNCTION_TOKENS
     | _BOILERPLATE_TOKENS
     | _HONORIFIC_TOKENS
+    | _LOW_VALUE_GENERIC_NOUN_TOKENS
 )
 _LOW_VALUE_REPEATED_TERM_START_TOKENS = frozenset(
     {
@@ -171,16 +187,6 @@ _LOW_VALUE_REPEATED_TERM_END_TOKENS = frozenset(
         "upon",
     }
 )
-_LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
-    {
-        "moment",
-        "people",
-        "thing",
-        "things",
-    }
-)
-
-
 @dataclass(frozen=True)
 class PreparedGlossaryCandidateQualityDecision:
     entry_id: str
@@ -296,6 +302,8 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
     tokens = _tokens(source)
     if not tokens:
         return ("candidate_quality_empty_source",)
+    first_token = tokens[0]
+    last_token = tokens[-1]
     reasons: list[str] = []
     if _is_boilerplate_phrase(tokens):
         reasons.append("candidate_quality_boilerplate_source")
@@ -309,13 +317,19 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
         reasons.append("candidate_quality_pronoun_phrase")
     if (
         len(tokens) <= 2
-        and tokens[0] in _FUNCTION_TOKENS
+        and (first_token in _FUNCTION_TOKENS or last_token in _FUNCTION_TOKENS)
         and not _has_honorific_name_shape(tokens)
     ):
         reasons.append("candidate_quality_function_word_phrase")
     if (
         len(tokens) <= 3
-        and tokens[0] in (_FUNCTION_TOKENS | _DETERMINER_TOKENS | _PRONOUN_TOKENS)
+        and first_token
+        in (
+            _FUNCTION_TOKENS
+            | _DETERMINER_TOKENS
+            | _PRONOUN_TOKENS
+            | _COMMON_INVOCATION_PREFIX_TOKENS
+        )
         and any(token in _COMMON_INVOCATION_TOKENS for token in tokens[1:])
     ):
         reasons.append("candidate_quality_common_phrase")
