@@ -11,7 +11,7 @@ PREPARED_GLOSSARY_CANDIDATE_QUALITY_POLICY_VERSION = (
     "prepared-glossary-candidate-quality-v1"
 )
 
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9']*")
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’]*")
 _PRONOUN_TOKENS = frozenset(
     {
         "he",
@@ -146,6 +146,18 @@ _HONORIFIC_TOKENS = frozenset(
 )
 _COMMON_INVOCATION_TOKENS = frozenset({"god", "lord"})
 _COMMON_INVOCATION_PREFIX_TOKENS = frozenset({"dear", "good", "oh"})
+_SAFE_STRUCTURAL_VOCATIVE_PREFIX_TOKENS = frozenset({"oh"})
+_BROAD_PERSON_ALIAS_TOKENS = frozenset(
+    {
+        "alice",
+        "elizabeth",
+        "henry",
+        "jane",
+        "john",
+        "mary",
+        "william",
+    }
+)
 _LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
     {
         "kind",
@@ -247,8 +259,12 @@ def filter_prepared_glossary_candidates(
     accepted: list[Any] = []
     decisions: list[PreparedGlossaryCandidateQualityDecision] = []
     for entry in entries:
-        reason_codes = _source_reason_codes(_entry_source(entry))
-        pruned_aliases, alias_reason_codes = _pruned_aliases(_entry_aliases(entry))
+        source_canonical = _entry_source(entry)
+        reason_codes = _source_reason_codes(source_canonical)
+        pruned_aliases, alias_reason_codes = _pruned_aliases(
+            _entry_aliases(entry),
+            source_canonical=source_canonical,
+        )
         alias_omitted_count = len(_entry_aliases(entry)) - len(pruned_aliases)
         if reason_codes:
             decisions.append(
@@ -335,32 +351,46 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
         reasons.append("candidate_quality_common_phrase")
     if _is_low_value_repeated_term_phrase(tokens):
         reasons.append("candidate_quality_low_value_repeated_term_phrase")
+    if _is_terminal_possessive_source(source):
+        reasons.append("candidate_quality_possessive_source")
+    if _is_corrupted_possessive_source(source):
+        reasons.append("candidate_quality_corrupted_possessive_source")
+    if _is_safe_structural_vocative_phrase(tokens):
+        reasons.append("candidate_quality_vocative_phrase")
     return tuple(dict.fromkeys(reasons))
 
 
 def _pruned_aliases(
     aliases: tuple[str, ...],
+    *,
+    source_canonical: str = "",
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     pruned: list[str] = []
-    omitted = False
+    reason_codes: list[str] = []
     seen: set[str] = set()
+    source_tokens = _tokens(source_canonical)
     for alias in aliases:
         tokens = _tokens(alias)
-        if (
-            not tokens
-            or all(token in _LOW_VALUE_ALIAS_TOKENS for token in tokens)
-            or (len(tokens) == 1 and len(tokens[0]) <= 2)
-            or _source_reason_codes(alias)
-        ):
-            omitted = True
+        alias_reasons: list[str] = []
+        if not tokens:
+            alias_reasons.append("candidate_quality_alias_empty")
+        if tokens and all(token in _LOW_VALUE_ALIAS_TOKENS for token in tokens):
+            alias_reasons.append("candidate_quality_low_value_alias")
+        if len(tokens) == 1 and len(tokens[0]) <= 2:
+            alias_reasons.append("candidate_quality_short_alias")
+        alias_reasons.extend(_source_reason_codes(alias))
+        if _is_broad_canonical_component_alias(tokens, source_tokens):
+            alias_reasons.append("candidate_quality_broad_alias_pruned")
+        if alias_reasons:
+            reason_codes.append("candidate_quality_alias_pruned")
+            reason_codes.extend(alias_reasons)
             continue
         key = " ".join(tokens)
         if key in seen:
             continue
         seen.add(key)
         pruned.append(alias)
-    reasons = ("candidate_quality_alias_pruned",) if omitted else ()
-    return tuple(pruned), reasons
+    return tuple(pruned), tuple(dict.fromkeys(reason_codes))
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -396,6 +426,42 @@ def _is_low_value_repeated_term_phrase(tokens: tuple[str, ...]) -> bool:
         left in (_DETERMINER_TOKENS | _PRONOUN_TOKENS)
         or right in _LOW_VALUE_GENERIC_NOUN_TOKENS
     ) and any(token in _LOW_VALUE_GENERIC_NOUN_TOKENS for token in tokens)
+
+
+def _is_terminal_possessive_source(source: str) -> bool:
+    stripped = source.strip().rstrip(".")
+    return bool(
+        len(_tokens(stripped)) > 1
+        and re.search(r"[A-Za-z][A-Za-z0-9]*['’]s$", stripped)
+    )
+
+
+def _is_corrupted_possessive_source(source: str) -> bool:
+    stripped = source.strip().rstrip(".")
+    return bool(re.search(r"\b[A-Z][A-Za-z0-9]+\s+s$", stripped))
+
+
+def _is_safe_structural_vocative_phrase(tokens: tuple[str, ...]) -> bool:
+    return (
+        2 <= len(tokens) <= 3
+        and tokens[0] in _SAFE_STRUCTURAL_VOCATIVE_PREFIX_TOKENS
+        and (
+            tokens[1] in _BROAD_PERSON_ALIAS_TOKENS
+            or tokens[1] in _HONORIFIC_TOKENS
+        )
+    )
+
+
+def _is_broad_canonical_component_alias(
+    alias_tokens: tuple[str, ...],
+    source_tokens: tuple[str, ...],
+) -> bool:
+    if len(alias_tokens) != 1 or len(source_tokens) <= 1:
+        return False
+    if source_tokens[0] in _HONORIFIC_TOKENS:
+        return False
+    alias_token = alias_tokens[0]
+    return alias_token == source_tokens[0] and alias_token in _BROAD_PERSON_ALIAS_TOKENS
 
 
 def _entry_source(entry: Any) -> str:
