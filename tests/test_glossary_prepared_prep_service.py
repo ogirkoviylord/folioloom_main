@@ -392,6 +392,73 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(raw_source, metadata_text)
 
+    def test_provider_mixed_artifact_package_prunes_broad_aliases(self):
+        request = _request(_source_content(), target_language="ru")
+
+        def provider(provider_request):
+            payload = _package_from_packet(provider_request.packet)
+            payload["entries"] = [
+                _prepared_package_entry(
+                    source_entry_id="entry:alice-winterbourne",
+                    source_canonical="Alice Winterbourne",
+                    aliases=["Alice", "Winterbourne", "Lizzy"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:darcy-possessive",
+                    source_canonical="Mr Darcy's",
+                    aliases=["Mr Darcy's"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:darcy-curly-possessive",
+                    source_canonical="Mr Darcy’s",
+                    aliases=["Mr Darcy’s"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:oh-john",
+                    source_canonical="Oh John",
+                    aliases=["Oh John"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:macy-department-store-curly",
+                    source_canonical="Macy’s Department Store",
+                    aliases=["Macy’s Department Store"],
+                ),
+                _prepared_package_entry(
+                    source_entry_id="entry:oh-canada",
+                    source_canonical="Oh Canada",
+                    aliases=["Oh Canada"],
+                ),
+            ]
+            return payload
+
+        result = PreparedGlossaryPrepService(provider=provider).prepare(request)
+
+        self.assertTrue(result.enabled)
+        self.assertIsInstance(result.payload, dict)
+        payload = result.payload
+        assert isinstance(payload, dict)
+        entries = payload["entries"]
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0]["source_canonical"], "Alice Winterbourne")
+        self.assertEqual(entries[0]["aliases"], ["Winterbourne", "Lizzy"])
+        self.assertEqual(entries[1]["source_canonical"], "Macy’s Department Store")
+        self.assertEqual(entries[1]["aliases"], ["Macy’s Department Store"])
+        self.assertEqual(entries[2]["source_canonical"], "Oh Canada")
+        self.assertEqual(entries[2]["aliases"], ["Oh Canada"])
+        quality = result.metadata["validation"]["quality"]
+        self.assertEqual(quality["dropped_candidate_count"], 3)
+        self.assertEqual(quality["alias_omitted_count"], 4)
+        self.assertIn("candidate_quality_possessive_source", quality["reason_codes"])
+        self.assertIn("candidate_quality_vocative_phrase", quality["reason_codes"])
+        self.assertIn("candidate_quality_broad_alias_pruned", quality["reason_codes"])
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        self.assertNotIn("Mr Darcy's", metadata_text)
+        self.assertNotIn("Mr Darcy’s", metadata_text)
+        self.assertNotIn("Oh John", metadata_text)
+        self.assertNotIn("Alice Winterbourne", metadata_text)
+        self.assertNotIn("Macy’s Department Store", metadata_text)
+        self.assertNotIn("Oh Canada", metadata_text)
+
     def test_invalid_package_schema_is_rejected(self):
         request = _request(_source_content())
 

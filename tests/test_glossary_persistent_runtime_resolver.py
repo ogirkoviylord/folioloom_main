@@ -308,16 +308,16 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         # when only the alias appears in this unit and the canonical term is absent.
         hook = build_persistent_glossary_runtime_hook_from_prepared_package(
             work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
-            source_text="Alice waited beside the gate.",
+            source_text="Charlotte waited beside the gate.",
             prepared_package_payload=_prepared_package_payload(
-                source_entry_id="entry:alice-winterbourne",
-                source_canonical="Alice Winterbourne",
-                aliases=("Alice",),
-                evidence_refs=("evidence:alice-winterbourne",),
+                source_entry_id="entry:charlotte-winterbourne",
+                source_canonical="Charlotte Winterbourne",
+                aliases=("Charlotte",),
+                evidence_refs=("evidence:charlotte-winterbourne",),
                 source_unit_refs=(1,),
                 source_block_refs=("chapter-1:p1",),
-                target_canonical="Алиса Уинтерборн",
-                target_variants=("Алиса Уинтерборн",),
+                target_canonical="Шарлотта Уинтерборн",
+                target_variants=("Шарлотта Уинтерборн",),
             ),
             document_kind="epub",
             config=_generic_enabled_config(),
@@ -339,8 +339,8 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
             ensure_ascii=False,
             sort_keys=True,
         )
-        self.assertNotIn("Alice waited beside the gate.", serialized_plan)
-        self.assertNotIn("Алиса Уинтерборн", serialized_plan)
+        self.assertNotIn("Charlotte waited beside the gate.", serialized_plan)
+        self.assertNotIn("Шарлотта Уинтерборн", serialized_plan)
 
     def test_prepared_package_canonical_presence_allows_single_token_alias(self):
         hook = build_persistent_glossary_runtime_hook_from_prepared_package(
