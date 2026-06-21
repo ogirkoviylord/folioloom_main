@@ -328,11 +328,12 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertEqual(plan["status"], "fallback")
         self.assertEqual(hook.prompt_context_entries, ())
         bridge = plan["prepared_package_runtime_bridge"]
-        self.assertEqual(bridge["source_risky_alias_only_count"], 1)
-        self.assertTrue(bridge["risky_alias_only_skipped"])
+        self.assertEqual(bridge["source_risky_alias_only_count"], 0)
+        self.assertFalse(bridge["risky_alias_only_skipped"])
+        self.assertEqual(bridge["source_term_missing_count"], 1)
         self.assertIn(
-            "prepared_package_runtime_bridge_risky_alias_only",
-            bridge["reason_codes"],
+            "candidate_quality_canonical_component_alias_pruned",
+            plan["prepared_package"]["quality"]["reason_codes"],
         )
         serialized_plan = json.dumps(
             plan,
@@ -342,7 +343,7 @@ class PersistentEpubGlossaryResolverTests(unittest.TestCase):
         self.assertNotIn("Charlotte waited beside the gate.", serialized_plan)
         self.assertNotIn("Шарлотта Уинтерборн", serialized_plan)
 
-    def test_prepared_package_canonical_presence_allows_single_token_alias(self):
+    def test_prepared_package_canonical_presence_allows_entry_after_alias_pruning(self):
         hook = build_persistent_glossary_runtime_hook_from_prepared_package(
             work_unit=_work_unit(source_block_ids=("chapter-1:p1",)),
             source_text="Alice Winterbourne waited beside the gate.",

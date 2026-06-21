@@ -75,12 +75,12 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
             "The Silver Key",
             "The Shire",
         ])
-        self.assertEqual(result.entries[0].aliases, ("Darcy",))
-        self.assertEqual(result.entries[1].aliases, ("drive",))
+        self.assertEqual(result.entries[0].aliases, ())
+        self.assertEqual(result.entries[1].aliases, ())
         self.assertEqual(result.entries[2].aliases, ("Silver Key",))
-        self.assertEqual(result.entries[3].aliases, ("Shire",))
+        self.assertEqual(result.entries[3].aliases, ())
         self.assertEqual(result.metadata["dropped_candidate_count"], 0)
-        self.assertEqual(result.metadata["alias_omitted_count"], 6)
+        self.assertEqual(result.metadata["alias_omitted_count"], 9)
         self.assertIn(
             "candidate_quality_alias_pruned",
             result.metadata["reason_codes"],
@@ -198,9 +198,9 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
             source_language="en",
         )
 
-        self.assertEqual(result.entries[0].aliases, ("Labour",))
+        self.assertEqual(result.entries[0].aliases, ())
         self.assertEqual(result.metadata["dropped_candidate_count"], 0)
-        self.assertEqual(result.metadata["alias_omitted_count"], 3)
+        self.assertEqual(result.metadata["alias_omitted_count"], 4)
         self.assertIn(
             "candidate_quality_alias_pruned",
             result.metadata["reason_codes"],
@@ -279,13 +279,71 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
             source_language="en",
         )
 
-        self.assertEqual(result.entries[0].aliases, ("Winterbourne", "Lizzy"))
-        self.assertEqual(result.entries[1].aliases, ("Darcy",))
-        self.assertEqual(result.entries[2].aliases, ("Arcadian",))
+        self.assertEqual(result.entries[0].aliases, ("Lizzy",))
+        self.assertEqual(result.entries[1].aliases, ())
+        self.assertEqual(result.entries[2].aliases, ())
         self.assertEqual(result.metadata["dropped_candidate_count"], 0)
-        self.assertEqual(result.metadata["alias_omitted_count"], 1)
+        self.assertEqual(result.metadata["alias_omitted_count"], 4)
         self.assertIn(
             "candidate_quality_broad_alias_pruned",
+            result.metadata["reason_codes"],
+        )
+
+    def test_prunes_canonical_component_aliases_and_collisions_metadata_only(self):
+        entries = (
+            _entry("Marina Vale", aliases=("Marina", "Vale", "Marnie")),
+            _entry("Jonas Vale", aliases=("Jonas", "Vale", "Captain Vale")),
+            _entry("Mr Barlow", aliases=("Mr. Barlow", "Barlow")),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual(result.entries[0].aliases, ("Marnie",))
+        self.assertEqual(result.entries[1].aliases, ("Captain Vale",))
+        self.assertEqual(result.entries[2].aliases, ("Mr. Barlow",))
+        self.assertEqual(result.metadata["dropped_candidate_count"], 0)
+        self.assertEqual(result.metadata["alias_omitted_count"], 5)
+        self.assertIn(
+            "candidate_quality_canonical_component_alias_pruned",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_alias_collision_pruned",
+            result.metadata["reason_codes"],
+        )
+        metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+        for raw_source in ("Marina Vale", "Jonas Vale", "Mr Barlow"):
+            self.assertNotIn(raw_source, metadata_text)
+
+    def test_calendar_common_word_sources_and_aliases_are_filtered(self):
+        entries = (
+            _entry("May", aliases=("May",)),
+            _entry("Sunday", aliases=("Sunday",)),
+            _entry("May Welland", aliases=("May", "Welland", "M.W.")),
+        )
+
+        result = filter_prepared_glossary_candidates(
+            entries,
+            upstream_selector_signature="reducer:test",
+            source_language="en",
+        )
+
+        self.assertEqual([entry.source_canonical for entry in result.entries], [
+            "May Welland",
+        ])
+        self.assertEqual(result.entries[0].aliases, ("M.W.",))
+        self.assertEqual(result.metadata["dropped_candidate_count"], 2)
+        self.assertEqual(result.metadata["alias_omitted_count"], 4)
+        self.assertIn(
+            "candidate_quality_calendar_common_source",
+            result.metadata["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_calendar_common_alias",
             result.metadata["reason_codes"],
         )
 
@@ -342,7 +400,7 @@ class PreparedGlossaryCandidateQualityTests(unittest.TestCase):
         self.assertNotEqual(clean.selector_signature, pruned.selector_signature)
         self.assertTrue(
             clean.selector_signature.startswith(
-                "prepared-glossary-candidate-quality:v1:"
+                "prepared-glossary-candidate-quality:v2:"
             )
         )
 

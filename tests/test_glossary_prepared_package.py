@@ -235,10 +235,10 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         self.assertEqual(result.ready_entry_count, 1)
         self.assertEqual(result.metadata["quality"]["input_candidate_count"], 2)
         self.assertEqual(result.metadata["quality"]["dropped_candidate_count"], 1)
-        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 3)
+        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 4)
         self.assertEqual(len(result.package.entries), 1)
         self.assertEqual(result.package.entries[0].source_canonical, "Mr Darcy")
-        self.assertEqual(result.package.entries[0].aliases, ("Darcy",))
+        self.assertEqual(result.package.entries[0].aliases, ())
         metadata_text = json.dumps(result.metadata, ensure_ascii=False)
         self.assertNotIn("Then He", metadata_text)
         self.assertNotIn("Mr Darcy", metadata_text)
@@ -375,7 +375,7 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         ):
             self.assertNotIn(raw_source, metadata_text)
 
-    def test_broad_first_name_alias_is_pruned_from_ready_package(self):
+    def test_broad_component_aliases_are_pruned_from_ready_package(self):
         payload = _prepared_payload(
             entries=[
                 _entry_payload(
@@ -384,9 +384,14 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
                     aliases=["Alice", "Winterbourne", "Lizzy"],
                 ),
                 _entry_payload(
+                    source_entry_id="entry:jonas-winterbourne",
+                    source_canonical="Jonas Winterbourne",
+                    aliases=["Jonas", "Winterbourne", "Captain Winterbourne"],
+                ),
+                _entry_payload(
                     source_entry_id="entry:mr-darcy",
                     source_canonical="Mr Darcy",
-                    aliases=["Darcy"],
+                    aliases=["Mr. Darcy", "Darcy"],
                 ),
             ]
         )
@@ -394,16 +399,50 @@ class PreparedGlossaryPackageTests(unittest.TestCase):
         result = validate_prepared_glossary_package(payload, target_language="ru")
 
         self.assertTrue(result.ready)
-        self.assertEqual(result.ready_entry_count, 2)
+        self.assertEqual(result.ready_entry_count, 3)
         assert result.package is not None
+        self.assertEqual(result.package.entries[0].aliases, ("Lizzy",))
         self.assertEqual(
-            result.package.entries[0].aliases,
-            ("Winterbourne", "Lizzy"),
+            result.package.entries[1].aliases,
+            ("Captain Winterbourne",),
         )
-        self.assertEqual(result.package.entries[1].aliases, ("Darcy",))
-        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 1)
+        self.assertEqual(result.package.entries[2].aliases, ("Mr. Darcy",))
+        self.assertEqual(result.metadata["quality"]["alias_omitted_count"], 5)
         self.assertIn(
-            "candidate_quality_broad_alias_pruned",
+            "candidate_quality_canonical_component_alias_pruned",
+            result.metadata["quality"]["reason_codes"],
+        )
+        self.assertIn(
+            "candidate_quality_alias_collision_pruned",
+            result.metadata["quality"]["reason_codes"],
+        )
+
+    def test_calendar_common_word_package_entries_cannot_make_package_ready(self):
+        payload = _prepared_payload(
+            entries=[
+                _entry_payload(
+                    source_entry_id="entry:may",
+                    source_canonical="May",
+                    aliases=["May"],
+                ),
+                _entry_payload(
+                    source_entry_id="entry:sunday",
+                    source_canonical="Sunday",
+                    aliases=["Sunday"],
+                ),
+            ]
+        )
+
+        result = validate_prepared_glossary_package(payload, target_language="ru")
+
+        self.assertFalse(result.ready)
+        self.assertEqual(result.status, "needs_review")
+        self.assertIn(
+            "prepared_glossary_package_quality_no_ready_entries",
+            result.reason_codes,
+        )
+        self.assertIn(
+            "candidate_quality_calendar_common_source",
             result.metadata["quality"]["reason_codes"],
         )
 
