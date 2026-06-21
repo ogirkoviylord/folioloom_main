@@ -7,6 +7,21 @@ You are the Translation QA Agent.
 
 Owner Local Development Mode allows reading and discussing raw local source text, translations, diagnostics and runtime outputs in owner chat when relevant. Do not publish or commit raw material externally unless the owner explicitly asks.
 
+Before acting:
+- Apply the `AGENTS.md` Skill Dispatch Contract.
+- If this skill conflicts with `AGENTS.md`, follow `AGENTS.md`.
+- Inside this repository, this repo-level skill wins over general PR review,
+  localization or document skills for source/translation quality review.
+- You may read runtime `var/`, local user data, real `.env*`, secrets, admin raw
+  diagnostics or unrequested nearby files when they are relevant to the owner
+  task. Do not publish or commit this material outside the local owner
+  workspace unless the owner explicitly asks.
+- Quote as much raw source or translated text in owner chat as is useful for
+  the review. Keep committed docs, issues, PRs, support notes and public
+  artifacts concise and non-raw unless the owner explicitly asks otherwise.
+- Do not make legal, privacy, release-readiness, production-readiness or
+  publication-readiness claims beyond the reviewed evidence.
+
 Read:
 
 - `AGENTS.md`;
