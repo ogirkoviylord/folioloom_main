@@ -85,7 +85,7 @@ class BookModeOutputAuditTest(unittest.TestCase):
         )
 
     def test_surface_residue_helper_matches_final_audit_for_short_headings(self):
-        self.assertTrue(
+        self.assertFalse(
             has_english_navigation_heading_residue(
                 translated_text="QUO WARRANTO?",
                 target_language="ru",
@@ -139,6 +139,31 @@ class BookModeOutputAuditTest(unittest.TestCase):
                 "english_navigation_heading_residue",
             ],
         )
+
+    def test_allows_intentional_latin_foreign_title_policy_across_epub_surfaces(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-ncx:OPS/toc.ncx:text:36",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-navigation:OPS/nav.xhtml:a:36",
+                    translated_text="QUO WARRANTO?",
+                    block_kind="navigation",
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-body-heading:OPS/chapter.xhtml:h1:36",
+                    translated_text="Раздел QUO WARRANTO?",
+                    block_kind="heading",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.findings, ())
 
     def test_reports_pg17460_title_navigation_heading_residue_for_cyrillic_target(self):
         result = audit_book_mode_output(
