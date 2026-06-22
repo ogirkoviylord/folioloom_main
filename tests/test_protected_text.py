@@ -2,6 +2,7 @@ import unittest
 
 from translator_service.protected_text import (
     count_protected_marker_residues,
+    mask_protected_marker_residues,
     protect_text,
     restore_protected_text,
 )
@@ -209,6 +210,12 @@ class ProtectedTextTest(unittest.TestCase):
                 self.assertEqual(count_protected_marker_residues(text), 1)
 
         self.assertEqual(count_protected_marker_residues("Защищенный текст"), 0)
+
+    def test_masks_same_protected_marker_residue_variants_as_counter(self):
+        text = "ZXQPROTECTED0QXZ ZXQ PROTECTED 1 QXZ Заголовок ZXQ–PROTECTED–2"
+
+        self.assertEqual(count_protected_marker_residues(text), 3)
+        self.assertEqual(mask_protected_marker_residues(text), "    Заголовок  ")
 
 
 if __name__ == "__main__":

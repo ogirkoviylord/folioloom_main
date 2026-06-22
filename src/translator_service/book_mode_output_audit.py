@@ -4,7 +4,10 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from translator_service.protected_text import count_protected_marker_residues
+from translator_service.protected_text import (
+    count_protected_marker_residues,
+    mask_protected_marker_residues,
+)
 
 
 @dataclass(frozen=True)
@@ -43,7 +46,6 @@ class BookModeAuditResult:
 _CYRILLIC_TARGETS = {"ru", "uk"}
 _CYRILLIC_WORD_RE = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґ]+")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
-_PROTECTED_MARKER_RE = re.compile(r"ZXQPROTECTED\d+QXZ")
 _PROVIDER_COMMENTARY_RE = re.compile(
     r"^\s*(?:sure,\s*)?(?:here(?:'s| is)(?: the)? translation|"
     r"translation|translated text|вот перевод|ниже перевод|готовый перевод|"
@@ -64,7 +66,6 @@ _MASK_RES = (
     re.compile(r"\{\{\s*[^{}\n]+\s*\}\}"),
     re.compile(r"%[A-Z][A-Z0-9_]+%"),
     re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}"),
-    re.compile(r"ZXQPROTECTED\d+QXZ"),
     re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\s*="),
     re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\([^()\n]*\)"),
     re.compile(r"\b(?:print|return)\s*\([^()\n]*\)"),
@@ -497,6 +498,7 @@ def _mask_non_residue_text(
     allow_intentional_latin_foreign_titles: bool = False,
 ) -> str:
     masked = _PROVIDER_COMMENTARY_RE.sub(" ", text)
+    masked = mask_protected_marker_residues(masked)
     if allow_intentional_latin_foreign_titles:
         masked = _mask_intentional_latin_foreign_title_phrases(masked)
     masked = _mask_gutenberg_legal_names(masked)
@@ -539,7 +541,7 @@ def _mask_gutenberg_legal_names(text: str) -> str:
 
 
 def _has_latin_residue_outside_title_allowlist(text: str) -> bool:
-    masked = text
+    masked = mask_protected_marker_residues(text)
     for pattern in _MASK_RES:
         masked = pattern.sub(" ", masked)
     if _meaningful_latin_word_observations(masked):
