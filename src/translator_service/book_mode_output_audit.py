@@ -269,6 +269,30 @@ def has_english_navigation_heading_residue(
     )
 
 
+def has_gutenberg_legal_backmatter_residue(
+    *,
+    translated_text: str,
+    target_language: str,
+    block_id: str = "epub:surface-check",
+    block_kind: str = "plain",
+) -> bool:
+    result = audit_book_mode_output(
+        chunks=(
+            BookModeAuditChunk(
+                block_id=block_id,
+                translated_text=translated_text,
+                block_kind=block_kind,
+            ),
+        ),
+        target_language=target_language,
+    )
+    return any(
+        finding.code == "gutenberg_legal_backmatter_residue"
+        and finding.category == "legal_backmatter"
+        for finding in result.findings
+    )
+
+
 def audit_book_mode_output(
     *,
     chunks: Iterable[BookModeAuditChunk],
@@ -329,22 +353,6 @@ def audit_book_mode_output(
                 )
             )
 
-        if is_navigation_or_heading and _has_heading_navigation_residue(stats):
-            findings.append(
-                _finding(
-                    code="english_navigation_heading_residue",
-                    message=(
-                        "English heading or navigation residue remains in "
-                        "Cyrillic output."
-                    ),
-                    target_root=target_root,
-                    chunk=chunk,
-                    category="navigation_heading",
-                    stats=stats,
-                )
-            )
-            continue
-
         if _has_gutenberg_legal_backmatter_residue(
             translated_text=chunk.translated_text,
             stats=stats,
@@ -362,6 +370,22 @@ def audit_book_mode_output(
                     category="legal_backmatter",
                     stats=stats,
                     severity="error",
+                )
+            )
+            continue
+
+        if is_navigation_or_heading and _has_heading_navigation_residue(stats):
+            findings.append(
+                _finding(
+                    code="english_navigation_heading_residue",
+                    message=(
+                        "English heading or navigation residue remains in "
+                        "Cyrillic output."
+                    ),
+                    target_root=target_root,
+                    chunk=chunk,
+                    category="navigation_heading",
+                    stats=stats,
                 )
             )
             continue
@@ -680,12 +704,28 @@ def _has_gutenberg_legal_backmatter_residue(
 ) -> bool:
     if not _GUTENBERG_LEGAL_BACKMATTER_RE.search(translated_text):
         return False
-    # Threshold: require at least 4 Latin words with 2 English function words
-    # to avoid false positives from short snippets, code artifacts, or isolated
-    # Gutenberg/legal entity names that legitimately appear in translated output.
-    if stats.latin_word_count < 4 or stats.english_function_word_count < 2:
+    has_legal_term = any(word in _LEGAL_BACKMATTER_TERMS for word in stats.latin_words)
+    if not has_legal_term:
         return False
-    return any(word in _LEGAL_BACKMATTER_TERMS for word in stats.latin_words)
+
+    # Narrow legal names may remain in translated output. Broad clauses and
+    # untranslated license headings must not: both block final EPUB delivery.
+    if stats.latin_word_count >= 4 and stats.english_function_word_count >= 2:
+        return True
+    raw_latin_observations = _meaningful_latin_word_observations(translated_text)
+    uppercase_count = sum(
+        1
+        for _word, is_uppercase, _is_title in raw_latin_observations
+        if is_uppercase
+    )
+    title_case_count = sum(
+        1
+        for _word, _is_uppercase, is_title in raw_latin_observations
+        if is_title
+    )
+    return len(raw_latin_observations) >= 3 and (
+        uppercase_count >= 2 or title_case_count >= 2
+    )
 
 
 def _finding(
