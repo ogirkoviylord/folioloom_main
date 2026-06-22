@@ -168,9 +168,13 @@ re-review and final PR gate instead.
   if it would include unapproved high-risk scope, deployment/server operations,
   DB migration/data cleanup, payment/legal/public-policy changes, raw private
   material publication, production dependency changes, or scope expansion.
-- Council work must be explicit: GPT-Orchestrator proposal -> DeepSeek-Critic
-  and MiMo-Critic independent critique when MiMo is in scope ->
-  GPT-Orchestrator synthesis -> owner approval if required -> implementation.
+- Council work must be explicit: GPT-Orchestrator proposal -> GPT-Critic
+  self-opposition -> DeepSeek-Critic and MiMo-Critic independent critique when
+  MiMo is in scope -> GPT-Orchestrator synthesis -> owner approval if required
+  -> implementation.
+- GPT-Critic is an internal planning red-team for GPT-Orchestrator output. It
+  does not code, does not make final decisions and does not replace DeepSeek or
+  MiMo peer critique.
 - For multi-model or council work, GPT-Orchestrator should prepare a bounded
   task packet using `docs/agent-task-packet-template.md`, `DOCUMENT_INDEX.md`
   and targeted `rg` searches before handing work to another model.
