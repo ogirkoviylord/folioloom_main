@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 from translator_service.book_mode_output_audit import (
     has_english_navigation_heading_residue,
+    has_gutenberg_legal_backmatter_residue,
 )
 from translator_service.file_storage import (
     LocalObjectStorage,
@@ -1534,7 +1535,10 @@ def _retry_untranslated_secondary_source_blocks(
         )
         if retry_reason is None:
             continue
-        if retry_reason == "epub_surface_navigation_heading_residue":
+        if retry_reason in {
+            "epub_surface_navigation_heading_residue",
+            "gutenberg_legal_backmatter_residue",
+        }:
             if surface_retry_calls >= _EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS:
                 continue
             surface_retry_calls += 1
@@ -1630,6 +1634,13 @@ def _secondary_language_retry_reason(
     ):
         return "epub_surface_navigation_heading_residue"
 
+    if _needs_gutenberg_legal_backmatter_retry(
+        source_block_id=source_block_id,
+        translated_text=translated_text,
+        target_language=target_language,
+    ):
+        return "gutenberg_legal_backmatter_residue"
+
     if (
         not _target_language_uses_cjk(target_language)
         and _has_untranslated_cjk_text(
@@ -1688,6 +1699,22 @@ def _needs_epub_surface_navigation_heading_retry(
         target_language=target_language,
         block_id=source_block_id or "epub:surface-check",
         block_kind="navigation",
+    )
+
+
+def _needs_gutenberg_legal_backmatter_retry(
+    *,
+    source_block_id: str,
+    translated_text: str,
+    target_language: str,
+) -> bool:
+    if not source_block_id.startswith("epub:"):
+        return False
+    return has_gutenberg_legal_backmatter_residue(
+        translated_text=translated_text,
+        target_language=target_language,
+        block_id=source_block_id or "epub:surface-check",
+        block_kind="plain",
     )
 
 

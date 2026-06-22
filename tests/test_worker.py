@@ -563,6 +563,79 @@ class WorkerTest(unittest.TestCase):
             "\n".join(logs.output),
         )
 
+    def test_single_block_epub_legal_work_unit_retries_license_heading_residue(self):
+        class LegalResidueRetryTranslator:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str, str]] = []
+                self.last_usage: ProviderUsage | None = None
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.calls.append((text, source_language, target_language))
+                self.last_usage = ProviderUsage(
+                    prompt_tokens=13,
+                    completion_tokens=5,
+                    total_tokens=18,
+                    prompt_cache_hit_tokens=0,
+                    prompt_cache_miss_tokens=13,
+                )
+                if source_language == "auto":
+                    return "Лицензия Project Gutenberg"
+                return "Project Gutenberg License"
+
+        store = self._store()
+        job = store.create_job(
+            order_id="order-1",
+            user_id="user-42",
+            file_id="file-1",
+            file_name="book.epub",
+            document_kind="epub",
+            source_language="en",
+            target_language="ru",
+            adapter_version="epub-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+        )
+        store.add_work_units(
+            job.id,
+            [
+                WorkUnitPlan(
+                    sequence=1,
+                    source_block_ids=("epub:OPS/license.xhtml:0",),
+                    source_text_hash="hash-1",
+                    prompt_tier="plain",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            ],
+        )
+        translator = LegalResidueRetryTranslator()
+
+        with self.assertLogs("translator_service.worker", level="INFO") as logs:
+            completed = run_next_persistent_work_unit(
+                store=store,
+                job_id=job.id,
+                worker_id="worker-a",
+                source_loader=lambda unit: "Project Gutenberg License",
+                translator=translator,
+            )
+
+        self.assertIsNotNone(completed)
+        if completed is None:
+            self.fail("expected completed work unit")
+        self.assertEqual(completed.status, PersistentWorkUnitStatus.TRANSLATED)
+        self.assertEqual(completed.translated_text, "Лицензия Project Gutenberg")
+        self.assertEqual([call[1] for call in translator.calls], ["en", "auto"])
+        self.assertIn(
+            "reason=gutenberg_legal_backmatter_residue",
+            "\n".join(logs.output),
+        )
+
     def test_returns_none_when_no_pending_work_units_exist(self):
         store = self._store()
         job = _job_with_units(store)
