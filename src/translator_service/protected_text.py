@@ -200,6 +200,10 @@ def count_protected_marker_residues(text: str) -> int:
     return len(_PROTECTED_MARKER_RESIDUE_RE.findall(text))
 
 
+def mask_protected_marker_residues(text: str, *, replacement: str = " ") -> str:
+    return _PROTECTED_MARKER_RESIDUE_RE.sub(replacement, text)
+
+
 def _protected_marker_variant_pattern(marker: str) -> re.Pattern[str]:
     pattern = _PROTECTED_MARKER_SEPARATOR.join(re.escape(char) for char in marker)
     return re.compile(
