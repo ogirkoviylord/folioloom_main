@@ -57,7 +57,7 @@ that `DOCUMENT_INDEX.md` plus `rg` is not enough.
 Status: Draft / Ready / Blocked / Complete
 Created: YYYY-MM-DD
 Owner: GPT-Orchestrator
-Target model/agent: Codex / DeepSeek-Critic / MiMo-Critic / DeepSeek-Reviewer / MiMo-Reviewer / GLM-Worker / MiniMax-UX / TBD
+Target model/agent: Codex / GPT-Critic / DeepSeek-Critic / MiMo-Critic / DeepSeek-Reviewer / MiMo-Reviewer / GLM-Worker / MiniMax-UX / TBD
 Hermes card / issue: <link or Unknown>
 
 ## Goal
@@ -108,6 +108,10 @@ One concrete outcome.
 - Manual evidence: ...
 
 ## Model-Specific Instructions
+- For GPT-Critic: red-team the GPT-Orchestrator proposal before external model
+  critique. Focus on scope creep, weak assumptions, missing acceptance
+  criteria, poor task-packet quality, approval gates, unverifiable claims and
+  missing verification. Do not code and do not make final decisions.
 - For critic/reviewer: classify findings as `owner-blocker`,
   `must-fix-for-coder`, `nice-to-have` or `ignore`.
 - For critic/reviewer: use repo-level skills as analysis modes when the packet
