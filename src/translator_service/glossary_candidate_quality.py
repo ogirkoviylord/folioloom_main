@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 PREPARED_GLOSSARY_CANDIDATE_QUALITY_POLICY_VERSION = (
-    "prepared-glossary-candidate-quality-v1"
+    "prepared-glossary-candidate-quality-v2"
 )
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’]*")
@@ -167,6 +167,29 @@ _LOW_VALUE_GENERIC_NOUN_TOKENS = frozenset(
         "things",
     }
 )
+_CALENDAR_COMMON_TOKENS = frozenset(
+    {
+        "april",
+        "august",
+        "december",
+        "february",
+        "friday",
+        "january",
+        "july",
+        "june",
+        "march",
+        "may",
+        "monday",
+        "november",
+        "october",
+        "saturday",
+        "september",
+        "sunday",
+        "thursday",
+        "tuesday",
+        "wednesday",
+    }
+)
 _LOW_VALUE_ALIAS_TOKENS = (
     _PRONOUN_TOKENS
     | _DETERMINER_TOKENS
@@ -174,6 +197,7 @@ _LOW_VALUE_ALIAS_TOKENS = (
     | _BOILERPLATE_TOKENS
     | _HONORIFIC_TOKENS
     | _LOW_VALUE_GENERIC_NOUN_TOKENS
+    | _CALENDAR_COMMON_TOKENS
 )
 _LOW_VALUE_REPEATED_TERM_START_TOKENS = frozenset(
     {
@@ -258,12 +282,14 @@ def filter_prepared_glossary_candidates(
 
     accepted: list[Any] = []
     decisions: list[PreparedGlossaryCandidateQualityDecision] = []
+    alias_collision_keys = _alias_collision_keys(entries)
     for entry in entries:
         source_canonical = _entry_source(entry)
         reason_codes = _source_reason_codes(source_canonical)
         pruned_aliases, alias_reason_codes = _pruned_aliases(
             _entry_aliases(entry),
             source_canonical=source_canonical,
+            alias_collision_keys=alias_collision_keys,
         )
         alias_omitted_count = len(_entry_aliases(entry)) - len(pruned_aliases)
         if reason_codes:
@@ -325,6 +351,8 @@ def _source_reason_codes(source: str) -> tuple[str, ...]:
         reasons.append("candidate_quality_boilerplate_source")
     if all(token in _LOW_VALUE_ALIAS_TOKENS for token in tokens):
         reasons.append("candidate_quality_low_value_source")
+    if len(tokens) == 1 and tokens[0] in _CALENDAR_COMMON_TOKENS:
+        reasons.append("candidate_quality_calendar_common_source")
     if (
         len(tokens) <= 2
         and any(token in _PRONOUN_TOKENS for token in tokens)
@@ -364,6 +392,7 @@ def _pruned_aliases(
     aliases: tuple[str, ...],
     *,
     source_canonical: str = "",
+    alias_collision_keys: frozenset[str] = frozenset(),
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     pruned: list[str] = []
     reason_codes: list[str] = []
@@ -379,13 +408,21 @@ def _pruned_aliases(
         if len(tokens) == 1 and len(tokens[0]) <= 2:
             alias_reasons.append("candidate_quality_short_alias")
         alias_reasons.extend(_source_reason_codes(alias))
+        key = _alias_key(tokens)
+        if key and key in alias_collision_keys:
+            alias_reasons.append("candidate_quality_alias_collision_pruned")
         if _is_broad_canonical_component_alias(tokens, source_tokens):
             alias_reasons.append("candidate_quality_broad_alias_pruned")
+        if _is_canonical_component_alias(tokens, source_tokens):
+            alias_reasons.append(
+                "candidate_quality_canonical_component_alias_pruned"
+            )
+        if len(tokens) == 1 and tokens[0] in _CALENDAR_COMMON_TOKENS:
+            alias_reasons.append("candidate_quality_calendar_common_alias")
         if alias_reasons:
             reason_codes.append("candidate_quality_alias_pruned")
             reason_codes.extend(alias_reasons)
             continue
-        key = " ".join(tokens)
         if key in seen:
             continue
         seen.add(key)
@@ -395,6 +432,27 @@ def _pruned_aliases(
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(match.group(0).casefold() for match in _TOKEN_RE.finditer(text))
+
+
+def _alias_collision_keys(entries: Sequence[Any]) -> frozenset[str]:
+    entry_keys: list[set[str]] = []
+    for entry in entries:
+        keys = {
+            key
+            for alias in _entry_aliases(entry)
+            if (key := _alias_key(_tokens(alias)))
+        }
+        if keys:
+            entry_keys.append(keys)
+    counts: dict[str, int] = {}
+    for keys in entry_keys:
+        for key in keys:
+            counts[key] = counts.get(key, 0) + 1
+    return frozenset(key for key, count in counts.items() if count > 1)
+
+
+def _alias_key(tokens: tuple[str, ...]) -> str:
+    return " ".join(tokens)
 
 
 def _is_boilerplate_phrase(tokens: tuple[str, ...]) -> bool:
@@ -458,10 +516,17 @@ def _is_broad_canonical_component_alias(
 ) -> bool:
     if len(alias_tokens) != 1 or len(source_tokens) <= 1:
         return False
-    if source_tokens[0] in _HONORIFIC_TOKENS:
-        return False
     alias_token = alias_tokens[0]
     return alias_token == source_tokens[0] and alias_token in _BROAD_PERSON_ALIAS_TOKENS
+
+
+def _is_canonical_component_alias(
+    alias_tokens: tuple[str, ...],
+    source_tokens: tuple[str, ...],
+) -> bool:
+    if len(alias_tokens) != 1 or len(source_tokens) <= 1:
+        return False
+    return alias_tokens[0] in source_tokens
 
 
 def _entry_source(entry: Any) -> str:
@@ -527,7 +592,7 @@ def _selector_signature(
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:24]
-    return f"prepared-glossary-candidate-quality:v1:{digest}"
+    return f"prepared-glossary-candidate-quality:v2:{digest}"
 
 
 def _entry_id(entry: Any) -> str:
