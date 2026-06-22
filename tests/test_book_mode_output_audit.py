@@ -538,6 +538,26 @@ class BookModeOutputAuditTest(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.findings, ())
 
+    def test_reports_gutenberg_license_heading_residue(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:aux:ncx:OPS/toc.ncx:text:4",
+                    block_kind="navigation",
+                    translated_text="Project Gutenberg License",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["gutenberg_legal_backmatter_residue"],
+        )
+        self.assertEqual(result.findings[0].category, "legal_backmatter")
+        self.assertEqual(result.findings[0].severity, "error")
+        self.assertNotIn("Project Gutenberg License", repr(result))
+
     def test_reports_suspicious_all_english_chunks_for_russian_output(self):
         result = audit_book_mode_output(
             chunks=(

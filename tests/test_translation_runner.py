@@ -2958,6 +2958,55 @@ class TranslationRunnerTest(unittest.TestCase):
             ["en", "auto"],
         )
 
+    def test_epub_translation_retries_gutenberg_license_heading_residue(self):
+        class LegalHeadingResidueTranslator:
+            def __init__(self) -> None:
+                self.requests: list[tuple[str, str, str]] = []
+
+            def translate(
+                self,
+                *,
+                text: str,
+                source_language: str,
+                target_language: str,
+            ) -> str:
+                self.requests.append((text, source_language, target_language))
+                if source_language == "auto":
+                    return "Лицензия Project Gutenberg"
+                return (
+                    "<translation_batch>"
+                    '<translation_block id="0">Project Gutenberg License'
+                    "</translation_block>"
+                    "</translation_batch>"
+                )
+
+        translator = LegalHeadingResidueTranslator()
+        content = _make_epub(
+            {
+                "OPS/license.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Project Gutenberg License</p></body>
+                </html>
+                """,
+            }
+        )
+
+        result = translate_epub_document(
+            file_name="book.epub",
+            content=content,
+            source_language="en",
+            target_language="ru",
+            translator=translator,
+        )
+
+        text = extract_text_from_epub(result.content)
+        self.assertEqual(text, "Лицензия Project Gutenberg")
+        self.assertNotIn("Project Gutenberg License", text)
+        self.assertEqual(
+            [request[1] for request in translator.requests],
+            ["en", "auto"],
+        )
+
     def test_epub_auxiliary_preserves_intentional_latin_title(self):
         class IntentionalLatinTitleTranslator:
             def __init__(self) -> None:
