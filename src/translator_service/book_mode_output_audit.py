@@ -4,6 +4,11 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from translator_service.protected_text import (
+    count_protected_marker_residues,
+    mask_protected_marker_residues,
+)
+
 
 @dataclass(frozen=True)
 class BookModeAuditChunk:
@@ -41,7 +46,6 @@ class BookModeAuditResult:
 _CYRILLIC_TARGETS = {"ru", "uk"}
 _CYRILLIC_WORD_RE = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґ]+")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
-_PROTECTED_MARKER_RE = re.compile(r"ZXQPROTECTED\d+QXZ")
 _PROVIDER_COMMENTARY_RE = re.compile(
     r"^\s*(?:sure,\s*)?(?:here(?:'s| is)(?: the)? translation|"
     r"translation|translated text|вот перевод|ниже перевод|готовый перевод|"
@@ -62,7 +66,6 @@ _MASK_RES = (
     re.compile(r"\{\{\s*[^{}\n]+\s*\}\}"),
     re.compile(r"%[A-Z][A-Z0-9_]+%"),
     re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}"),
-    re.compile(r"ZXQPROTECTED\d+QXZ"),
     re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\s*="),
     re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\([^()\n]*\)"),
     re.compile(r"\b(?:print|return)\s*\([^()\n]*\)"),
@@ -334,6 +337,22 @@ def audit_book_mode_output(
                 )
             )
 
+        if stats.protected_marker_count:
+            findings.append(
+                _finding(
+                    code="protected_marker_residue",
+                    message=(
+                        "Internal protected-text marker residue remains in "
+                        "book-mode output."
+                    ),
+                    target_root=target_root,
+                    chunk=chunk,
+                    category="protected_text",
+                    stats=stats,
+                    severity="error",
+                )
+            )
+
         if _has_gutenberg_legal_backmatter_residue(
             translated_text=chunk.translated_text,
             stats=stats,
@@ -468,7 +487,7 @@ def _chunk_language_stats(
     expected_latin_terms: tuple[str, ...],
     allow_intentional_latin_foreign_titles: bool = False,
 ) -> _ChunkLanguageStats:
-    protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
+    protected_marker_count = count_protected_marker_residues(text)
     masked = _mask_non_residue_text(
         text,
         expected_latin_terms=expected_latin_terms,
@@ -503,6 +522,7 @@ def _mask_non_residue_text(
     allow_intentional_latin_foreign_titles: bool = False,
 ) -> str:
     masked = _PROVIDER_COMMENTARY_RE.sub(" ", text)
+    masked = mask_protected_marker_residues(masked)
     if allow_intentional_latin_foreign_titles:
         masked = _mask_intentional_latin_foreign_title_phrases(masked)
     masked = _mask_gutenberg_legal_names(masked)
@@ -545,7 +565,7 @@ def _mask_gutenberg_legal_names(text: str) -> str:
 
 
 def _has_latin_residue_outside_title_allowlist(text: str) -> bool:
-    masked = text
+    masked = mask_protected_marker_residues(text)
     for pattern in _MASK_RES:
         masked = pattern.sub(" ", masked)
     if _meaningful_latin_word_observations(masked):

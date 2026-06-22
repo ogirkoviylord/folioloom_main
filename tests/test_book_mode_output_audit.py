@@ -289,6 +289,109 @@ class BookModeOutputAuditTest(unittest.TestCase):
             all(finding.category == "navigation_heading" for finding in result.findings)
         )
 
+    def test_reports_exact_protected_marker_residue_in_epub_xhtml_title(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:aux:xhtml-title:OPS/chapter.xhtml:title:0",
+                    translated_text="ZXQPROTECTED0QXZ",
+                    block_kind="title",
+                    metadata=(("epub_aux_kind", "xhtml_title"),),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["protected_marker_residue"],
+        )
+        self.assertEqual(result.findings[0].protected_marker_count, 1)
+        self.assertFalse(result.passed)
+
+    def test_reports_hyphenated_protected_marker_residue_in_epub_ncx_navigation(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:aux:ncx:OPS/toc.ncx:text:7",
+                    translated_text="ZXQ-PROTECTED-0-QXZ",
+                    block_kind="navigation",
+                    metadata=(("epub_aux_kind", "ncx_text"),),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["protected_marker_residue"],
+        )
+        self.assertEqual(result.findings[0].protected_marker_count, 1)
+        self.assertFalse(result.passed)
+
+    def test_masks_broken_protected_marker_residue_before_navigation_audit(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:aux:xhtml-navigation:OPS/nav.xhtml:a:2",
+                    translated_text="ZXQ PROTECTED 2 QXZ",
+                    block_kind="navigation",
+                    metadata=(("epub_aux_kind", "xhtml_navigation"),),
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:aux:xhtml-title:OPS/chapter.xhtml:title:2",
+                    translated_text="ZXQ\u00adPROTECTED\u00ad2\u00adQXZ",
+                    block_kind="title",
+                    metadata=(("epub_aux_kind", "xhtml_title"),),
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-body-heading:OPS/chapter.xhtml:h1:2",
+                    translated_text="ZXQ–PROTECTED–2–QXZ",
+                    block_kind="heading",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            [
+                "protected_marker_residue",
+                "protected_marker_residue",
+                "protected_marker_residue",
+            ],
+        )
+        self.assertTrue(
+            all(
+                finding.protected_marker_count == 1
+                for finding in result.findings
+            )
+        )
+        self.assertNotIn(
+            "english_navigation_heading_residue",
+            [finding.code for finding in result.findings],
+        )
+        self.assertFalse(result.passed)
+
+    def test_reports_truncated_protected_marker_residue_in_epub_body_heading(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:surface-xhtml-body-heading:OPS/chapter.xhtml:h1:0",
+                    translated_text="Глава ZXQPROTECTED0",
+                    block_kind="heading",
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["protected_marker_residue"],
+        )
+        self.assertEqual(result.findings[0].protected_marker_count, 1)
+        self.assertFalse(result.passed)
+
     def test_reports_mixed_cyrillic_all_caps_title_residue_for_nav_headings(self):
         result = audit_book_mode_output(
             chunks=(
@@ -480,8 +583,7 @@ class BookModeOutputAuditTest(unittest.TestCase):
                     block_kind="plain",
                     translated_text=(
                         "https://example.com/v1/items ORD-2026-05 API_TOKEN "
-                        "ZXQPROTECTED0QXZ `print(\"Hello World\")` "
-                        "Winston Churchill and OpenAI."
+                        "`print(\"Hello World\")` Winston Churchill and OpenAI."
                     ),
                 ),
             ),

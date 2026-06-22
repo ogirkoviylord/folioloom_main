@@ -784,6 +784,12 @@ def _final_epub_book_mode_surface_gate(
         chunks=extract_epub_book_mode_audit_chunks(content),
         target_language=job.target_language,
     )
+    protected_marker_blocking_findings = [
+        finding
+        for finding in result.findings
+        if finding.code == "protected_marker_residue"
+        and finding.category == "protected_text"
+    ]
     navigation_blocking_findings = [
         finding
         for finding in result.findings
@@ -796,14 +802,21 @@ def _final_epub_book_mode_surface_gate(
         if finding.code == "gutenberg_legal_backmatter_residue"
         and finding.category == "legal_backmatter"
     ]
-    blocking_findings = legal_backmatter_blocking_findings
-    reason = "gutenberg_legal_backmatter_residue"
+    blocking_findings = (
+        protected_marker_blocking_findings + legal_backmatter_blocking_findings
+    )
+    reason = (
+        "protected_marker_residue"
+        if protected_marker_blocking_findings
+        else "gutenberg_legal_backmatter_residue"
+    )
     if (
         len(navigation_blocking_findings)
         >= _FINAL_EPUB_NAVIGATION_RESIDUE_THRESHOLD
     ):
         blocking_findings = navigation_blocking_findings + blocking_findings
-        reason = "english_navigation_heading_residue"
+        if not protected_marker_blocking_findings:
+            reason = "english_navigation_heading_residue"
     if not blocking_findings:
         return None
 

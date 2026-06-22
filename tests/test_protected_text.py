@@ -1,6 +1,11 @@
 import unittest
 
-from translator_service.protected_text import protect_text, restore_protected_text
+from translator_service.protected_text import (
+    count_protected_marker_residues,
+    mask_protected_marker_residues,
+    protect_text,
+    restore_protected_text,
+)
 
 
 class ProtectedTextTest(unittest.TestCase):
@@ -183,6 +188,34 @@ class ProtectedTextTest(unittest.TestCase):
 
         self.assertIn("BOOK", protected.replacements.values())
         self.assertIn("ONE", protected.replacements.values())
+
+    def test_restore_repairs_hyphenated_protected_marker_variant(self):
+        restored = restore_protected_text(
+            "Название ZXQ-PROTECTED-0-QXZ",
+            {"ZXQPROTECTED0QXZ": "API_TOKEN"},
+        )
+
+        self.assertEqual(restored, "Название API_TOKEN")
+        self.assertNotIn("ZXQ", restored)
+
+    def test_counts_exact_mutated_and_truncated_protected_marker_residue(self):
+        cases = (
+            "ZXQPROTECTED0QXZ",
+            "ZXQ-PROTECTED-0-QXZ",
+            "Заголовок ZXQPROTECTED0",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                self.assertEqual(count_protected_marker_residues(text), 1)
+
+        self.assertEqual(count_protected_marker_residues("Защищенный текст"), 0)
+
+    def test_masks_same_protected_marker_residue_variants_as_counter(self):
+        text = "ZXQPROTECTED0QXZ ZXQ PROTECTED 1 QXZ Заголовок ZXQ–PROTECTED–2"
+
+        self.assertEqual(count_protected_marker_residues(text), 3)
+        self.assertEqual(mask_protected_marker_residues(text), "    Заголовок  ")
 
 
 if __name__ == "__main__":
