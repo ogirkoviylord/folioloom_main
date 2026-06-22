@@ -14,6 +14,7 @@ from zipfile import BadZipFile, ZipFile
 
 from translator_service.book_mode_output_audit import (
     has_english_navigation_heading_residue,
+    has_gutenberg_legal_backmatter_residue,
 )
 from translator_service.extractors import (
     TextExtractionError,
@@ -2198,16 +2199,30 @@ def _retry_untranslated_source_residue_texts(
         return translated_texts
 
     retry_texts = list(translated_texts)
+    legal_retry_calls = 0
     for index, (source, translated, protected) in enumerate(
         zip(source_texts, retry_texts, protected_texts, strict=True)
     ):
-        if not _has_untranslated_source_language_residue(
+        needs_residue_retry = _has_untranslated_source_language_residue(
             source_text=source,
             translated_text=translated,
             source_language=source_language,
             target_language=target_language,
-        ):
+        )
+        needs_legal_retry = (
+            not needs_residue_retry
+            and legal_retry_calls < _EPUB_SURFACE_RESIDUE_RETRY_MAX_CALLS
+            and has_gutenberg_legal_backmatter_residue(
+                translated_text=translated,
+                target_language=target_language,
+                block_id="epub:surface-pre-final:legal-backmatter",
+                block_kind="plain",
+            )
+        )
+        if not needs_residue_retry and not needs_legal_retry:
             continue
+        if needs_legal_retry:
+            legal_retry_calls += 1
 
         retried = restore_protected_text(
             _clean_translated_text(
