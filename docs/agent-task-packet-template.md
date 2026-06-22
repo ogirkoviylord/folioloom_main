@@ -57,7 +57,7 @@ that `DOCUMENT_INDEX.md` plus `rg` is not enough.
 Status: Draft / Ready / Blocked / Complete
 Created: YYYY-MM-DD
 Owner: GPT-Orchestrator
-Target model/agent: Codex / DeepSeek-Critic / GLM-Worker / MiniMax-UX / TBD
+Target model/agent: Codex / DeepSeek-Critic / MiMo-Critic / DeepSeek-Reviewer / MiMo-Reviewer / GLM-Worker / MiniMax-UX / TBD
 Hermes card / issue: <link or Unknown>
 
 ## Goal
@@ -110,6 +110,12 @@ One concrete outcome.
 ## Model-Specific Instructions
 - For critic/reviewer: classify findings as `owner-blocker`,
   `must-fix-for-coder`, `nice-to-have` or `ignore`.
+- For critic/reviewer: use repo-level skills as analysis modes when the packet
+  routes there. Use `architecture-review` criteria for risky or
+  cross-component architecture/provider/auth/admin/DB/runtime work. Use
+  `translation-quality-review` criteria for translation QA, glossary effects,
+  language profiles, terminology, EPUB/DOCX/TXT outputs or pipeline
+  regressions. Do not broaden into unrelated skills without packet evidence.
 - For implementation worker: do not expand scope; return changed files, tests,
   residual risk and any `TBD` / `Unknown`.
 - For UX/product reviewer: focus on user journey, next best action, confusing

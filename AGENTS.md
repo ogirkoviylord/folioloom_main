@@ -169,8 +169,8 @@ re-review and final PR gate instead.
   DB migration/data cleanup, payment/legal/public-policy changes, raw private
   material publication, production dependency changes, or scope expansion.
 - Council work must be explicit: GPT-Orchestrator proposal -> DeepSeek-Critic
-  critique -> GPT-Orchestrator synthesis -> owner approval if required ->
-  implementation.
+  and MiMo-Critic independent critique when MiMo is in scope ->
+  GPT-Orchestrator synthesis -> owner approval if required -> implementation.
 - For multi-model or council work, GPT-Orchestrator should prepare a bounded
   task packet using `docs/agent-task-packet-template.md`, `DOCUMENT_INDEX.md`
   and targeted `rg` searches before handing work to another model.
@@ -183,7 +183,7 @@ re-review and final PR gate instead.
 Preferred flow:
 
 1. Implementer completes the implementation card with a clear handoff.
-2. GPT-Reviewer and/or DeepSeek-Reviewer review the same worktree.
+2. GPT-Reviewer, DeepSeek-Reviewer and/or MiMo-Reviewer review the same worktree.
 3. If fixes are needed and they are inside approved scope, create a new
    `gpt-coder` follow-up card.
 4. The follow-up card uses the same worktree as the original implementation
