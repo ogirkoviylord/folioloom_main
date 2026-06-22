@@ -390,6 +390,57 @@ class TranslationRunLoggerTest(unittest.TestCase):
         self.assertNotIn("sk-bookaudit-secret", artifact_text)
         self.assertNotIn("Traceback", artifact_text)
 
+    def test_book_mode_audit_preserves_gutenberg_legal_code(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-book-audit-legal",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    translation_policy=json.dumps(
+                        {
+                            "translation_mode": "book_manuscript",
+                            "translation_mode_profile": "book-manuscript-v1",
+                        }
+                    ),
+                ),
+            )
+
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="RAW LEGAL SOURCE SENTINEL",
+                    translated_text=(
+                        "Project Gutenberg: этот раздел лицензии сообщает, что "
+                        "you may copy and distribute this ebook under the terms "
+                        "of the license agreement."
+                    ),
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    source_block_ids=(
+                        "epub:aux:surface-xhtml-legal-backmatter:OPS/chapter.xhtml:p:0",
+                    ),
+                    audit_metadata=(("surface", "xhtml_legal_backmatter"),),
+                )
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+
+        audit = snapshot["book_mode_audit"]
+        self.assertEqual(
+            audit["counts_by_code"],
+            {"gutenberg_legal_backmatter_residue": 1},
+        )
+        self.assertNotIn("other", audit["counts_by_code"])
+
     def test_records_book_mode_final_gate_metadata_without_text(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
