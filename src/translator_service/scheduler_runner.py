@@ -569,7 +569,10 @@ def assemble_due_jobs(
             )
             assembled += 1
             continue
-        if job.partial_object_key is not None and storage.exists(job.partial_object_key):
+        if (
+            job.partial_object_key is not None
+            and storage.exists(job.partial_object_key)
+        ):
             store.mark_job_assembled(job.id, partial=True)
             _finish_assembled_translation_run(
                 translation_run_log_root,
@@ -781,20 +784,34 @@ def _final_epub_book_mode_surface_gate(
         chunks=extract_epub_book_mode_audit_chunks(content),
         target_language=job.target_language,
     )
-    blocking_findings = [
+    navigation_blocking_findings = [
         finding
         for finding in result.findings
         if finding.code == "english_navigation_heading_residue"
         and finding.category == "navigation_heading"
     ]
-    if len(blocking_findings) < _FINAL_EPUB_NAVIGATION_RESIDUE_THRESHOLD:
+    legal_backmatter_blocking_findings = [
+        finding
+        for finding in result.findings
+        if finding.code == "gutenberg_legal_backmatter_residue"
+        and finding.category == "legal_backmatter"
+    ]
+    blocking_findings = legal_backmatter_blocking_findings
+    reason = "gutenberg_legal_backmatter_residue"
+    if (
+        len(navigation_blocking_findings)
+        >= _FINAL_EPUB_NAVIGATION_RESIDUE_THRESHOLD
+    ):
+        blocking_findings = navigation_blocking_findings + blocking_findings
+        reason = "english_navigation_heading_residue"
+    if not blocking_findings:
         return None
 
     return {
-        "schema_version": "book-mode-final-surface-gate-v1",
+        "schema_version": "book-mode-final-surface-gate-v2",
         "phase": "final_epub_surface_audit",
         "status": "failed",
-        "reason": "english_navigation_heading_residue",
+        "reason": reason,
         "blocking_findings": len(blocking_findings),
         "total_findings": len(result.findings),
         "counts_by_code": _audit_counts_by(result.findings, "code"),
@@ -815,10 +832,16 @@ def _audit_counts_by(findings, field_name: str) -> dict[str, int]:
 def _surface_categories(findings) -> list[str]:
     return sorted(
         {
-            _surface_category_from_chunk_id(finding.chunk_id)
+            _surface_category_from_finding(finding)
             for finding in findings
         }
     )
+
+
+def _surface_category_from_finding(finding) -> str:
+    if getattr(finding, "category", "") == "legal_backmatter":
+        return "legal_backmatter"
+    return _surface_category_from_chunk_id(finding.chunk_id)
 
 
 def _surface_category_from_chunk_id(chunk_id: str) -> str:

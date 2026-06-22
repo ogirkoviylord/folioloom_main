@@ -6,7 +6,11 @@ from pathlib import PurePosixPath
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from translator_service.book_mode_output_audit import BookModeAuditChunk
+from translator_service.book_mode_output_audit import (
+    _GUTENBERG_LEGAL_BACKMATTER_RE,
+    _LEGAL_BACKMATTER_TERMS,
+    BookModeAuditChunk,
+)
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     TextExtractionError,
@@ -1266,6 +1270,7 @@ def _collect_epub_xhtml_audit_chunks(
         title_index = 0
         navigation_index_by_local_name: dict[str, int] = {}
         heading_index = 0
+        legal_backmatter_index = 0
         seen_element_ids: set[int] = set()
         document_language_metadata = _element_language_metadata(document)
         for element in document.iter():
@@ -1333,6 +1338,40 @@ def _collect_epub_xhtml_audit_chunks(
                     )
                 )
                 heading_index += 1
+                continue
+
+            text = _visible_text(element)
+            if (
+                _is_epub_text_element(element)
+                and _is_epub_gutenberg_legal_backmatter_text(text)
+            ):
+                chunks.append(
+                    BookModeAuditChunk(
+                        block_id=epub_aux_block_id(
+                            kind="surface-xhtml-legal-backmatter",
+                            file_name=file_name,
+                            local_name=local_name,
+                            index=legal_backmatter_index,
+                        ),
+                        translated_text=text,
+                        block_kind="plain",
+                        metadata=(("surface", "xhtml_legal_backmatter"),),
+                    )
+                )
+                legal_backmatter_index += 1
+                continue
+
+
+def _is_epub_gutenberg_legal_backmatter_text(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    if not _GUTENBERG_LEGAL_BACKMATTER_RE.search(normalized):
+        return False
+    return any(
+        re.search(rf"\b{re.escape(term)}\b", normalized)
+        for term in _LEGAL_BACKMATTER_TERMS
+    )
 
 
 def _element_language_metadata(

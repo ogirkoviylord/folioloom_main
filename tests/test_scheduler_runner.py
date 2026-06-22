@@ -1402,6 +1402,82 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.READY)
             self.assertIsNotNone(persisted_job.final_object_key)
 
+    def test_assemble_due_jobs_blocks_final_epub_gutenberg_legal_residue(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=plan.job.id,
+                    order_id=plan.job.order_id,
+                    user_id=plan.job.user_id,
+                    file_name=plan.job.file_name,
+                    document_kind=plan.job.document_kind,
+                    source_language=plan.job.source_language,
+                    target_language=plan.job.target_language,
+                    total_fragment_count=len(plan.work_units),
+                    translation_policy=plan.job.translation_policy,
+                ),
+            )
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Глава 1",
+                    "epub:OPS/chapter.xhtml:1": (
+                        "Project Gutenberg: этот раздел лицензии сообщает, что "
+                        "you may copy and distribute this ebook under the terms "
+                        "of the license agreement."
+                    ),
+                    "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "Глава 1",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "Название книги"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "Книга I",
+                },
+            )
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                translation_run_log_root=run_log_root,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            artifact_text = "\n".join(
+                [
+                    (logger.run_dir / "run.json").read_text(encoding="utf-8"),
+                    (logger.run_dir / "events.jsonl").read_text(encoding="utf-8"),
+                    (logger.run_dir / "summary.md").read_text(encoding="utf-8"),
+                ]
+            )
+            gate = snapshot["book_mode_audit"]["final_surface_gate"]
+
+            self.assertEqual(assembled, 1)
+            if persisted_job is None:
+                self.fail("expected persisted job")
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.FAILED,
+            )
+            self.assertEqual(gate["reason"], "gutenberg_legal_backmatter_residue")
+            self.assertEqual(gate["blocking_findings"], 1)
+            self.assertIn("legal_backmatter", gate["surface_categories"])
+            self.assertNotIn("copy and distribute", artifact_text)
+
     def test_assemble_due_jobs_blocks_final_epub_mixed_nav_residue(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1477,6 +1553,84 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertIn("xhtml_body_heading", gate["surface_categories"])
             self.assertNotIn("Modern Pilgrims", artifact_text)
             self.assertNotIn("SIGNS AND WONDERS", artifact_text)
+
+    def test_assemble_due_jobs_prioritizes_nav_with_combined_legal_residue(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=plan.job.id,
+                    order_id=plan.job.order_id,
+                    user_id=plan.job.user_id,
+                    file_name=plan.job.file_name,
+                    document_kind=plan.job.document_kind,
+                    source_language=plan.job.source_language,
+                    target_language=plan.job.target_language,
+                    total_fragment_count=len(plan.work_units),
+                    translation_policy=plan.job.translation_policy,
+                ),
+            )
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Глава: Modern Pilgrims",
+                    "epub:OPS/chapter.xhtml:1": (
+                        "Project Gutenberg: этот раздел лицензии сообщает, что "
+                        "you may copy and distribute this ebook under the terms "
+                        "of the license agreement."
+                    ),
+                    "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "Раздел SIGNS AND WONDERS",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "Название книги"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": (
+                        "Глава Modern Pilgrims"
+                    ),
+                },
+            )
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                translation_run_log_root=run_log_root,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            self.assertIsNotNone(persisted_job)
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            gate = snapshot["book_mode_audit"]["final_surface_gate"]
+
+            self.assertEqual(assembled, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.FAILED,
+            )
+            self.assertEqual(gate["reason"], "english_navigation_heading_residue")
+            self.assertGreaterEqual(gate["blocking_findings"], 3)
+            self.assertEqual(
+                gate["counts_by_code"]["gutenberg_legal_backmatter_residue"],
+                1,
+            )
+            self.assertGreaterEqual(
+                gate["counts_by_code"]["english_navigation_heading_residue"],
+                2,
+            )
+            self.assertIn("legal_backmatter", gate["surface_categories"])
+            self.assertIn("xhtml_navigation", gate["surface_categories"])
 
     def test_assemble_due_jobs_keeps_clean_book_mode_epub_ready(self):
         with TemporaryDirectory() as temp_dir:
@@ -2709,7 +2863,7 @@ class SchedulerRunnerTest(unittest.TestCase):
                 "[uk] First paragraph",
             )
 
-    def test_assemble_due_jobs_reassembles_when_attached_partial_object_is_missing(self):
+    def test_assemble_due_jobs_reassembles_when_attached_partial_object_is_missing(self):  # noqa: E501
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
             original = storage.put_bytes(
@@ -2813,7 +2967,12 @@ class SchedulerRunnerTest(unittest.TestCase):
 
             persisted_job = store.get_job(job.id)
             self.assertEqual(assembled, 1)
-            self.assertEqual(persisted_job.status, PersistentTranslationJobStatus.PARTIAL)
+            if persisted_job is None:
+                self.fail("expected persisted job")
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.PARTIAL,
+            )
             self.assertEqual(persisted_job.partial_object_key, partial.object_key)
             self.assertTrue(storage.exists(partial.object_key))
             self.assertEqual(
