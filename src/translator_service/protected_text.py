@@ -97,7 +97,10 @@ _PROTECTED_PATTERNS = [
         r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:\s*'
         r'(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|null)'
     ),
-    re.compile(r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:\s*"[A-Z][A-Za-z]*(?:[ -][A-Z][A-Za-z]*)*"'),
+    re.compile(
+        r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:\s*'
+        r'"[A-Z][A-Za-z]*(?:[ -][A-Z][A-Za-z]*)*"'
+    ),
     re.compile(r'"[A-Za-z_][A-Za-z0-9_-]*"\s*:'),
     re.compile(r':\s*"[A-Z][A-Za-z]*(?:[ -][A-Z][A-Za-z]*)*"'),
     re.compile(r"(?m)^[ \t]*[A-Za-z_][A-Za-z0-9_-]*\s*:"),
@@ -118,6 +121,42 @@ _PROTECTED_TERMS = (
     "merge cells",
     "section breaks",
     "inline_code",
+)
+_PROTECTED_MARKER_SEPARATOR = r"[\s\-\u00ad\u2010-\u2015]*"
+_PROTECTED_MARKER_RESIDUE_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"Z"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"X"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"Q"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"P"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"R"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"O"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"T"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"E"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"C"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"T"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"E"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"D"
+    rf"{_PROTECTED_MARKER_SEPARATOR}"
+    r"\d*"
+    rf"(?:{_PROTECTED_MARKER_SEPARATOR}Q"
+    rf"(?:{_PROTECTED_MARKER_SEPARATOR}X"
+    rf"(?:{_PROTECTED_MARKER_SEPARATOR}Z)?"
+    r")?"
+    r")?"
+    r"(?![A-Za-z0-9])",
+    flags=re.IGNORECASE,
 )
 
 
@@ -153,7 +192,20 @@ def restore_protected_text(text: str, replacements: dict[str, str]) -> str:
     restored = text
     for marker, original in replacements.items():
         restored = restored.replace(marker, original)
+        restored = _protected_marker_variant_pattern(marker).sub(original, restored)
     return restored
+
+
+def count_protected_marker_residues(text: str) -> int:
+    return len(_PROTECTED_MARKER_RESIDUE_RE.findall(text))
+
+
+def _protected_marker_variant_pattern(marker: str) -> re.Pattern[str]:
+    pattern = _PROTECTED_MARKER_SEPARATOR.join(re.escape(char) for char in marker)
+    return re.compile(
+        rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])",
+        flags=re.IGNORECASE,
+    )
 
 
 def _collect_non_overlapping_matches(

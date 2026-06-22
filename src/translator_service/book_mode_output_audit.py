@@ -4,6 +4,8 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from translator_service.protected_text import count_protected_marker_residues
+
 
 @dataclass(frozen=True)
 class BookModeAuditChunk:
@@ -310,6 +312,22 @@ def audit_book_mode_output(
                 )
             )
 
+        if stats.protected_marker_count:
+            findings.append(
+                _finding(
+                    code="protected_marker_residue",
+                    message=(
+                        "Internal protected-text marker residue remains in "
+                        "book-mode output."
+                    ),
+                    target_root=target_root,
+                    chunk=chunk,
+                    category="protected_text",
+                    stats=stats,
+                    severity="error",
+                )
+            )
+
         if is_navigation_or_heading and _has_heading_navigation_residue(stats):
             findings.append(
                 _finding(
@@ -444,7 +462,7 @@ def _chunk_language_stats(
     expected_latin_terms: tuple[str, ...],
     allow_intentional_latin_foreign_titles: bool = False,
 ) -> _ChunkLanguageStats:
-    protected_marker_count = len(_PROTECTED_MARKER_RE.findall(text))
+    protected_marker_count = count_protected_marker_residues(text)
     masked = _mask_non_residue_text(
         text,
         expected_latin_terms=expected_latin_terms,
