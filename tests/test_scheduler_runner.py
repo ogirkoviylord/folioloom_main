@@ -1322,6 +1322,102 @@ class SchedulerRunnerTest(unittest.TestCase):
             self.assertNotIn("Original Book Title", artifact_text)
             self.assertNotIn("Chapter 1", artifact_text)
             self.assertNotIn("Book I", artifact_text)
+
+    def test_assemble_due_jobs_blocks_final_epub_protected_marker_residue(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root / "objects")
+            run_log_root = root / "translation-runs"
+            store = SQLiteTranslationJobStore(":memory:")
+            self.addCleanup(store.close)
+            plan = _create_epub_surface_audit_job_plan(
+                store=store,
+                storage=storage,
+                target_language="ru",
+            )
+            logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=plan.job.id,
+                    order_id=plan.job.order_id,
+                    user_id=plan.job.user_id,
+                    file_name=plan.job.file_name,
+                    document_kind=plan.job.document_kind,
+                    source_language=plan.job.source_language,
+                    target_language=plan.job.target_language,
+                    total_fragment_count=len(plan.work_units),
+                    translation_policy=plan.job.translation_policy,
+                ),
+            )
+            guard = RecordingBetaSafetyGuard(allowed=True)
+
+            _complete_scheduled_units_by_block_id(
+                store,
+                plan.job.id,
+                {
+                    "epub:OPS/chapter.xhtml:0": "Глава ZXQPROTECTED0",
+                    "epub:OPS/chapter.xhtml:1": "Переведенный абзац.",
+                    "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:0": "Название книги",
+                    "epub:aux:ncx:OPS/toc.ncx:text:1": "ZXQ-PROTECTED-0-QXZ",
+                    "epub:aux:xhtml-title:OPS/chapter.xhtml:title:0": (
+                        "ZXQPROTECTED0QXZ"
+                    ),
+                    "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0": "Книга I",
+                },
+            )
+
+            assembled = assemble_due_jobs(
+                store=store,
+                storage=storage,
+                beta_safety_guard=guard,
+                translation_run_log_root=run_log_root,
+            )
+
+            persisted_job = store.get_job(plan.job.id)
+            if persisted_job is None:
+                self.fail("expected persisted job")
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            events_jsonl = (logger.run_dir / "events.jsonl").read_text()
+            artifact_text = "\n".join(
+                [
+                    (logger.run_dir / "run.json").read_text(encoding="utf-8"),
+                    events_jsonl,
+                    (logger.run_dir / "summary.md").read_text(encoding="utf-8"),
+                ]
+            )
+            gate = snapshot["book_mode_audit"]["final_surface_gate"]
+
+            self.assertEqual(assembled, 1)
+            self.assertEqual(
+                persisted_job.status,
+                PersistentTranslationJobStatus.FAILED,
+            )
+            self.assertIsNone(persisted_job.final_object_key)
+            self.assertIsNone(persisted_job.partial_object_key)
+            self.assertEqual(snapshot["status"], "failed")
+            self.assertEqual(
+                snapshot["error_message"],
+                "Final EPUB surface audit failed safely.",
+            )
+            self.assertEqual(gate["reason"], "protected_marker_residue")
+            self.assertEqual(gate["phase"], "final_epub_surface_audit")
+            self.assertGreaterEqual(gate["blocking_findings"], 3)
+            self.assertEqual(gate["counts_by_code"]["protected_marker_residue"], 3)
+            self.assertEqual(gate["counts_by_category"]["protected_text"], 3)
+            self.assertIn("xhtml_title", gate["surface_categories"])
+            self.assertIn("toc_ncx", gate["surface_categories"])
+            self.assertIn("xhtml_body_heading", gate["surface_categories"])
+            self.assertIn("book_mode_audit_gate_failed", events_jsonl)
+            self.assertIn("run_failed", events_jsonl)
+            self.assertEqual(
+                guard.released_jobs,
+                [(plan.job.id, "final_epub_surface_audit_failed")],
+            )
+            self.assertEqual(guard.consumed_jobs, [])
+            self.assertNotIn("ZXQPROTECTED0QXZ", artifact_text)
+            self.assertNotIn("ZXQ-PROTECTED-0-QXZ", artifact_text)
+            self.assertNotIn("ZXQPROTECTED0", artifact_text)
             self.assertNotIn("Переведенный абзац", artifact_text)
 
     def test_assemble_due_jobs_does_not_block_final_epub_on_navigation_url_noise(self):
