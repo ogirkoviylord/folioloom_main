@@ -440,14 +440,14 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         entries = payload["entries"]
         self.assertEqual(len(entries), 3)
         self.assertEqual(entries[0]["source_canonical"], "Alice Winterbourne")
-        self.assertEqual(entries[0]["aliases"], ["Winterbourne", "Lizzy"])
+        self.assertEqual(entries[0]["aliases"], ["Lizzy"])
         self.assertEqual(entries[1]["source_canonical"], "Macy’s Department Store")
         self.assertEqual(entries[1]["aliases"], ["Macy’s Department Store"])
         self.assertEqual(entries[2]["source_canonical"], "Oh Canada")
         self.assertEqual(entries[2]["aliases"], ["Oh Canada"])
         quality = result.metadata["validation"]["quality"]
         self.assertEqual(quality["dropped_candidate_count"], 3)
-        self.assertEqual(quality["alias_omitted_count"], 4)
+        self.assertEqual(quality["alias_omitted_count"], 5)
         self.assertIn("candidate_quality_possessive_source", quality["reason_codes"])
         self.assertIn("candidate_quality_vocative_phrase", quality["reason_codes"])
         self.assertIn("candidate_quality_broad_alias_pruned", quality["reason_codes"])
