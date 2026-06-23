@@ -270,6 +270,16 @@ class ContentRoleAnnotationContractTest(unittest.TestCase):
             ("metadata_value_kind", "prompt"),
             ("reason_code", "RAW PROVIDER body"),
             ("reason_code", "Project Gutenberg excerpt"),
+            ("reason_code", "contains secret"),
+            ("reason_code", "api key material"),
+            ("reason_code", "raw prompt excerpt"),
+            ("reason_code", "source excerpt sample"),
+            ("reason_code", "translation excerpt sample"),
+            ("reason_code", "api-key material"),
+            ("reason_code", "apikey material"),
+            ("reason_code", "contains-secret"),
+            ("reason_code", "secret material"),
+            ("reason_code", "prompt excerpt"),
         ):
             with self.subTest(field_name=field_name, value=value):
                 evidence_kwargs = {
