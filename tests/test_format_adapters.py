@@ -266,6 +266,26 @@ class EpubFormatAdapterTest(unittest.TestCase):
             "epub_xhtml_navigation_auxiliary_block,xhtml_navigation_aux_kind"
         ),
     }
+    _EXPECTED_XHTML_TITLE_CONTENT_ROLE_METADATA = {
+        "content_role.schema_version": "content-role-annotation-v1",
+        "content_role.source_surface": "epub_xhtml_title",
+        "content_role.source_granularity": "block",
+        "content_role.role": "title_heading",
+        "content_role.confidence": "medium",
+        "content_role.reporting_bucket": "reader_visible",
+        "content_role.allowed_action_envelope": (
+            "shadow_report_translate_include"
+        ),
+        "content_role.behavior_allowed": "false",
+        "content_role.raw_publication_allowed": "false",
+        "content_role.risk_approval_flags": "all_false",
+        "content_role.evidence_signal_families": (
+            "path_class_id,structural_semantic"
+        ),
+        "content_role.evidence_reason_codes": (
+            "epub_xhtml_title_auxiliary_block,xhtml_title_aux_kind"
+        ),
+    }
 
     def _assert_xhtml_navigation_content_role_metadata(self, blocks):
         for block in blocks:
@@ -279,6 +299,20 @@ class EpubFormatAdapterTest(unittest.TestCase):
                         if key.startswith("content_role.")
                     },
                     self._EXPECTED_XHTML_NAVIGATION_CONTENT_ROLE_METADATA,
+                )
+
+    def _assert_xhtml_title_content_role_metadata(self, blocks):
+        for block in blocks:
+            with self.subTest(source_block_id=block.source_block_id):
+                metadata = dict(block.metadata)
+                self.assertEqual(metadata["epub_aux_kind"], "xhtml_title")
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in metadata.items()
+                        if key.startswith("content_role.")
+                    },
+                    self._EXPECTED_XHTML_TITLE_CONTENT_ROLE_METADATA,
                 )
 
     def _assert_ncx_text_content_role_metadata(self, blocks):
@@ -1000,6 +1034,16 @@ class EpubFormatAdapterTest(unittest.TestCase):
         ]
         self.assertEqual(len(source_block_ids), len(set(source_block_ids)))
         self.assertNotIn("epub:aux:opf:OPS/content.opf:language:0", source_block_ids)
+        non_aux_blocks = [
+            block
+            for unit in plan.units
+            for block in unit.blocks
+            if not block.source_block_id.startswith("epub:aux:")
+        ]
+        for block in non_aux_blocks:
+            self.assertFalse(
+                any(key.startswith("content_role.") for key, _ in block.metadata)
+            )
         for block in aux_blocks:
             metadata = dict(block.metadata)
             self.assertIn(("role", "auxiliary"), block.metadata)
@@ -1012,19 +1056,30 @@ class EpubFormatAdapterTest(unittest.TestCase):
             block
             for block in aux_blocks
             if dict(block.metadata).get("epub_aux_kind")
-            not in {"ncx_text", "xhtml_navigation"}
+            not in {"ncx_text", "xhtml_navigation", "xhtml_title"}
         ]
         self.assertEqual(
             [
                 dict(block.metadata).get("epub_aux_kind")
                 for block in unannotated_aux_blocks
             ],
-            ["opf_title", "opf_description", "xhtml_title"],
+            ["opf_title", "opf_description"],
         )
         for block in unannotated_aux_blocks:
             self.assertFalse(
                 any(key.startswith("content_role.") for key, _ in block.metadata)
             )
+
+        xhtml_title_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") == "xhtml_title"
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in xhtml_title_blocks],
+            ["epub:aux:xhtml-title:OPS/chapter.xhtml:title:0"],
+        )
+        self._assert_xhtml_title_content_role_metadata(xhtml_title_blocks)
 
         ncx_blocks = [
             block
@@ -1055,6 +1110,109 @@ class EpubFormatAdapterTest(unittest.TestCase):
         self.assertEqual(navigation_metadata["file_name"], "OPS/nav.xhtml")
         self.assertEqual(navigation_metadata["local_name"], "a")
         self.assertEqual(navigation_metadata["aux_index"], "0")
+
+    def test_plans_epub_xhtml_title_metadata_for_multiple_files(self):
+        plan = plan_epub_translation(
+            content=_make_epub(
+                {
+                    "OPS/chapter1.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <head><title>Chapter One Metadata Title</title></head>
+                      <body><p>First paragraph.</p></body>
+                    </html>
+                    """,
+                    "OPS/chapter2.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <head><title>Chapter Two Metadata Title</title></head>
+                      <body><p>Second paragraph.</p></body>
+                    </html>
+                    """,
+                }
+            ),
+            max_fragment_chars=100,
+        )
+
+        xhtml_title_blocks = [
+            block
+            for unit in plan.units
+            for block in unit.blocks
+            if dict(block.metadata).get("epub_aux_kind") == "xhtml_title"
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in xhtml_title_blocks],
+            [
+                "epub:aux:xhtml-title:OPS/chapter1.xhtml:title:0",
+                "epub:aux:xhtml-title:OPS/chapter2.xhtml:title:0",
+            ],
+        )
+        self.assertEqual(
+            len({block.source_block_id for block in xhtml_title_blocks}),
+            2,
+        )
+        self._assert_xhtml_title_content_role_metadata(xhtml_title_blocks)
+        self.assertEqual(
+            [
+                {
+                    key: metadata[key]
+                    for key in ("role", "file_name", "local_name", "aux_index")
+                }
+                for metadata in (dict(block.metadata) for block in xhtml_title_blocks)
+            ],
+            [
+                {
+                    "role": "auxiliary",
+                    "file_name": "OPS/chapter1.xhtml",
+                    "local_name": "title",
+                    "aux_index": "0",
+                },
+                {
+                    "role": "auxiliary",
+                    "file_name": "OPS/chapter2.xhtml",
+                    "local_name": "title",
+                    "aux_index": "0",
+                },
+            ],
+        )
+
+    def test_skips_empty_epub_xhtml_head_titles(self):
+        plan = plan_epub_translation(
+            content=_make_epub(
+                {
+                    "OPS/empty-title.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <head><title></title></head>
+                      <body><p>First paragraph.</p></body>
+                    </html>
+                    """,
+                    "OPS/whitespace-title.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <head><title>   </title></head>
+                      <body><p>Second paragraph.</p></body>
+                    </html>
+                    """,
+                }
+            ),
+            max_fragment_chars=100,
+        )
+
+        source_block_ids = [
+            block.source_block_id
+            for unit in plan.units
+            for block in unit.blocks
+        ]
+        self.assertFalse(
+            any(
+                source_block_id.startswith("epub:aux:xhtml-title:")
+                for source_block_id in source_block_ids
+            )
+        )
+        self.assertFalse(
+            any(
+                dict(block.metadata).get("epub_aux_kind") == "xhtml_title"
+                for unit in plan.units
+                for block in unit.blocks
+            )
+        )
 
     def test_plans_nested_epub_navigation_anchor_labels(self):
         plan = plan_epub_translation(
