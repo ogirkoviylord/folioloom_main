@@ -936,6 +936,50 @@ class EpubFormatAdapterTest(unittest.TestCase):
             self.assertIn(("local_name", metadata["local_name"]), block.metadata)
             self.assertIn(("aux_index", metadata["aux_index"]), block.metadata)
 
+        non_navigation_aux_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") != "xhtml_navigation"
+        ]
+        for block in non_navigation_aux_blocks:
+            self.assertFalse(
+                any(key.startswith("content_role.") for key, _ in block.metadata)
+            )
+
+        navigation_metadata = dict(aux_blocks[-1].metadata)
+        self.assertEqual(navigation_metadata["epub_aux_kind"], "xhtml_navigation")
+        self.assertEqual(
+            {
+                key: value
+                for key, value in navigation_metadata.items()
+                if key.startswith("content_role.")
+            },
+            {
+                "content_role.schema_version": "content-role-annotation-v1",
+                "content_role.source_surface": "epub_xhtml_nav",
+                "content_role.source_granularity": "block",
+                "content_role.role": "reader_navigation",
+                "content_role.confidence": "high",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.allowed_action_envelope": (
+                    "shadow_report_translate_include"
+                ),
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+                "content_role.risk_approval_flags": "all_false",
+                "content_role.evidence_signal_families": (
+                    "path_class_id,structural_semantic"
+                ),
+                "content_role.evidence_reason_codes": (
+                    "epub_xhtml_navigation_auxiliary_block,xhtml_navigation_aux_kind"
+                ),
+            },
+        )
+        self.assertEqual(navigation_metadata["role"], "auxiliary")
+        self.assertEqual(navigation_metadata["file_name"], "OPS/nav.xhtml")
+        self.assertEqual(navigation_metadata["local_name"], "a")
+        self.assertEqual(navigation_metadata["aux_index"], "0")
+
     def test_plans_nested_epub_navigation_anchor_labels(self):
         plan = plan_epub_translation(
             content=_make_epub(
