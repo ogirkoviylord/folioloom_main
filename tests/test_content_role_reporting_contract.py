@@ -7,6 +7,8 @@ from translator_service.content_roles import (
     ContentRoleEvidence,
     SourceLocator,
     TokenPreservationMetadata,
+    build_content_role_shadow_report,
+    content_role_shadow_report_payload,
     report_bucket_metadata,
     reporting_bucket_for_annotation,
 )
@@ -128,6 +130,79 @@ class ContentRoleReportingContractTest(unittest.TestCase):
                 reporting_bucket="publisher_metadata_shadow",
                 token_preservation=TokenPreservationMetadata(token_kinds=("isbn",)),
             )
+
+    def test_shadow_report_aggregates_only_safe_content_role_metadata(self):
+        report = build_content_role_shadow_report(
+            (
+                {
+                    "content_role.source_surface": "epub_xhtml_nav",
+                    "content_role.source_granularity": "block",
+                    "content_role.role": "reader_navigation",
+                    "content_role.confidence": "high",
+                    "content_role.reporting_bucket": "reader_visible",
+                    "content_role.behavior_allowed": "false",
+                    "content_role.raw_publication_allowed": "false",
+                },
+                {
+                    "content_role.source_surface": "epub_opf_metadata",
+                    "content_role.source_granularity": "block",
+                    "content_role.role": "publisher_metadata",
+                    "content_role.confidence": "medium",
+                    "content_role.reporting_bucket": "publisher_metadata_shadow",
+                    "content_role.behavior_allowed": "false",
+                    "content_role.raw_publication_allowed": "false",
+                    "raw_source": "PRIVATE_SOURCE_SENTINEL",
+                },
+                {"unrelated": "metadata"},
+            )
+        )
+        payload = content_role_shadow_report_payload(report)
+        serialized = str(payload).lower()
+
+        self.assertEqual(payload["schema_version"], "content-role-shadow-report-v1")
+        self.assertTrue(payload["metadata_only"])
+        self.assertFalse(payload["behavior_allowed"])
+        self.assertFalse(payload["raw_publication_allowed"])
+        self.assertEqual(payload["annotated_block_count"], 2)
+        self.assertEqual(
+            payload["bucket_counts"],
+            {"publisher_metadata_shadow": 1, "reader_visible": 1},
+        )
+        self.assertEqual(payload["confidence_counts"], {"high": 1, "medium": 1})
+        self.assertEqual(
+            payload["source_surface_counts"],
+            {"epub_opf_metadata": 1, "epub_xhtml_nav": 1},
+        )
+        self.assertEqual(payload["unknown_annotation_count"], 0)
+        self.assertEqual(payload["conflicting_safety_flag_count"], 0)
+        self.assertNotIn("private_source_sentinel", serialized)
+        self.assertNotIn("raw_source", serialized)
+
+    def test_shadow_report_counts_unknown_and_conflicts_without_raw_values(self):
+        report = build_content_role_shadow_report(
+            (
+                (
+                    ("content_role.source_surface", "unknown"),
+                    ("content_role.source_granularity", "block"),
+                    ("content_role.role", "unknown_paratext"),
+                    ("content_role.confidence", "unknown"),
+                    ("content_role.reporting_bucket", "unknown_shadow"),
+                    ("content_role.behavior_allowed", "true"),
+                    ("content_role.raw_publication_allowed", "true"),
+                    ("content_role.evidence_reason_codes", "raw source excerpt here"),
+                ),
+            )
+        )
+        payload = content_role_shadow_report_payload(report)
+        serialized = str(payload).lower()
+
+        self.assertEqual(payload["annotated_block_count"], 1)
+        self.assertEqual(payload["unknown_annotation_count"], 1)
+        self.assertEqual(payload["conflicting_safety_flag_count"], 1)
+        self.assertEqual(payload["bucket_counts"], {"unknown_shadow": 1})
+        self.assertEqual(payload["confidence_counts"], {"unknown": 1})
+        self.assertNotIn("raw source excerpt", serialized)
+        self.assertNotIn("evidence_reason_codes", serialized)
 
 
 if __name__ == "__main__":
