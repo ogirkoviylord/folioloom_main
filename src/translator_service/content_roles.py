@@ -155,6 +155,12 @@ REQUIRED_TEXT_SNIPPET_POLICY_FIELDS = (
     "max_synthetic_chars_if_needed",
     "publication_rule",
 )
+REQUIRED_EVIDENCE_METADATA_FIELDS = (
+    "signal_family",
+    "strength",
+    "metadata_value_kind",
+    "reason_code",
+)
 
 BEHAVIOR_RISK_APPROVAL_FLAGS = (
     "output_behavior_change_approved",
@@ -388,6 +394,41 @@ class ContentRoleEvidence:
             "metadata_value_kind": self.metadata_value_kind,
             "reason_code": self.reason_code,
         }
+
+
+def source_locator_from_metadata(metadata: Mapping[str, Any]) -> SourceLocator:
+    """Build a metadata-only SourceLocator from adapter-neutral fixture fields."""
+
+    missing = [
+        field for field in REQUIRED_SOURCE_STRUCTURE_FIELDS if field not in metadata
+    ]
+    if missing:
+        raise ValueError(f"missing source locator fields: {', '.join(missing)}")
+    return SourceLocator(
+        surface=str(metadata["surface"]),
+        source_path_or_chunk_id=str(metadata["source_path_or_chunk_id"]),
+        granularity=str(metadata["granularity"]),
+        structure_hints=_as_tuple(metadata["structure_hints"]),
+        position_hint=str(metadata["position_hint"]),
+    )
+
+
+def content_role_evidence_from_metadata(
+    metadata: Mapping[str, Any],
+) -> ContentRoleEvidence:
+    """Build one metadata-only evidence signal from deterministic fixture fields."""
+
+    missing = [
+        field for field in REQUIRED_EVIDENCE_METADATA_FIELDS if field not in metadata
+    ]
+    if missing:
+        raise ValueError(f"missing content-role evidence fields: {', '.join(missing)}")
+    return ContentRoleEvidence(
+        signal_family=str(metadata["signal_family"]),
+        strength=str(metadata["strength"]),
+        metadata_value_kind=str(metadata["metadata_value_kind"]),
+        reason_code=str(metadata["reason_code"]),
+    )
 
 
 @dataclass(frozen=True)
