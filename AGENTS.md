@@ -74,6 +74,34 @@ provider configuration, adding new provider-spend scripts, operating Telegram
 or servers, deploying, changing runtime/cache behavior, externalizing raw
 material or making release/quality/legal/public claims.
 
+## Translation QA Agent Guidance
+
+For translation QA over FolioLoom outputs, diagnostics and owner-provided
+before/after runs:
+
+- Use `content_role.*` metadata and content-role shadow report diagnostics as
+  evidence for classification, prioritization and uncertainty only. They are
+  not behavior authority, scoring policy, pass/fail gate authority or permission
+  to skip/alter output content.
+- When the owner provides comparable before/after runs, compare them safely at
+  the smallest useful metadata/output level and keep conclusions evidence-bound:
+  confirmed, assumption, `Unknown` or `TBD`.
+- Keep suspicious legal/archive/publisher boilerplate translated and included by
+  default. Do not remove, preserve untranslated, down-rank, suppress or classify
+  it as non-user content unless a later owner-approved behavior policy explicitly
+  changes that rule.
+- Never publish raw source text, translations, prompts, provider bodies, secrets,
+  private diagnostic excerpts, private/local paths or long copyrighted excerpts
+  in GitHub issues/PRs, committed docs, release artifacts, public/support
+  surfaces or external tools.
+- Distinguish local synthetic fixture/test work from owner-gated full-book,
+  provider, Telegram, server or release-quality runs. Synthetic/local metadata
+  evidence does not prove full-book translation quality, release readiness or
+  production behavior.
+- Route behavior changes, scoring/profile changes, gate/pass-fail policy and
+  content-role authority decisions to the Slice H owner decision path. Do not
+  smuggle those decisions into QA docs, tests or implementation tasks.
+
 ## Context Routing
 
 Read the smallest useful context set. Do not load large history files by default.
