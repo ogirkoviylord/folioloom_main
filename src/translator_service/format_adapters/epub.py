@@ -1082,6 +1082,15 @@ def _collect_epub_opf_auxiliary_blocks(
                     index=index,
                 )
             )
+        elif local_name == "description":
+            extra_metadata = _epub_opf_description_content_role_metadata(
+                source_block_id=epub_aux_block_id(
+                    kind="opf",
+                    file_name=opf_path,
+                    local_name=local_name,
+                    index=index,
+                )
+            )
         blocks.append(
             _epub_auxiliary_text_block(
                 block_index=len(blocks),
@@ -1696,6 +1705,43 @@ def _epub_opf_title_content_role_metadata(
             ),
             reporting_bucket=reporting_bucket_for_annotation(
                 role="title_heading",
+                granularity="block",
+            ),
+        )
+    )
+
+
+def _epub_opf_description_content_role_metadata(
+    *,
+    source_block_id: str,
+) -> tuple[tuple[str, str], ...]:
+    return content_role_metadata_pairs(
+        ContentRoleAnnotation(
+            locator=SourceLocator(
+                surface="epub_opf_metadata",
+                source_path_or_chunk_id=source_block_id,
+                granularity="block",
+                structure_hints=("opf-metadata", "dc-description"),
+                position_hint="auxiliary",
+            ),
+            role="publisher_metadata",
+            confidence="medium",
+            evidence=(
+                ContentRoleEvidence(
+                    signal_family="structural_semantic",
+                    strength="medium",
+                    metadata_value_kind="opf_description_element",
+                    reason_code="epub_opf_description_auxiliary_block",
+                ),
+                ContentRoleEvidence(
+                    signal_family="path_class_id",
+                    strength="medium",
+                    metadata_value_kind="epub_aux_kind",
+                    reason_code="opf_description_aux_kind",
+                ),
+            ),
+            reporting_bucket=reporting_bucket_for_annotation(
+                role="publisher_metadata",
                 granularity="block",
             ),
         )

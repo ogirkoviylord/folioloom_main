@@ -49,6 +49,14 @@ class TxtFormatAdapterTest(unittest.TestCase):
         self.assertEqual(plan.units[0].blocks[0].metadata[0], ("txt_kind", "heading"))
         self.assertEqual(plan.units[1].blocks[0].metadata[0], ("txt_kind", "list"))
         self.assertEqual(plan.units[2].blocks[0].metadata[0], ("txt_kind", "prose"))
+        self.assertFalse(
+            any(
+                key.startswith("content_role.")
+                for unit in plan.units
+                for block in unit.blocks
+                for key, _ in block.metadata
+            )
+        )
 
     def test_rejects_raw_only_non_empty_txt(self):
         with self.assertRaisesRegex(
@@ -115,6 +123,14 @@ class DocxFormatAdapterTest(unittest.TestCase):
         self.assertEqual(
             [block.text for block in plan.units[0].blocks],
             ["First paragraph", "Second paragraph"],
+        )
+        self.assertFalse(
+            any(
+                key.startswith("content_role.")
+                for unit in plan.units
+                for block in unit.blocks
+                for key, _ in block.metadata
+            )
         )
 
     def test_plans_docx_table_as_strict_unit_between_plain_units(self):
@@ -306,6 +322,26 @@ class EpubFormatAdapterTest(unittest.TestCase):
             "epub_opf_title_auxiliary_block,opf_title_aux_kind"
         ),
     }
+    _EXPECTED_OPF_DESCRIPTION_CONTENT_ROLE_METADATA = {
+        "content_role.schema_version": "content-role-annotation-v1",
+        "content_role.source_surface": "epub_opf_metadata",
+        "content_role.source_granularity": "block",
+        "content_role.role": "publisher_metadata",
+        "content_role.confidence": "medium",
+        "content_role.reporting_bucket": "publisher_metadata_shadow",
+        "content_role.allowed_action_envelope": (
+            "shadow_report_translate_include"
+        ),
+        "content_role.behavior_allowed": "false",
+        "content_role.raw_publication_allowed": "false",
+        "content_role.risk_approval_flags": "all_false",
+        "content_role.evidence_signal_families": (
+            "path_class_id,structural_semantic"
+        ),
+        "content_role.evidence_reason_codes": (
+            "epub_opf_description_auxiliary_block,opf_description_aux_kind"
+        ),
+    }
 
     def _assert_xhtml_navigation_content_role_metadata(self, blocks):
         for block in blocks:
@@ -361,6 +397,20 @@ class EpubFormatAdapterTest(unittest.TestCase):
                         if key.startswith("content_role.")
                     },
                     self._EXPECTED_OPF_TITLE_CONTENT_ROLE_METADATA,
+                )
+
+    def _assert_opf_description_content_role_metadata(self, blocks):
+        for block in blocks:
+            with self.subTest(source_block_id=block.source_block_id):
+                metadata = dict(block.metadata)
+                self.assertEqual(metadata["epub_aux_kind"], "opf_description")
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in metadata.items()
+                        if key.startswith("content_role.")
+                    },
+                    self._EXPECTED_OPF_DESCRIPTION_CONTENT_ROLE_METADATA,
                 )
 
     def test_epub_adapter_does_not_import_private_translation_runner_helpers(self):
@@ -1086,23 +1136,30 @@ class EpubFormatAdapterTest(unittest.TestCase):
             self.assertIn(("local_name", metadata["local_name"]), block.metadata)
             self.assertIn(("aux_index", metadata["aux_index"]), block.metadata)
 
+        opf_description_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") == "opf_description"
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in opf_description_blocks],
+            ["epub:aux:opf:OPS/content.opf:description:0"],
+        )
+        self._assert_opf_description_content_role_metadata(opf_description_blocks)
+
         unannotated_aux_blocks = [
             block
             for block in aux_blocks
             if dict(block.metadata).get("epub_aux_kind")
-            not in {"ncx_text", "xhtml_navigation", "xhtml_title", "opf_title"}
+            not in {
+                "ncx_text",
+                "xhtml_navigation",
+                "xhtml_title",
+                "opf_title",
+                "opf_description",
+            }
         ]
-        self.assertEqual(
-            [
-                dict(block.metadata).get("epub_aux_kind")
-                for block in unannotated_aux_blocks
-            ],
-            ["opf_description"],
-        )
-        for block in unannotated_aux_blocks:
-            self.assertFalse(
-                any(key.startswith("content_role.") for key, _ in block.metadata)
-            )
+        self.assertEqual(unannotated_aux_blocks, [])
 
         opf_title_blocks = [
             block
