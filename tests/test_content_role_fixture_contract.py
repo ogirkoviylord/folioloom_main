@@ -36,6 +36,40 @@ REQUIRED_POSITIVE_FIXTURE_IDS = {
     "cr-pos-archive-digitization-artifact-epub-v1",
     "cr-pos-archive-digitization-artifact-txt-v1",
     "cr-pos-publisher-metadata-separate-v1",
+    "cr-pos-publisher-token-identifier-v1",
+}
+
+REQUIRED_CORPUS_REGRESSION_CATEGORIES = {
+    "epub_aux_surfaces": {
+        "cr-neg-toc-title-legal-archive-terms-v1",
+        "cr-pos-publisher-metadata-separate-v1",
+    },
+    "reader_visible_paratext": {
+        "cr-neg-legal-discussion-preface-v1",
+        "cr-neg-editorial-transcriber-note-v1",
+        "cr-neg-scholarly-note-copyright-archive-v1",
+    },
+    "legal_archive_publisher_metadata": {
+        "cr-pos-legal-rights-boilerplate-epub-v1",
+        "cr-pos-archive-digitization-artifact-epub-v1",
+        "cr-pos-publisher-metadata-separate-v1",
+    },
+    "unknown_conflicting_paratext": {
+        "cr-neg-url-only-section-v1",
+        "cr-neg-position-only-front-back-matter-v1",
+        "cr-neg-ambiguous-mixed-paragraph-v1",
+    },
+    "token_identifiers": {
+        "cr-pos-legal-rights-boilerplate-epub-v1",
+        "cr-neg-publisher-colophon-identifiers-v1",
+        "cr-pos-publisher-metadata-separate-v1",
+        "cr-pos-publisher-token-identifier-v1",
+    },
+    "main_vs_auxiliary_distinctions": {
+        "cr-neg-archive-ocr-words-main-content-v1",
+        "cr-neg-toc-title-legal-archive-terms-v1",
+        "cr-pos-archive-digitization-artifact-epub-v1",
+    },
 }
 
 FORBIDDEN_FIELD_NAMES = {
@@ -174,9 +208,14 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                     case["schema_version"],
                     content_roles.FIXTURE_SCHEMA_VERSION,
                 )
+                expected_action_envelope = (
+                    content_roles.TOKEN_ACTION_ENVELOPE
+                    if case["reporting_bucket"] == "token_identifier"
+                    else content_roles.SECTION_BLOCK_ACTION_ENVELOPE
+                )
                 self.assertEqual(
                     case["allowed_action_envelope"],
-                    content_roles.SECTION_BLOCK_ACTION_ENVELOPE,
+                    expected_action_envelope,
                 )
                 self.assertEqual(content_roles.validate_fixture_case(case), ())
                 self.assertEqual(
@@ -202,6 +241,74 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                     case["text_snippet_policy"]["private_or_copyrighted_source_allowed"]
                 )
                 self.assertNotIn("owner_policy_tbd_later_behavior", json.dumps(case))
+
+    def test_fixture_declares_medium_corpus_regression_matrix_without_raw_text(self):
+        fixture = _load_fixture()
+        cases = _fixture_cases(fixture)
+        fixture_ids = {case["fixture_id"] for case in cases}
+
+        matrix = fixture["corpus_regression_matrix"]
+
+        self.assertEqual(matrix["schema_version"], "content-role-corpus-regression-v1")
+        self.assertEqual(matrix["issue"], "#781")
+        self.assertTrue(matrix["metadata_only"])
+        self.assertFalse(matrix["raw_publication_allowed"])
+        self.assertFalse(matrix["behavior_allowed"])
+        self.assertEqual(
+            matrix["before_slice_e_f_scope"],
+            "pre_existing_aux_blocks_may_have_no_content_role_metadata",
+        )
+        self.assertEqual(
+            matrix["after_slice_e_f_scope"],
+            "content_role_scalar_metadata_and_count_only_shadow_report",
+        )
+
+        category_by_id = {
+            category["category_id"]: category for category in matrix["categories"]
+        }
+        category_map = {
+            category_id: set(category["fixture_ids"])
+            for category_id, category in category_by_id.items()
+        }
+        self.assertEqual(set(category_map), set(REQUIRED_CORPUS_REGRESSION_CATEGORIES))
+        for category_id, required_ids in REQUIRED_CORPUS_REGRESSION_CATEGORIES.items():
+            with self.subTest(category_id=category_id):
+                self.assertTrue(required_ids <= category_map[category_id])
+                self.assertTrue(category_map[category_id] <= fixture_ids)
+                expected_buckets = category_by_id[category_id]["expected_buckets"]
+                self.assertTrue(expected_buckets)
+                self.assertTrue(
+                    set(expected_buckets) <= set(content_roles.REPORTING_BUCKETS)
+                )
+
+        token_identifier_category = category_by_id["token_identifiers"]
+        self.assertIn("token_identifier", token_identifier_category["expected_buckets"])
+        token_identifier_cases = [
+            case
+            for case in cases
+            if case["fixture_id"] in token_identifier_category["fixture_ids"]
+            and case["expected_role"] == "publisher_metadata"
+            and case["source_structure"]["granularity"] == "token"
+            and case["protected_token_expectations"]["token_kinds"]
+        ]
+        self.assertTrue(token_identifier_cases)
+        self.assertTrue(
+            any(
+                (
+                    case["reporting_bucket"] == "token_identifier"
+                    and case["allowed_action_envelope"]
+                    == content_roles.TOKEN_ACTION_ENVELOPE
+                )
+                for case in token_identifier_cases
+            )
+        )
+
+        for value in _walk_values(matrix):
+            if isinstance(value, str):
+                self.assertNotIn("\n", value)
+                self.assertLessEqual(len(value), 280)
+                for sentinel in FORBIDDEN_VALUE_SENTINELS:
+                    self.assertNotIn(sentinel, value)
 
     def test_validate_fixture_case_catches_invalid_violations(self):
         fixture = _load_fixture()
@@ -290,6 +397,14 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                 "section behavior",
             ),
             (
+                "forbidden_token_kind",
+                lambda case: case["protected_token_expectations"].__setitem__(
+                    "token_kinds",
+                    ["bad\ntoken"],
+                ),
+                "token_kind",
+            ),
+            (
                 "high_confidence_positive_signals",
                 lambda case: case.__setitem__("positive_signals", []),
                 "high confidence requires",
@@ -330,7 +445,12 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
         for case in _fixture_cases(fixture):
             with self.subTest(fixture_id=case["fixture_id"]):
                 envelope = case["allowed_action_envelope"]
-                self.assertEqual(envelope, content_roles.SECTION_BLOCK_ACTION_ENVELOPE)
+                expected_action_envelope = (
+                    content_roles.TOKEN_ACTION_ENVELOPE
+                    if case["reporting_bucket"] == "token_identifier"
+                    else content_roles.SECTION_BLOCK_ACTION_ENVELOPE
+                )
+                self.assertEqual(envelope, expected_action_envelope)
                 self.assertEqual(
                     case["fallback_expected"],
                     "translate_include_report_only",
@@ -437,7 +557,9 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                     content_roles.CONFLICT_RULES,
                 )
                 self.assertFalse(
-                    case["protected_token_expectations"]["section_omit_or_preserve_allowed"]
+                    case["protected_token_expectations"][
+                        "section_omit_or_preserve_allowed"
+                    ]
                 )
                 behavior_values = (
                     case["allowed_action_envelope"],

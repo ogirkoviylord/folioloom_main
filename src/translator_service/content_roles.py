@@ -293,6 +293,8 @@ def _validate_metadata_scalar(field_name: str, value: str) -> str:
         raise ValueError(f"metadata field is forbidden: {field_name}")
     if "\n" in value or "\r" in value or len(value) > MAX_METADATA_SCALAR_CHARS:
         raise ValueError(f"metadata value is not PR-safe: {field_name}")
+    if normalized_field_name == "reason_code" and "," in value:
+        raise ValueError(f"metadata value is not PR-safe: {field_name}")
     normalized_value = value.strip().lower()
     if normalized_value in METADATA_ONLY_FORBIDDEN_EXACT_VALUES or any(
         marker in normalized_value for marker in METADATA_ONLY_FORBIDDEN_VALUE_MARKERS
@@ -833,15 +835,24 @@ def validate_fixture_case(case: Mapping[str, Any]) -> tuple[str, ...]:
         case["expected_role"] in ALLOWED_ROLES
         and case["source_structure"].get("granularity") in GRANULARITIES
     ):
-        expected_bucket = reporting_bucket_for_annotation(
-            role=case["expected_role"],
-            granularity=case["source_structure"]["granularity"],
-            token_kinds=case["protected_token_expectations"].get("token_kinds", ()),
-        )
-        if case["reporting_bucket"] != expected_bucket:
-            errors.append("reporting_bucket must match deterministic contract")
-    if case["allowed_action_envelope"] != SECTION_BLOCK_ACTION_ENVELOPE:
-        errors.append("section/block action envelope must remain shadow/report/include")
+        try:
+            expected_bucket = reporting_bucket_for_annotation(
+                role=case["expected_role"],
+                granularity=case["source_structure"]["granularity"],
+                token_kinds=case["protected_token_expectations"].get("token_kinds", ()),
+            )
+        except ValueError as exc:
+            errors.append(f"invalid token_kind metadata: {exc}")
+        else:
+            if case["reporting_bucket"] != expected_bucket:
+                errors.append("reporting_bucket must match deterministic contract")
+    expected_action_envelope = (
+        TOKEN_ACTION_ENVELOPE
+        if case["reporting_bucket"] == "token_identifier"
+        else SECTION_BLOCK_ACTION_ENVELOPE
+    )
+    if case["allowed_action_envelope"] != expected_action_envelope:
+        errors.append("action envelope must match metadata-only granularity contract")
     if case["behavior_allowed"] is not False:
         errors.append("behavior_allowed must be false")
     if case["raw_publication_allowed"] is not False:
