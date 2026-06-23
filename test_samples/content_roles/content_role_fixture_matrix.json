@@ -1144,8 +1144,158 @@
         "publication_rule": "metadata-only PR-safe fixture facts only",
         "raw_excerpt_included": false
       }
+    },
+    {
+      "allowed_action_envelope": "token_preserve_only",
+      "behavior_allowed": false,
+      "conflict_rule_expected": "publisher_metadata_separate",
+      "expected_confidence": "medium",
+      "expected_role": "publisher_metadata",
+      "fallback_expected": "translate_include_report_only",
+      "fixture_id": "cr-pos-publisher-token-identifier-v1",
+      "format_surface": "generic_metadata",
+      "negative_signals": [
+        {
+          "reason": "identifier tokens are not section authority",
+          "signal_family": "URL alone",
+          "strength": "weak"
+        }
+      ],
+      "positive_signals": [
+        {
+          "metadata_value_kind": "opf_dc_field",
+          "reason": "publisher identifier field",
+          "signal_family": "structural_semantic",
+          "strength": "strong"
+        },
+        {
+          "metadata_value_kind": "token_identifier",
+          "reason": "identifier token shape",
+          "signal_family": "url_or_rights_pattern",
+          "strength": "medium"
+        }
+      ],
+      "protected_token_expectations": {
+        "notes": "Token exactness remains token-scoped only.",
+        "section_omit_or_preserve_allowed": false,
+        "token_action_envelope": "token_preserve_only",
+        "token_kinds": [
+          "isbn",
+          "catalog_id"
+        ],
+        "token_preserve_allowed": true
+      },
+      "raw_publication_allowed": false,
+      "reporting_bucket": "token_identifier",
+      "schema_version": "content-role-fixture-contract-v1",
+      "single_signal_shortcuts_rejected": [
+        "url_alone",
+        "publisher_source_name_alone"
+      ],
+      "source_structure": {
+        "granularity": "token",
+        "position_hint": "metadata",
+        "source_path_or_chunk_id": "generic:publisher-metadata-token-identifier:19",
+        "structure_hints": [
+          "publisher",
+          "identifier",
+          "token"
+        ],
+        "surface": "epub_opf_metadata"
+      },
+      "text_snippet_policy": {
+        "fixture_text_kind": "metadata_only",
+        "max_synthetic_chars_if_needed": 280,
+        "private_or_copyrighted_source_allowed": false,
+        "publication_rule": "metadata-only PR-safe fixture facts only",
+        "raw_excerpt_included": false
+      }
     }
   ],
+  "corpus_regression_matrix": {
+    "after_slice_e_f_scope": "content_role_scalar_metadata_and_count_only_shadow_report",
+    "before_slice_e_f_scope": "pre_existing_aux_blocks_may_have_no_content_role_metadata",
+    "behavior_allowed": false,
+    "categories": [
+      {
+        "category_id": "epub_aux_surfaces",
+        "expected_buckets": [
+          "reader_visible",
+          "publisher_metadata_shadow"
+        ],
+        "fixture_ids": [
+          "cr-neg-toc-title-legal-archive-terms-v1",
+          "cr-pos-publisher-metadata-separate-v1"
+        ]
+      },
+      {
+        "category_id": "reader_visible_paratext",
+        "expected_buckets": [
+          "reader_visible"
+        ],
+        "fixture_ids": [
+          "cr-neg-legal-discussion-preface-v1",
+          "cr-neg-editorial-transcriber-note-v1",
+          "cr-neg-scholarly-note-copyright-archive-v1"
+        ]
+      },
+      {
+        "category_id": "legal_archive_publisher_metadata",
+        "expected_buckets": [
+          "legal_archive_shadow",
+          "publisher_metadata_shadow"
+        ],
+        "fixture_ids": [
+          "cr-pos-legal-rights-boilerplate-epub-v1",
+          "cr-pos-archive-digitization-artifact-epub-v1",
+          "cr-pos-publisher-metadata-separate-v1"
+        ]
+      },
+      {
+        "category_id": "unknown_conflicting_paratext",
+        "expected_buckets": [
+          "unknown_shadow"
+        ],
+        "fixture_ids": [
+          "cr-neg-url-only-section-v1",
+          "cr-neg-position-only-front-back-matter-v1",
+          "cr-neg-ambiguous-mixed-paragraph-v1"
+        ]
+      },
+      {
+        "category_id": "token_identifiers",
+        "expected_buckets": [
+          "legal_archive_shadow",
+          "publisher_metadata_shadow",
+          "token_identifier"
+        ],
+        "fixture_ids": [
+          "cr-pos-legal-rights-boilerplate-epub-v1",
+          "cr-neg-publisher-colophon-identifiers-v1",
+          "cr-pos-publisher-metadata-separate-v1",
+          "cr-pos-publisher-token-identifier-v1"
+        ]
+      },
+      {
+        "category_id": "main_vs_auxiliary_distinctions",
+        "expected_buckets": [
+          "main",
+          "reader_visible",
+          "legal_archive_shadow"
+        ],
+        "fixture_ids": [
+          "cr-neg-archive-ocr-words-main-content-v1",
+          "cr-neg-toc-title-legal-archive-terms-v1",
+          "cr-pos-archive-digitization-artifact-epub-v1"
+        ]
+      }
+    ],
+    "comparison_rule": "compare metadata field presence and count buckets only",
+    "issue": "#781",
+    "metadata_only": true,
+    "raw_publication_allowed": false,
+    "schema_version": "content-role-corpus-regression-v1"
+  },
   "fixture_id": "content-role-fixture-matrix-v1",
   "metadata_safety": {
     "contains_api_keys_or_auth_material": false,
