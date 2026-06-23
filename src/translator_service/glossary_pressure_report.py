@@ -15,6 +15,11 @@ from translator_service.book_profile import (
     detect_book_profile,
     validate_book_profile_detection,
 )
+from translator_service.content_roles import (
+    ContentRoleShadowReport,
+    build_content_role_shadow_report,
+    content_role_shadow_report_payload,
+)
 from translator_service.format_adapters.contracts import FormatAdapterPlan
 from translator_service.glossary_contracts import (
     GlossarySnapshot,
@@ -152,6 +157,7 @@ class GlossaryPressureReport:
     source_language: str
     target_language: str
     plan: GlossaryPressurePlanStats
+    content_roles: ContentRoleShadowReport
     candidates: GlossaryPressureCandidateStats
     profile: GlossaryPressureProfileSummary
     packets: GlossaryPressurePacketStats
@@ -202,6 +208,9 @@ def build_glossary_pressure_report(
         packet_budget=packet_budget,
     )
     candidates = _candidate_stats(glossary)
+    content_roles = build_content_role_shadow_report(
+        block.metadata for unit in plan.units for block in unit.blocks
+    )
     profile_summary = _profile_summary(profile)
     packets = _packet_stats(packet_result, packet_error=packet_error)
     findings = _findings(
@@ -219,6 +228,7 @@ def build_glossary_pressure_report(
         "source_language": source_language,
         "target_language": target_language,
         "plan": _plan_stats_payload(_plan_stats(plan)),
+        "content_roles": content_role_shadow_report_payload(content_roles),
         "candidates": _candidate_stats_payload(candidates),
         "profile": _profile_summary_payload(profile_summary),
         "packets": _packet_stats_payload(packets),
@@ -230,6 +240,7 @@ def build_glossary_pressure_report(
         source_language=source_language,
         target_language=target_language,
         plan=_plan_stats(plan),
+        content_roles=content_roles,
         candidates=candidates,
         profile=profile_summary,
         packets=packets,
@@ -252,6 +263,7 @@ def glossary_pressure_report_payload(
         "blocker_count": report.blocker_count,
         "fixture_metadata": _fixture_metadata_payload(report.fixture_metadata),
         "plan": _plan_stats_payload(report.plan),
+        "content_roles": content_role_shadow_report_payload(report.content_roles),
         "candidates": _candidate_stats_payload(report.candidates),
         "profile": _profile_summary_payload(report.profile),
         "packets": _packet_stats_payload(report.packets),

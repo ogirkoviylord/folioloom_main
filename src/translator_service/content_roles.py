@@ -7,12 +7,14 @@ behavior, or approve any gate/report persistence change.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 FIXTURE_SCHEMA_VERSION = "content-role-fixture-contract-v1"
 ANNOTATION_SCHEMA_VERSION = "content-role-annotation-v1"
+SHADOW_REPORT_SCHEMA_VERSION = "content-role-shadow-report-v1"
 
 SECTION_BLOCK_ACTION_ENVELOPE = "shadow_report_translate_include"
 TOKEN_ACTION_ENVELOPE = "token_preserve_only"
@@ -264,6 +266,21 @@ METADATA_ONLY_FORBIDDEN_VALUE_MARKERS = (
 MAX_METADATA_SCALAR_CHARS = 280
 
 
+@dataclass(frozen=True)
+class ContentRoleShadowReport:
+    """Metadata-only aggregate diagnostics for existing content_role.* pairs."""
+
+    annotated_block_count: int
+    bucket_counts: Mapping[str, int]
+    role_counts: Mapping[str, int]
+    confidence_counts: Mapping[str, int]
+    source_surface_counts: Mapping[str, int]
+    source_granularity_counts: Mapping[str, int]
+    unknown_annotation_count: int
+    conflicting_safety_flag_count: int
+    invalid_metadata_count: int = 0
+
+
 def _as_tuple(values: Sequence[str]) -> tuple[str, ...]:
     if isinstance(values, str):
         return (values,)
@@ -334,6 +351,167 @@ def report_bucket_metadata(
             flag_name: False for flag_name in BEHAVIOR_RISK_APPROVAL_FLAGS
         },
     }
+
+
+def build_content_role_shadow_report(
+    metadata_blocks: Iterable[
+        Mapping[str, str] | Sequence[tuple[str, str]]
+    ],
+) -> ContentRoleShadowReport:
+    """Aggregate existing content_role.* scalar metadata for local reports.
+
+    The report is intentionally count-only. It does not serialize block ids,
+    source paths, raw text, evidence reason values, prompts, provider payloads,
+    private diagnostics, or behavior-enabling switches.
+    """
+
+    bucket_counts: Counter[str] = Counter()
+    role_counts: Counter[str] = Counter()
+    confidence_counts: Counter[str] = Counter()
+    source_surface_counts: Counter[str] = Counter()
+    source_granularity_counts: Counter[str] = Counter()
+    annotated_block_count = 0
+    unknown_annotation_count = 0
+    conflicting_safety_flag_count = 0
+    invalid_metadata_count = 0
+
+    for metadata_block in metadata_blocks:
+        metadata = _content_role_metadata_map(metadata_block)
+        if not metadata:
+            continue
+        annotated_block_count += 1
+
+        bucket = metadata.get("content_role.reporting_bucket", "")
+        role = metadata.get("content_role.role", "")
+        confidence = metadata.get("content_role.confidence", "")
+        source_surface = metadata.get("content_role.source_surface", "")
+        source_granularity = metadata.get("content_role.source_granularity", "")
+
+        invalid_metadata_count += _invalid_content_role_metadata_field_count(
+            bucket=bucket,
+            role=role,
+            confidence=confidence,
+            source_surface=source_surface,
+            source_granularity=source_granularity,
+        )
+        _increment_if_allowed(bucket_counts, bucket, REPORTING_BUCKETS)
+        _increment_if_allowed(role_counts, role, ALLOWED_ROLES)
+        _increment_if_allowed(confidence_counts, confidence, CONFIDENCE_LEVELS)
+        _increment_if_allowed(source_surface_counts, source_surface, SOURCE_SURFACES)
+        _increment_if_allowed(
+            source_granularity_counts,
+            source_granularity,
+            GRANULARITIES,
+        )
+        if _is_unknown_content_role_annotation(
+            bucket=bucket,
+            role=role,
+            confidence=confidence,
+            source_surface=source_surface,
+        ):
+            unknown_annotation_count += 1
+        if (
+            metadata.get("content_role.behavior_allowed", "false") != "false"
+            or metadata.get("content_role.raw_publication_allowed", "false") != "false"
+        ):
+            conflicting_safety_flag_count += 1
+
+    return ContentRoleShadowReport(
+        annotated_block_count=annotated_block_count,
+        bucket_counts=_sorted_counter(bucket_counts),
+        role_counts=_sorted_counter(role_counts),
+        confidence_counts=_sorted_counter(confidence_counts),
+        source_surface_counts=_sorted_counter(source_surface_counts),
+        source_granularity_counts=_sorted_counter(source_granularity_counts),
+        unknown_annotation_count=unknown_annotation_count,
+        conflicting_safety_flag_count=conflicting_safety_flag_count,
+        invalid_metadata_count=invalid_metadata_count,
+    )
+
+
+def content_role_shadow_report_payload(
+    report: ContentRoleShadowReport,
+) -> dict[str, Any]:
+    """Serialize safe count-only content-role report diagnostics."""
+
+    return {
+        "schema_version": SHADOW_REPORT_SCHEMA_VERSION,
+        "metadata_only": True,
+        "behavior_allowed": False,
+        "raw_publication_allowed": False,
+        "annotated_block_count": report.annotated_block_count,
+        "bucket_counts": dict(report.bucket_counts),
+        "role_counts": dict(report.role_counts),
+        "confidence_counts": dict(report.confidence_counts),
+        "source_surface_counts": dict(report.source_surface_counts),
+        "source_granularity_counts": dict(report.source_granularity_counts),
+        "unknown_annotation_count": report.unknown_annotation_count,
+        "conflicting_safety_flag_count": report.conflicting_safety_flag_count,
+        "invalid_metadata_count": report.invalid_metadata_count,
+    }
+
+
+def _content_role_metadata_map(
+    metadata_block: Mapping[str, str] | Sequence[tuple[str, str]],
+) -> dict[str, str]:
+    if isinstance(metadata_block, Mapping):
+        items = metadata_block.items()
+    else:
+        items = metadata_block
+    return {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in items
+        if str(key).strip().lower().startswith("content_role.")
+    }
+
+
+def _invalid_content_role_metadata_field_count(
+    *,
+    bucket: str,
+    role: str,
+    confidence: str,
+    source_surface: str,
+    source_granularity: str,
+) -> int:
+    return sum(
+        1
+        for value, allowed in (
+            (bucket, REPORTING_BUCKETS),
+            (role, ALLOWED_ROLES),
+            (confidence, CONFIDENCE_LEVELS),
+            (source_surface, SOURCE_SURFACES),
+            (source_granularity, GRANULARITIES),
+        )
+        if value not in allowed
+    )
+
+
+def _increment_if_allowed(
+    counter: Counter[str],
+    value: str,
+    allowed: Sequence[str],
+) -> None:
+    if value in allowed:
+        counter[value] += 1
+
+
+def _is_unknown_content_role_annotation(
+    *,
+    bucket: str,
+    role: str,
+    confidence: str,
+    source_surface: str,
+) -> bool:
+    return (
+        bucket == "unknown_shadow"
+        or role == "unknown_paratext"
+        or confidence == "unknown"
+        or source_surface == "unknown"
+    )
+
+
+def _sorted_counter(counter: Counter[str]) -> dict[str, int]:
+    return {key: counter[key] for key in sorted(counter)}
 
 
 @dataclass(frozen=True)
