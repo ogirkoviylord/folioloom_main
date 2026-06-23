@@ -204,6 +204,137 @@ class ContentRoleReportingContractTest(unittest.TestCase):
         self.assertNotIn("raw source excerpt", serialized)
         self.assertNotIn("evidence_reason_codes", serialized)
 
+    def test_synthetic_corpus_matrix_reports_before_after_metadata_counts_only(self):
+        before_slice_e_f_block = {
+            "epub_aux_kind": "xhtml_navigation",
+            "role": "auxiliary",
+            "auxiliary_payload": "withheld_non_content_role_value",
+        }
+        after_slice_e_f_blocks = (
+            {
+                "content_role.source_surface": "epub_xhtml_nav",
+                "content_role.source_granularity": "block",
+                "content_role.role": "reader_navigation",
+                "content_role.confidence": "high",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "epub_ncx_nav",
+                "content_role.source_granularity": "block",
+                "content_role.role": "reader_navigation",
+                "content_role.confidence": "medium",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "epub_xhtml_title",
+                "content_role.source_granularity": "block",
+                "content_role.role": "title_heading",
+                "content_role.confidence": "medium",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "epub_opf_metadata",
+                "content_role.source_granularity": "block",
+                "content_role.role": "title_heading",
+                "content_role.confidence": "medium",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "epub_opf_metadata",
+                "content_role.source_granularity": "block",
+                "content_role.role": "publisher_metadata",
+                "content_role.confidence": "medium",
+                "content_role.reporting_bucket": "publisher_metadata_shadow",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+                "auxiliary_payload": "withheld_non_content_role_value",
+            },
+            {
+                "content_role.source_surface": "epub_opf_metadata",
+                "content_role.source_granularity": "token",
+                "content_role.role": "publisher_metadata",
+                "content_role.confidence": "medium",
+                "content_role.reporting_bucket": "token_identifier",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+                "content_role.evidence_reason_codes": "identifier reason withheld",
+            },
+            {
+                "content_role.source_surface": "epub_xhtml_body",
+                "content_role.source_granularity": "block",
+                "content_role.role": "legal_rights_boilerplate",
+                "content_role.confidence": "high",
+                "content_role.reporting_bucket": "legal_archive_shadow",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "epub_xhtml_body",
+                "content_role.source_granularity": "block",
+                "content_role.role": "main_content",
+                "content_role.confidence": "high",
+                "content_role.reporting_bucket": "main",
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+            },
+            {
+                "content_role.source_surface": "unknown",
+                "content_role.source_granularity": "block",
+                "content_role.role": "unknown_paratext",
+                "content_role.confidence": "unknown",
+                "content_role.reporting_bucket": "unknown_shadow",
+                "content_role.behavior_allowed": "true",
+                "content_role.raw_publication_allowed": "false",
+                "content_role.evidence_reason_codes": "fixture reason withheld",
+            },
+        )
+
+        report = build_content_role_shadow_report(
+            (before_slice_e_f_block, *after_slice_e_f_blocks)
+        )
+        payload = content_role_shadow_report_payload(report)
+        serialized = str(payload).lower()
+
+        self.assertEqual(payload["annotated_block_count"], 9)
+        self.assertEqual(
+            payload["bucket_counts"],
+            {
+                "legal_archive_shadow": 1,
+                "main": 1,
+                "publisher_metadata_shadow": 1,
+                "reader_visible": 4,
+                "token_identifier": 1,
+                "unknown_shadow": 1,
+            },
+        )
+        self.assertEqual(
+            payload["role_counts"],
+            {
+                "legal_rights_boilerplate": 1,
+                "main_content": 1,
+                "publisher_metadata": 2,
+                "reader_navigation": 2,
+                "title_heading": 2,
+                "unknown_paratext": 1,
+            },
+        )
+        self.assertEqual(payload["source_granularity_counts"], {"block": 8, "token": 1})
+        self.assertEqual(payload["unknown_annotation_count"], 1)
+        self.assertEqual(payload["conflicting_safety_flag_count"], 1)
+        self.assertEqual(payload["invalid_metadata_count"], 0)
+        self.assertFalse(payload["behavior_allowed"])
+        self.assertFalse(payload["raw_publication_allowed"])
+        self.assertNotIn("withheld_non_content_role_value", serialized)
+        self.assertNotIn("evidence_reason_codes", serialized)
+
 
 if __name__ == "__main__":
     unittest.main()

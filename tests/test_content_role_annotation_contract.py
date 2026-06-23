@@ -310,6 +310,15 @@ class ContentRoleAnnotationContractTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ContentRoleEvidence(**evidence_kwargs)
 
+    def test_evidence_reason_code_comma_scalar_values_raise_before_serialization(self):
+        with self.assertRaises(ValueError):
+            ContentRoleEvidence(
+                signal_family="structural_semantic",
+                strength="strong",
+                metadata_value_kind="opf_dc_field",
+                reason_code="publisher,identifier",
+            )
+
     def test_reproduction_equivalent_forbidden_provider_evidence_is_rejected(self):
         with self.assertRaises(ValueError):
             ContentRoleEvidence(
@@ -324,6 +333,51 @@ class ContentRoleAnnotationContractTest(unittest.TestCase):
             with self.subTest(token_kind=token_kind):
                 with self.assertRaises(ValueError):
                     TokenPreservationMetadata(token_kinds=(token_kind,))
+
+    def test_public_identifier_tokens_remain_token_scoped_and_behavior_neutral(self):
+        for token_kind in ("isbn", "email", "url", "catalog_id"):
+            with self.subTest(token_kind=token_kind):
+                annotation = ContentRoleAnnotation(
+                    locator=SourceLocator(
+                        surface="epub_opf_metadata",
+                        source_path_or_chunk_id=f"epub:opf:identifier:{token_kind}",
+                        granularity="token",
+                        structure_hints=("identifier",),
+                        position_hint="metadata",
+                    ),
+                    role="publisher_metadata",
+                    confidence="medium",
+                    evidence=(
+                        ContentRoleEvidence(
+                            signal_family="structural_semantic",
+                            strength="strong",
+                            metadata_value_kind="opf_dc_field",
+                            reason_code="publisher_identifier_field",
+                        ),
+                    ),
+                    reporting_bucket="token_identifier",
+                    token_preservation=TokenPreservationMetadata(
+                        token_kinds=(token_kind,)
+                    ),
+                )
+
+                metadata = annotation.to_metadata_dict()
+
+                self.assertEqual(
+                    metadata["allowed_action_envelope"],
+                    TOKEN_ACTION_ENVELOPE,
+                )
+                self.assertFalse(metadata["behavior_allowed"])
+                self.assertFalse(metadata["raw_publication_allowed"])
+                self.assertEqual(metadata["reporting_bucket"], "token_identifier")
+                self.assertEqual(
+                    metadata["token_preservation"]["token_action_envelope"],
+                    TOKEN_ACTION_ENVELOPE,
+                )
+                self.assertTrue(metadata["token_preservation"]["token_scope_only"])
+                self.assertFalse(
+                    metadata["token_preservation"]["section_omit_or_preserve_allowed"]
+                )
 
     def test_conflict_note_forbidden_scalar_values_raise_before_serialization(self):
         locator = SourceLocator(
