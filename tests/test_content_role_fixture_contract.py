@@ -379,6 +379,33 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                         and len(families) < 2
                     )
 
+    def test_high_confidence_fixture_validation_rejects_all_weak_evidence(self):
+        fixture = _load_fixture()
+        invalid_case = copy.deepcopy(_fixture_cases(fixture)[0])
+        invalid_case["expected_confidence"] = "high"
+        invalid_case["positive_signals"] = (
+            {
+                "signal_family": "structural_semantic",
+                "strength": "weak",
+                "metadata_value_kind": "epub_type",
+                "reason_code": "copyright_page_landmark",
+            },
+            {
+                "signal_family": "body_lexical_cluster",
+                "strength": "weak",
+                "metadata_value_kind": "lexical_cluster",
+                "reason_code": "rights_license_cluster",
+            },
+        )
+
+        errors = content_roles.validate_fixture_case(invalid_case)
+
+        self.assertTrue(errors)
+        self.assertTrue(
+            any("high confidence requires" in error for error in errors),
+            f"expected high-confidence error in errors: {errors!r}",
+        )
+
     def test_negative_cases_never_authorize_behavior_or_section_preservation(self):
         fixture = _load_fixture()
         negative_cases = [
