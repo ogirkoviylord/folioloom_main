@@ -1161,6 +1161,14 @@ def _collect_epub_xhtml_auxiliary_blocks(
                         aux_index=title_index,
                         text=text,
                         aux_kind="xhtml_title",
+                        extra_metadata=_epub_xhtml_title_content_role_metadata(
+                            source_block_id=epub_aux_block_id(
+                                kind="xhtml-title",
+                                file_name=file_name,
+                                local_name=local_name,
+                                index=title_index,
+                            )
+                        ),
                     )
                 )
                 title_index += 1
@@ -1643,6 +1651,43 @@ def _epub_auxiliary_text_block(
             )
             + extra_metadata
         ),
+    )
+
+
+def _epub_xhtml_title_content_role_metadata(
+    *,
+    source_block_id: str,
+) -> tuple[tuple[str, str], ...]:
+    return content_role_metadata_pairs(
+        ContentRoleAnnotation(
+            locator=SourceLocator(
+                surface="epub_xhtml_title",
+                source_path_or_chunk_id=source_block_id,
+                granularity="block",
+                structure_hints=("xhtml-title", "head-title"),
+                position_hint="auxiliary",
+            ),
+            role="title_heading",
+            confidence="medium",
+            evidence=(
+                ContentRoleEvidence(
+                    signal_family="structural_semantic",
+                    strength="medium",
+                    metadata_value_kind="xhtml_head_title_element",
+                    reason_code="epub_xhtml_title_auxiliary_block",
+                ),
+                ContentRoleEvidence(
+                    signal_family="path_class_id",
+                    strength="medium",
+                    metadata_value_kind="epub_aux_kind",
+                    reason_code="xhtml_title_aux_kind",
+                ),
+            ),
+            reporting_bucket=reporting_bucket_for_annotation(
+                role="title_heading",
+                granularity="block",
+            ),
+        )
     )
 
 
