@@ -1072,6 +1072,16 @@ def _collect_epub_opf_auxiliary_blocks(
             continue
         index = counters[local_name]
         counters[local_name] += 1
+        extra_metadata = ()
+        if local_name == "title":
+            extra_metadata = _epub_opf_title_content_role_metadata(
+                source_block_id=epub_aux_block_id(
+                    kind="opf",
+                    file_name=opf_path,
+                    local_name=local_name,
+                    index=index,
+                )
+            )
         blocks.append(
             _epub_auxiliary_text_block(
                 block_index=len(blocks),
@@ -1081,6 +1091,7 @@ def _collect_epub_opf_auxiliary_blocks(
                 aux_index=index,
                 text=text,
                 aux_kind=f"opf_{local_name}",
+                extra_metadata=extra_metadata,
             )
         )
         validate_epub_text_block_count(len(blocks))
@@ -1651,6 +1662,43 @@ def _epub_auxiliary_text_block(
             )
             + extra_metadata
         ),
+    )
+
+
+def _epub_opf_title_content_role_metadata(
+    *,
+    source_block_id: str,
+) -> tuple[tuple[str, str], ...]:
+    return content_role_metadata_pairs(
+        ContentRoleAnnotation(
+            locator=SourceLocator(
+                surface="epub_opf_metadata",
+                source_path_or_chunk_id=source_block_id,
+                granularity="block",
+                structure_hints=("opf-metadata", "dc-title"),
+                position_hint="auxiliary",
+            ),
+            role="title_heading",
+            confidence="medium",
+            evidence=(
+                ContentRoleEvidence(
+                    signal_family="structural_semantic",
+                    strength="medium",
+                    metadata_value_kind="opf_title_element",
+                    reason_code="epub_opf_title_auxiliary_block",
+                ),
+                ContentRoleEvidence(
+                    signal_family="path_class_id",
+                    strength="medium",
+                    metadata_value_kind="epub_aux_kind",
+                    reason_code="opf_title_aux_kind",
+                ),
+            ),
+            reporting_bucket=reporting_bucket_for_annotation(
+                role="title_heading",
+                granularity="block",
+            ),
+        )
     )
 
 
