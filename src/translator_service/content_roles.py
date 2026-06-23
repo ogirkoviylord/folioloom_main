@@ -101,6 +101,16 @@ REPORTING_BUCKETS = (
     "unknown_shadow",
     "token_identifier",
 )
+ROLE_REPORTING_BUCKETS: Mapping[str, str] = {
+    "main_content": "main",
+    "title_heading": "reader_visible",
+    "reader_navigation": "reader_visible",
+    "reader_visible_paratext": "reader_visible",
+    "legal_rights_boilerplate": "legal_archive_shadow",
+    "archive_digitization_artifact": "legal_archive_shadow",
+    "publisher_metadata": "publisher_metadata_shadow",
+    "unknown_paratext": "unknown_shadow",
+}
 
 CONFLICT_RULES = (
     "reader_visible_wins",
@@ -268,6 +278,58 @@ def _validate_metadata_scalar(field_name: str, value: str) -> str:
     return value
 
 
+def reporting_bucket_for_annotation(
+    *,
+    role: str,
+    granularity: str,
+    token_kinds: Sequence[str] = (),
+) -> str:
+    """Return the deterministic metadata-only report bucket for an annotation.
+
+    The bucket is descriptive only. It does not authorize omit/preserve/exclude
+    behavior, provider/profile/cache/runtime changes, output changes, or gate
+    pass/fail decisions.
+    """
+
+    if role not in ALLOWED_ROLES:
+        raise ValueError("invalid content role")
+    if granularity not in GRANULARITIES:
+        raise ValueError("invalid annotation granularity")
+    normalized_token_kinds = _as_tuple(token_kinds)
+    for token_kind in normalized_token_kinds:
+        _validate_metadata_scalar("token_kind", token_kind)
+    if (
+        granularity == "token"
+        and role == "publisher_metadata"
+        and normalized_token_kinds
+    ):
+        return "token_identifier"
+    return ROLE_REPORTING_BUCKETS[role]
+
+
+def report_bucket_metadata(
+    *,
+    role: str,
+    granularity: str,
+    token_kinds: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Serialize a descriptive report-bucket contract as metadata only."""
+
+    return {
+        "reporting_bucket": reporting_bucket_for_annotation(
+            role=role,
+            granularity=granularity,
+            token_kinds=token_kinds,
+        ),
+        "metadata_only": True,
+        "behavior_allowed": False,
+        "raw_publication_allowed": False,
+        "risk_approval_flags": {
+            flag_name: False for flag_name in BEHAVIOR_RISK_APPROVAL_FLAGS
+        },
+    }
+
+
 @dataclass(frozen=True)
 class SourceLocator:
     """Adapter-neutral source location for metadata-only role annotations."""
@@ -388,6 +450,7 @@ class ContentRoleAnnotation:
             _validate_metadata_scalar("conflict_note", note)
         self._validate_evidence()
         self._validate_action_envelope()
+        self._validate_reporting_bucket()
 
     def _validate_evidence(self) -> None:
         if not self.evidence:
@@ -419,6 +482,20 @@ class ContentRoleAnnotation:
             object.__setattr__(self, "token_preservation", token_preservation)
         elif self.token_preservation is not None:
             raise ValueError("token preservation metadata must remain token-scoped")
+
+    def _validate_reporting_bucket(self) -> None:
+        token_kinds = (
+            ()
+            if self.token_preservation is None
+            else self.token_preservation.token_kinds
+        )
+        expected_bucket = reporting_bucket_for_annotation(
+            role=self.role,
+            granularity=self.locator.granularity,
+            token_kinds=token_kinds,
+        )
+        if self.reporting_bucket != expected_bucket:
+            raise ValueError("reporting bucket does not match metadata-only contract")
 
     def to_metadata_dict(self) -> dict[str, Any]:
         metadata = {
@@ -491,6 +568,17 @@ def validate_fixture_case(case: Mapping[str, Any]) -> tuple[str, ...]:
                 errors.append(f"invalid {signal_group} strength")
     if case["reporting_bucket"] not in REPORTING_BUCKETS:
         errors.append("invalid reporting_bucket")
+    elif (
+        case["expected_role"] in ALLOWED_ROLES
+        and case["source_structure"].get("granularity") in GRANULARITIES
+    ):
+        expected_bucket = reporting_bucket_for_annotation(
+            role=case["expected_role"],
+            granularity=case["source_structure"]["granularity"],
+            token_kinds=case["protected_token_expectations"].get("token_kinds", ()),
+        )
+        if case["reporting_bucket"] != expected_bucket:
+            errors.append("reporting_bucket must match deterministic contract")
     if case["allowed_action_envelope"] != SECTION_BLOCK_ACTION_ENVELOPE:
         errors.append("section/block action envelope must remain shadow/report/include")
     if case["behavior_allowed"] is not False:
