@@ -11,6 +11,13 @@ from translator_service.book_mode_output_audit import (
     _LEGAL_BACKMATTER_TERMS,
     BookModeAuditChunk,
 )
+from translator_service.content_roles import (
+    ContentRoleAnnotation,
+    ContentRoleEvidence,
+    SourceLocator,
+    content_role_metadata_pairs,
+    reporting_bucket_for_annotation,
+)
 from translator_service.documents import DocumentFormat
 from translator_service.extractors import (
     TextExtractionError,
@@ -1173,6 +1180,14 @@ def _collect_epub_xhtml_auxiliary_blocks(
                     aux_index=index,
                     text=text,
                     aux_kind="xhtml_navigation",
+                    extra_metadata=_epub_xhtml_navigation_content_role_metadata(
+                        source_block_id=epub_aux_block_id(
+                            kind="xhtml-navigation",
+                            file_name=file_name,
+                            local_name=local_name,
+                            index=index,
+                        )
+                    ),
                 )
             )
             validate_epub_text_block_count(len(blocks))
@@ -1597,6 +1612,7 @@ def _epub_auxiliary_text_block(
     aux_index: int,
     text: str,
     aux_kind: str,
+    extra_metadata: tuple[tuple[str, str], ...] = (),
 ) -> FormatTextBlock:
     return FormatTextBlock(
         index=block_index,
@@ -1610,12 +1626,52 @@ def _epub_auxiliary_text_block(
         kind=TextBlockKind.PLAIN,
         group_id=None,
         metadata=(
-            ("role", "auxiliary"),
-            ("file_name", file_name),
-            ("epub_aux_kind", aux_kind),
-            ("local_name", local_name),
-            ("aux_index", str(aux_index)),
+            (
+                ("role", "auxiliary"),
+                ("file_name", file_name),
+                ("epub_aux_kind", aux_kind),
+                ("local_name", local_name),
+                ("aux_index", str(aux_index)),
+            )
+            + extra_metadata
         ),
+    )
+
+
+def _epub_xhtml_navigation_content_role_metadata(
+    *,
+    source_block_id: str,
+) -> tuple[tuple[str, str], ...]:
+    return content_role_metadata_pairs(
+        ContentRoleAnnotation(
+            locator=SourceLocator(
+                surface="epub_xhtml_nav",
+                source_path_or_chunk_id=source_block_id,
+                granularity="block",
+                structure_hints=("xhtml-navigation", "reader-navigation"),
+                position_hint="auxiliary",
+            ),
+            role="reader_navigation",
+            confidence="high",
+            evidence=(
+                ContentRoleEvidence(
+                    signal_family="structural_semantic",
+                    strength="strong",
+                    metadata_value_kind="xhtml_nav_element",
+                    reason_code="epub_xhtml_navigation_auxiliary_block",
+                ),
+                ContentRoleEvidence(
+                    signal_family="path_class_id",
+                    strength="medium",
+                    metadata_value_kind="epub_aux_kind",
+                    reason_code="xhtml_navigation_aux_kind",
+                ),
+            ),
+            reporting_bucket=reporting_bucket_for_annotation(
+                role="reader_navigation",
+                granularity="block",
+            ),
+        )
     )
 
 
