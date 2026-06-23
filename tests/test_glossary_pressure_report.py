@@ -168,10 +168,57 @@ class GlossaryPressureReportTest(unittest.TestCase):
         self.assertNotIn(raw_candidate, serialized)
         self.assertNotIn("PRIVATE_SOURCE_SENTINEL", serialized)
 
+    def test_includes_content_role_shadow_counts_without_raw_metadata_values(self):
+        raw_metadata_value = "PRIVATE_SOURCE_SENTINEL raw source excerpt"
+        plan = _pressure_plan(
+            block_metadata=(
+                ("content_role.source_surface", "epub_xhtml_nav"),
+                ("content_role.source_granularity", "block"),
+                ("content_role.role", "reader_navigation"),
+                ("content_role.confidence", "high"),
+                ("content_role.reporting_bucket", "reader_visible"),
+                ("content_role.behavior_allowed", "false"),
+                ("content_role.raw_publication_allowed", "false"),
+                ("raw_source", raw_metadata_value),
+            )
+        )
+
+        report = build_glossary_pressure_report(
+            plan,
+            source_language="en",
+            target_language="ru",
+        )
+        serialized = serialize_glossary_pressure_report(report)
+        payload = json.loads(serialized)
+
+        self.assertEqual(report.content_roles.annotated_block_count, 1)
+        self.assertEqual(
+            payload["content_roles"]["schema_version"],
+            "content-role-shadow-report-v1",
+        )
+        self.assertEqual(
+            payload["content_roles"]["bucket_counts"],
+            {"reader_visible": 1},
+        )
+        self.assertEqual(
+            payload["content_roles"]["confidence_counts"],
+            {"high": 1},
+        )
+        self.assertEqual(
+            payload["content_roles"]["source_surface_counts"],
+            {"epub_xhtml_nav": 1},
+        )
+        self.assertTrue(payload["content_roles"]["metadata_only"])
+        self.assertFalse(payload["content_roles"]["behavior_allowed"])
+        self.assertFalse(payload["content_roles"]["raw_publication_allowed"])
+        self.assertNotIn(raw_metadata_value, serialized)
+        self.assertNotIn("raw_source", serialized)
+
 
 def _pressure_plan(
     *,
     document_format: DocumentFormat = DocumentFormat.TXT,
+    block_metadata: tuple[tuple[str, str], ...] = (),
 ) -> FormatAdapterPlan:
     units = (
         _unit(
@@ -184,6 +231,7 @@ def _pressure_plan(
                     "Mr Darcy near Longbourn. The quantum drive hummed."
                 ),
                 kind=TextBlockKind.HEADING,
+                metadata=block_metadata,
             ),
         ),
         _unit(
@@ -232,12 +280,14 @@ def _block(
     text: str,
     *,
     kind: TextBlockKind = TextBlockKind.PLAIN,
+    metadata: tuple[tuple[str, str], ...] = (),
 ) -> FormatTextBlock:
     return FormatTextBlock(
         index=index,
         source_block_id=source_block_id,
         text=text,
         kind=kind,
+        metadata=metadata,
     )
 
 
