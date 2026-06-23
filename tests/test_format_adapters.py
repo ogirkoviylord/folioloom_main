@@ -226,6 +226,26 @@ class DocxFormatAdapterTest(unittest.TestCase):
 
 
 class EpubFormatAdapterTest(unittest.TestCase):
+    _EXPECTED_NCX_TEXT_CONTENT_ROLE_METADATA = {
+        "content_role.schema_version": "content-role-annotation-v1",
+        "content_role.source_surface": "epub_ncx_nav",
+        "content_role.source_granularity": "block",
+        "content_role.role": "reader_navigation",
+        "content_role.confidence": "medium",
+        "content_role.reporting_bucket": "reader_visible",
+        "content_role.allowed_action_envelope": (
+            "shadow_report_translate_include"
+        ),
+        "content_role.behavior_allowed": "false",
+        "content_role.raw_publication_allowed": "false",
+        "content_role.risk_approval_flags": "all_false",
+        "content_role.evidence_signal_families": (
+            "path_class_id,structural_semantic"
+        ),
+        "content_role.evidence_reason_codes": (
+            "epub_ncx_text_auxiliary_block,ncx_text_aux_kind"
+        ),
+    }
     _EXPECTED_XHTML_NAVIGATION_CONTENT_ROLE_METADATA = {
         "content_role.schema_version": "content-role-annotation-v1",
         "content_role.source_surface": "epub_xhtml_nav",
@@ -259,6 +279,20 @@ class EpubFormatAdapterTest(unittest.TestCase):
                         if key.startswith("content_role.")
                     },
                     self._EXPECTED_XHTML_NAVIGATION_CONTENT_ROLE_METADATA,
+                )
+
+    def _assert_ncx_text_content_role_metadata(self, blocks):
+        for block in blocks:
+            with self.subTest(source_block_id=block.source_block_id):
+                metadata = dict(block.metadata)
+                self.assertEqual(metadata["epub_aux_kind"], "ncx_text")
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in metadata.items()
+                        if key.startswith("content_role.")
+                    },
+                    self._EXPECTED_NCX_TEXT_CONTENT_ROLE_METADATA,
                 )
 
     def test_epub_adapter_does_not_import_private_translation_runner_helpers(self):
@@ -974,15 +1008,37 @@ class EpubFormatAdapterTest(unittest.TestCase):
             self.assertIn(("local_name", metadata["local_name"]), block.metadata)
             self.assertIn(("aux_index", metadata["aux_index"]), block.metadata)
 
-        non_navigation_aux_blocks = [
+        unannotated_aux_blocks = [
             block
             for block in aux_blocks
-            if dict(block.metadata).get("epub_aux_kind") != "xhtml_navigation"
+            if dict(block.metadata).get("epub_aux_kind")
+            not in {"ncx_text", "xhtml_navigation"}
         ]
-        for block in non_navigation_aux_blocks:
+        self.assertEqual(
+            [
+                dict(block.metadata).get("epub_aux_kind")
+                for block in unannotated_aux_blocks
+            ],
+            ["opf_title", "opf_description", "xhtml_title"],
+        )
+        for block in unannotated_aux_blocks:
             self.assertFalse(
                 any(key.startswith("content_role.") for key, _ in block.metadata)
             )
+
+        ncx_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") == "ncx_text"
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in ncx_blocks],
+            [
+                "epub:aux:ncx:OPS/toc.ncx:text:0",
+                "epub:aux:ncx:OPS/toc.ncx:text:1",
+            ],
+        )
+        self._assert_ncx_text_content_role_metadata(ncx_blocks)
 
         navigation_blocks = [
             block
