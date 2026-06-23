@@ -202,8 +202,14 @@ METADATA_ONLY_FORBIDDEN_EXACT_VALUES = frozenset(
 METADATA_ONLY_FORBIDDEN_VALUE_MARKERS = (
     "begin_untrusted_document_content",
     "<translation_batch",
+    "api key",
+    "api-key",
+    "api_key",
+    "apikey",
     "authorization:",
     "bearer ",
+    "contains secret",
+    "contains-secret",
     "owner only diagnostics",
     "owner_only_diagnostics",
     "owner_policy_tbd_later_behavior",
@@ -212,6 +218,8 @@ METADATA_ONLY_FORBIDDEN_VALUE_MARKERS = (
     "project gutenberg",
     "prompt body",
     "prompt_body",
+    "prompt excerpt",
+    "raw prompt",
     "provider body",
     "provider_body",
     "provider request",
@@ -226,13 +234,16 @@ METADATA_ONLY_FORBIDDEN_VALUE_MARKERS = (
     "raw_target",
     "raw translation",
     "raw_translation",
+    "secret material",
     "sk-",
+    "source excerpt",
     "source text",
     "source_text",
     "translated passage",
     "translated text",
     "translated_passage",
     "translated_text",
+    "translation excerpt",
 )
 MAX_METADATA_SCALAR_CHARS = 280
 
@@ -440,15 +451,20 @@ def high_confidence_requirements_met(signals: Sequence[Mapping[str, Any]]) -> bo
     """Validate the conservative #781 high-confidence evidence floor.
 
     High confidence requires at least two independent allowed families and at
-    least one strong structural or body-lexical family. This is only a fixture
-    contract helper, not a production classifier.
+    least one structural or body-lexical family with strong/medium evidence.
+    This is only a fixture contract helper, not a production classifier.
     """
 
     families = signal_families(signals)
+    has_core_strong_or_medium_signal = any(
+        signal.get("signal_family") in STRONG_HIGH_CONFIDENCE_FAMILIES
+        and signal.get("strength") in {"strong", "medium"}
+        for signal in signals
+    )
     return (
         len(families) >= 2
         and families <= set(SIGNAL_FAMILIES)
-        and bool(families & STRONG_HIGH_CONFIDENCE_FAMILIES)
+        and has_core_strong_or_medium_signal
     )
 
 
@@ -485,7 +501,8 @@ def validate_fixture_case(case: Mapping[str, Any]) -> tuple[str, ...]:
         case["positive_signals"]
     ):
         errors.append(
-            "high confidence requires at least two independent strong signals"
+            "high confidence requires at least two independent allowed signal families"
+            " and one strong/medium core signal"
         )
 
     protected = case["protected_token_expectations"]
