@@ -9,6 +9,7 @@ from translator_service.content_roles import (
     ContentRoleAnnotation,
     TokenPreservationMetadata,
     content_role_evidence_from_metadata,
+    content_role_metadata_pairs,
     source_locator_from_metadata,
 )
 
@@ -264,6 +265,74 @@ class ContentRoleSourceLocatorContractTest(unittest.TestCase):
                 serialized = str(metadata).lower()
                 for forbidden in FORBIDDEN_SERIALIZED_VALUE_FRAGMENTS:
                     self.assertNotIn(forbidden, serialized)
+
+    def test_reader_navigation_annotation_pairs_are_namespaced_scalar_contract(self):
+        annotation = ContentRoleAnnotation(
+            locator=source_locator_from_metadata(
+                {
+                    "surface": "epub_xhtml_nav",
+                    "source_path_or_chunk_id": (
+                        "epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0"
+                    ),
+                    "granularity": "block",
+                    "structure_hints": ["xhtml-navigation", "reader-navigation"],
+                    "position_hint": "auxiliary",
+                }
+            ),
+            role="reader_navigation",
+            confidence="high",
+            evidence=(
+                content_role_evidence_from_metadata(
+                    {
+                        "signal_family": "structural_semantic",
+                        "strength": "strong",
+                        "metadata_value_kind": "xhtml_nav_element",
+                        "reason_code": "epub_xhtml_navigation_auxiliary_block",
+                    }
+                ),
+                content_role_evidence_from_metadata(
+                    {
+                        "signal_family": "path_class_id",
+                        "strength": "medium",
+                        "metadata_value_kind": "epub_aux_kind",
+                        "reason_code": "xhtml_navigation_aux_kind",
+                    }
+                ),
+            ),
+            reporting_bucket="reader_visible",
+        )
+
+        pairs = content_role_metadata_pairs(annotation)
+        metadata = dict(pairs)
+
+        self.assertEqual(
+            metadata,
+            {
+                "content_role.schema_version": "content-role-annotation-v1",
+                "content_role.source_surface": "epub_xhtml_nav",
+                "content_role.source_granularity": "block",
+                "content_role.role": "reader_navigation",
+                "content_role.confidence": "high",
+                "content_role.reporting_bucket": "reader_visible",
+                "content_role.allowed_action_envelope": (
+                    "shadow_report_translate_include"
+                ),
+                "content_role.behavior_allowed": "false",
+                "content_role.raw_publication_allowed": "false",
+                "content_role.risk_approval_flags": "all_false",
+                "content_role.evidence_signal_families": (
+                    "path_class_id,structural_semantic"
+                ),
+                "content_role.evidence_reason_codes": (
+                    "epub_xhtml_navigation_auxiliary_block,xhtml_navigation_aux_kind"
+                ),
+            },
+        )
+        self.assertTrue(all(key.startswith("content_role.") for key, _ in pairs))
+        self.assertTrue(all(isinstance(value, str) for _, value in pairs))
+        serialized = str(pairs).lower()
+        for forbidden in FORBIDDEN_SERIALIZED_VALUE_FRAGMENTS:
+            self.assertNotIn(forbidden, serialized)
 
 
 if __name__ == "__main__":

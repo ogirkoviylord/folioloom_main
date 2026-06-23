@@ -226,6 +226,41 @@ class DocxFormatAdapterTest(unittest.TestCase):
 
 
 class EpubFormatAdapterTest(unittest.TestCase):
+    _EXPECTED_XHTML_NAVIGATION_CONTENT_ROLE_METADATA = {
+        "content_role.schema_version": "content-role-annotation-v1",
+        "content_role.source_surface": "epub_xhtml_nav",
+        "content_role.source_granularity": "block",
+        "content_role.role": "reader_navigation",
+        "content_role.confidence": "high",
+        "content_role.reporting_bucket": "reader_visible",
+        "content_role.allowed_action_envelope": (
+            "shadow_report_translate_include"
+        ),
+        "content_role.behavior_allowed": "false",
+        "content_role.raw_publication_allowed": "false",
+        "content_role.risk_approval_flags": "all_false",
+        "content_role.evidence_signal_families": (
+            "path_class_id,structural_semantic"
+        ),
+        "content_role.evidence_reason_codes": (
+            "epub_xhtml_navigation_auxiliary_block,xhtml_navigation_aux_kind"
+        ),
+    }
+
+    def _assert_xhtml_navigation_content_role_metadata(self, blocks):
+        for block in blocks:
+            with self.subTest(source_block_id=block.source_block_id):
+                metadata = dict(block.metadata)
+                self.assertEqual(metadata["epub_aux_kind"], "xhtml_navigation")
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in metadata.items()
+                        if key.startswith("content_role.")
+                    },
+                    self._EXPECTED_XHTML_NAVIGATION_CONTENT_ROLE_METADATA,
+                )
+
     def test_epub_adapter_does_not_import_private_translation_runner_helpers(self):
         adapter_source = Path(
             "src/translator_service/format_adapters/epub.py"
@@ -569,19 +604,21 @@ class EpubFormatAdapterTest(unittest.TestCase):
             ],
             ["epub:OPS/chapter.xhtml:0", "epub:OPS/chapter.xhtml:2"],
         )
+        navigation_blocks = [
+            block
+            for unit in plan.units
+            for block in unit.blocks
+            if dict(block.metadata).get("epub_aux_kind") == "xhtml_navigation"
+        ]
         self.assertEqual(
-            [
-                block.source_block_id
-                for unit in plan.units
-                for block in unit.blocks
-                if dict(block.metadata).get("epub_aux_kind") == "xhtml_navigation"
-            ],
+            [block.source_block_id for block in navigation_blocks],
             [
                 "epub:aux:xhtml-navigation:OPS/front.xhtml:h1:0",
                 "epub:aux:xhtml-navigation:OPS/front.xhtml:p:0",
                 "epub:aux:xhtml-navigation:OPS/front.xhtml:p:1",
             ],
         )
+        self._assert_xhtml_navigation_content_role_metadata(navigation_blocks)
 
     def test_plans_plain_xhtml_contents_page_as_auxiliary_navigation_blocks(self):
         plan = plan_epub_translation(
@@ -627,6 +664,7 @@ class EpubFormatAdapterTest(unittest.TestCase):
             [block.text for block in navigation_blocks],
             ["Contents", "Chapter 1", "Part I"],
         )
+        self._assert_xhtml_navigation_content_role_metadata(navigation_blocks)
         self.assertEqual(
             [unit.source_block_ids for unit in plan.units[:1]],
             [("epub:OPS/chapter.xhtml:0",)],
@@ -936,6 +974,32 @@ class EpubFormatAdapterTest(unittest.TestCase):
             self.assertIn(("local_name", metadata["local_name"]), block.metadata)
             self.assertIn(("aux_index", metadata["aux_index"]), block.metadata)
 
+        non_navigation_aux_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") != "xhtml_navigation"
+        ]
+        for block in non_navigation_aux_blocks:
+            self.assertFalse(
+                any(key.startswith("content_role.") for key, _ in block.metadata)
+            )
+
+        navigation_blocks = [
+            block
+            for block in aux_blocks
+            if dict(block.metadata).get("epub_aux_kind") == "xhtml_navigation"
+        ]
+        self.assertEqual(
+            [block.source_block_id for block in navigation_blocks],
+            ["epub:aux:xhtml-navigation:OPS/nav.xhtml:a:0"],
+        )
+        self._assert_xhtml_navigation_content_role_metadata(navigation_blocks)
+        navigation_metadata = dict(navigation_blocks[0].metadata)
+        self.assertEqual(navigation_metadata["role"], "auxiliary")
+        self.assertEqual(navigation_metadata["file_name"], "OPS/nav.xhtml")
+        self.assertEqual(navigation_metadata["local_name"], "a")
+        self.assertEqual(navigation_metadata["aux_index"], "0")
+
     def test_plans_nested_epub_navigation_anchor_labels(self):
         plan = plan_epub_translation(
             content=_make_epub(
@@ -981,6 +1045,7 @@ class EpubFormatAdapterTest(unittest.TestCase):
             ],
         )
         self.assertEqual([block.text for block in nav_blocks], ["Part I", "Chapter 1"])
+        self._assert_xhtml_navigation_content_role_metadata(nav_blocks)
 
     def test_plans_only_xhtml_head_title_as_auxiliary_title(self):
         plan = plan_epub_translation(

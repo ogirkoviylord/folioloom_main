@@ -559,6 +559,48 @@ class ContentRoleAnnotation:
         return metadata
 
 
+def content_role_metadata_pairs(
+    annotation: ContentRoleAnnotation,
+) -> tuple[tuple[str, str], ...]:
+    """Flatten an annotation into PR-safe namespaced scalar metadata pairs.
+
+    The adapter-facing representation deliberately avoids nested dict/list
+    values, raw text, provider payloads, diagnostics, and behavior-enabling
+    switches. It is descriptive metadata only.
+    """
+
+    pairs = (
+        ("content_role.schema_version", ANNOTATION_SCHEMA_VERSION),
+        ("content_role.source_surface", annotation.locator.surface),
+        ("content_role.source_granularity", annotation.locator.granularity),
+        ("content_role.role", annotation.role),
+        ("content_role.confidence", annotation.confidence),
+        ("content_role.reporting_bucket", annotation.reporting_bucket),
+        (
+            "content_role.allowed_action_envelope",
+            str(annotation.allowed_action_envelope),
+        ),
+        ("content_role.behavior_allowed", "false"),
+        ("content_role.raw_publication_allowed", "false"),
+        ("content_role.risk_approval_flags", "all_false"),
+        (
+            "content_role.evidence_signal_families",
+            ",".join(
+                sorted({evidence.signal_family for evidence in annotation.evidence})
+            ),
+        ),
+        (
+            "content_role.evidence_reason_codes",
+            ",".join(sorted(evidence.reason_code for evidence in annotation.evidence)),
+        ),
+    )
+    for key, value in pairs:
+        if not key.startswith("content_role."):
+            raise ValueError("content-role metadata key must be namespaced")
+        _validate_metadata_scalar(key, value)
+    return pairs
+
+
 def signal_families(signals: Sequence[Mapping[str, Any]]) -> frozenset[str]:
     """Return the independent signal-family names present in a fixture row."""
 
