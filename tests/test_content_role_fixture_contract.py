@@ -246,6 +246,11 @@ class ContentRoleFixtureContractTest(unittest.TestCase):
                 "reporting_bucket",
             ),
             (
+                "reporting_bucket_mismatch",
+                lambda case: case.__setitem__("reporting_bucket", "reader_visible"),
+                "deterministic contract",
+            ),
+            (
                 "missing_required_field",
                 lambda case: case.pop("fixture_id"),
                 "missing required fields",
