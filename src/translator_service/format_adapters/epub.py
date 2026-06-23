@@ -1116,6 +1116,14 @@ def _collect_epub_ncx_auxiliary_blocks(
                     aux_index=index,
                     text=text,
                     aux_kind="ncx_text",
+                    extra_metadata=_epub_ncx_text_content_role_metadata(
+                        source_block_id=epub_aux_block_id(
+                            kind="ncx",
+                            file_name=file_name,
+                            local_name=local_name,
+                            index=index,
+                        )
+                    ),
                 )
             )
             index += 1
@@ -1665,6 +1673,43 @@ def _epub_xhtml_navigation_content_role_metadata(
                     strength="medium",
                     metadata_value_kind="epub_aux_kind",
                     reason_code="xhtml_navigation_aux_kind",
+                ),
+            ),
+            reporting_bucket=reporting_bucket_for_annotation(
+                role="reader_navigation",
+                granularity="block",
+            ),
+        )
+    )
+
+
+def _epub_ncx_text_content_role_metadata(
+    *,
+    source_block_id: str,
+) -> tuple[tuple[str, str], ...]:
+    return content_role_metadata_pairs(
+        ContentRoleAnnotation(
+            locator=SourceLocator(
+                surface="epub_ncx_nav",
+                source_path_or_chunk_id=source_block_id,
+                granularity="block",
+                structure_hints=("ncx", "reader-navigation"),
+                position_hint="auxiliary",
+            ),
+            role="reader_navigation",
+            confidence="medium",
+            evidence=(
+                ContentRoleEvidence(
+                    signal_family="structural_semantic",
+                    strength="medium",
+                    metadata_value_kind="ncx_text_element",
+                    reason_code="epub_ncx_text_auxiliary_block",
+                ),
+                ContentRoleEvidence(
+                    signal_family="path_class_id",
+                    strength="medium",
+                    metadata_value_kind="epub_aux_kind",
+                    reason_code="ncx_text_aux_kind",
                 ),
             ),
             reporting_bucket=reporting_bucket_for_annotation(
