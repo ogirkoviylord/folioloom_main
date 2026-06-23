@@ -8,6 +8,7 @@ behavior, or approve any gate/report persistence change.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 FIXTURE_SCHEMA_VERSION = "content-role-fixture-contract-v1"
@@ -165,6 +166,268 @@ DISALLOWED_SINGLE_SIGNAL_SHORTCUTS = (
     "cache_or_output_side_text_alone",
     "project_gutenberg_or_source_specific_key",
 )
+
+METADATA_ONLY_FORBIDDEN_FIELD_NAMES = (
+    "api_key",
+    "authorization",
+    "auth_material",
+    "owner_only_diagnostics",
+    "password",
+    "private_diagnostics",
+    "prompt",
+    "prompt_body",
+    "provider_request",
+    "provider_response",
+    "raw_provider_response",
+    "raw_source",
+    "raw_target",
+    "raw_translation",
+    "secret",
+    "source_text",
+    "system_prompt",
+    "translated_passage",
+    "translated_text",
+    "user_prompt",
+)
+METADATA_ONLY_FORBIDDEN_EXACT_VALUES = frozenset(
+    METADATA_ONLY_FORBIDDEN_FIELD_NAMES
+    + (
+        "private_diagnostic",
+        "provider",
+        "source",
+        "target",
+        "translation",
+    )
+)
+METADATA_ONLY_FORBIDDEN_VALUE_MARKERS = (
+    "begin_untrusted_document_content",
+    "<translation_batch",
+    "authorization:",
+    "bearer ",
+    "owner only diagnostics",
+    "owner_only_diagnostics",
+    "owner_policy_tbd_later_behavior",
+    "private diagnostics",
+    "private_diagnostics",
+    "project gutenberg",
+    "prompt body",
+    "prompt_body",
+    "provider body",
+    "provider_body",
+    "provider request",
+    "provider response",
+    "provider_request",
+    "provider_response",
+    "raw provider",
+    "raw_provider",
+    "raw source",
+    "raw_source",
+    "raw target",
+    "raw_target",
+    "raw translation",
+    "raw_translation",
+    "sk-",
+    "source text",
+    "source_text",
+    "translated passage",
+    "translated text",
+    "translated_passage",
+    "translated_text",
+)
+MAX_METADATA_SCALAR_CHARS = 280
+
+
+def _as_tuple(values: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(values, str):
+        return (values,)
+    return tuple(str(value) for value in values)
+
+
+def _validate_metadata_scalar(field_name: str, value: str) -> str:
+    normalized_field_name = field_name.strip().lower()
+    if normalized_field_name in METADATA_ONLY_FORBIDDEN_FIELD_NAMES:
+        raise ValueError(f"metadata field is forbidden: {field_name}")
+    if "\n" in value or "\r" in value or len(value) > MAX_METADATA_SCALAR_CHARS:
+        raise ValueError(f"metadata value is not PR-safe: {field_name}")
+    normalized_value = value.strip().lower()
+    if normalized_value in METADATA_ONLY_FORBIDDEN_EXACT_VALUES or any(
+        marker in normalized_value for marker in METADATA_ONLY_FORBIDDEN_VALUE_MARKERS
+    ):
+        raise ValueError(f"metadata value is forbidden: {field_name}")
+    return value
+
+
+@dataclass(frozen=True)
+class SourceLocator:
+    """Adapter-neutral source location for metadata-only role annotations."""
+
+    surface: str
+    source_path_or_chunk_id: str
+    granularity: str
+    structure_hints: Sequence[str] = ()
+    position_hint: str = "unknown"
+
+    def __post_init__(self) -> None:
+        if self.surface not in SOURCE_SURFACES:
+            raise ValueError("invalid source surface")
+        if self.granularity not in GRANULARITIES:
+            raise ValueError("invalid annotation granularity")
+        _validate_metadata_scalar(
+            "source_path_or_chunk_id",
+            self.source_path_or_chunk_id,
+        )
+        _validate_metadata_scalar("position_hint", self.position_hint)
+        object.__setattr__(self, "structure_hints", _as_tuple(self.structure_hints))
+        for hint in self.structure_hints:
+            _validate_metadata_scalar("structure_hint", hint)
+
+    def to_metadata_dict(self) -> dict[str, Any]:
+        return {
+            "surface": self.surface,
+            "source_path_or_chunk_id": self.source_path_or_chunk_id,
+            "granularity": self.granularity,
+            "structure_hints": list(self.structure_hints),
+            "position_hint": self.position_hint,
+        }
+
+
+@dataclass(frozen=True)
+class ContentRoleEvidence:
+    """One metadata-only source-side evidence signal for a role annotation."""
+
+    signal_family: str
+    strength: str
+    metadata_value_kind: str
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        if self.signal_family not in SIGNAL_FAMILIES:
+            raise ValueError("invalid signal family")
+        if self.strength not in EVIDENCE_CONFIDENCE_LEVELS:
+            raise ValueError("invalid evidence strength")
+        _validate_metadata_scalar("metadata_value_kind", self.metadata_value_kind)
+        _validate_metadata_scalar("reason_code", self.reason_code)
+
+    def to_metadata_dict(self) -> dict[str, str]:
+        return {
+            "signal_family": self.signal_family,
+            "strength": self.strength,
+            "metadata_value_kind": self.metadata_value_kind,
+            "reason_code": self.reason_code,
+        }
+
+
+@dataclass(frozen=True)
+class TokenPreservationMetadata:
+    """Token-scoped preservation metadata; never authorizes section behavior."""
+
+    token_kinds: Sequence[str] = ()
+    token_scope_only: bool = True
+    section_omit_or_preserve_allowed: bool = False
+    token_action_envelope: str = TOKEN_ACTION_ENVELOPE
+
+    def __post_init__(self) -> None:
+        if self.token_action_envelope != TOKEN_ACTION_ENVELOPE:
+            raise ValueError("token preservation must use token_preserve_only")
+        if self.token_scope_only is not True:
+            raise ValueError("token preservation must remain token-scoped")
+        if self.section_omit_or_preserve_allowed is not False:
+            raise ValueError("token preservation must not authorize section behavior")
+        object.__setattr__(self, "token_kinds", _as_tuple(self.token_kinds))
+        for token_kind in self.token_kinds:
+            _validate_metadata_scalar("token_kind", token_kind)
+
+    def to_metadata_dict(self) -> dict[str, Any]:
+        return {
+            "token_action_envelope": self.token_action_envelope,
+            "token_scope_only": self.token_scope_only,
+            "section_omit_or_preserve_allowed": self.section_omit_or_preserve_allowed,
+            "token_kinds": list(self.token_kinds),
+        }
+
+
+@dataclass(frozen=True)
+class ContentRoleAnnotation:
+    """Metadata-only source-side content-role annotation carrier.
+
+    The carrier is deliberately behavior-neutral: section/block annotations can
+    only shadow-report while translating/including, and token annotations can
+    only describe token-scoped preservation metadata.
+    """
+
+    locator: SourceLocator
+    role: str
+    confidence: str
+    evidence: Sequence[ContentRoleEvidence]
+    reporting_bucket: str
+    allowed_action_envelope: str | None = None
+    conflict_notes: Sequence[str] = ()
+    token_preservation: TokenPreservationMetadata | None = None
+
+    def __post_init__(self) -> None:
+        if self.role not in ALLOWED_ROLES:
+            raise ValueError("invalid content role")
+        if self.confidence not in CONFIDENCE_LEVELS:
+            raise ValueError("invalid content-role confidence")
+        if self.reporting_bucket not in REPORTING_BUCKETS:
+            raise ValueError("invalid reporting bucket")
+        object.__setattr__(self, "evidence", tuple(self.evidence))
+        object.__setattr__(self, "conflict_notes", _as_tuple(self.conflict_notes))
+        for note in self.conflict_notes:
+            _validate_metadata_scalar("conflict_note", note)
+        self._validate_evidence()
+        self._validate_action_envelope()
+
+    def _validate_evidence(self) -> None:
+        if not self.evidence:
+            raise ValueError("content-role annotation requires evidence")
+        families = frozenset(evidence.signal_family for evidence in self.evidence)
+        if self.confidence == "high":
+            has_strong_core_signal = any(
+                evidence.signal_family in STRONG_HIGH_CONFIDENCE_FAMILIES
+                and evidence.strength in {"strong", "medium"}
+                for evidence in self.evidence
+            )
+            if len(families) < 2 or not has_strong_core_signal:
+                raise ValueError(
+                    "high confidence requires multiple independent evidence signals"
+                )
+
+    def _validate_action_envelope(self) -> None:
+        expected_envelope = (
+            TOKEN_ACTION_ENVELOPE
+            if self.locator.granularity == "token"
+            else SECTION_BLOCK_ACTION_ENVELOPE
+        )
+        envelope = self.allowed_action_envelope or expected_envelope
+        if envelope != expected_envelope or envelope not in ALLOWED_ACTION_ENVELOPES:
+            raise ValueError("behavior-changing action envelope is not allowed")
+        object.__setattr__(self, "allowed_action_envelope", envelope)
+        if self.locator.granularity == "token":
+            token_preservation = self.token_preservation or TokenPreservationMetadata()
+            object.__setattr__(self, "token_preservation", token_preservation)
+        elif self.token_preservation is not None:
+            raise ValueError("token preservation metadata must remain token-scoped")
+
+    def to_metadata_dict(self) -> dict[str, Any]:
+        metadata = {
+            "schema_version": ANNOTATION_SCHEMA_VERSION,
+            "locator": self.locator.to_metadata_dict(),
+            "role": self.role,
+            "confidence": self.confidence,
+            "evidence": [evidence.to_metadata_dict() for evidence in self.evidence],
+            "reporting_bucket": self.reporting_bucket,
+            "allowed_action_envelope": self.allowed_action_envelope,
+            "conflict_notes": list(self.conflict_notes),
+            "behavior_allowed": False,
+            "raw_publication_allowed": False,
+            "risk_approval_flags": {
+                flag_name: False for flag_name in BEHAVIOR_RISK_APPROVAL_FLAGS
+            },
+        }
+        if self.token_preservation is not None:
+            metadata["token_preservation"] = self.token_preservation.to_metadata_dict()
+        return metadata
 
 
 def signal_families(signals: Sequence[Mapping[str, Any]]) -> frozenset[str]:
