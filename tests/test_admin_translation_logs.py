@@ -238,6 +238,57 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertNotIn("Original paragraph", repr(details))
         self.assertNotIn("Перекладений абзац", repr(details))
 
+    def test_translation_run_details_can_bound_recent_history(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-bounded-history",
+                    order_id=None,
+                    user_id=None,
+                    file_name="bounded.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=10001,
+                ),
+            )
+            for sequence in range(9998, 10002):
+                logger.record_fragment(
+                    TranslationFragmentLog(
+                        sequence=sequence,
+                        source_text=f"private source {sequence}",
+                        translated_text=f"private translation {sequence}",
+                        status=f"status-{sequence}",
+                        elapsed_seconds=1.0,
+                        prompt_tokens=1,
+                        completion_tokens=1,
+                        total_tokens=2,
+                    )
+                )
+
+            details = get_translation_run_details(
+                temp_dir,
+                logger.run_dir.name,
+                history_limit=3,
+            )
+
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertEqual(
+            [fragment.sequence for fragment in details.fragments],
+            [9999, 10000, 10001],
+        )
+        self.assertEqual(
+            [fragment.status for fragment in details.fragments],
+            ["status-9999", "status-10000", "status-10001"],
+        )
+        self.assertEqual(len(details.events), 3)
+        self.assertEqual(
+            [event.payload.get("sequence") for event in details.events],
+            [9999, 10000, 10001],
+        )
+
     def test_translation_run_archive_keeps_book_audit_metadata_only(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
