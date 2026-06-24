@@ -3010,10 +3010,8 @@ def _translation_run_details(
         fragments = _translation_work_unit_fragments(
             settings,
             job_id=details.summary.job_id,
+            limit=history_limit,
         )
-        if history_limit is not None:
-            safe_limit = max(0, int(history_limit))
-            fragments = fragments[-safe_limit:] if safe_limit else ()
         if fragments:
             details = replace(details, fragments=fragments)
     diagnostic = _translation_work_unit_diagnostic(
@@ -3100,15 +3098,22 @@ def _translation_work_unit_fragments(
     settings: Settings,
     *,
     job_id: str,
+    limit: int | None = None,
 ) -> tuple[TranslationRunFragmentDetail, ...]:
     if not job_id or not _persistent_job_store_readable(settings):
         return ()
+    safe_limit = None if limit is None else max(0, int(limit))
+    if safe_limit == 0:
+        return ()
     store = open_persistent_job_store(settings)
     try:
-        units = sorted(
-            store.list_work_units(job_id),
-            key=lambda unit: getattr(unit, "sequence", 0),
-        )
+        if safe_limit is None:
+            units = sorted(
+                store.list_work_units(job_id),
+                key=lambda unit: getattr(unit, "sequence", 0),
+            )
+        else:
+            units = store.list_recent_work_units(job_id, limit=safe_limit)
     finally:
         store.close()
     return tuple(_translation_work_unit_fragment(unit) for unit in units)

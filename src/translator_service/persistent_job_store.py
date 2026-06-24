@@ -28,6 +28,13 @@ class PersistentJobStore(Protocol):
 
     def list_work_units(self, job_id: str) -> list[PersistentWorkUnit]: ...
 
+    def list_recent_work_units(
+        self,
+        job_id: str,
+        *,
+        limit: int,
+    ) -> list[PersistentWorkUnit]: ...
+
     def list_jobs_by_status(
         self,
         status: PersistentTranslationJobStatus,

@@ -265,7 +265,7 @@ def get_translation_run_details(
     if run_dir is None:
         return None
     run_json = run_dir / "run.json"
-    summary = _read_run_summary(run_json)
+    summary = _read_run_summary(run_json, history_limit=history_limit)
     if summary is None:
         return None
     try:
@@ -1910,6 +1910,7 @@ def _read_run_summary(
     run_json: Path,
     *,
     now: datetime | None = None,
+    history_limit: int | None = None,
 ) -> TranslationRunSummary | None:
     try:
         data = json.loads(run_json.read_text(encoding="utf-8"))
@@ -1926,8 +1927,12 @@ def _read_run_summary(
         data,
         completed_fragments=completed_fragments,
         events_path=events_path,
+        history_limit=history_limit,
     )
-    last_event_at, current_stage = _latest_event_state(events_path)
+    last_event_at, current_stage = _latest_event_state(
+        events_path,
+        limit=history_limit,
+    )
     elapsed_seconds = _float(totals.get("elapsed_seconds"))
     status = _string(data.get("status"), fallback="unknown").lower()
     started_at = _parse_datetime(data.get("started_at"))
@@ -2039,8 +2044,11 @@ def _total_fragment_count(
     *,
     completed_fragments: int,
     events_path: Path,
+    history_limit: int | None = None,
 ) -> int:
     explicit_total = _int(data.get("total_fragment_count"))
+    if history_limit is not None:
+        return max(completed_fragments, explicit_total)
     event_total = _event_fragment_count(events_path)
     return max(completed_fragments, explicit_total, event_total)
 
@@ -2074,13 +2082,17 @@ def _event_fragment_count(events_path: Path) -> int:
     return total
 
 
-def _latest_event_state(events_path: Path) -> tuple[datetime | None, str | None]:
+def _latest_event_state(
+    events_path: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[datetime | None, str | None]:
     if not events_path.exists():
         return None, None
     latest_at: datetime | None = None
     latest_type: str | None = None
     try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
+        lines = _read_recent_lines(events_path, limit=limit)
     except OSError:
         return None, None
     for line in lines:

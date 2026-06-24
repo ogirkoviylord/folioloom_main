@@ -2485,6 +2485,96 @@ class AdminRoutesTest(unittest.TestCase):
         serialized_api = json.dumps(details_api.json(), ensure_ascii=False)
         self.assertNotIn("old-status-sentinel", serialized_api)
 
+    def test_translation_log_api_persistent_fallback_uses_bounded_recent_work_units(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_root = root / "runs"
+            job_db = root / "jobs.sqlite3"
+            store = SQLiteTranslationJobStore(job_db)
+            try:
+                job = store.create_job(
+                    order_id="order-work-unit-bound",
+                    user_id="telegram:42",
+                    file_id="file-work-unit-bound",
+                    file_name="large-work-units.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    adapter_version="txt-adapter-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                )
+                store.add_work_units(
+                    job.id,
+                    [
+                        WorkUnitPlan(
+                            sequence=sequence,
+                            source_block_ids=(f"block-{sequence}",),
+                            source_text_hash=f"hash-{sequence}",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="ru",
+                        )
+                        for sequence in range(1, 106)
+                    ],
+                )
+            finally:
+                store.close()
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id=job.id,
+                    order_id=job.order_id,
+                    user_id=job.user_id,
+                    file_name=job.file_name,
+                    document_kind=job.document_kind,
+                    source_language=job.source_language,
+                    target_language=job.target_language,
+                    total_fragment_count=105,
+                ),
+            )
+            logger.finish(status="active")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        persistent_jobs_db_path=str(job_db),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            with (
+                patch.object(
+                    SQLiteTranslationJobStore,
+                    "list_work_units",
+                    side_effect=AssertionError("unbounded work unit listing"),
+                ),
+                patch(
+                    "translator_service.admin.routes._operations_overview",
+                    return_value=None,
+                ),
+                patch(
+                    "translator_service.admin.routes._translation_work_unit_diagnostic",
+                    return_value=None,
+                ),
+            ):
+                details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+
+        self.assertEqual(details_api.status_code, 200)
+        fragments = details_api.json()["details"]["fragments"]
+        self.assertEqual(len(fragments), 100)
+        self.assertEqual(fragments[0]["sequence"], 6)
+        self.assertEqual(fragments[-1]["sequence"], 105)
+        source_block_ids = [
+            block_id
+            for fragment in fragments
+            for block_id in fragment["source_block_ids"]
+        ]
+        self.assertNotIn("block-1", source_block_ids)
+
     def test_translation_log_download_uses_effective_scheduler_snapshot(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
