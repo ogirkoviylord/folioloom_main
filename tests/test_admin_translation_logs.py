@@ -255,6 +255,18 @@ class AdminTranslationLogsTest(unittest.TestCase):
                     total_fragment_count=10001,
                 ),
             )
+            for sequence in range(1, 301):
+                logger.record_event(
+                    "work_unit_finished",
+                    {
+                        "sequence": sequence,
+                        "status": "old",
+                        "elapsed_seconds": 1.0,
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                )
             for sequence in range(9998, 10002):
                 logger.record_fragment(
                     TranslationFragmentLog(
@@ -270,9 +282,50 @@ class AdminTranslationLogsTest(unittest.TestCase):
                 )
 
             events_path = logger.run_dir / "events.jsonl"
+            event_line_count = len(events_path.read_text(encoding="utf-8").splitlines())
+            event_byte_size = events_path.stat().st_size
             event_read_text_calls: list[Path] = []
+            event_read_stats = {
+                "bytes_read": 0,
+                "chars_read": 0,
+                "line_iterations": 0,
+            }
             path_type = type(events_path)
             original_read_text = path_type.read_text
+            original_open = path_type.open
+
+            class CountingEventRead:
+                def __init__(self, handle):
+                    self._handle = handle
+
+                def __enter__(self):
+                    self._handle.__enter__()
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return self._handle.__exit__(exc_type, exc, tb)
+
+                def __iter__(self):
+                    for line in self._handle:
+                        event_read_stats["line_iterations"] += 1
+                        yield line
+
+                def read(self, *args, **kwargs):
+                    data = self._handle.read(*args, **kwargs)
+                    if isinstance(data, bytes):
+                        event_read_stats["bytes_read"] += len(data)
+                    else:
+                        event_read_stats["chars_read"] += len(data)
+                    return data
+
+                def readline(self, *args, **kwargs):
+                    data = self._handle.readline(*args, **kwargs)
+                    if data:
+                        event_read_stats["line_iterations"] += 1
+                    return data
+
+                def __getattr__(self, name):
+                    return getattr(self._handle, name)
 
             def fail_full_event_read(path: Path, *args, **kwargs):
                 if path.name == "events.jsonl":
@@ -280,8 +333,16 @@ class AdminTranslationLogsTest(unittest.TestCase):
                     raise AssertionError("bounded details must not full-read events")
                 return original_read_text(path, *args, **kwargs)
 
+            def count_event_open(path: Path, *args, **kwargs):
+                handle = original_open(path, *args, **kwargs)
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path.name == "events.jsonl" and "r" in mode:
+                    return CountingEventRead(handle)
+                return handle
+
             with (
                 patch.object(path_type, "read_text", fail_full_event_read),
+                patch.object(path_type, "open", count_event_open),
                 patch(
                     "translator_service.admin.translation_logs._event_fragment_count",
                     side_effect=AssertionError(
@@ -295,7 +356,13 @@ class AdminTranslationLogsTest(unittest.TestCase):
                     history_limit=3,
                 )
 
+        self.assertGreater(event_line_count, 300)
         self.assertEqual(event_read_text_calls, [])
+        self.assertLess(event_read_stats["line_iterations"], event_line_count)
+        self.assertLess(
+            event_read_stats["bytes_read"] + event_read_stats["chars_read"],
+            event_byte_size,
+        )
         self.assertIsNotNone(details)
         assert details is not None
         self.assertEqual(details.summary.total_fragment_count, 10001)
