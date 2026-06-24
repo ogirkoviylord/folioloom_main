@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import deque
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, date, datetime
@@ -13,6 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
 DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT = 100
+_RECENT_LINE_TAIL_CHUNK_SIZE = 8192
 _COMPLETED_FRAGMENT_STATUSES = {
     "cached",
     "complete",
@@ -2032,11 +2032,20 @@ def _read_recent_lines(path: Path, *, limit: int | None) -> tuple[str, ...]:
     safe_limit = max(0, int(limit))
     if safe_limit == 0:
         return ()
-    lines: deque[str] = deque(maxlen=safe_limit)
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            lines.append(line.rstrip("\n"))
-    return tuple(lines)
+    chunks: list[bytes] = []
+    newline_count = 0
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        position = handle.tell()
+        while position > 0 and newline_count <= safe_limit:
+            read_size = min(_RECENT_LINE_TAIL_CHUNK_SIZE, position)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            chunks.append(chunk)
+            newline_count += chunk.count(b"\n")
+    tail = b"".join(reversed(chunks))
+    return tuple(line.decode("utf-8") for line in tail.splitlines()[-safe_limit:])
 
 
 def _total_fragment_count(
