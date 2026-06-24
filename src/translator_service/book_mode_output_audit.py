@@ -233,6 +233,7 @@ _LANGUAGE_METADATA_KEYS = {
     "target_language",
     "xml:lang",
 }
+_OPF_SOURCE_RESIDUE_TERMS = {"archive", "source"}
 _LANGUAGE_NAME_ROOTS = {
     "english": "en",
     "russian": "ru",
@@ -370,6 +371,22 @@ def audit_book_mode_output(
                     category="legal_backmatter",
                     stats=stats,
                     severity="error",
+                )
+            )
+            continue
+
+        if _has_opf_source_archive_residue(chunk=chunk, stats=stats):
+            findings.append(
+                _finding(
+                    code="untranslated_source_residue",
+                    message=(
+                        "English source/archive metadata residue remains in "
+                        "Cyrillic book-mode output."
+                    ),
+                    target_root=target_root,
+                    chunk=chunk,
+                    category="language_mix",
+                    stats=stats,
                 )
             )
             continue
@@ -695,6 +712,29 @@ def _has_untranslated_english_residue(stats: _ChunkLanguageStats) -> bool:
         and stats.latin_word_count >= 4
         and stats.english_function_word_count >= 2
     )
+
+
+def _has_opf_source_archive_residue(
+    *,
+    chunk: BookModeAuditChunk,
+    stats: _ChunkLanguageStats,
+) -> bool:
+    if not _is_opf_source_metadata_surface(chunk):
+        return False
+    if not stats.latin_words:
+        return False
+    return any(word in _OPF_SOURCE_RESIDUE_TERMS for word in stats.latin_words)
+
+
+def _is_opf_source_metadata_surface(chunk: BookModeAuditChunk) -> bool:
+    metadata = {
+        key.strip().lower(): value.strip().lower()
+        for key, value in chunk.metadata
+    }
+    if metadata.get("surface") == "opf_source":
+        return True
+    block_id = chunk.block_id.lower()
+    return block_id.startswith("epub:aux:surface-opf:") and ":source:" in block_id
 
 
 def _has_gutenberg_legal_backmatter_residue(
