@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.admin.translation_logs import (
     _glossary_participation_status_from_payload,
@@ -267,14 +269,38 @@ class AdminTranslationLogsTest(unittest.TestCase):
                     )
                 )
 
-            details = get_translation_run_details(
-                temp_dir,
-                logger.run_dir.name,
-                history_limit=3,
-            )
+            events_path = logger.run_dir / "events.jsonl"
+            event_read_text_calls: list[Path] = []
+            path_type = type(events_path)
+            original_read_text = path_type.read_text
 
+            def fail_full_event_read(path: Path, *args, **kwargs):
+                if path.name == "events.jsonl":
+                    event_read_text_calls.append(path)
+                    raise AssertionError("bounded details must not full-read events")
+                return original_read_text(path, *args, **kwargs)
+
+            with (
+                patch.object(path_type, "read_text", fail_full_event_read),
+                patch(
+                    "translator_service.admin.translation_logs._event_fragment_count",
+                    side_effect=AssertionError(
+                        "bounded details must not scan event fragment counts"
+                    ),
+                ),
+            ):
+                details = get_translation_run_details(
+                    temp_dir,
+                    logger.run_dir.name,
+                    history_limit=3,
+                )
+
+        self.assertEqual(event_read_text_calls, [])
         self.assertIsNotNone(details)
         assert details is not None
+        self.assertEqual(details.summary.total_fragment_count, 10001)
+        self.assertEqual(details.summary.current_stage, "work_unit_finished")
+        self.assertIsNotNone(details.summary.last_event_at)
         self.assertEqual(
             [fragment.sequence for fragment in details.fragments],
             [9999, 10000, 10001],

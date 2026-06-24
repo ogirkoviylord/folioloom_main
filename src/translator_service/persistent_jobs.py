@@ -406,6 +406,26 @@ class SQLiteTranslationJobStore:
         ).fetchall()
         return [_work_unit_from_row(row) for row in rows]
 
+    def list_recent_work_units(
+        self,
+        job_id: str,
+        *,
+        limit: int,
+    ) -> list[PersistentWorkUnit]:
+        safe_limit = max(0, int(limit))
+        if safe_limit == 0:
+            return []
+        rows = self._connection.execute(
+            """
+            SELECT * FROM work_units
+            WHERE job_id = ?
+            ORDER BY sequence DESC
+            LIMIT ?
+            """,
+            (job_id, safe_limit),
+        ).fetchall()
+        return [_work_unit_from_row(row) for row in reversed(rows)]
+
     def get_work_unit(self, work_unit_id: str) -> PersistentWorkUnit | None:
         return self._get_work_unit(work_unit_id)
 
