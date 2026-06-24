@@ -10,6 +10,7 @@ from translator_service.deepseek_client import (
 from translator_service.deepseek_key_pool import (
     CHANNEL_HEALTH_COOLING_DOWN,
     CHANNEL_HEALTH_HEALTHY,
+    PROVIDER_ERROR_MALFORMED_RESPONSE,
     PROVIDER_ERROR_RATE_LIMITED,
     PROVIDER_ERROR_UNSAFE_MODEL_OUTPUT,
     DeepSeekChannelConfig,
@@ -24,7 +25,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
     def test_fails_over_to_next_channel_and_cools_down_rate_limited_channel(self):
         factory = RecordingClientFactory(
             {
-                "key-a": [DeepSeekApiError("DeepSeek API returned HTTP 429: rate limit")],
+                "key-a": [
+                    DeepSeekApiError("DeepSeek API returned HTTP 429: rate limit")
+                ],
                 "key-b": ["переклад"],
             }
         )
@@ -167,7 +170,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertNotIn("secret-key-a", repr(snapshot[0]))
 
     def test_provider_slot_inventory_exposes_safe_logical_channels(self):
-        factory = RecordingClientFactory({"secret-key-a": ["ok"], "secret-key-b": ["ok"]})
+        factory = RecordingClientFactory(
+            {"secret-key-a": ["ok"], "secret-key-b": ["ok"]}
+        )
         pool = DeepSeekKeyPoolTranslator(
             channels=[
                 DeepSeekChannelConfig(
@@ -187,7 +192,10 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         inventory = pool.provider_slot_inventory()
 
         self.assertEqual(
-            [(item.provider_id, item.channel_id, item.max_parallel_requests) for item in inventory],
+            [
+                (item.provider_id, item.channel_id, item.max_parallel_requests)
+                for item in inventory
+            ],
             [
                 ("deepseek", "deepseek-channel-1", 2),
                 ("deepseek", "deepseek-channel-2", 1),
@@ -200,7 +208,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertNotIn("backup", inventory_repr)
 
     def test_provider_capacity_caps_expose_safe_default_account_and_model_caps(self):
-        factory = RecordingClientFactory({"secret-key-a": ["ok"], "secret-key-b": ["ok"]})
+        factory = RecordingClientFactory(
+            {"secret-key-a": ["ok"], "secret-key-b": ["ok"]}
+        )
         pool = DeepSeekKeyPoolTranslator(
             channels=[
                 DeepSeekChannelConfig(
@@ -302,7 +312,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=lambda: 100.0,
         )
 
-        result = pool.translate(text="source", source_language="en", target_language="uk")
+        result = pool.translate(
+            text="source", source_language="en", target_language="uk"
+        )
 
         snapshot = pool.snapshot()[0]
         self.assertEqual(result, "ok")
@@ -340,7 +352,11 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
     def test_permanent_error_is_recorded_and_not_replayed_on_other_channels(self):
         factory = RecordingClientFactory(
             {
-                "key-a": [DeepSeekApiError("DeepSeek API returned HTTP 400: bad request for key-a")],
+                "key-a": [
+                    DeepSeekApiError(
+                        "DeepSeek API returned HTTP 400: bad request for key-a"
+                    )
+                ],
                 "key-b": ["should-not-run"],
             }
         )
@@ -468,6 +484,50 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertEqual(provider_snapshot.circuit_state, "closed")
         self.assertIsNone(provider_snapshot.last_reason)
 
+    def test_deepseek_contract_errors_are_malformed_response_failures(self):
+        cases = [
+            "DeepSeek response did not contain message content",
+            "DeepSeek response message content is not text",
+            "DeepSeek response message content is empty",
+            "DeepSeek response was not valid JSON",
+            "DeepSeek response JSON was not an object",
+        ]
+
+        for message in cases:
+            with self.subTest(message=message):
+                factory = RecordingClientFactory(
+                    {
+                        "key-a": [DeepSeekApiError(f"{message} for key-a")],
+                        "key-b": ["should-not-run"],
+                    }
+                )
+                pool = DeepSeekKeyPoolTranslator(
+                    channels=[
+                        DeepSeekChannelConfig(api_key="key-a", label="a"),
+                        DeepSeekChannelConfig(api_key="key-b", label="b"),
+                    ],
+                    client_factory=factory,
+                    cooldown_seconds=30,
+                    clock=lambda: 100.0,
+                )
+
+                with self.assertRaisesRegex(DeepSeekApiError, message):
+                    pool.translate(
+                        text="source",
+                        source_language="en",
+                        target_language="uk",
+                    )
+
+                first, second = pool.snapshot()
+                self.assertEqual(factory.calls, [("key-a", "source")])
+                self.assertEqual(first.total_started_requests, 1)
+                self.assertEqual(first.error_kind, PROVIDER_ERROR_MALFORMED_RESPONSE)
+                self.assertEqual(first.total_malformed_response_failures, 1)
+                self.assertEqual(first.total_other_provider_failures, 0)
+                self.assertIn(message, first.last_error or "")
+                self.assertNotIn("key-a", first.last_error or "")
+                self.assertEqual(second.total_started_requests, 0)
+
     def test_temporary_error_records_cooldown_and_fails_over(self):
         factory = RecordingClientFactory(
             {
@@ -492,7 +552,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=now,
         )
 
-        result = pool.translate(text="source", source_language="en", target_language="uk")
+        result = pool.translate(
+            text="source", source_language="en", target_language="uk"
+        )
 
         first, second = pool.snapshot()
         self.assertEqual(result, "ok")
@@ -540,13 +602,22 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=now,
         )
 
-        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "ok-1")
+        self.assertEqual(
+            pool.translate(text="one", source_language="en", target_language="uk"),
+            "ok-1",
+        )
         self.assertEqual(pool.snapshot()[0].cooldown_until, 110.0)
         now.value = 110.0
-        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "ok-2")
+        self.assertEqual(
+            pool.translate(text="two", source_language="en", target_language="uk"),
+            "ok-2",
+        )
         self.assertEqual(pool.snapshot()[0].cooldown_until, 130.0)
         now.value = 130.0
-        self.assertEqual(pool.translate(text="three", source_language="en", target_language="uk"), "ok-3")
+        self.assertEqual(
+            pool.translate(text="three", source_language="en", target_language="uk"),
+            "ok-3",
+        )
         self.assertEqual(pool.snapshot()[0].cooldown_until, 155.0)
         self.assertEqual(pool.snapshot()[0].consecutive_temporary_failures, 3)
 
@@ -572,9 +643,15 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=now,
         )
 
-        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "fallback")
+        self.assertEqual(
+            pool.translate(text="one", source_language="en", target_language="uk"),
+            "fallback",
+        )
         now.value = 110.0
-        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "recovered")
+        self.assertEqual(
+            pool.translate(text="two", source_language="en", target_language="uk"),
+            "recovered",
+        )
 
         first = pool.snapshot()[0]
         self.assertEqual(first.total_temporary_failures, 1)
@@ -594,7 +671,10 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=lambda: 100.0,
         )
 
-        self.assertEqual(pool.translate(text="source", source_language="en", target_language="uk"), "b")
+        self.assertEqual(
+            pool.translate(text="source", source_language="en", target_language="uk"),
+            "b",
+        )
 
         self.assertEqual(factory.calls, [("key-b", "source")])
 
@@ -619,12 +699,20 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=now,
         )
 
-        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "fallback")
+        self.assertEqual(
+            pool.translate(text="one", source_language="en", target_language="uk"),
+            "fallback",
+        )
         now.value = 110.0
 
-        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "healthy-next")
+        self.assertEqual(
+            pool.translate(text="two", source_language="en", target_language="uk"),
+            "healthy-next",
+        )
 
-        self.assertEqual(factory.calls, [("key-a", "one"), ("key-b", "one"), ("key-b", "two")])
+        self.assertEqual(
+            factory.calls, [("key-a", "one"), ("key-b", "one"), ("key-b", "two")]
+        )
 
     def test_slower_channel_is_penalized_when_load_and_fairness_are_equal(self):
         now = FakeClock(100.0)
@@ -645,19 +733,34 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
             clock=now,
         )
 
-        self.assertEqual(pool.translate(text="one", source_language="en", target_language="uk"), "[key-a] one")
-        self.assertEqual(pool.translate(text="two", source_language="en", target_language="uk"), "[key-b] two")
-        self.assertEqual(pool.translate(text="three", source_language="en", target_language="uk"), "[key-b] three")
+        self.assertEqual(
+            pool.translate(text="one", source_language="en", target_language="uk"),
+            "[key-a] one",
+        )
+        self.assertEqual(
+            pool.translate(text="two", source_language="en", target_language="uk"),
+            "[key-b] two",
+        )
+        self.assertEqual(
+            pool.translate(text="three", source_language="en", target_language="uk"),
+            "[key-b] three",
+        )
 
-        self.assertEqual(factory.calls, [("key-a", "one"), ("key-b", "two"), ("key-b", "three")])
+        self.assertEqual(
+            factory.calls, [("key-a", "one"), ("key-b", "two"), ("key-b", "three")]
+        )
 
     def test_selection_uses_available_capacity_before_waiting(self):
         barrier = threading.Barrier(2)
         factory = BlockingClientFactory(barrier=barrier)
         pool = DeepSeekKeyPoolTranslator(
             channels=[
-                DeepSeekChannelConfig(api_key="key-a", label="a", max_parallel_requests=1),
-                DeepSeekChannelConfig(api_key="key-b", label="b", max_parallel_requests=1),
+                DeepSeekChannelConfig(
+                    api_key="key-a", label="a", max_parallel_requests=1
+                ),
+                DeepSeekChannelConfig(
+                    api_key="key-b", label="b", max_parallel_requests=1
+                ),
             ],
             client_factory=factory,
             cooldown_seconds=30,
@@ -683,7 +786,9 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
         self.assertFalse(second.is_alive())
         self.assertEqual(set(results.values()), {"[key-a] one", "[key-b] two"})
         self.assertEqual([item.active_requests for item in pool.snapshot()], [0, 0])
-        self.assertEqual([item.total_started_requests for item in pool.snapshot()], [1, 1])
+        self.assertEqual(
+            [item.total_started_requests for item in pool.snapshot()], [1, 1]
+        )
 
     def test_adaptive_throttle_limits_concurrent_provider_starts(self):
         started = threading.Event()
@@ -828,8 +933,7 @@ class DeepSeekKeyPoolTranslatorTest(unittest.TestCase):
 class RecordingClientFactory:
     def __init__(self, results_by_key):
         self.results_by_key = {
-            key: list(results)
-            for key, results in results_by_key.items()
+            key: list(results) for key, results in results_by_key.items()
         }
         self.calls = []
         self.chat_calls = []
@@ -917,7 +1021,9 @@ class BlockingClient:
         self.barrier = barrier
         self.last_usage = None
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.barrier.wait(timeout=5)
         prompt_tokens = 101 if self.api_key == "key-a" else 202
         self.last_usage = _Usage(prompt_tokens=prompt_tokens)
@@ -940,7 +1046,9 @@ class HoldingClient:
         self.factory = factory
         self.last_usage = None
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.factory.calls.append((self.api_key, text))
         self.factory.started.set()
         if not self.factory.release.wait(timeout=5.0):
@@ -953,8 +1061,7 @@ class LatencyClientFactory:
     def __init__(self, *, clock: FakeClock, delays_by_key):
         self.clock = clock
         self.delays_by_key = {
-            key: list(delays)
-            for key, delays in delays_by_key.items()
+            key: list(delays) for key, delays in delays_by_key.items()
         }
         self.calls = []
 
@@ -968,7 +1075,9 @@ class LatencyClient:
         self.factory = factory
         self.last_usage = None
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         self.factory.calls.append((self.api_key, text))
         delay = self.factory.delays_by_key[self.api_key].pop(0)
         self.factory.clock.value += delay

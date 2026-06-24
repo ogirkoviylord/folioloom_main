@@ -770,7 +770,19 @@ def _classify_provider_error(error: DeepSeekApiError) -> str:
         return PROVIDER_ERROR_UNAVAILABLE
     if "timeout" in message or "timed out" in message:
         return PROVIDER_ERROR_TIMEOUT
-    if "malformed" in message or "invalid json" in message:
+    if any(
+        marker in message
+        for marker in (
+            "malformed",
+            "invalid json",
+            "not valid json",
+            "invalid translation batch",
+            "did not contain message content",
+            "message content is not text",
+            "message content is empty",
+            "response json was not",
+        )
+    ):
         return PROVIDER_ERROR_MALFORMED_RESPONSE
     if "http 401" in message or "http 403" in message or "auth" in message:
         return PROVIDER_ERROR_AUTH

@@ -24,7 +24,11 @@ from translator_service.beta_safety import (
 from translator_service.bot.runtime import build_deepseek_translator
 from translator_service.bot_translation_service import BotTranslationService
 from translator_service.config import Settings
-from translator_service.deepseek_client import DeepSeekClient
+from translator_service.deepseek_client import (
+    DeepSeekApiError,
+    DeepSeekClient,
+    DeepSeekUnsafeModelOutputError,
+)
 from translator_service.deepseek_key_pool import (
     DeepSeekChannelConfig,
     DeepSeekKeyPoolTranslator,
@@ -2652,6 +2656,81 @@ class SchedulerRunnerTest(unittest.TestCase):
                 ["terminal_failure"],
             )
 
+    def test_run_once_terminal_provider_contract_failures_are_classified_safely(self):
+        cases = [
+            (
+                DeepSeekUnsafeModelOutputError("tool_or_execution_claim"),
+                "unsafe_model_output",
+            ),
+            (
+                DeepSeekApiError("DeepSeek response message content is not text"),
+                "malformed_response",
+            ),
+        ]
+
+        for error, expected_category in cases:
+            with self.subTest(expected_category=expected_category):
+                with TemporaryDirectory() as temp_dir:
+                    storage = LocalObjectStorage(Path(temp_dir))
+                    base_store = SQLiteTranslationJobStore(":memory:")
+                    self.addCleanup(base_store.close)
+                    store = ProviderSlotLeaseGuardedStore(base_store)
+                    job = _create_single_unit_txt_job(
+                        store=base_store,
+                        storage=storage,
+                        order_id=f"order-{expected_category}",
+                        file_id=f"file-{expected_category}",
+                        source_text="Synthetic source paragraph",
+                    )
+                    with base_store._connection:
+                        base_store._connection.execute(
+                            "UPDATE work_units SET max_attempts = 1 WHERE job_id = ?",
+                            (job.id,),
+                        )
+
+                    with self.assertLogs("translator_service.worker", level="ERROR"):
+                        summary = run_scheduler_once(
+                            store=store,
+                            storage=storage,
+                            worker_id="worker-a",
+                            translator=ProviderSlotAwareRaisingRunnerTranslator(error),
+                            limits=SchedulerLimits(max_active_units_global=1),
+                            lease_seconds=300,
+                            retry_base_delay_seconds=0,
+                            retry_max_delay_seconds=0,
+                        )
+
+                    [unit] = base_store.list_work_units(job.id)
+                    [attempt] = base_store.list_work_unit_attempts(unit.id)
+                    scheduler_events = json.dumps(
+                        [
+                            json.loads(event.payload_json)
+                            for event in base_store.list_scheduler_events(job.id)
+                        ],
+                        sort_keys=True,
+                    )
+
+                    self.assertEqual(summary.failed_units, 1)
+                    self.assertEqual(unit.status.value, "failed_terminal")
+                    self.assertEqual(
+                        unit.last_error,
+                        f"provider failure: {expected_category}",
+                    )
+                    self.assertEqual(attempt.error_code, expected_category)
+                    self.assertIn(
+                        f'"failure_category": "{expected_category}"',
+                        scheduler_events,
+                    )
+                    self.assertIn(
+                        '"terminal_reason": "max_attempts_reached"',
+                        scheduler_events,
+                    )
+                    self.assertEqual(
+                        [call.release_reason for call in store.release_calls],
+                        ["terminal_failure"],
+                    )
+                    self.assertNotIn("Synthetic source paragraph", scheduler_events)
+
     def test_run_once_releases_provider_slot_lease_after_cancelled_completion(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir))
@@ -3426,6 +3505,22 @@ class ProviderSlotAwareFailingRunnerTranslator(ProviderSlotAwareRunnerTranslator
             "DeepSeek provider read timeout for Private source paragraph "
             "with sk-private-provider-key at /var/private/source.txt"
         )
+
+
+class ProviderSlotAwareRaisingRunnerTranslator(ProviderSlotAwareRunnerTranslator):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__()
+        self.error = error
+
+    def translate(
+        self,
+        *,
+        text: str,
+        source_language: str,
+        target_language: str,
+    ) -> str:
+        self.calls.append(text)
+        raise self.error
 
 
 class ProviderSlotAwareCancellingRunnerTranslator(ProviderSlotAwareRunnerTranslator):
