@@ -2418,8 +2418,72 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("Chapter one", archive_text)
             self.assertNotIn("Глава первая", archive_text)
             self.assertNotIn("processing-bearer-token", archive_text)
-            self.assertNotIn("sk-processing-secret-value", archive_text)
+            self.assertNotIn("sk-pro...alue", archive_text)
             self.assertNotIn("deepseek.api_keys.processing-key", archive_text)
+
+    def test_translation_log_detail_and_api_default_to_bounded_recent_history(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-large-log-history",
+                    order_id="order-large-log-history",
+                    user_id="telegram:42",
+                    file_name="large-log.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=105,
+                ),
+            )
+            for sequence in range(1, 106):
+                status = (
+                    "old-status-sentinel"
+                    if sequence == 1
+                    else f"recent-status-{sequence}"
+                )
+                logger.record_fragment(
+                    TranslationFragmentLog(
+                        sequence=sequence,
+                        source_text=f"private source {sequence}",
+                        translated_text=f"private translation {sequence}",
+                        status=status,
+                        elapsed_seconds=1.0,
+                        prompt_tokens=1,
+                        completion_tokens=1,
+                        total_tokens=2,
+                        source_block_ids=(f"block-{sequence}",),
+                    )
+                )
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=temp_dir,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            details = client.get(f"/admin/logs/{logger.run_dir.name}")
+            details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
+
+        self.assertEqual(details.status_code, 200)
+        self.assertIn("Showing latest 100 fragment rows", details.text)
+        self.assertIn("recent-status-105", details.text)
+        self.assertNotIn("old-status-sentinel", details.text)
+        self.assertNotIn("block-1<", details.text)
+        self.assertEqual(details_api.status_code, 200)
+        fragments = details_api.json()["details"]["fragments"]
+        events = details_api.json()["details"]["events"]
+        self.assertEqual(len(fragments), 100)
+        self.assertEqual(len(events), 100)
+        self.assertEqual(fragments[0]["sequence"], 6)
+        self.assertEqual(fragments[-1]["sequence"], 105)
+        self.assertEqual(events[-1]["payload"]["sequence"], 105)
+        serialized_api = json.dumps(details_api.json(), ensure_ascii=False)
+        self.assertNotIn("old-status-sentinel", serialized_api)
 
     def test_translation_log_download_uses_effective_scheduler_snapshot(self):
         with TemporaryDirectory() as temp_dir:

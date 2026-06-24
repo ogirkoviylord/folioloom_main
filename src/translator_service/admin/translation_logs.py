@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, date, datetime
@@ -11,6 +12,7 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
+DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT = 100
 _COMPLETED_FRAGMENT_STATUSES = {
     "cached",
     "complete",
@@ -256,6 +258,8 @@ def list_translation_run_summaries(
 def get_translation_run_details(
     root: str | Path,
     run_id: str,
+    *,
+    history_limit: int | None = None,
 ) -> TranslationRunDetails | None:
     run_dir = _resolve_run_dir(root, run_id)
     if run_dir is None:
@@ -276,8 +280,8 @@ def get_translation_run_details(
         totals=_safe_dict(data.get("totals")),
         security=_safe_dict(data.get("security")),
         translation_stack=_safe_dict(data.get("translation_stack")),
-        events=_read_events(run_dir / "events.jsonl"),
-        fragments=_read_fragments(run_dir / "fragments"),
+        events=_read_events(run_dir / "events.jsonl", limit=history_limit),
+        fragments=_read_fragments(run_dir / "fragments", limit=history_limit),
         run_dir=str(run_dir),
     )
 
@@ -1986,12 +1990,16 @@ def _run_metadata(data: dict[str, Any]) -> dict[str, Any]:
     return {key: _safe_value(data.get(key)) for key in keys if key in data}
 
 
-def _read_events(events_path: Path) -> tuple[TranslationRunEvent, ...]:
+def _read_events(
+    events_path: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[TranslationRunEvent, ...]:
     if not events_path.exists():
         return ()
     events: list[TranslationRunEvent] = []
     try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
+        lines = _read_recent_lines(events_path, limit=limit)
     except OSError:
         return ()
     for line in lines:
@@ -2011,6 +2019,19 @@ def _read_events(events_path: Path) -> tuple[TranslationRunEvent, ...]:
             )
         )
     return tuple(events)
+
+
+def _read_recent_lines(path: Path, *, limit: int | None) -> tuple[str, ...]:
+    if limit is None:
+        return tuple(path.read_text(encoding="utf-8").splitlines())
+    safe_limit = max(0, int(limit))
+    if safe_limit == 0:
+        return ()
+    lines: deque[str] = deque(maxlen=safe_limit)
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            lines.append(line.rstrip("\n"))
+    return tuple(lines)
 
 
 def _total_fragment_count(
@@ -2120,18 +2141,30 @@ def _eta_seconds(
     return round(average_seconds * (total_fragments - completed_fragments), 1)
 
 
-def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, ...]:
+def _read_fragments(
+    fragments_dir: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[TranslationRunFragmentDetail, ...]:
     return tuple(
         _fragment_detail(data)
-        for data in _read_fragment_records(fragments_dir)
+        for data in _read_fragment_records(fragments_dir, limit=limit)
     )
 
 
-def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
+def _read_fragment_records(
+    fragments_dir: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[dict[str, Any], ...]:
     if not fragments_dir.exists():
         return ()
     fragments: list[dict[str, Any]] = []
-    for path in sorted(fragments_dir.glob("*.json")):
+    paths = sorted(fragments_dir.glob("*.json"), key=_fragment_path_sort_key)
+    if limit is not None:
+        safe_limit = max(0, int(limit))
+        paths = paths[-safe_limit:] if safe_limit else []
+    for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -2140,6 +2173,13 @@ def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
             continue
         fragments.append(data)
     return tuple(fragments)
+
+
+def _fragment_path_sort_key(path: Path) -> tuple[int, int | str]:
+    try:
+        return (0, int(path.stem))
+    except ValueError:
+        return (1, path.name)
 
 
 def _fragment_detail(data: dict[str, Any]) -> TranslationRunFragmentDetail:

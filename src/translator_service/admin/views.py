@@ -45,6 +45,7 @@ from translator_service.admin.quality import (
 from translator_service.admin.secret_safety import SecretSafetyItem, SecretSafetyReport
 from translator_service.admin.settings import AdminSettingValue, SettingValueType
 from translator_service.admin.translation_logs import (
+    DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT,
     TranslationRunDetails,
     TranslationRunEvent,
     TranslationRunFragmentDetail,
@@ -3528,6 +3529,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     events = "\n".join(_run_event_row(event) for event in details.events)
     if not events:
         events = '<tr><td colspan="3" class="empty-cell">No events recorded.</td></tr>'
+    event_history_note = _detail_event_history_note(details)
     fragments = "\n".join(_run_fragment_row(fragment) for fragment in details.fragments)
     if not fragments:
         if summary.fragment_count > 0:
@@ -3543,6 +3545,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           <td colspan="9" class="empty-cell">{escape(fragment_message)}</td>
         </tr>
         """
+    fragment_history_note = _detail_fragment_history_note(details)
     return f"""
     <section class="toolbar-panel">
       <div>
@@ -3613,6 +3616,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     </section>
     <section class="panel table-panel">
       <h4>Fragments</h4>
+      {fragment_history_note}
       <table class="log-table">
         <thead>
           <tr>
@@ -3632,6 +3636,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
     </section>
     <section class="panel table-panel">
       <h4>Events</h4>
+      {event_history_note}
       <table class="log-table">
         <thead>
           <tr>
@@ -3777,7 +3782,10 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           `;
         }}).join("");
         async function refreshTranslationDetails() {{
-          const detailsUrl = `/admin/api/logs/${{encodeURIComponent(runId)}}`;
+          const detailsUrl = [
+            `/admin/api/logs/${{encodeURIComponent(runId)}}`,
+            `?history_limit=${DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT}`
+          ].join("");
           const response = await fetch(detailsUrl, {{
             cache: "no-store"
           }});
@@ -3812,6 +3820,38 @@ def log_detail_body(details: TranslationRunDetails) -> str:
       }})();
     </script>
     """
+
+
+def _detail_fragment_history_note(details: TranslationRunDetails) -> str:
+    shown = len(details.fragments)
+    total = max(
+        shown,
+        details.summary.fragment_count,
+        details.summary.total_fragment_count,
+    )
+    if shown >= DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT and total > shown:
+        message = (
+            f"Showing latest {shown} fragment rows of {total} recorded. "
+            "Use Text diagnostics, Reader, or Download archive for full inspection."
+        )
+    else:
+        message = (
+            f"Showing {shown} fragment rows. Text diagnostics, Reader, and "
+            "Download archive remain available for deeper inspection."
+        )
+    return f'<p class="table-note">{escape(message)}</p>'
+
+
+def _detail_event_history_note(details: TranslationRunDetails) -> str:
+    shown = len(details.events)
+    if shown >= DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT:
+        message = (
+            f"Showing latest {shown} event rows. Download archive includes "
+            "the full events.jsonl for this run."
+        )
+    else:
+        message = f"Showing {shown} event rows."
+    return f'<p class="table-note">{escape(message)}</p>'
 
 
 def _work_unit_diagnostic_panel(details: TranslationRunDetails, run_id: str) -> str:
