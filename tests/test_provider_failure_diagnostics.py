@@ -51,6 +51,11 @@ class ProviderFailureDiagnosticsTest(unittest.TestCase):
                 None,
             ),
             (
+                DeepSeekApiError("DeepSeek response message content is not text"),
+                ProviderFailureCategory.MALFORMED_RESPONSE,
+                None,
+            ),
+            (
                 DeepSeekUnsafeModelOutputError("tool_or_execution_claim"),
                 ProviderFailureCategory.UNSAFE_MODEL_OUTPUT,
                 None,
@@ -104,7 +109,9 @@ class ProviderFailureDiagnosticsTest(unittest.TestCase):
         )
 
         with self.assertRaises(DeepSeekApiError) as error:
-            pool.translate(text="Private source text", source_language="en", target_language="uk")
+            pool.translate(
+                text="Private source text", source_language="en", target_language="uk"
+            )
 
         diagnostic = build_provider_failure_diagnostic(
             error.exception,
@@ -140,7 +147,9 @@ class RecordingClient:
         self.api_key = api_key
         self._responses = responses
 
-    def translate(self, *, text: str, source_language: str, target_language: str) -> str:
+    def translate(
+        self, *, text: str, source_language: str, target_language: str
+    ) -> str:
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response

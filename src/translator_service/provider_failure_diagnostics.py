@@ -61,7 +61,11 @@ class ProviderFailureDiagnostic:
         )
         if retry_after is not None:
             payload["retry_after_seconds"] = max(0, int(retry_after))
-        terminal = terminal_reason if terminal_reason is not None else self.terminal_reason
+        terminal = (
+            terminal_reason
+            if terminal_reason is not None
+            else self.terminal_reason
+        )
         if terminal is not None:
             payload["terminal_reason"] = terminal
         if self.latency_ms is not None:
@@ -96,9 +100,15 @@ def classify_provider_failure(error: BaseException) -> ProviderFailureClassifica
             bucket,
         )
     if status == 429 or "rate limit" in lowered or "rate-limited" in lowered:
-        return ProviderFailureClassification(ProviderFailureCategory.RATE_LIMITED, "429")
+        return ProviderFailureClassification(
+            ProviderFailureCategory.RATE_LIMITED,
+            "429",
+        )
     if "circuit open" in lowered or "no available channels" in lowered:
-        return ProviderFailureClassification(ProviderFailureCategory.CIRCUIT_OPEN, bucket)
+        return ProviderFailureClassification(
+            ProviderFailureCategory.CIRCUIT_OPEN,
+            bucket,
+        )
     if "timeout" in lowered or "timed out" in lowered:
         return ProviderFailureClassification(ProviderFailureCategory.TIMEOUT, bucket)
     if status is not None and 500 <= status <= 599:
@@ -123,6 +133,7 @@ def classify_provider_failure(error: BaseException) -> ProviderFailureClassifica
             "not valid json",
             "invalid translation batch",
             "did not contain message content",
+            "message content is not text",
             "message content is empty",
             "response json was not",
         )
@@ -163,7 +174,9 @@ def build_provider_failure_diagnostic(
         provider_id=provider_id,
         channel_fingerprint=_channel_fingerprint(channel, provider_id=provider_id),
         channel_health=_string_attr(channel, "health"),
-        channel_error_kind=_mapped_channel_error_kind(_string_attr(channel, "error_kind")),
+        channel_error_kind=_mapped_channel_error_kind(
+            _string_attr(channel, "error_kind")
+        ),
         latency_ms=_float_attr(channel, "last_latency_ms"),
         adaptive_circuit_snapshot=adaptive,
     )
@@ -267,7 +280,7 @@ def _channel_fingerprint(channel: object | None, *, provider_id: str) -> str | N
     label = _string_attr(channel, "label")
     if not label:
         return None
-    digest = hashlib.sha256(f"{provider_id}:{label}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{provider_id}:{label}".encode()).hexdigest()
     return f"chan_{digest[:12]}"
 
 
