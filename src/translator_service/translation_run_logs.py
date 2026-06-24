@@ -9,6 +9,10 @@ from translator_service.book_mode_output_audit import (
     BookModeAuditChunk,
     audit_book_mode_output,
 )
+from translator_service.content_roles import (
+    build_content_role_shadow_report,
+    content_role_shadow_report_payload,
+)
 from translator_service.security_telemetry import (
     build_security_event,
     normalize_security_event,
@@ -90,6 +94,7 @@ class TranslationRunLogger:
             enabled=self._book_mode_audit_enabled,
             target_language=metadata.target_language,
         )
+        self._content_role_metadata_blocks: list[tuple[tuple[str, str], ...]] = []
 
     @classmethod
     def start(
@@ -156,6 +161,7 @@ class TranslationRunLogger:
         self._totals["elapsed_seconds"] += fragment.elapsed_seconds
         self._totals["retry_count"] += fragment.retry_count
         self._totals["cache_hits"] += 1 if fragment.cache_hit else 0
+        self._record_content_role_shadow_report(fragment)
         self._record_book_mode_audit(fragment)
         self.record_event(
             "work_unit_failed" if fragment.status == "failed" else "work_unit_finished",
@@ -223,7 +229,16 @@ class TranslationRunLogger:
             "totals": dict(self._totals),
             "security": dict(self._security),
             "book_mode_audit": _book_mode_audit_snapshot(self._book_mode_audit),
+            "content_role_shadow_report": _content_role_shadow_report_payload(
+                self._content_role_metadata_blocks,
+            ),
         }
+
+    def _record_content_role_shadow_report(
+        self,
+        fragment: TranslationFragmentLog,
+    ) -> None:
+        self._content_role_metadata_blocks.append(tuple(fragment.audit_metadata))
 
     def _record_book_mode_audit(self, fragment: TranslationFragmentLog) -> None:
         if not self._book_mode_audit_enabled:
@@ -438,6 +453,10 @@ def record_book_mode_audit_fragment_for_job(
             audit_metadata=audit_metadata,
         )
         snapshot["book_mode_audit"] = _book_mode_audit_snapshot(audit)
+        snapshot["content_role_shadow_report"] = _merge_content_role_shadow_report(
+            snapshot.get("content_role_shadow_report"),
+            audit_metadata,
+        )
         run_json.write_text(
             json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -750,7 +769,96 @@ def _render_summary(snapshot: dict) -> str:
             "- counts_by_code: "
             f"`{json.dumps(audit.get('counts_by_code') or {}, sort_keys=True)}`"
         )
+    content_role_report = snapshot.get("content_role_shadow_report") or {}
+    if content_role_report.get("annotated_block_count"):
+        lines.extend(["", "## Content Role Shadow Report", ""])
+        lines.append(
+            "- annotated_block_count: "
+            f"`{content_role_report.get('annotated_block_count') or 0}`"
+        )
+        lines.append(
+            "- bucket_counts: "
+            f"`{_json_count_map(content_role_report.get('bucket_counts'))}`"
+        )
+        lines.append(
+            "- role_counts: "
+            f"`{_json_count_map(content_role_report.get('role_counts'))}`"
+        )
+        lines.append(
+            "- confidence_counts: "
+            f"`{_json_count_map(content_role_report.get('confidence_counts'))}`"
+        )
+        lines.append(
+            "- source_surface_counts: "
+            f"`{_json_count_map(content_role_report.get('source_surface_counts'))}`"
+        )
+        lines.append(
+            "- source_granularity_counts: "
+            f"`{_json_count_map(content_role_report.get('source_granularity_counts'))}`"
+        )
+        lines.append(
+            "- unknown_annotation_count: "
+            f"`{content_role_report.get('unknown_annotation_count') or 0}`"
+        )
+        lines.append(
+            "- conflicting_safety_flag_count: "
+            f"`{content_role_report.get('conflicting_safety_flag_count') or 0}`"
+        )
+        lines.append(
+            "- invalid_metadata_count: "
+            f"`{content_role_report.get('invalid_metadata_count') or 0}`"
+        )
     return "\n".join(lines) + "\n"
+
+
+def _json_count_map(value: object) -> str:
+    return json.dumps(value if isinstance(value, dict) else {}, sort_keys=True)
+
+
+def _content_role_shadow_report_payload(
+    metadata_blocks: list[tuple[tuple[str, str], ...]],
+) -> dict:
+    return content_role_shadow_report_payload(
+        build_content_role_shadow_report(metadata_blocks),
+    )
+
+
+def _merge_content_role_shadow_report(
+    existing: object,
+    metadata_block: tuple[tuple[str, str], ...],
+) -> dict:
+    report = _content_role_shadow_report_payload([metadata_block])
+    if not isinstance(existing, dict):
+        return report
+    merged = _content_role_shadow_report_payload([])
+    for key in (
+        "annotated_block_count",
+        "unknown_annotation_count",
+        "conflicting_safety_flag_count",
+        "invalid_metadata_count",
+    ):
+        merged[key] = _int_value(existing.get(key)) + _int_value(report.get(key))
+    for key in (
+        "bucket_counts",
+        "role_counts",
+        "confidence_counts",
+        "source_surface_counts",
+        "source_granularity_counts",
+    ):
+        merged[key] = _merge_count_maps(existing.get(key), report.get(key))
+    return merged
+
+
+def _merge_count_maps(left: object, right: object) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for mapping in (left, right):
+        if not isinstance(mapping, dict):
+            continue
+        for key, value in mapping.items():
+            key_text = str(key)
+            if key_text:
+                counts[key_text] = counts.get(key_text, 0) + _int_value(value)
+    return {key: counts[key] for key in sorted(counts)}
 
 
 def _render_translation_stack(stack: dict | None) -> list[str]:

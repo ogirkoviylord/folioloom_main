@@ -520,6 +520,9 @@ def _effective_run_payload(details: TranslationRunDetails) -> dict[str, Any]:
         "security": _json_safe(details.security),
         "translation_stack": _json_safe(details.translation_stack),
         "work_unit_diagnostic": _json_safe(details.work_unit_diagnostic),
+        "content_role_shadow_report": _json_safe(
+            details.metadata.get("content_role_shadow_report"),
+        ),
     }
 
 
@@ -1761,6 +1764,8 @@ def _render_effective_summary(
     )
     if participation is not None:
         lines.append(f"- Glossary participation: `{participation}`")
+    content_role_report = details.metadata.get("content_role_shadow_report")
+    lines.extend(_content_role_shadow_report_summary_lines(content_role_report))
     lines.extend(
         [
             "",
@@ -1798,6 +1803,32 @@ def _render_effective_summary(
         lines.extend(["", "## Error", "", summary.error_message])
     lines.append("")
     return "\n".join(lines)
+
+
+def _content_role_shadow_report_summary_lines(report: object) -> list[str]:
+    if not isinstance(report, dict) or not report.get("annotated_block_count"):
+        return []
+    return [
+        "",
+        "## Content Role Shadow Report",
+        "",
+        f"- annotated_block_count: `{report.get('annotated_block_count') or 0}`",
+        f"- bucket_counts: `{_json_count_map(report.get('bucket_counts'))}`",
+        f"- role_counts: `{_json_count_map(report.get('role_counts'))}`",
+        f"- confidence_counts: `{_json_count_map(report.get('confidence_counts'))}`",
+        "- source_surface_counts: "
+        f"`{_json_count_map(report.get('source_surface_counts'))}`",
+        "- source_granularity_counts: "
+        f"`{_json_count_map(report.get('source_granularity_counts'))}`",
+        f"- unknown_annotation_count: `{report.get('unknown_annotation_count') or 0}`",
+        "- conflicting_safety_flag_count: "
+        f"`{report.get('conflicting_safety_flag_count') or 0}`",
+        f"- invalid_metadata_count: `{report.get('invalid_metadata_count') or 0}`",
+    ]
+
+
+def _json_count_map(value: object) -> str:
+    return json.dumps(value if isinstance(value, dict) else {}, sort_keys=True)
 
 
 def _json_dumps(payload: Any) -> str:
@@ -1946,6 +1977,7 @@ def _run_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "adapter_version",
         "translation_policy",
         "translation_quality_route",
+        "content_role_shadow_report",
         "result_file_name",
         "error_message",
         "started_at",

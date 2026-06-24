@@ -310,6 +310,96 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertNotIn("Вот перевод", archive_text)
         self.assertNotIn("disease was serious", archive_text)
 
+    def test_effective_archive_exposes_content_role_shadow_report_metadata_only(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-content-role-archive",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="novel.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="ARCHIVE CONTENT ROLE SOURCE SENTINEL",
+                    translated_text="ARCHIVE CONTENT ROLE TRANSLATION SENTINEL",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    audit_metadata=(
+                        ("content_role.source_surface", "epub_opf_metadata"),
+                        ("content_role.source_granularity", "token"),
+                        ("content_role.role", "publisher_metadata"),
+                        ("content_role.confidence", "medium"),
+                        ("content_role.reporting_bucket", "token_identifier"),
+                        ("content_role.behavior_allowed", "false"),
+                        ("content_role.raw_publication_allowed", "false"),
+                        (
+                            "content_role.evidence_reason_codes",
+                            "ARCHIVE_REASON_VALUE_SENTINEL",
+                        ),
+                    ),
+                )
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(effective_archive)
+        assert effective_archive is not None
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(effective_archive.content)) as archive:
+            run = json.loads(archive.read("run.json"))
+            effective = json.loads(archive.read("effective_run.json"))
+            summary = archive.read("summary.md").decode("utf-8")
+
+        run_report = run["content_role_shadow_report"]
+        effective_report = effective["content_role_shadow_report"]
+        self.assertEqual(effective_report, run_report)
+        self.assertEqual(effective_report["annotated_block_count"], 1)
+        self.assertEqual(effective_report["bucket_counts"], {"token_identifier": 1})
+        self.assertEqual(effective_report["role_counts"], {"publisher_metadata": 1})
+        self.assertEqual(effective_report["confidence_counts"], {"medium": 1})
+        self.assertEqual(
+            effective_report["source_surface_counts"],
+            {"epub_opf_metadata": 1},
+        )
+        self.assertEqual(effective_report["source_granularity_counts"], {"token": 1})
+        self.assertEqual(effective_report["unknown_annotation_count"], 0)
+        self.assertEqual(effective_report["conflicting_safety_flag_count"], 0)
+        self.assertEqual(effective_report["invalid_metadata_count"], 0)
+        self.assertTrue(effective_report["metadata_only"])
+        self.assertFalse(effective_report["behavior_allowed"])
+        self.assertFalse(effective_report["raw_publication_allowed"])
+        self.assertIn("Content Role Shadow Report", summary)
+        self.assertIn('- bucket_counts: `{"token_identifier": 1}`', summary)
+        self.assertIn('- role_counts: `{"publisher_metadata": 1}`', summary)
+        self.assertIn('- confidence_counts: `{"medium": 1}`', summary)
+        self.assertIn('- source_surface_counts: `{"epub_opf_metadata": 1}`', summary)
+        self.assertIn('- source_granularity_counts: `{"token": 1}`', summary)
+        self.assertIn("- unknown_annotation_count: `0`", summary)
+        self.assertIn("- conflicting_safety_flag_count: `0`", summary)
+        self.assertIn("- invalid_metadata_count: `0`", summary)
+        archive_text = _archive_text(effective_archive.content)
+        self.assertNotIn("ARCHIVE CONTENT ROLE SOURCE SENTINEL", archive_text)
+        self.assertNotIn("ARCHIVE CONTENT ROLE TRANSLATION SENTINEL", archive_text)
+        self.assertNotIn("ARCHIVE_REASON_VALUE_SENTINEL", archive_text)
+        self.assertNotIn("evidence_reason_codes", archive_text)
+
     def test_effective_archive_includes_provider_io_diagnostics(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
