@@ -558,6 +558,36 @@ class BookModeOutputAuditTest(unittest.TestCase):
         self.assertEqual(result.findings[0].severity, "error")
         self.assertNotIn("Project Gutenberg License", repr(result))
 
+    def test_reports_short_opf_source_archive_residue_for_cyrillic_target(self):
+        result = audit_book_mode_output(
+            chunks=(
+                BookModeAuditChunk(
+                    block_id="epub:aux:surface-opf:OPS/content.opf:source:0",
+                    block_kind="metadata",
+                    translated_text="Project Gutenberg source archive",
+                    metadata=(("surface", "opf_source"),),
+                ),
+                BookModeAuditChunk(
+                    block_id="epub:aux:surface-opf:OPS/content.opf:publisher:0",
+                    block_kind="metadata",
+                    translated_text="Project Gutenberg",
+                    metadata=(("surface", "opf_publisher"),),
+                ),
+            ),
+            target_language="ru",
+        )
+
+        self.assertEqual(
+            [finding.code for finding in result.findings],
+            ["untranslated_source_residue"],
+        )
+        self.assertEqual(
+            result.findings[0].chunk_id,
+            "epub:aux:surface-opf:OPS/content.opf:source:0",
+        )
+        self.assertEqual(result.findings[0].category, "language_mix")
+        self.assertNotIn("Project Gutenberg source archive", repr(result))
+
     def test_reports_suspicious_all_english_chunks_for_russian_output(self):
         result = audit_book_mode_output(
             chunks=(

@@ -868,7 +868,7 @@ def _replace_epub_opf_auxiliary_text(
     )
     if target_language:
         _set_existing_epub_language_attrs(document, target_language)
-    counters = {"title": 0, "description": 0}
+    counters = {local_name: 0 for local_name in _OPF_TRANSLATABLE_METADATA_LOCAL_NAMES}
     for element in document.iter():
         local_name = _local_name(element.tag)
         if local_name == "language" and target_language:
@@ -1062,7 +1062,7 @@ def _collect_epub_opf_auxiliary_blocks(
         epub.read(opf_path),
         parse_error_message="EPUB package XML is not readable",
     )
-    counters = {"title": 0, "description": 0}
+    counters = {local_name: 0 for local_name in _OPF_TRANSLATABLE_METADATA_LOCAL_NAMES}
     for element in document.iter():
         local_name = _local_name(element.tag)
         if local_name not in counters:
@@ -1073,23 +1073,24 @@ def _collect_epub_opf_auxiliary_blocks(
         index = counters[local_name]
         counters[local_name] += 1
         extra_metadata = ()
+        source_block_id = epub_aux_block_id(
+            kind="opf",
+            file_name=opf_path,
+            local_name=local_name,
+            index=index,
+        )
         if local_name == "title":
             extra_metadata = _epub_opf_title_content_role_metadata(
-                source_block_id=epub_aux_block_id(
-                    kind="opf",
-                    file_name=opf_path,
-                    local_name=local_name,
-                    index=index,
-                )
+                source_block_id=source_block_id,
             )
         elif local_name == "description":
             extra_metadata = _epub_opf_description_content_role_metadata(
-                source_block_id=epub_aux_block_id(
-                    kind="opf",
-                    file_name=opf_path,
-                    local_name=local_name,
-                    index=index,
-                )
+                source_block_id=source_block_id,
+            )
+        elif local_name in {"publisher", "source", "rights"}:
+            extra_metadata = _epub_opf_publisher_metadata_content_role_metadata(
+                source_block_id=source_block_id,
+                local_name=local_name,
             )
         blocks.append(
             _epub_auxiliary_text_block(
@@ -1241,7 +1242,10 @@ def _collect_epub_opf_audit_chunks(
         epub.read(opf_path),
         parse_error_message="EPUB package XML is not readable",
     )
-    counters = {"title": 0, "language": 0}
+    counters = {
+        local_name: 0
+        for local_name in (*_OPF_TRANSLATABLE_METADATA_LOCAL_NAMES, "language")
+    }
     for element in document.iter():
         local_name = _local_name(element.tag)
         if local_name not in counters:
@@ -1715,13 +1719,24 @@ def _epub_opf_description_content_role_metadata(
     *,
     source_block_id: str,
 ) -> tuple[tuple[str, str], ...]:
+    return _epub_opf_publisher_metadata_content_role_metadata(
+        source_block_id=source_block_id,
+        local_name="description",
+    )
+
+
+def _epub_opf_publisher_metadata_content_role_metadata(
+    *,
+    source_block_id: str,
+    local_name: str,
+) -> tuple[tuple[str, str], ...]:
     return content_role_metadata_pairs(
         ContentRoleAnnotation(
             locator=SourceLocator(
                 surface="epub_opf_metadata",
                 source_path_or_chunk_id=source_block_id,
                 granularity="block",
-                structure_hints=("opf-metadata", "dc-description"),
+                structure_hints=("opf-metadata", f"dc-{local_name}"),
                 position_hint="auxiliary",
             ),
             role="publisher_metadata",
@@ -1730,14 +1745,14 @@ def _epub_opf_description_content_role_metadata(
                 ContentRoleEvidence(
                     signal_family="structural_semantic",
                     strength="medium",
-                    metadata_value_kind="opf_description_element",
-                    reason_code="epub_opf_description_auxiliary_block",
+                    metadata_value_kind=f"opf_{local_name}_element",
+                    reason_code=f"epub_opf_{local_name}_auxiliary_block",
                 ),
                 ContentRoleEvidence(
                     signal_family="path_class_id",
                     strength="medium",
                     metadata_value_kind="epub_aux_kind",
-                    reason_code="opf_description_aux_kind",
+                    reason_code=f"opf_{local_name}_aux_kind",
                 ),
             ),
             reporting_bucket=reporting_bucket_for_annotation(
@@ -1911,6 +1926,13 @@ _EPUB_TEXT_BLOCK_TAGS = {
     "th",
 }
 _EPUB_IGNORED_TAGS = {"head", "script", "style", "svg"}
+_OPF_TRANSLATABLE_METADATA_LOCAL_NAMES = (
+    "title",
+    "description",
+    "publisher",
+    "source",
+    "rights",
+)
 _EPUB_BLOCK_ROLE_BODY = "body"
 _EPUB_BLOCK_ROLE_NAVIGATION = "navigation"
 _EPUB_BLOCK_ROLE_NOISE = "noise"

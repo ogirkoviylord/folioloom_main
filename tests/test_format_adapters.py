@@ -1031,6 +1031,143 @@ class EpubFormatAdapterTest(unittest.TestCase):
         self.assertEqual(by_surface["xhtml_navigation"], "Book I")
         self.assertEqual(by_surface["xhtml_body_heading"], "Chapter 1")
 
+    def test_extracts_epub_opf_source_rights_publisher_audit_chunks(self):
+        content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Переведенный абзац.</p></body>
+                </html>
+                """,
+            },
+            opf_content="""
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Название книги</dc:title>
+                <dc:publisher>Project Gutenberg</dc:publisher>
+                <dc:source>Project Gutenberg source archive</dc:source>
+                <dc:rights>Project Gutenberg license terms</dc:rights>
+                <dc:language>ru</dc:language>
+              </metadata>
+            </package>
+            """,
+        )
+
+        chunks = extract_epub_book_mode_audit_chunks(content)
+        by_surface = {
+            dict(chunk.metadata).get("surface"): chunk.translated_text
+            for chunk in chunks
+        }
+
+        self.assertEqual(by_surface["opf_publisher"], "Project Gutenberg")
+        self.assertEqual(
+            by_surface["opf_source"],
+            "Project Gutenberg source archive",
+        )
+        self.assertEqual(
+            by_surface["opf_rights"],
+            "Project Gutenberg license terms",
+        )
+
+    def test_assembles_epub_opf_source_rights_publisher_translations(self):
+        source_content = _make_epub(
+            {
+                "OPS/chapter.xhtml": """
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                  <body><p>Body paragraph.</p></body>
+                </html>
+                """,
+            },
+            opf_content="""
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Book Title</dc:title>
+                <dc:publisher>Project Gutenberg</dc:publisher>
+                <dc:source>Project Gutenberg source archive</dc:source>
+                <dc:rights>Project Gutenberg license terms</dc:rights>
+                <dc:language>en</dc:language>
+              </metadata>
+            </package>
+            """,
+        )
+
+        assembled = assemble_epub_content_from_block_translations(
+            source_content=source_content,
+            translated_by_block_id={
+                "epub:OPS/chapter.xhtml:0": "Переведенный абзац.",
+                "epub:aux:opf:OPS/content.opf:title:0": "Название книги",
+                "epub:aux:opf:OPS/content.opf:publisher:0": "Проект Гутенберг",
+                "epub:aux:opf:OPS/content.opf:source:0": "Архивный источник",
+                "epub:aux:opf:OPS/content.opf:rights:0": "Лицензионные условия",
+            },
+            target_language="ru",
+        )
+
+        chunks = extract_epub_book_mode_audit_chunks(assembled)
+        by_surface = {
+            dict(chunk.metadata).get("surface"): chunk.translated_text
+            for chunk in chunks
+        }
+
+        self.assertEqual(by_surface["opf_title"], "Название книги")
+        self.assertEqual(by_surface["opf_publisher"], "Проект Гутенберг")
+        self.assertEqual(by_surface["opf_source"], "Архивный источник")
+        self.assertEqual(by_surface["opf_rights"], "Лицензионные условия")
+        self.assertEqual(by_surface["opf_language"], "ru")
+
+    def test_plans_epub_opf_source_rights_publisher_auxiliary_blocks(self):
+        plan = plan_epub_translation(
+            content=_make_epub(
+                {
+                    "OPS/chapter.xhtml": """
+                    <html xmlns="http://www.w3.org/1999/xhtml">
+                      <body><p>Body paragraph.</p></body>
+                    </html>
+                    """,
+                },
+                opf_content="""
+                <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+                  <metadata>
+                    <dc:title>Book Title</dc:title>
+                    <dc:publisher>Project Gutenberg</dc:publisher>
+                    <dc:source>Project Gutenberg source archive</dc:source>
+                    <dc:rights>Project Gutenberg license terms</dc:rights>
+                    <dc:language>en</dc:language>
+                  </metadata>
+                </package>
+                """,
+            ),
+            max_fragment_chars=100,
+        )
+
+        aux_blocks = [
+            block
+            for unit in plan.units
+            for block in unit.blocks
+            if block.source_block_id.startswith("epub:aux:opf:")
+        ]
+
+        self.assertEqual(
+            [block.source_block_id for block in aux_blocks],
+            [
+                "epub:aux:opf:OPS/content.opf:title:0",
+                "epub:aux:opf:OPS/content.opf:publisher:0",
+                "epub:aux:opf:OPS/content.opf:source:0",
+                "epub:aux:opf:OPS/content.opf:rights:0",
+            ],
+        )
+        self.assertEqual(
+            [dict(block.metadata)["epub_aux_kind"] for block in aux_blocks],
+            ["opf_title", "opf_publisher", "opf_source", "opf_rights"],
+        )
+        for block in aux_blocks[1:]:
+            metadata = dict(block.metadata)
+            self.assertEqual(metadata["content_role.role"], "publisher_metadata")
+            self.assertEqual(
+                metadata["content_role.source_surface"],
+                "epub_opf_metadata",
+            )
+
     def test_plans_epub_auxiliary_metadata_and_navigation_blocks(self):
         plan = plan_epub_translation(
             content=_make_epub(
