@@ -390,6 +390,112 @@ class TranslationRunLoggerTest(unittest.TestCase):
         self.assertNotIn("sk-bookaudit-secret", artifact_text)
         self.assertNotIn("Traceback", artifact_text)
 
+    def test_content_role_shadow_report_exports_counts_without_raw_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-content-role-report",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="CONTENT ROLE SOURCE SENTINEL",
+                    translated_text="CONTENT ROLE TRANSLATION SENTINEL",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    audit_metadata=(
+                        ("content_role.source_surface", "epub_xhtml_nav"),
+                        ("content_role.source_granularity", "block"),
+                        ("content_role.role", "reader_navigation"),
+                        ("content_role.confidence", "high"),
+                        ("content_role.reporting_bucket", "reader_visible"),
+                        ("content_role.behavior_allowed", "false"),
+                        ("content_role.raw_publication_allowed", "false"),
+                        (
+                            "content_role.evidence_reason_codes",
+                            "LEAKED_REASON_VALUE_SENTINEL",
+                        ),
+                        ("unrelated_payload", "LEAKED_METADATA_VALUE_SENTINEL"),
+                    ),
+                )
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=2,
+                    source_text="UNKNOWN CONTENT ROLE SOURCE SENTINEL",
+                    translated_text="UNKNOWN CONTENT ROLE TRANSLATION SENTINEL",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                    total_tokens=2,
+                    audit_metadata=(
+                        ("content_role.source_surface", "unknown"),
+                        ("content_role.source_granularity", "block"),
+                        ("content_role.role", "unknown_paratext"),
+                        ("content_role.confidence", "unknown"),
+                        ("content_role.reporting_bucket", "unknown_shadow"),
+                        ("content_role.behavior_allowed", "true"),
+                        ("content_role.raw_publication_allowed", "false"),
+                    ),
+                )
+            )
+
+            snapshot = json.loads((logger.run_dir / "run.json").read_text())
+            summary = (logger.run_dir / "summary.md").read_text(encoding="utf-8")
+            artifact_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    logger.run_dir / "run.json",
+                    logger.run_dir / "summary.md",
+                    logger.run_dir / "fragments" / "0001.json",
+                    logger.run_dir / "fragments" / "0002.json",
+                )
+            )
+
+        report = snapshot["content_role_shadow_report"]
+        self.assertEqual(report["schema_version"], "content-role-shadow-report-v1")
+        self.assertTrue(report["metadata_only"])
+        self.assertFalse(report["behavior_allowed"])
+        self.assertFalse(report["raw_publication_allowed"])
+        self.assertEqual(report["annotated_block_count"], 2)
+        self.assertEqual(
+            report["bucket_counts"],
+            {"reader_visible": 1, "unknown_shadow": 1},
+        )
+        self.assertEqual(
+            report["role_counts"],
+            {"reader_navigation": 1, "unknown_paratext": 1},
+        )
+        self.assertEqual(report["confidence_counts"], {"high": 1, "unknown": 1})
+        self.assertEqual(
+            report["source_surface_counts"],
+            {"epub_xhtml_nav": 1, "unknown": 1},
+        )
+        self.assertEqual(report["source_granularity_counts"], {"block": 2})
+        self.assertEqual(report["unknown_annotation_count"], 1)
+        self.assertEqual(report["conflicting_safety_flag_count"], 1)
+        self.assertEqual(report["invalid_metadata_count"], 0)
+        self.assertIn("## Content Role Shadow Report", summary)
+        self.assertIn('- confidence_counts: `{"high": 1, "unknown": 1}`', summary)
+        self.assertNotIn("CONTENT ROLE SOURCE SENTINEL", artifact_text)
+        self.assertNotIn("CONTENT ROLE TRANSLATION SENTINEL", artifact_text)
+        self.assertNotIn("LEAKED_REASON_VALUE_SENTINEL", artifact_text)
+        self.assertNotIn("LEAKED_METADATA_VALUE_SENTINEL", artifact_text)
+        self.assertNotIn("evidence_reason_codes", artifact_text)
+
     def test_book_mode_audit_preserves_gutenberg_legal_code(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
@@ -589,19 +695,67 @@ class TranslationRunLoggerTest(unittest.TestCase):
                     "Кімната стихла, but she could not remember where the "
                     "letter was hidden."
                 ),
+                audit_metadata=(
+                    ("content_role.source_surface", "epub_xhtml_nav"),
+                    ("content_role.source_granularity", "block"),
+                    ("content_role.role", "reader_navigation"),
+                    ("content_role.confidence", "high"),
+                    ("content_role.reporting_bucket", "reader_visible"),
+                    ("content_role.behavior_allowed", "false"),
+                    ("content_role.raw_publication_allowed", "false"),
+                    (
+                        "content_role.evidence_reason_codes",
+                        "HELPER_REASON_VALUE_SENTINEL",
+                    ),
+                    ("unrelated_payload", "HELPER_METADATA_VALUE_SENTINEL"),
+                ),
             )
             finished_snapshot = json.loads(
                 (finished.run_dir / "run.json").read_text()
             )
             running_snapshot = json.loads((running.run_dir / "run.json").read_text())
+            finished_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    finished.run_dir / "run.json",
+                    finished.run_dir / "summary.md",
+                )
+            )
+            running_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (
+                    running.run_dir / "run.json",
+                    running.run_dir / "summary.md",
+                )
+            )
 
         self.assertEqual(updated, 1)
         self.assertEqual(finished_snapshot["book_mode_audit"]["chunks_audited"], 0)
+        self.assertEqual(
+            finished_snapshot["content_role_shadow_report"]["annotated_block_count"],
+            0,
+        )
         self.assertEqual(running_snapshot["book_mode_audit"]["chunks_audited"], 1)
         self.assertEqual(
             running_snapshot["book_mode_audit"]["counts_by_code"],
             {"untranslated_source_residue": 1},
         )
+        running_report = running_snapshot["content_role_shadow_report"]
+        self.assertEqual(running_report["annotated_block_count"], 1)
+        self.assertEqual(running_report["bucket_counts"], {"reader_visible": 1})
+        self.assertEqual(running_report["role_counts"], {"reader_navigation": 1})
+        self.assertEqual(running_report["confidence_counts"], {"high": 1})
+        self.assertEqual(
+            running_report["source_surface_counts"],
+            {"epub_xhtml_nav": 1},
+        )
+        self.assertEqual(running_report["source_granularity_counts"], {"block": 1})
+        self.assertIn("## Content Role Shadow Report", running_text)
+        self.assertIn('- confidence_counts: `{"high": 1}`', running_text)
+        self.assertNotIn("## Content Role Shadow Report", finished_text)
+        self.assertNotIn("HELPER_REASON_VALUE_SENTINEL", running_text)
+        self.assertNotIn("HELPER_METADATA_VALUE_SENTINEL", running_text)
+        self.assertNotIn("evidence_reason_codes", running_text)
 
     def test_redacts_run_artifact_error_details(self):
         with TemporaryDirectory() as temp_dir:
