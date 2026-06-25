@@ -116,6 +116,10 @@ def _advanced_nav_tag(page_text: str) -> str:
     return match.group(0)
 
 
+def _compact_text(page_text: str) -> str:
+    return re.sub(r"\s+", " ", page_text)
+
+
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
 
@@ -538,6 +542,7 @@ class AdminRoutesTest(unittest.TestCase):
                 ),
             )
         )
+        plain_text = _compact_text(html)
 
         self.assertIn('class="status admin-badge"', html)
         self.assertIn(f'title="{long_file_name}"', html)
@@ -546,6 +551,12 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn("admin-cell-id", html)
         self.assertIn(f'title="{safe_error}"', html)
         self.assertIn("admin-cell-error", html)
+        self.assertIn("multi-file owner-only diagnostic packet", plain_text)
+        self.assertIn("sanitized summary/state", plain_text)
+        self.assertIn("lifecycle events", plain_text)
+        self.assertIn("per-fragment/work-unit metadata", plain_text)
+        self.assertIn("owner-only provider/glossary diagnostics", plain_text)
+        self.assertIn("explicit archive download", plain_text)
         self.assertIn(
             'class="action-control action-control-view action-control-compact"',
             html,
@@ -2349,8 +2360,31 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("deepseek.api_keys.processing-key", trace.text)
             self.assertNotIn("sk-trace-activity-secret", trace.text)
             self.assertNotIn("RAW TRACE ACTIVITY SOURCE", trace.text)
+            details_text = _compact_text(details.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
+            self.assertIn(
+                "Normal detail UI/API shows bounded recent fragment and event rows",
+                details_text,
+            )
+            self.assertIn(
+                "deeper inspection through Text diagnostics, Reader, or "
+                "Download archive",
+                details_text,
+            )
+            self.assertIn(
+                "Archive is generated and downloaded only after explicit owner action",
+                details_text,
+            )
+            self.assertIn(
+                "may include sensitive owner-only diagnostic material",
+                details_text,
+            )
+            self.assertIn(
+                "Do not publish archive contents to issues, PRs, support notes, "
+                "or release artifacts unless explicitly approved",
+                details_text,
+            )
             self.assertIn("Progress", details.text)
             self.assertIn("ETA", details.text)
             self.assertIn('class="progress-bar"', details.text)
@@ -2371,6 +2405,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertNotIn("sk-processing-secret-value", details.text)
             self.assertNotIn("deepseek.api_keys.processing-key", details.text)
             self.assertEqual(api.status_code, 200)
+            self.assertEqual(api.headers["cache-control"], "no-store")
             payload = api.json()
             self.assertEqual(payload["logs"][0]["job_id"], "job-logs-1")
             self.assertEqual(payload["logs"][0]["status"], "ready")
@@ -2380,6 +2415,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertEqual(payload["logs"][0]["current_stage"], "run_finished")
             self.assertIn("last_event_at", payload["logs"][0])
             self.assertEqual(details_api.status_code, 200)
+            self.assertEqual(details_api.headers["cache-control"], "no-store")
             details_api_text = details_api.text
             self.assertIn("[redacted]", details_api_text)
             self.assertNotIn("Chapter one", details_api_text)
@@ -2470,7 +2506,17 @@ class AdminRoutesTest(unittest.TestCase):
             details_api = client.get(f"/admin/api/logs/{logger.run_dir.name}")
 
         self.assertEqual(details.status_code, 200)
-        self.assertIn("Showing latest 100 fragment rows", details.text)
+        details_text = _compact_text(details.text)
+        self.assertIn(
+            "Normal detail UI/API shows bounded recent fragment rows",
+            details_text,
+        )
+        self.assertIn("Showing latest 100 fragment rows", details_text)
+        self.assertIn(
+            "Use Text diagnostics, Reader, or Download archive for explicit "
+            "deeper inspection.",
+            details_text,
+        )
         self.assertIn("recent-status-105", details.text)
         self.assertNotIn("old-status-sentinel", details.text)
         self.assertNotIn("block-1<", details.text)

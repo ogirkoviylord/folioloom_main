@@ -1118,7 +1118,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
                     settings,
                     **_log_filters(request),
                 )
-            }
+            },
+            headers={"Cache-Control": "no-store"},
         )
 
     @router.get("/api/logs/{run_id}")
@@ -1137,7 +1138,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
         )
         if details is None:
             return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
-        return _json({"details": details, "history_limit": history_limit})
+        return _json(
+            {"details": details, "history_limit": history_limit},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.get("/api/activity")
     async def activity_api(request: Request) -> JSONResponse:
@@ -3964,8 +3968,13 @@ def _json(
     payload: object,
     *,
     status_code: int | HTTPStatus = HTTPStatus.OK,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
-    return JSONResponse(jsonable_encoder(payload), status_code=int(status_code))
+    return JSONResponse(
+        jsonable_encoder(payload),
+        status_code=int(status_code),
+        headers=headers,
+    )
 
 
 def _download_file_name(value: str) -> str:
