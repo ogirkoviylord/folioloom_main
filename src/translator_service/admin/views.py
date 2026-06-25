@@ -8695,6 +8695,11 @@ header {
   justify-self: end;
   white-space: nowrap;
 }
+.action-critical .status {
+  color: var(--warn);
+  border-color: rgba(163, 61, 42, 0.45);
+  background: #fff1f0;
+}
 .action-blocked .status,
 .action-action_needed .status {
   color: var(--warn);
