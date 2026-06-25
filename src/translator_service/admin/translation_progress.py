@@ -46,6 +46,7 @@ class DurableTranslationProgressSnapshot:
     completion_tokens: int = 0
     cache_hit_tokens: int = 0
     cache_miss_tokens: int = 0
+    cache_hit_units: int = 0
     total_tokens: int = 0
     retry_count: int = 0
     active_worker_ids: tuple[str, ...] = ()
@@ -95,6 +96,8 @@ def build_durable_translation_progress_snapshot(
     pending_units = _count_unit_states(unit_states, JOB_STATE_QUEUED)
     prompt_tokens = _sum_unit_field(units, "prompt_tokens")
     completion_tokens = _sum_unit_field(units, "completion_tokens")
+    cache_hit_tokens = _sum_unit_field(units, "cache_hit_tokens")
+    cache_miss_tokens = _sum_unit_field(units, "cache_miss_tokens")
     total_units = max(
         _nonnegative_int(_read_value(job, "total_units", "unit_count")),
         len(units),
@@ -123,8 +126,9 @@ def build_durable_translation_progress_snapshot(
         pending_units=pending_units,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        cache_hit_tokens=_sum_unit_field(units, "cache_hit_tokens"),
-        cache_miss_tokens=_sum_unit_field(units, "cache_miss_tokens"),
+        cache_hit_tokens=cache_hit_tokens,
+        cache_miss_tokens=cache_miss_tokens,
+        cache_hit_units=_count_positive_unit_field(units, "cache_hit_tokens"),
         total_tokens=prompt_tokens + completion_tokens,
         retry_count=max(
             _nonnegative_int(_read_value(job, "retry_count", "retries")),
@@ -290,7 +294,7 @@ def _overlay_summary_with_progress_snapshot(
         ),
         current_stage=status or summary.current_stage,
         last_event_at=snapshot.updated_at or summary.last_event_at,
-        total_tokens=snapshot.total_tokens or summary.total_tokens,
+        total_tokens=snapshot.total_tokens,
     )
 
 
@@ -312,11 +316,13 @@ def _overlay_totals_with_progress_snapshot(
     if snapshot is None or not snapshot.available:
         return totals
     updated = dict(totals)
-    _set_if_positive(updated, "prompt_tokens", snapshot.prompt_tokens)
-    _set_if_positive(updated, "completion_tokens", snapshot.completion_tokens)
-    _set_if_positive(updated, "total_tokens", snapshot.total_tokens)
-    _set_if_positive(updated, "prompt_cache_hit_tokens", snapshot.cache_hit_tokens)
-    _set_if_positive(updated, "prompt_cache_miss_tokens", snapshot.cache_miss_tokens)
+    updated["prompt_tokens"] = snapshot.prompt_tokens
+    updated["completion_tokens"] = snapshot.completion_tokens
+    updated["total_tokens"] = snapshot.total_tokens
+    updated["prompt_cache_hit_tokens"] = snapshot.cache_hit_tokens
+    updated["prompt_cache_miss_tokens"] = snapshot.cache_miss_tokens
+    updated["cache_hits"] = snapshot.cache_hit_units
+    updated["retry_count"] = snapshot.retry_count
     return updated
 
 
@@ -384,6 +390,14 @@ def _sum_unit_field(units: tuple[Any, ...], field_name: str) -> int:
     return sum(_nonnegative_int(_read_value(unit, field_name)) for unit in units)
 
 
+def _count_positive_unit_field(units: tuple[Any, ...], field_name: str) -> int:
+    return sum(
+        1
+        for unit in units
+        if _nonnegative_int(_read_value(unit, field_name)) > 0
+    )
+
+
 def _read_value(row: Any, *names: str) -> Any:
     for name in names:
         if isinstance(row, Mapping) and name in row:
@@ -432,11 +446,6 @@ def _last_datetime(values: tuple[Any, ...]) -> datetime | None:
 
 def _set_max(values: dict[str, Any], key: str, candidate: int) -> None:
     values[key] = max(_nonnegative_int(values.get(key, 0)), candidate)
-
-
-def _set_if_positive(values: dict[str, Any], key: str, candidate: int) -> None:
-    if candidate > 0:
-        values[key] = candidate
 
 
 def _progress_percent(completed: int, total: int) -> float | None:
