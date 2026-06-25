@@ -6,9 +6,15 @@ from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
 from translator_service.admin.operations import JOB_STATE_RUNNING
-from translator_service.admin.translation_logs import list_translation_run_summaries
+from translator_service.admin.translation_logs import (
+    TranslationRunDetails,
+    TranslationRunSummary,
+    list_translation_run_summaries,
+)
 from translator_service.admin.translation_progress import (
+    DurableTranslationProgressSnapshot,
     build_durable_translation_progress_snapshot,
+    overlay_translation_run_details,
 )
 from translator_service.translation_run_logs import (
     TranslationRunLogger,
@@ -96,6 +102,7 @@ class AdminTranslationProgressTest(unittest.TestCase):
         self.assertEqual(snapshot.completion_tokens, 54)
         self.assertEqual(snapshot.cache_hit_tokens, 105)
         self.assertEqual(snapshot.cache_miss_tokens, 75)
+        self.assertEqual(snapshot.cache_hit_units, 2)
         self.assertEqual(snapshot.total_tokens, 246)
         self.assertEqual(snapshot.retry_count, 2)
         self.assertEqual(snapshot.active_worker_ids, ("worker-b",))
@@ -109,6 +116,97 @@ class AdminTranslationProgressTest(unittest.TestCase):
         self.assertNotIn("private cached text", snapshot_repr)
         self.assertNotIn("private source", snapshot_repr)
         self.assertNotIn("secret-token", snapshot_repr)
+
+    def test_overlay_details_uses_durable_accounting_as_effective_semantics(self):
+        stale_details = TranslationRunDetails(
+            summary=TranslationRunSummary(
+                job_id="job-accounting",
+                status="failed",
+                started_at=_time(0),
+                finished_at=None,
+                order_id="order-accounting",
+                user_id="telegram:42",
+                file_name="book.epub",
+                document_kind="epub",
+                source_language="en",
+                target_language="ru",
+                translator_model=None,
+                result_file_name=None,
+                error_message=None,
+                fragment_count=1,
+                total_fragment_count=3,
+                progress_percent=33.3,
+                eta_seconds=None,
+                current_stage="run_failed",
+                last_event_at=_time(4),
+                total_tokens=999,
+                elapsed_seconds=4.0,
+                run_dir="/synthetic/run-dir",
+            ),
+            metadata={"job_id": "job-accounting"},
+            totals={
+                "prompt_tokens": 900,
+                "completion_tokens": 99,
+                "total_tokens": 999,
+                "prompt_cache_hit_tokens": 500,
+                "prompt_cache_miss_tokens": 400,
+                "cache_hits": 9,
+                "retry_count": 7,
+            },
+            security={},
+            translation_stack={},
+            events=(),
+            fragments=(),
+            run_dir="/synthetic/run-dir",
+        )
+        durable = DurableTranslationProgressSnapshot(
+            job_id="job-accounting",
+            available=True,
+            status="translated",
+            state="succeeded",
+            completed_units=2,
+            total_units=3,
+            prompt_tokens=0,
+            completion_tokens=0,
+            cache_hit_tokens=0,
+            cache_miss_tokens=0,
+            total_tokens=0,
+            retry_count=0,
+            updated_at=_time(5),
+        )
+
+        effective = overlay_translation_run_details(
+            stale_details,
+            operations=None,
+            progress_snapshots={"job-accounting": durable},
+        )
+
+        self.assertEqual(effective.summary.fragment_count, 2)
+        self.assertEqual(effective.summary.total_fragment_count, 3)
+        self.assertEqual(effective.summary.total_tokens, 0)
+        self.assertEqual(effective.totals["prompt_tokens"], 0)
+        self.assertEqual(effective.totals["completion_tokens"], 0)
+        self.assertEqual(effective.totals["total_tokens"], 0)
+        self.assertEqual(effective.totals["prompt_cache_hit_tokens"], 0)
+        self.assertEqual(effective.totals["prompt_cache_miss_tokens"], 0)
+        self.assertEqual(effective.totals["cache_hits"], 0)
+        self.assertEqual(effective.totals["retry_count"], 0)
+
+    def test_snapshot_counts_cache_hit_units_for_run_totals(self):
+        snapshot = build_durable_translation_progress_snapshot(
+            "job-cache-hits",
+            store=_FakeProgressStore(
+                job=_Row(id="job-cache-hits", status="translated"),
+                units=(
+                    _Row(status="translated", cache_hit_tokens=0),
+                    _Row(status="translated", cache_hit_tokens=3),
+                    _Row(status="cached", cache_hit_tokens=7),
+                    _Row(status="failed_retryable", cache_hit_tokens=11),
+                ),
+            ),
+        )
+
+        self.assertEqual(snapshot.cache_hit_units, 3)
 
     def test_snapshot_handles_missing_store_and_job_without_leaking_exceptions(self):
         no_store = build_durable_translation_progress_snapshot(
