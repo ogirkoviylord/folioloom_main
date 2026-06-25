@@ -1,7 +1,9 @@
 import hashlib
 import json
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.translation_run_logs import (
     TranslationFragmentLog,
@@ -12,6 +14,7 @@ from translator_service.translation_run_logs import (
     finish_running_translation_runs_for_job,
     record_book_mode_audit_fragment_for_job,
     record_book_mode_audit_gate_for_job,
+    refresh_translation_run_summary,
 )
 
 
@@ -88,6 +91,87 @@ class TranslationRunLoggerTest(unittest.TestCase):
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("job-1", summary)
             self.assertIn("deepseek-v4-flash", summary)
+
+    def test_run_json_updates_per_fragment_while_summary_rewrites_are_deferred(self):
+        original_write_text = Path.write_text
+        summary_writes = []
+
+        def counting_write_text(path, data, *args, **kwargs):
+            if path.name == "summary.md":
+                summary_writes.append(data)
+            return original_write_text(path, data, *args, **kwargs)
+
+        with TemporaryDirectory() as temp_dir:
+            with patch.object(Path, "write_text", new=counting_write_text):
+                logger = TranslationRunLogger.start(
+                    root=temp_dir,
+                    metadata=TranslationRunMetadata(
+                        job_id="job-deferred-summary",
+                        order_id=None,
+                        user_id="telegram:42",
+                        file_name="large-book.txt",
+                        document_kind="txt",
+                        source_language="en",
+                        target_language="uk",
+                        total_fragment_count=1000,
+                    ),
+                )
+                self.assertEqual(len(summary_writes), 1)
+
+                for sequence in range(1, 1001):
+                    logger.record_fragment(
+                        TranslationFragmentLog(
+                            sequence=sequence,
+                            source_text=f"source {sequence}",
+                            translated_text=f"translation {sequence}",
+                            status="translated",
+                            elapsed_seconds=1.0,
+                            prompt_tokens=1,
+                            completion_tokens=2,
+                            total_tokens=3,
+                        )
+                    )
+                    if sequence in {1, 1000}:
+                        snapshot = json.loads(
+                            (logger.run_dir / "run.json").read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                        self.assertEqual(snapshot["fragment_count"], sequence)
+                        self.assertEqual(
+                            snapshot["totals"]["total_tokens"],
+                            sequence * 3,
+                        )
+                        self.assertEqual(snapshot["status"], "running")
+
+                self.assertEqual(len(summary_writes), 1)
+                stale_summary = (logger.run_dir / "summary.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("- total_tokens: `0`", stale_summary)
+
+                logger.refresh_summary()
+                self.assertEqual(len(summary_writes), 2)
+                refreshed_summary = (logger.run_dir / "summary.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("- total_tokens: `3000`", refreshed_summary)
+
+                logger.finish(status="ready", result_file_name="large-book.uk.txt")
+                self.assertEqual(len(summary_writes), 3)
+
+            final_snapshot = json.loads(
+                (logger.run_dir / "run.json").read_text(encoding="utf-8")
+            )
+            final_summary = (logger.run_dir / "summary.md").read_text(
+                encoding="utf-8"
+            )
+
+        self.assertEqual(final_snapshot["status"], "ready")
+        self.assertEqual(final_snapshot["fragment_count"], 1000)
+        self.assertEqual(final_snapshot["totals"]["total_tokens"], 3000)
+        self.assertIn("- Status: `ready`", final_summary)
+        self.assertIn("- total_tokens: `3000`", final_summary)
 
     def test_appends_provider_io_diagnostics_to_running_matching_run(self):
         with TemporaryDirectory() as temp_dir:
@@ -337,6 +421,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
                 )
             )
 
+            logger.refresh_summary()
             snapshot = json.loads((logger.run_dir / "run.json").read_text())
             summary = (logger.run_dir / "summary.md").read_text(encoding="utf-8")
             artifact_text = "\n".join(
@@ -453,6 +538,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
                 )
             )
 
+            logger.refresh_summary()
             snapshot = json.loads((logger.run_dir / "run.json").read_text())
             summary = (logger.run_dir / "summary.md").read_text(encoding="utf-8")
             artifact_text = "\n".join(
@@ -647,6 +733,7 @@ class TranslationRunLoggerTest(unittest.TestCase):
             self.assertNotIn("Ignore previous instructions", events_jsonl)
             self.assertNotIn("The system prompt says", events_jsonl)
 
+            logger.refresh_summary()
             summary = (logger.run_dir / "summary.md").read_text()
             self.assertIn("## Security", summary)
             self.assertIn("unsafe_model_outputs", summary)
@@ -709,6 +796,9 @@ class TranslationRunLoggerTest(unittest.TestCase):
                     ),
                     ("unrelated_payload", "HELPER_METADATA_VALUE_SENTINEL"),
                 ),
+            )
+            self.assertTrue(
+                refresh_translation_run_summary(temp_dir, running.run_dir.name)
             )
             finished_snapshot = json.loads(
                 (finished.run_dir / "run.json").read_text()

@@ -455,6 +455,61 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertNotIn("Вот перевод", archive_text)
         self.assertNotIn("disease was serious", archive_text)
 
+    def test_translation_archives_ignore_stale_atomic_temp_files(self):
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-temp-artifact",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="book.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                ),
+            )
+            logger.finish(status="ready", result_file_name="book.ru.txt")
+            (logger.run_dir / ".run.json.stale.tmp").write_text(
+                "PRIVATE TEMP RUN JSON SENTINEL",
+                encoding="utf-8",
+            )
+            (logger.run_dir / ".summary.md.stale.tmp").write_text(
+                "PRIVATE TEMP SUMMARY SENTINEL",
+                encoding="utf-8",
+            )
+
+            summaries = list_translation_run_summaries(temp_dir)
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            raw_archive = build_translation_run_archive(temp_dir, logger.run_dir.name)
+            self.assertIsNotNone(details)
+            assert details is not None
+            effective_archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertEqual(len(summaries), 1)
+        self.assertIsNotNone(raw_archive)
+        self.assertIsNotNone(effective_archive)
+        assert raw_archive is not None
+        assert effective_archive is not None
+        for archive_bytes in (raw_archive.content, effective_archive.content):
+            with ZipFile(BytesIO(archive_bytes)) as archive:
+                names = set(archive.namelist())
+                archive_text = "\n".join(
+                    archive.read(name).decode("utf-8", errors="ignore")
+                    for name in names
+                )
+            self.assertNotIn(".run.json.stale.tmp", names)
+            self.assertNotIn(".summary.md.stale.tmp", names)
+            self.assertNotIn("PRIVATE TEMP RUN JSON SENTINEL", archive_text)
+            self.assertNotIn("PRIVATE TEMP SUMMARY SENTINEL", archive_text)
+
     def test_effective_archive_exposes_content_role_shadow_report_metadata_only(self):
         with TemporaryDirectory() as temp_dir:
             logger = TranslationRunLogger.start(
