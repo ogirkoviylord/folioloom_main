@@ -23,6 +23,7 @@ from translator_service.translation_run_logs import (
     TranslationFragmentLog,
     TranslationRunLogger,
     TranslationRunMetadata,
+    append_provider_io_diagnostic_for_job,
     append_translation_run_event_for_job,
 )
 
@@ -606,6 +607,120 @@ class AdminTranslationLogsTest(unittest.TestCase):
 
         with ZipFile(BytesIO(effective_archive.content)) as archive:
             self.assertIn("provider_io_diagnostics.jsonl", archive.namelist())
+
+    def test_effective_archive_provider_io_and_token_cache_accounting_invariants(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-accounting-invariant",
+                    order_id=None,
+                    user_id="telegram:42",
+                    file_name="novel.epub",
+                    document_kind="epub",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=2,
+                ),
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=1,
+                    source_text="Synthetic source one",
+                    translated_text="Synthetic translation one",
+                    status="translated",
+                    elapsed_seconds=1.0,
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                    prompt_cache_hit_tokens=4,
+                    prompt_cache_miss_tokens=6,
+                    cache_hit=True,
+                )
+            )
+            logger.record_fragment(
+                TranslationFragmentLog(
+                    sequence=2,
+                    source_text="Synthetic source two",
+                    translated_text="Synthetic translation two",
+                    status="translated",
+                    elapsed_seconds=2.0,
+                    prompt_tokens=7,
+                    completion_tokens=3,
+                    total_tokens=10,
+                    prompt_cache_hit_tokens=0,
+                    prompt_cache_miss_tokens=7,
+                    cache_hit=False,
+                )
+            )
+            append_provider_io_diagnostic_for_job(
+                temp_dir,
+                job_id="job-accounting-invariant",
+                record={
+                    "schema_version": "provider-io-diagnostics-v1",
+                    "diagnostic_scope": "owner_only_translation_run_archive",
+                    "provider_id": "deepseek",
+                    "request_body": {"encoding": "utf-8", "byte_count": 17},
+                    "response_body": {"encoding": "utf-8", "byte_count": 23},
+                },
+            )
+            details = get_translation_run_details(temp_dir, logger.run_dir.name)
+            assert details is not None
+            archive = build_effective_translation_run_archive(
+                temp_dir,
+                logger.run_dir.name,
+                details=details,
+            )
+
+        self.assertIsNotNone(archive)
+        assert archive is not None
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        with ZipFile(BytesIO(archive.content)) as archive_file:
+            run = json.loads(archive_file.read("run.json"))
+            effective = json.loads(archive_file.read("effective_run.json"))
+            work_units = json.loads(archive_file.read("work_units.json"))
+            [provider_io] = [
+                json.loads(line)
+                for line in archive_file.read("provider_io_diagnostics.jsonl")
+                .decode("utf-8")
+                .splitlines()
+            ]
+
+        unit_total_tokens = sum(unit["total_tokens"] for unit in work_units["units"])
+        unit_prompt_tokens = sum(unit["prompt_tokens"] for unit in work_units["units"])
+        unit_completion_tokens = sum(
+            unit["completion_tokens"] for unit in work_units["units"]
+        )
+        unit_cache_hit_tokens = sum(
+            unit["prompt_cache_hit_tokens"] for unit in work_units["units"]
+        )
+        unit_cache_miss_tokens = sum(
+            unit["prompt_cache_miss_tokens"] for unit in work_units["units"]
+        )
+        unit_cache_hits = sum(1 for unit in work_units["units"] if unit["cache_hit"])
+
+        self.assertEqual(effective["summary"]["job_id"], run["job_id"])
+        self.assertEqual(effective["summary"]["total_tokens"], 25)
+        self.assertEqual(effective["summary"]["total_tokens"], unit_total_tokens)
+        self.assertEqual(effective["totals"]["total_tokens"], unit_total_tokens)
+        self.assertEqual(effective["totals"]["prompt_tokens"], unit_prompt_tokens)
+        self.assertEqual(
+            effective["totals"]["completion_tokens"],
+            unit_completion_tokens,
+        )
+        self.assertEqual(
+            effective["totals"]["prompt_cache_hit_tokens"],
+            unit_cache_hit_tokens,
+        )
+        self.assertEqual(
+            effective["totals"]["prompt_cache_miss_tokens"],
+            unit_cache_miss_tokens,
+        )
+        self.assertEqual(effective["totals"]["cache_hits"], unit_cache_hits)
+        self.assertEqual(provider_io["job_id"], effective["summary"]["job_id"])
+        self.assertEqual(provider_io["run_id"], Path(details.run_dir).name)
 
     def test_effective_archive_provider_io_redacts_auth_material(self):
         with TemporaryDirectory() as temp_dir:
