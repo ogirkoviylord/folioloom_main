@@ -3311,6 +3311,12 @@ def logs_body(
           Review translation runs by date, state, file, language direction,
           token usage, and safe error metadata.
         </p>
+        <p>
+          A translation run is a multi-file owner-only diagnostic packet:
+          sanitized summary/state, lifecycle events, per-fragment/work-unit
+          metadata, optional owner-only provider/glossary diagnostics, and
+          explicit archive download.
+        </p>
       </div>
     </section>
     <section class="panel">
@@ -3554,6 +3560,11 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           {escape(summary.file_name)} · {escape(summary.source_language)}
           -> {escape(summary.target_language)} · {escape(summary.status)}
         </p>
+        <p>
+          Normal detail UI/API shows bounded recent fragment and event rows;
+          deeper inspection through Text diagnostics, Reader, or Download
+          archive is explicit.
+        </p>
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to logs", "/admin/logs", "view")}
@@ -3565,6 +3576,14 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         {_action_link("Reader", f"/admin/logs/{run_id}/reader", "view")}
         {_action_link("Download archive", f"/admin/logs/{run_id}/download", "copy")}
       </div>
+    </section>
+    <section class="panel warning-panel">
+      <p>
+        Archive is generated and downloaded only after explicit owner action.
+        It may include sensitive owner-only diagnostic material. Do not publish
+        archive contents to issues, PRs, support notes, or release artifacts
+        unless explicitly approved.
+      </p>
     </section>
     <section class="panel">
       <div class="metric-grid">
@@ -3831,13 +3850,16 @@ def _detail_fragment_history_note(details: TranslationRunDetails) -> str:
     )
     if shown >= DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT and total > shown:
         message = (
+            "Normal detail UI/API shows bounded recent fragment rows. "
             f"Showing latest {shown} fragment rows of {total} recorded. "
-            "Use Text diagnostics, Reader, or Download archive for full inspection."
+            "Use Text diagnostics, Reader, or Download archive for explicit "
+            "deeper inspection."
         )
     else:
         message = (
+            "Normal detail UI/API shows bounded recent fragment rows. "
             f"Showing {shown} fragment rows. Text diagnostics, Reader, and "
-            "Download archive remain available for deeper inspection."
+            "Download archive remain available for explicit deeper inspection."
         )
     return f'<p class="table-note">{escape(message)}</p>'
 
@@ -3846,11 +3868,15 @@ def _detail_event_history_note(details: TranslationRunDetails) -> str:
     shown = len(details.events)
     if shown >= DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT:
         message = (
+            "Normal detail UI/API shows bounded recent event rows. "
             f"Showing latest {shown} event rows. Download archive includes "
-            "the full events.jsonl for this run."
+            "the full events.jsonl for this run after explicit owner action."
         )
     else:
-        message = f"Showing {shown} event rows."
+        message = (
+            "Normal detail UI/API shows bounded recent event rows. "
+            f"Showing {shown} event rows."
+        )
     return f'<p class="table-note">{escape(message)}</p>'
 
 
