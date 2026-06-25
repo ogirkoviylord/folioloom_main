@@ -73,11 +73,18 @@ class GlossaryComplianceTest(unittest.TestCase):
         entries = [
             _entry("entry-north", source="North Door", target="Северница"),
             _entry("entry-salt", source="Salt Thread", target="Солевязь"),
+            _entry("entry-absent", source="Absent Gate", target="Пропавшие Врата"),
+            _entry("entry-omitted", source="Omitted Gate", target="Скрытые Врата"),
         ]
         partial = validate_glossary_compliance(
             entries,
-            selected_entry_ids=("entry-north", "entry-salt"),
-            included_entry_ids=("entry-north", "entry-salt"),
+            selected_entry_ids=(
+                "entry-north",
+                "entry-salt",
+                "entry-absent",
+                "entry-omitted",
+            ),
+            included_entry_ids=("entry-north", "entry-salt", "entry-absent"),
             source_text="North Door and Salt Thread.",
             translated_text="Северница была на месте, но второго термина нет.",
         )
@@ -92,10 +99,34 @@ class GlossaryComplianceTest(unittest.TestCase):
         self.assertEqual(partial["status"], "findings")
         self.assertEqual(partial["target_form_present_entry_ids"], ["entry-north"])
         self.assertEqual(partial["target_form_missing_entry_ids"], ["entry-salt"])
+        self.assertEqual(partial["requested_entry_count"], 4)
+        self.assertEqual(partial["context_included_entry_count"], 3)
+        self.assertEqual(partial["context_omitted_entry_count"], 1)
+        self.assertEqual(
+            partial["source_term_present_entry_ids"],
+            ["entry-north", "entry-salt"],
+        )
+        self.assertEqual(partial["source_term_missing_entry_ids"], ["entry-absent"])
+        self.assertEqual(partial["source_term_present_count"], 2)
+        self.assertEqual(partial["source_term_missing_count"], 1)
+        self.assertEqual(partial["observed_target_form_present_count"], 1)
+        self.assertEqual(partial["observed_target_form_missing_count"], 1)
+        self.assertEqual(
+            partial["quality_evidence_scope"],
+            "local_target_form_presence_only",
+        )
+        self.assertFalse(partial["quality_pass_fail_policy_changed"])
+        self.assertTrue(partial["requested_effective_observed_separated"])
+        self.assertFalse(partial["semantic_quality_claim_made"])
         self.assertIn("target_form_missing", partial["reason_codes"])
+        self.assertIn("source_term_absent", partial["reason_codes"])
+        self.assertIn("glossary_context_omitted", partial["reason_codes"])
         self.assertEqual(zero["status"], "findings")
         self.assertEqual(zero["target_form_present_count"], 0)
         self.assertEqual(zero["target_form_missing_count"], 2)
+        serialized = json.dumps(partial, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("North Door and Salt Thread.", serialized)
+        self.assertNotIn("Северница была на месте", serialized)
 
     def test_skip_reasons_and_structural_failure_are_metadata_only(self):
         entries = [
