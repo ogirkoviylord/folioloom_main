@@ -1523,8 +1523,8 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("sk-ove...cret", response.text)
 
     def test_admin_action_center_critical_severity_renders_critical_label(self):
-        from translator_service.admin.action_center import ActionCenter, ActionItem
         from translator_service.admin import views
+        from translator_service.admin.action_center import ActionCenter, ActionItem
 
         html = views.overview_body(
             ActionCenter(
