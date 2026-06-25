@@ -11,6 +11,8 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 _ACTIVE_STATUSES = {"running", "active", "translating", "processing"}
+DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT = 100
+_RECENT_LINE_TAIL_CHUNK_SIZE = 8192
 _COMPLETED_FRAGMENT_STATUSES = {
     "cached",
     "complete",
@@ -256,12 +258,14 @@ def list_translation_run_summaries(
 def get_translation_run_details(
     root: str | Path,
     run_id: str,
+    *,
+    history_limit: int | None = None,
 ) -> TranslationRunDetails | None:
     run_dir = _resolve_run_dir(root, run_id)
     if run_dir is None:
         return None
     run_json = run_dir / "run.json"
-    summary = _read_run_summary(run_json)
+    summary = _read_run_summary(run_json, history_limit=history_limit)
     if summary is None:
         return None
     try:
@@ -276,8 +280,8 @@ def get_translation_run_details(
         totals=_safe_dict(data.get("totals")),
         security=_safe_dict(data.get("security")),
         translation_stack=_safe_dict(data.get("translation_stack")),
-        events=_read_events(run_dir / "events.jsonl"),
-        fragments=_read_fragments(run_dir / "fragments"),
+        events=_read_events(run_dir / "events.jsonl", limit=history_limit),
+        fragments=_read_fragments(run_dir / "fragments", limit=history_limit),
         run_dir=str(run_dir),
     )
 
@@ -1919,6 +1923,7 @@ def _read_run_summary(
     run_json: Path,
     *,
     now: datetime | None = None,
+    history_limit: int | None = None,
 ) -> TranslationRunSummary | None:
     try:
         data = json.loads(run_json.read_text(encoding="utf-8"))
@@ -1935,8 +1940,12 @@ def _read_run_summary(
         data,
         completed_fragments=completed_fragments,
         events_path=events_path,
+        history_limit=history_limit,
     )
-    last_event_at, current_stage = _latest_event_state(events_path)
+    last_event_at, current_stage = _latest_event_state(
+        events_path,
+        limit=history_limit,
+    )
     elapsed_seconds = _float(totals.get("elapsed_seconds"))
     status = _string(data.get("status"), fallback="unknown").lower()
     started_at = _parse_datetime(data.get("started_at"))
@@ -1999,12 +2008,16 @@ def _run_metadata(data: dict[str, Any]) -> dict[str, Any]:
     return {key: _safe_value(data.get(key)) for key in keys if key in data}
 
 
-def _read_events(events_path: Path) -> tuple[TranslationRunEvent, ...]:
+def _read_events(
+    events_path: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[TranslationRunEvent, ...]:
     if not events_path.exists():
         return ()
     events: list[TranslationRunEvent] = []
     try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
+        lines = _read_recent_lines(events_path, limit=limit)
     except OSError:
         return ()
     for line in lines:
@@ -2026,13 +2039,38 @@ def _read_events(events_path: Path) -> tuple[TranslationRunEvent, ...]:
     return tuple(events)
 
 
+def _read_recent_lines(path: Path, *, limit: int | None) -> tuple[str, ...]:
+    if limit is None:
+        return tuple(path.read_text(encoding="utf-8").splitlines())
+    safe_limit = max(0, int(limit))
+    if safe_limit == 0:
+        return ()
+    chunks: list[bytes] = []
+    newline_count = 0
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        position = handle.tell()
+        while position > 0 and newline_count <= safe_limit:
+            read_size = min(_RECENT_LINE_TAIL_CHUNK_SIZE, position)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            chunks.append(chunk)
+            newline_count += chunk.count(b"\n")
+    tail = b"".join(reversed(chunks))
+    return tuple(line.decode("utf-8") for line in tail.splitlines()[-safe_limit:])
+
+
 def _total_fragment_count(
     data: dict[str, Any],
     *,
     completed_fragments: int,
     events_path: Path,
+    history_limit: int | None = None,
 ) -> int:
     explicit_total = _int(data.get("total_fragment_count"))
+    if history_limit is not None:
+        return max(completed_fragments, explicit_total)
     event_total = _event_fragment_count(events_path)
     return max(completed_fragments, explicit_total, event_total)
 
@@ -2066,13 +2104,17 @@ def _event_fragment_count(events_path: Path) -> int:
     return total
 
 
-def _latest_event_state(events_path: Path) -> tuple[datetime | None, str | None]:
+def _latest_event_state(
+    events_path: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[datetime | None, str | None]:
     if not events_path.exists():
         return None, None
     latest_at: datetime | None = None
     latest_type: str | None = None
     try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
+        lines = _read_recent_lines(events_path, limit=limit)
     except OSError:
         return None, None
     for line in lines:
@@ -2133,18 +2175,30 @@ def _eta_seconds(
     return round(average_seconds * (total_fragments - completed_fragments), 1)
 
 
-def _read_fragments(fragments_dir: Path) -> tuple[TranslationRunFragmentDetail, ...]:
+def _read_fragments(
+    fragments_dir: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[TranslationRunFragmentDetail, ...]:
     return tuple(
         _fragment_detail(data)
-        for data in _read_fragment_records(fragments_dir)
+        for data in _read_fragment_records(fragments_dir, limit=limit)
     )
 
 
-def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
+def _read_fragment_records(
+    fragments_dir: Path,
+    *,
+    limit: int | None = None,
+) -> tuple[dict[str, Any], ...]:
     if not fragments_dir.exists():
         return ()
     fragments: list[dict[str, Any]] = []
-    for path in sorted(fragments_dir.glob("*.json")):
+    paths = sorted(fragments_dir.glob("*.json"), key=_fragment_path_sort_key)
+    if limit is not None:
+        safe_limit = max(0, int(limit))
+        paths = paths[-safe_limit:] if safe_limit else []
+    for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -2153,6 +2207,13 @@ def _read_fragment_records(fragments_dir: Path) -> tuple[dict[str, Any], ...]:
             continue
         fragments.append(data)
     return tuple(fragments)
+
+
+def _fragment_path_sort_key(path: Path) -> tuple[int, int | str]:
+    try:
+        return (0, int(path.stem))
+    except ValueError:
+        return (1, path.name)
 
 
 def _fragment_detail(data: dict[str, Any]) -> TranslationRunFragmentDetail:

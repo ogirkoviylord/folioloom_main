@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from translator_service.admin.translation_logs import (
     _glossary_participation_status_from_payload,
@@ -237,6 +239,148 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertIn("run_started", [event.event_type for event in details.events])
         self.assertNotIn("Original paragraph", repr(details))
         self.assertNotIn("Перекладений абзац", repr(details))
+
+    def test_translation_run_details_can_bound_recent_history(self):
+        with TemporaryDirectory() as temp_dir:
+            logger = TranslationRunLogger.start(
+                root=temp_dir,
+                metadata=TranslationRunMetadata(
+                    job_id="job-bounded-history",
+                    order_id=None,
+                    user_id=None,
+                    file_name="bounded.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="ru",
+                    total_fragment_count=10001,
+                ),
+            )
+            for sequence in range(1, 301):
+                logger.record_event(
+                    "work_unit_finished",
+                    {
+                        "sequence": sequence,
+                        "status": "old",
+                        "elapsed_seconds": 1.0,
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                )
+            for sequence in range(9998, 10002):
+                logger.record_fragment(
+                    TranslationFragmentLog(
+                        sequence=sequence,
+                        source_text=f"private source {sequence}",
+                        translated_text=f"private translation {sequence}",
+                        status=f"status-{sequence}",
+                        elapsed_seconds=1.0,
+                        prompt_tokens=1,
+                        completion_tokens=1,
+                        total_tokens=2,
+                    )
+                )
+
+            events_path = logger.run_dir / "events.jsonl"
+            event_line_count = len(events_path.read_text(encoding="utf-8").splitlines())
+            event_byte_size = events_path.stat().st_size
+            event_read_text_calls: list[Path] = []
+            event_read_stats = {
+                "bytes_read": 0,
+                "chars_read": 0,
+                "line_iterations": 0,
+            }
+            path_type = type(events_path)
+            original_read_text = path_type.read_text
+            original_open = path_type.open
+
+            class CountingEventRead:
+                def __init__(self, handle):
+                    self._handle = handle
+
+                def __enter__(self):
+                    self._handle.__enter__()
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return self._handle.__exit__(exc_type, exc, tb)
+
+                def __iter__(self):
+                    for line in self._handle:
+                        event_read_stats["line_iterations"] += 1
+                        yield line
+
+                def read(self, *args, **kwargs):
+                    data = self._handle.read(*args, **kwargs)
+                    if isinstance(data, bytes):
+                        event_read_stats["bytes_read"] += len(data)
+                    else:
+                        event_read_stats["chars_read"] += len(data)
+                    return data
+
+                def readline(self, *args, **kwargs):
+                    data = self._handle.readline(*args, **kwargs)
+                    if data:
+                        event_read_stats["line_iterations"] += 1
+                    return data
+
+                def __getattr__(self, name):
+                    return getattr(self._handle, name)
+
+            def fail_full_event_read(path: Path, *args, **kwargs):
+                if path.name == "events.jsonl":
+                    event_read_text_calls.append(path)
+                    raise AssertionError("bounded details must not full-read events")
+                return original_read_text(path, *args, **kwargs)
+
+            def count_event_open(path: Path, *args, **kwargs):
+                handle = original_open(path, *args, **kwargs)
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if path.name == "events.jsonl" and "r" in mode:
+                    return CountingEventRead(handle)
+                return handle
+
+            with (
+                patch.object(path_type, "read_text", fail_full_event_read),
+                patch.object(path_type, "open", count_event_open),
+                patch(
+                    "translator_service.admin.translation_logs._event_fragment_count",
+                    side_effect=AssertionError(
+                        "bounded details must not scan event fragment counts"
+                    ),
+                ),
+            ):
+                details = get_translation_run_details(
+                    temp_dir,
+                    logger.run_dir.name,
+                    history_limit=3,
+                )
+
+        self.assertGreater(event_line_count, 300)
+        self.assertEqual(event_read_text_calls, [])
+        self.assertLess(event_read_stats["line_iterations"], event_line_count)
+        self.assertLess(
+            event_read_stats["bytes_read"] + event_read_stats["chars_read"],
+            event_byte_size,
+        )
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertEqual(details.summary.total_fragment_count, 10001)
+        self.assertEqual(details.summary.current_stage, "work_unit_finished")
+        self.assertIsNotNone(details.summary.last_event_at)
+        self.assertEqual(
+            [fragment.sequence for fragment in details.fragments],
+            [9999, 10000, 10001],
+        )
+        self.assertEqual(
+            [fragment.status for fragment in details.fragments],
+            ["status-9999", "status-10000", "status-10001"],
+        )
+        self.assertEqual(len(details.events), 3)
+        self.assertEqual(
+            [event.payload.get("sequence") for event in details.events],
+            [9999, 10000, 10001],
+        )
 
     def test_translation_run_archive_keeps_book_audit_metadata_only(self):
         with TemporaryDirectory() as temp_dir:
