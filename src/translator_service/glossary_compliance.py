@@ -91,9 +91,14 @@ def validate_glossary_compliance(
         for entry in entries
         if (entry_id := _text_value(entry, "entry_id")) is not None
     }
+    included_selected_entry_ids = tuple(
+        entry_id for entry_id in selected_ids if entry_id in included_ids
+    )
 
     entry_results: list[dict[str, Any]] = []
     checked_entry_ids: list[str] = []
+    source_term_present_entry_ids: list[str] = []
+    source_term_missing_entry_ids: list[str] = []
     target_form_present_entry_ids: list[str] = []
     target_form_missing_entry_ids: list[str] = []
     forbidden_variant_entry_ids: list[str] = []
@@ -104,7 +109,10 @@ def validate_glossary_compliance(
         return _payload(
             status=GlossaryComplianceStatus.SKIPPED,
             selected_entry_ids=selected_ids,
+            included_entry_ids=included_selected_entry_ids,
             checked_entry_ids=(),
+            source_term_present_entry_ids=(),
+            source_term_missing_entry_ids=(),
             target_form_present_entry_ids=(),
             target_form_missing_entry_ids=(),
             forbidden_variant_entry_ids=(),
@@ -129,7 +137,10 @@ def validate_glossary_compliance(
         return _payload(
             status=GlossaryComplianceStatus.SKIPPED,
             selected_entry_ids=(),
+            included_entry_ids=(),
             checked_entry_ids=(),
+            source_term_present_entry_ids=(),
+            source_term_missing_entry_ids=(),
             target_form_present_entry_ids=(),
             target_form_missing_entry_ids=(),
             forbidden_variant_entry_ids=(),
@@ -167,16 +178,19 @@ def validate_glossary_compliance(
             continue
 
         if not _entry_source_matches(entry, source_text):
+            source_term_missing_entry_ids.append(entry_id)
             skipped_entry_ids.append(entry_id)
             entry_results.append(
                 _entry_result(
                     entry_id,
                     checked=False,
                     target_form_present=False,
+                    source_term_present=False,
                     reason_codes=(GlossaryComplianceReason.SOURCE_TERM_ABSENT,),
                 )
             )
             continue
+        source_term_present_entry_ids.append(entry_id)
 
         target_forms = _entry_target_forms(entry)
         if not target_forms:
@@ -186,6 +200,7 @@ def validate_glossary_compliance(
                     entry_id,
                     checked=False,
                     target_form_present=False,
+                    source_term_present=True,
                     reason_codes=(GlossaryComplianceReason.TARGET_METADATA_MISSING,),
                 )
             )
@@ -198,6 +213,7 @@ def validate_glossary_compliance(
                     entry_id,
                     checked=False,
                     target_form_present=False,
+                    source_term_present=True,
                     reason_codes=_policy_resolution_reason_codes(policy_resolution),
                     terminology_match=_unsupported_terminology_match_payload(
                         policy_resolution
@@ -230,6 +246,7 @@ def validate_glossary_compliance(
                 entry_id,
                 checked=match_result.checked,
                 target_form_present=target_form_present,
+                source_term_present=True,
                 reason_codes=reason_codes,
                 terminology_match=terminology_match_payload(match_result),
             )
@@ -250,7 +267,10 @@ def validate_glossary_compliance(
     return _payload(
         status=status,
         selected_entry_ids=selected_ids,
+        included_entry_ids=included_selected_entry_ids,
         checked_entry_ids=checked_entry_ids,
+        source_term_present_entry_ids=source_term_present_entry_ids,
+        source_term_missing_entry_ids=source_term_missing_entry_ids,
         target_form_present_entry_ids=target_form_present_entry_ids,
         target_form_missing_entry_ids=target_form_missing_entry_ids,
         forbidden_variant_entry_ids=forbidden_variant_entry_ids,
@@ -364,7 +384,10 @@ def _payload(
     *,
     status: GlossaryComplianceStatus,
     selected_entry_ids: Sequence[str],
+    included_entry_ids: Sequence[str],
     checked_entry_ids: Sequence[str],
+    source_term_present_entry_ids: Sequence[str],
+    source_term_missing_entry_ids: Sequence[str],
     target_form_present_entry_ids: Sequence[str],
     target_form_missing_entry_ids: Sequence[str],
     forbidden_variant_entry_ids: Sequence[str],
@@ -391,15 +414,31 @@ def _payload(
         "status": status.value,
         "reason_codes": _sorted_reason_values(reason_codes),
         "uncertainty_reason_codes": uncertainty_reason_codes,
+        "requested_entry_count": len(selected_entry_ids),
+        "context_included_entry_count": len(included_entry_ids),
+        "context_omitted_entry_count": (
+            len(selected_entry_ids) - len(included_entry_ids)
+        ),
         "selected_entry_count": len(selected_entry_ids),
         "checked_entry_count": len(checked_entry_ids),
+        "source_term_present_count": len(source_term_present_entry_ids),
+        "source_term_missing_count": len(source_term_missing_entry_ids),
         "target_form_present_count": len(target_form_present_entry_ids),
         "target_form_missing_count": len(target_form_missing_entry_ids),
+        "observed_target_form_present_count": len(
+            target_form_present_entry_ids,
+        ),
+        "observed_target_form_missing_count": len(
+            target_form_missing_entry_ids,
+        ),
         "forbidden_variant_count": len(forbidden_variant_entry_ids),
         "needs_review_entry_count": len(needs_review_entry_ids),
         "skipped_entry_count": len(skipped_entry_ids),
         "selected_entry_ids": list(selected_entry_ids),
+        "context_included_entry_ids": list(included_entry_ids),
         "checked_entry_ids": list(checked_entry_ids),
+        "source_term_present_entry_ids": list(source_term_present_entry_ids),
+        "source_term_missing_entry_ids": list(source_term_missing_entry_ids),
         "target_form_present_entry_ids": list(target_form_present_entry_ids),
         "target_form_missing_entry_ids": list(target_form_missing_entry_ids),
         "forbidden_variant_entry_ids": list(forbidden_variant_entry_ids),
@@ -408,6 +447,9 @@ def _payload(
         "entries": [dict(item) for item in entry_results],
         "metadata_only": True,
         "raw_payload_included": False,
+        "quality_evidence_scope": "local_target_form_presence_only",
+        "quality_pass_fail_policy_changed": False,
+        "requested_effective_observed_separated": True,
         "semantic_quality_claim_made": False,
     }
 
@@ -417,6 +459,7 @@ def _entry_result(
     *,
     checked: bool,
     target_form_present: bool,
+    source_term_present: bool | None = None,
     reason_codes: Sequence[GlossaryComplianceReason | str],
     terminology_match: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -426,6 +469,8 @@ def _entry_result(
         "target_form_present": target_form_present,
         "reason_codes": _sorted_reason_values(reason_codes),
     }
+    if source_term_present is not None:
+        payload["source_term_present"] = source_term_present
     if terminology_match is not None:
         payload["terminology_match"] = dict(terminology_match)
     return payload

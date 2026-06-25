@@ -738,13 +738,23 @@ class AdminTranslationLogsTest(unittest.TestCase):
                         "status": "pass",
                         "reason_codes": ["target_form_present"],
                         "selected_entry_count": 1,
+                        "requested_entry_count": 1,
+                        "context_included_entry_count": 1,
+                        "context_omitted_entry_count": 0,
                         "checked_entry_count": 1,
+                        "source_term_present_count": 1,
+                        "source_term_missing_count": 0,
                         "target_form_present_count": 1,
                         "target_form_missing_count": 0,
+                        "observed_target_form_present_count": 1,
+                        "observed_target_form_missing_count": 0,
                         "forbidden_variant_count": 0,
                         "needs_review_entry_count": 0,
                         "skipped_entry_count": 0,
                         "selected_entry_ids": ["glossary-entry:v1:darcy"],
+                        "context_included_entry_ids": ["glossary-entry:v1:darcy"],
+                        "source_term_present_entry_ids": ["glossary-entry:v1:darcy"],
+                        "source_term_missing_entry_ids": [],
                         "checked_entry_ids": ["glossary-entry:v1:darcy"],
                         "target_form_present_entry_ids": [
                             "glossary-entry:v1:darcy"
@@ -755,6 +765,9 @@ class AdminTranslationLogsTest(unittest.TestCase):
                         "skipped_entry_ids": [],
                         "metadata_only": True,
                         "raw_payload_included": False,
+                        "quality_evidence_scope": "local_target_form_presence_only",
+                        "quality_pass_fail_policy_changed": False,
+                        "requested_effective_observed_separated": True,
                         "semantic_quality_claim_made": False,
                     },
                 },
@@ -838,6 +851,18 @@ class AdminTranslationLogsTest(unittest.TestCase):
         self.assertEqual(
             sidecar["compliance_summaries"][0]["target_form_present_count"],
             1,
+        )
+        self.assertEqual(
+            sidecar["compliance_summaries"][0]["source_term_present_count"],
+            1,
+        )
+        self.assertEqual(
+            sidecar["compliance_summaries"][0]["observed_target_form_present_count"],
+            1,
+        )
+        self.assertEqual(
+            sidecar["compliance_summaries"][0]["quality_evidence_scope"],
+            "local_target_form_presence_only",
         )
         self.assertEqual(
             sidecar["effectiveness_diagnostic"]["status"],
