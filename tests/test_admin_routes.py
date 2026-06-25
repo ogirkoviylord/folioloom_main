@@ -1524,9 +1524,9 @@ class AdminRoutesTest(unittest.TestCase):
 
     def test_admin_action_center_critical_severity_renders_critical_label(self):
         from translator_service.admin.action_center import ActionCenter, ActionItem
-        from translator_service.admin.views import overview_body
+        from translator_service.admin import views
 
-        html = overview_body(
+        html = views.overview_body(
             ActionCenter(
                 items=(
                     ActionItem(
@@ -1540,7 +1540,10 @@ class AdminRoutesTest(unittest.TestCase):
             )
         )
 
+        css = views._css()
         self.assertIn("action-critical", html)
+        self.assertIn(".action-critical .status", css)
+        self.assertIn("background: #fff1f0", css)
         self.assertIn("Critical", html)
         self.assertNotIn("Blocked", html)
 
