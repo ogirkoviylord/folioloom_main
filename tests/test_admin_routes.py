@@ -669,9 +669,62 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertIn("Refresh to read current run summaries", empty_text)
         self.assertIn(
+            "No translation runs found yet. Refresh after a translation has started.",
+            empty_text,
+        )
+        self.assertNotIn(
             "No runs match the current filters — clear filters to see all runs.",
             empty_text,
         )
+
+    def test_translations_body_empty_state_distinguishes_true_empty_from_filters(self):
+        from translator_service.admin.views import translations_body
+
+        true_empty_copy = (
+            "No translation runs found yet. Refresh after a translation has started."
+        )
+        filtered_empty_copy = (
+            "No runs match the current filters — clear filters to see all runs."
+        )
+
+        no_filter_cases = (
+            ("status-none", None, None, None),
+            ("status-empty", "", None, None),
+            ("status-all", "all", None, None),
+        )
+        for label, status, date_from, date_to in no_filter_cases:
+            with self.subTest(label=label):
+                empty_text = _compact_text(
+                    translations_body(
+                        (),
+                        status=status,
+                        date_from=date_from,
+                        date_to=date_to,
+                    )
+                )
+
+                self.assertIn(true_empty_copy, empty_text)
+                self.assertNotIn(filtered_empty_copy, empty_text)
+
+        filtered_cases = (
+            ("status-failed", "failed", None, None),
+            ("date-from", None, "2026-06-01", None),
+            ("date-to", None, None, "2026-06-30"),
+            ("status-all-with-date", "all", "2026-06-01", None),
+        )
+        for label, status, date_from, date_to in filtered_cases:
+            with self.subTest(label=label):
+                empty_text = _compact_text(
+                    translations_body(
+                        (),
+                        status=status,
+                        date_from=date_from,
+                        date_to=date_to,
+                    )
+                )
+
+                self.assertIn(filtered_empty_copy, empty_text)
+                self.assertNotIn(true_empty_copy, empty_text)
 
     def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
         with TemporaryDirectory() as temp_dir:
@@ -874,7 +927,8 @@ class AdminRoutesTest(unittest.TestCase):
             _nav_section(logs.text, "advanced-nav"),
         )
         self.assertIn("open", _advanced_nav_tag(logs.text))
-        self.assertIn("<th>Primary action</th>", translations.text)
+        self.assertIn("<th>Troubleshooting</th>", translations.text)
+        self.assertNotIn("<th>Primary action</th>", translations.text)
         self.assertIn("<th>Emergency</th>", translations.text)
         self.assertNotIn("<th>Actions</th>", translations.text)
         self.assertIn("<th>Actions</th>", logs.text)
