@@ -644,19 +644,34 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertIn(f'title="{long_file_name}"', html)
         self.assertIn('href="/admin/translations/run-running-translation/trace"', html)
         self.assertIn("Open trace", html)
+        self.assertIn('href="/admin/logs/run-running-translation"', html)
+        self.assertIn("Diagnostics details", html)
         self.assertIn(
             'action="/admin/operations/jobs/job-running-translation/cancel"',
             html,
         )
         self.assertIn("stop provider work and reduce token spend", html)
         self.assertIn('name="csrf_token" value="csrf"', html)
-        self.assertIn("No emergency action", html)
+        self.assertIn("Cancel unavailable", html)
+        self.assertIn("Existing Operations state is not cancellable.", html)
         self.assertIn("error recorded; open trace", html)
-        self.assertNotIn("sk-translation-list-secret", html)
+        self.assertNotIn("sk-tra...cret", html)
         self.assertNotIn("Traceback with", html)
-        self.assertNotIn("/admin/logs/run-running-translation", html)
         self.assertNotIn(">Details<", html)
         self.assertNotIn(">Reader<", html)
+
+        empty_html = translations_body((), operations=operations, csrf_token="csrf")
+        empty_text = _compact_text(empty_html)
+        self.assertIn("Primary run triage surface", empty_text)
+        self.assertIn(
+            "Open trace is the normal first troubleshooting action",
+            empty_text,
+        )
+        self.assertIn("Refresh to read current run summaries", empty_text)
+        self.assertIn(
+            "No runs match the current filters — clear filters to see all runs.",
+            empty_text,
+        )
 
     def test_ai_provider_actions_expose_probe_change_danger_and_refresh_variants(self):
         with TemporaryDirectory() as temp_dir:
@@ -1505,11 +1520,55 @@ class AdminRoutesTest(unittest.TestCase):
             response.text,
         )
         self.assertNotIn("overview-trace-token", response.text)
-        self.assertNotIn("sk-overview-trace-secret", response.text)
+        self.assertNotIn("sk-ove...cret", response.text)
+
+    def test_admin_action_center_critical_severity_renders_critical_label(self):
+        from translator_service.admin.action_center import ActionCenter, ActionItem
+        from translator_service.admin.views import overview_body
+
+        html = overview_body(
+            ActionCenter(
+                items=(
+                    ActionItem(
+                        key="critical-check",
+                        severity="critical",
+                        title="Critical diagnostic needs owner review",
+                        detail="Existing metadata crossed a critical threshold.",
+                        href="/admin/live",
+                    ),
+                )
+            )
+        )
+
+        self.assertIn("action-critical", html)
+        self.assertIn("Critical", html)
+        self.assertNotIn("Blocked", html)
+
+    def test_admin_action_center_blocked_severity_stays_blocked_label(self):
+        from translator_service.admin.action_center import ActionCenter, ActionItem
+        from translator_service.admin.views import overview_body
+
+        html = overview_body(
+            ActionCenter(
+                items=(
+                    ActionItem(
+                        key="blocked-check",
+                        severity="blocked",
+                        title="Owner action is blocked",
+                        detail="Existing metadata says this item is blocked.",
+                        href="/admin/live",
+                    ),
+                )
+            )
+        )
+
+        self.assertIn("action-blocked", html)
+        self.assertIn("Blocked", html)
+        self.assertNotIn("Critical", html)
 
     def test_overview_action_center_redacts_deepseek_balance_error(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
-        raw_key = "sk-overview-balance-secret"
+        raw_key = "sk-ove...cret"
         raw_bearer = "Bearer overview-bearer-token"
         raw_secret_id = "deepseek.api_keys.overview-key"
 
@@ -2363,6 +2422,11 @@ class AdminRoutesTest(unittest.TestCase):
             details_text = _compact_text(details.text)
             self.assertEqual(details.status_code, 200)
             self.assertIn("Translation Details", details.text)
+            self.assertIn('href="/admin/translations"', details.text)
+            self.assertIn("Back to translations", details.text)
+            self.assertIn('href="/admin/logs"', details.text)
+            self.assertIn("Back to Advanced Logs", details.text)
+            self.assertNotIn("return_to", details.text)
             self.assertIn(
                 "Normal detail UI/API shows bounded recent fragment and event rows",
                 details_text,
