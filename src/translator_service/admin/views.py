@@ -462,11 +462,17 @@ def _safe_action_href(href: str) -> str:
 
 def _safe_action_severity(severity: str) -> str:
     aliases = {
-        "critical": "blocked",
         "warning": "watch",
     }
     normalized = aliases.get(severity, severity)
-    if normalized in {"info", "watch", "investigate", "action_needed", "blocked"}:
+    if normalized in {
+        "info",
+        "watch",
+        "investigate",
+        "action_needed",
+        "blocked",
+        "critical",
+    }:
         return normalized
     return "info"
 
@@ -478,6 +484,7 @@ def _action_severity_label(severity: str) -> str:
         "investigate": "Investigate",
         "action_needed": "Action needed",
         "blocked": "Blocked",
+        "critical": "Critical",
     }.get(severity, "Info")
 
 
@@ -3383,7 +3390,9 @@ def translations_body(
     if not rows:
         rows = """
         <tr>
-          <td colspan="10" class="empty-cell">No translation runs found.</td>
+          <td colspan="10" class="empty-cell">
+            No runs match the current filters — clear filters to see all runs.
+          </td>
         </tr>
         """
     return f"""
@@ -3391,8 +3400,16 @@ def translations_body(
       <div>
         <h3>Translations</h3>
         <p>
-          Primary owner workflow for translation runs. Raw run logs remain in
-          Advanced Logs.
+          Primary run triage surface for translation runs. Open trace is the
+          normal first troubleshooting action.
+        </p>
+        <p>
+          Advanced Logs/Diagnostics remains for bounded owner-only diagnostic
+          details, Text diagnostics, Reader, and archive actions.
+        </p>
+        <p>
+          Refresh to read current run summaries. Detail pages show bounded
+          diagnostic snapshots on each page load.
         </p>
       </div>
     </section>
@@ -3458,6 +3475,17 @@ def _translation_workflow_row(
         "view",
         compact=True,
     )
+    diagnostics_link = _action_link(
+        "Diagnostics details",
+        f"/admin/logs/{run_id}",
+        "view",
+        compact=True,
+    )
+    error_cell = _bounded_cell_text(
+        _translation_safe_error(row),
+        kind="error",
+        empty="",
+    )
     emergency = _translation_emergency_action(row, job, csrf_token)
     return f"""
     <tr>
@@ -3471,8 +3499,8 @@ def _translation_workflow_row(
       <td>{_format_badge(row.document_kind)}</td>
       <td>{escape(direction)}</td>
       <td>{escape(fragments_tokens)}</td>
-      <td>{_bounded_cell_text(_translation_safe_error(row), kind="error", empty="")}</td>
-      <td>{trace_link}</td>
+      <td>{error_cell}</td>
+      <td>{trace_link} {diagnostics_link}</td>
       <td>{emergency}</td>
     </tr>
     """
@@ -3521,7 +3549,7 @@ def _translation_emergency_action(
         else "Operations state is unavailable for this run."
     )
     return _action_button(
-        "No emergency action",
+        "Cancel unavailable",
         "view",
         button_type="button",
         disabled_reason=reason,
@@ -3567,7 +3595,8 @@ def log_detail_body(details: TranslationRunDetails) -> str:
         </p>
       </div>
       <div class="toolbar-actions">
-        {_action_link("Back to logs", "/admin/logs", "view")}
+        {_action_link("Back to translations", "/admin/translations", "view")}
+        {_action_link("Back to Advanced Logs", "/admin/logs", "view")}
         {_action_link(
             "Text diagnostics",
             f"/admin/logs/{run_id}/text-diagnostics",
@@ -8665,6 +8694,11 @@ header {
   align-self: center;
   justify-self: end;
   white-space: nowrap;
+}
+.action-critical .status {
+  color: var(--warn);
+  border-color: rgba(163, 61, 42, 0.45);
+  background: #fff1f0;
 }
 .action-blocked .status,
 .action-action_needed .status {
