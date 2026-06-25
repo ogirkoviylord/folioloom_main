@@ -79,6 +79,7 @@ from translator_service.admin.secrets import (
 )
 from translator_service.admin.settings import SettingValueType, SQLiteAdminSettingsStore
 from translator_service.admin.translation_logs import (
+    DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT,
     TranslationProviderFailureAttempt,
     TranslationRunDetails,
     TranslationRunDiagnosticFile,
@@ -686,7 +687,11 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def log_detail(run_id: str, request: Request) -> Response:
         if _session_or_none(request, session_manager) is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        details = _translation_run_details(settings, run_id)
+        details = _translation_run_details(
+            settings,
+            run_id,
+            history_limit=DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT,
+        )
         if details is None:
             return _html("Not found", status_code=HTTPStatus.NOT_FOUND)
         return _protected_page(
@@ -1120,10 +1125,19 @@ def create_admin_router(settings: Settings) -> APIRouter:
     async def log_detail_api(run_id: str, request: Request) -> JSONResponse:
         if _session_or_none(request, session_manager) is None:
             return _json({"error": "unauthorized"}, status_code=HTTPStatus.UNAUTHORIZED)
-        details = _translation_run_details(settings, run_id)
+        history_limit = _bounded_int(
+            request.query_params.get("history_limit"),
+            default=DEFAULT_TRANSLATION_RUN_DETAIL_HISTORY_LIMIT,
+            maximum=500,
+        )
+        details = _translation_run_details(
+            settings,
+            run_id,
+            history_limit=history_limit,
+        )
         if details is None:
             return _json({"error": "not_found"}, status_code=HTTPStatus.NOT_FOUND)
-        return _json({"details": details})
+        return _json({"details": details, "history_limit": history_limit})
 
     @router.get("/api/activity")
     async def activity_api(request: Request) -> JSONResponse:
@@ -2955,10 +2969,13 @@ def _reader_explorer_run_summaries(
 def _translation_run_details(
     settings: Settings,
     run_id: str,
+    *,
+    history_limit: int | None = None,
 ) -> TranslationRunDetails | None:
     details = get_translation_run_details(
         settings.translation_run_log_root,
         run_id,
+        history_limit=history_limit,
     )
     if details is None:
         return None
@@ -2993,6 +3010,7 @@ def _translation_run_details(
         fragments = _translation_work_unit_fragments(
             settings,
             job_id=details.summary.job_id,
+            limit=history_limit,
         )
         if fragments:
             details = replace(details, fragments=fragments)
@@ -3080,15 +3098,22 @@ def _translation_work_unit_fragments(
     settings: Settings,
     *,
     job_id: str,
+    limit: int | None = None,
 ) -> tuple[TranslationRunFragmentDetail, ...]:
     if not job_id or not _persistent_job_store_readable(settings):
         return ()
+    safe_limit = None if limit is None else max(0, int(limit))
+    if safe_limit == 0:
+        return ()
     store = open_persistent_job_store(settings)
     try:
-        units = sorted(
-            store.list_work_units(job_id),
-            key=lambda unit: getattr(unit, "sequence", 0),
-        )
+        if safe_limit is None:
+            units = sorted(
+                store.list_work_units(job_id),
+                key=lambda unit: getattr(unit, "sequence", 0),
+            )
+        else:
+            units = store.list_recent_work_units(job_id, limit=safe_limit)
     finally:
         store.close()
     return tuple(_translation_work_unit_fragment(unit) for unit in units)

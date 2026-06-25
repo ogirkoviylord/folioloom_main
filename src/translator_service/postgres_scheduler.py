@@ -514,6 +514,26 @@ class PostgresSchedulerStore:
         ).fetchall()
         return [_work_unit_from_mapping(row) for row in rows]
 
+    def list_recent_work_units(
+        self,
+        job_id: str,
+        *,
+        limit: int,
+    ) -> list[PersistentWorkUnit]:
+        safe_limit = max(0, int(limit))
+        if safe_limit == 0:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT * FROM work_units
+            WHERE job_id = %(job_id)s
+            ORDER BY sequence DESC
+            LIMIT %(limit)s
+            """,
+            {"job_id": job_id, "limit": safe_limit},
+        ).fetchall()
+        return [_work_unit_from_mapping(row) for row in reversed(rows)]
+
     def get_work_unit(self, work_unit_id: str) -> PersistentWorkUnit | None:
         row = self.connection.execute(
             "SELECT * FROM work_units WHERE id = %(work_unit_id)s",
