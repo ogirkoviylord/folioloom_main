@@ -297,7 +297,7 @@ def build_translation_run_archive(
     buffer = BytesIO()
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(run_dir.rglob("*")):
-            if path.is_file() and path.name != READER_REVIEW_MARKS_FILE:
+            if _include_raw_archive_file(path):
                 archive.write(path, path.relative_to(run_dir).as_posix())
     return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
 
@@ -325,11 +325,7 @@ def build_effective_translation_run_archive(
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as archive:
         written_paths: set[str] = set()
         for path in sorted(run_dir.rglob("*")):
-            if path.is_file() and path.name not in {
-                "summary.md",
-                GLOSSARY_RUNTIME_DIAGNOSTICS_FILE,
-                READER_REVIEW_MARKS_FILE,
-            }:
+            if _include_effective_archive_file(path):
                 member_path = path.relative_to(run_dir).as_posix()
                 archive.write(path, member_path)
                 written_paths.add(member_path)
@@ -415,6 +411,37 @@ def build_effective_translation_run_archive(
             ),
         )
     return TranslationRunArchive(file_name=archive_name, content=buffer.getvalue())
+
+
+def _include_raw_archive_file(path: Path) -> bool:
+    return (
+        path.is_file()
+        and path.name != READER_REVIEW_MARKS_FILE
+        and not _is_transient_run_artifact(path)
+    )
+
+
+def _include_effective_archive_file(path: Path) -> bool:
+    return (
+        path.is_file()
+        and path.name
+        not in {
+            "summary.md",
+            GLOSSARY_RUNTIME_DIAGNOSTICS_FILE,
+            READER_REVIEW_MARKS_FILE,
+        }
+        and not _is_transient_run_artifact(path)
+    )
+
+
+def _is_transient_run_artifact(path: Path) -> bool:
+    name = path.name
+    return (
+        name == ".run.json.tmp"
+        or (name.startswith(".run.json.") and name.endswith(".tmp"))
+        or name == ".summary.md.tmp"
+        or (name.startswith(".summary.md.") and name.endswith(".tmp"))
+    )
 
 
 def load_reader_review_marks(
