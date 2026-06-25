@@ -3388,10 +3388,21 @@ def translations_body(
         for row in logs
     )
     if not rows:
-        rows = """
+        status_filter_active = status not in (None, "", "all")
+        filters_active = status_filter_active or bool(date_from) or bool(date_to)
+        true_empty_copy = (
+            "No translation runs found yet. "
+            "Refresh after a translation has started."
+        )
+        empty_copy = (
+            "No runs match the current filters — clear filters to see all runs."
+            if filters_active
+            else true_empty_copy
+        )
+        rows = f"""
         <tr>
           <td colspan="10" class="empty-cell">
-            No runs match the current filters — clear filters to see all runs.
+            {empty_copy}
           </td>
         </tr>
         """
@@ -3449,7 +3460,7 @@ def translations_body(
             <th>Direction</th>
             <th>Fragments / tokens</th>
             <th>Error</th>
-            <th>Primary action</th>
+            <th>Troubleshooting</th>
             <th>Emergency</th>
           </tr>
         </thead>
