@@ -1,9 +1,11 @@
 import json
+import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from tempfile import mkstemp
 
 from translator_service.book_mode_output_audit import (
     BookModeAuditChunk,
@@ -110,7 +112,7 @@ class TranslationRunLogger:
         (run_dir / "fragments").mkdir()
         logger = cls(run_dir=run_dir, metadata=metadata, started_at=started_at)
         logger.record_event("run_started", {"status": "running"})
-        logger._write_outputs()
+        logger._write_outputs(write_summary=True)
         return logger
 
     def record_event(self, event_type: str, payload: dict | None = None) -> None:
@@ -200,17 +202,17 @@ class TranslationRunLogger:
                 "error_message": self._error_message,
             },
         )
-        self._write_outputs()
+        self._write_outputs(write_summary=True)
 
-    def _write_outputs(self) -> None:
+    def refresh_summary(self) -> None:
+        self._write_outputs(write_summary=True)
+
+    def _write_outputs(self, *, write_summary: bool = False) -> None:
         snapshot = self._snapshot()
-        (self.run_dir / "run.json").write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        (self.run_dir / "summary.md").write_text(
-            _render_summary(snapshot),
-            encoding="utf-8",
+        _write_run_snapshot(
+            self.run_dir / "run.json",
+            snapshot,
+            write_summary=write_summary,
         )
 
     def _snapshot(self) -> dict:
@@ -255,6 +257,29 @@ class TranslationRunLogger:
             block_kind=fragment.block_kind,
             audit_metadata=fragment.audit_metadata,
         )
+
+
+def refresh_translation_run_summary(root: str | Path, run_id: str) -> bool:
+    if not run_id or "/" in run_id or "\\" in run_id:
+        return False
+    root_path = Path(root).resolve()
+    run_dir = (root_path / run_id).resolve()
+    try:
+        run_dir.relative_to(root_path)
+    except ValueError:
+        return False
+    run_json = run_dir / "run.json"
+    try:
+        snapshot = json.loads(run_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(snapshot, dict):
+        return False
+    (run_dir / "summary.md").write_text(
+        _render_summary(snapshot),
+        encoding="utf-8",
+    )
+    return True
 
 
 def finish_running_translation_runs_for_job(
@@ -310,13 +335,10 @@ def finish_running_translation_runs_for_job(
                 "error_message": safe_error_message,
             },
         )
-        run_json.write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        (run_json.parent / "summary.md").write_text(
-            _render_summary(snapshot),
-            encoding="utf-8",
+        _write_run_snapshot(
+            run_json,
+            snapshot,
+            write_summary=True,
         )
         finished += 1
     return finished
@@ -457,13 +479,10 @@ def record_book_mode_audit_fragment_for_job(
             snapshot.get("content_role_shadow_report"),
             audit_metadata,
         )
-        run_json.write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        (run_json.parent / "summary.md").write_text(
-            _render_summary(snapshot),
-            encoding="utf-8",
+        _write_run_snapshot(
+            run_json,
+            snapshot,
+            write_summary=False,
         )
         updated += 1
     return updated
@@ -508,13 +527,10 @@ def record_book_mode_audit_gate_for_job(
             job_id=job_id,
             payload=_safe_gate_payload(gate),
         )
-        run_json.write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        (run_json.parent / "summary.md").write_text(
-            _render_summary(snapshot),
-            encoding="utf-8",
+        _write_run_snapshot(
+            run_json,
+            snapshot,
+            write_summary=True,
         )
         updated += 1
     return updated
@@ -535,6 +551,46 @@ def _append_run_event(
     }
     with (run_dir / "events.jsonl").open("a", encoding="utf-8") as events:
         events.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _write_run_snapshot(
+    run_json: Path,
+    snapshot: dict,
+    *,
+    write_summary: bool,
+) -> None:
+    _write_text_atomic(
+        run_json,
+        json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    if write_summary:
+        (run_json.parent / "summary.md").write_text(
+            _render_summary(snapshot),
+            encoding="utf-8",
+        )
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_temp_path = mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    temp_path = Path(raw_temp_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+            temp_file.write(text)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _fragment_to_dict(fragment: TranslationFragmentLog) -> dict:
