@@ -80,7 +80,7 @@ _PRIMARY_NAV_ITEMS = (
     ("settings", "/admin/settings", "Settings"),
 )
 _ADVANCED_NAV_ITEMS = (
-    ("logs", "/admin/logs", "Logs"),
+    ("logs", "/admin/logs", "Run Logs / Diagnostics"),
     ("reader", "/admin/internal-reader", "Reader Explorer"),
     ("activity", "/admin/activity", "Activity"),
     ("operations", "/admin/operations/jobs", "Jobs / Queue"),
@@ -3324,6 +3324,10 @@ def logs_body(
           metadata, optional owner-only provider/glossary diagnostics, and
           explicit archive download.
         </p>
+        <p>
+          Logs are run lifecycle metadata. Diagnostics here are run-scoped
+          and owner-only where raw text or provider bodies appear.
+        </p>
       </div>
     </section>
     <section class="panel">
@@ -3415,8 +3419,7 @@ def translations_body(
           normal first troubleshooting action.
         </p>
         <p>
-          Advanced Logs/Diagnostics remains for bounded owner-only diagnostic
-          details, Text diagnostics, Reader, and archive actions.
+          Advanced run logs and run-scoped diagnostics remain under Advanced.
         </p>
         <p>
           Refresh to read current run summaries. Detail pages show bounded
@@ -3607,7 +3610,7 @@ def log_detail_body(details: TranslationRunDetails) -> str:
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to translations", "/admin/translations", "view")}
-        {_action_link("Back to Advanced Logs", "/admin/logs", "view")}
+        {_action_link("Back to run logs", "/admin/logs", "view")}
         {_action_link(
             "Text diagnostics",
             f"/admin/logs/{run_id}/text-diagnostics",
