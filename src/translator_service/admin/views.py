@@ -3628,6 +3628,11 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           deeper inspection through Text diagnostics, Reader, or Download
           archive is explicit.
         </p>
+        <p class="helper-text">
+          Download archive produces a single file with the run output.
+          It does not include raw provider bodies or glossary runtime
+          detail.
+        </p>
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to translations", "/admin/translations", "view")}
@@ -4064,6 +4069,11 @@ def translation_text_diagnostics_body(
         <p>
           {escape(summary.file_name)} · {escape(summary.job_id)}
         </p>
+        <p class="helper-text">
+          Text Diagnostics shows run-scoped, owner-only diagnostics for
+          this run. Information here is bounded to this run and is not
+          exported elsewhere.
+        </p>
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
@@ -4322,6 +4332,11 @@ def translation_reader_body(
         <p>
           {escape(summary.file_name)} · {escape(summary.source_language)}
           -> {escape(summary.target_language)} · {escape(summary.job_id)}
+        </p>
+        <p class="helper-text">
+          Reader shows the source and translated text for this run.
+          Raw provider bodies and glossary runtime detail are not shown
+          here; use Text Diagnostics for that.
         </p>
       </div>
       <div class="toolbar-actions">

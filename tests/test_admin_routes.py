@@ -703,6 +703,136 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(detail_page.status_code, 200)
         self.assertIn("Back to run logs", detail_page.text)
 
+    def test_admin_redesign_b61a_reader_raw_diagnostics_helper_copy(self):
+        """B6.1a pinned visible copy for Reader / Text Diagnostics /
+        Archive-download boundary clarity.
+
+        Asserts each surface renders the exact pinned helper sentence in a
+        calm ``helper-text`` paragraph and that no WARNING prefix / icon-only
+        alert is added. Also asserts the B6.1a copy does NOT leak into
+        ``translation_logs.py`` (out of scope for this slice).
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_root = root / "runs"
+            logger = TranslationRunLogger.start(
+                root=run_root,
+                metadata=TranslationRunMetadata(
+                    job_id="job-b61a-reader-helper",
+                    order_id="order-b61a-reader-helper",
+                    user_id="telegram:42",
+                    file_name="book-b61a-reader-helper.txt",
+                    document_kind="txt",
+                    source_language="en",
+                    target_language="uk",
+                    total_fragment_count=1,
+                ),
+            )
+            logger.record_event("job_queued", {"fragment_count": 1})
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        translation_run_log_root=str(run_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            detail_page = client.get(f"/admin/logs/{logger.run_dir.name}")
+            diagnostics_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/text-diagnostics"
+            )
+            reader_page = client.get(
+                f"/admin/logs/{logger.run_dir.name}/reader"
+            )
+
+        self.assertEqual(detail_page.status_code, 200)
+        self.assertEqual(diagnostics_page.status_code, 200)
+        self.assertEqual(reader_page.status_code, 200)
+
+        reader_helper = (
+            "Reader shows the source and translated text for this run. "
+            "Raw provider bodies and glossary runtime detail are not "
+            "shown here; use Text Diagnostics for that."
+        )
+        diagnostics_helper = (
+            "Text Diagnostics shows run-scoped, owner-only diagnostics "
+            "for this run. Information here is bounded to this run and "
+            "is not exported elsewhere."
+        )
+        archive_helper = (
+            "Download archive produces a single file with the run "
+            "output. It does not include raw provider bodies or "
+            "glossary runtime detail."
+        )
+
+        # Pinned helper sentences render verbatim on each surface.
+        self.assertIn(reader_helper, _compact_text(reader_page.text))
+        self.assertIn(
+            diagnostics_helper, _compact_text(diagnostics_page.text)
+        )
+        self.assertIn(archive_helper, _compact_text(detail_page.text))
+
+        # Helper block uses the calm ``helper-text`` class — no
+        # warning-panel / WARNING: prefix / icon-only alert for the
+        # new pinned copy. Each sentence must live inside a calm
+        # ``<p class="helper-text">`` block on its target surface.
+        surfaces_with_helper = (
+            (reader_page.text, reader_helper),
+            (diagnostics_page.text, diagnostics_helper),
+            (detail_page.text, archive_helper),
+        )
+        for html, sentence in surfaces_with_helper:
+            compact = _compact_text(html)
+            self.assertIn(sentence, compact)
+            # The sentence appears inside a calm helper-text paragraph;
+            # tolerant of template whitespace via _compact_text.
+            self.assertIn(
+                'class="helper-text"> ' + sentence[:32],
+                compact,
+            )
+
+        # Negative guards: no new WARNING: prefix introduced by B6.1a
+        # in the helper blocks. Existing pre-B6.1a warning-panels
+        # already render without a "WARNING:" literal, so the helper
+        # sentences must not introduce one either.
+        for sentence in (
+            reader_helper,
+            diagnostics_helper,
+            archive_helper,
+        ):
+            self.assertNotIn("WARNING:", sentence)
+
+        # Cross-surface guard: each helper sentence is targeted at
+        # exactly the surface it belongs to — it must not appear on
+        # the other two surfaces (preserves boundary clarity).
+        self.assertNotIn(reader_helper, _compact_text(detail_page.text))
+        self.assertNotIn(
+            diagnostics_helper, _compact_text(reader_page.text)
+        )
+        self.assertNotIn(archive_helper, _compact_text(reader_page.text))
+        self.assertNotIn(
+            archive_helper, _compact_text(diagnostics_page.text)
+        )
+
+        # Out-of-scope guard: B6.1a is views.py only — pinned copy must
+        # not leak into translation_logs.py.
+        translation_logs_source = (
+            Path(__file__).resolve().parent.parent
+            / "src"
+            / "translator_service"
+            / "admin"
+            / "translation_logs.py"
+        ).read_text(encoding="utf-8")
+        for sentence in (
+            reader_helper,
+            diagnostics_helper,
+            archive_helper,
+        ):
+            self.assertNotIn(sentence, translation_logs_source)
+
     def test_translations_body_renders_primary_workflow_and_emergency_cancel(self):
         from translator_service.admin.translation_logs import TranslationRunSummary
         from translator_service.admin.views import translations_body
