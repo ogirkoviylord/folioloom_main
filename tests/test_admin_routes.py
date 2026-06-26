@@ -241,6 +241,54 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
+    def test_admin_overview_reuses_translation_run_summary_scan(self):
+        from translator_service.admin.translation_logs import TranslationRunSummary
+
+        now = datetime(2026, 6, 26, 12, 0, tzinfo=UTC)
+        summary = TranslationRunSummary(
+            job_id="job-failed",
+            status="failed",
+            started_at=now,
+            finished_at=now,
+            order_id="order-failed",
+            user_id="telegram:1",
+            file_name="failed.txt",
+            document_kind="txt",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name=None,
+            error_message="safe metadata-only error",
+            fragment_count=0,
+            total_fragment_count=1,
+            progress_percent=0.0,
+            eta_seconds=None,
+            current_stage="failed",
+            last_event_at=now,
+            total_tokens=0,
+            elapsed_seconds=0.0,
+            run_dir=str(Path(self.translation_run_log_root) / "run-failed"),
+        )
+        scan_calls = []
+
+        def fake_list_translation_run_summaries(root, **filters):
+            scan_calls.append((root, filters))
+            return (summary,)
+
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        with patch(
+            "translator_service.admin.routes.list_translation_run_summaries",
+            side_effect=fake_list_translation_run_summaries,
+        ), patch(
+            "translator_service.admin.live.list_translation_run_summaries",
+            side_effect=fake_list_translation_run_summaries,
+        ):
+            response = self.client.get("/admin/overview")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(scan_calls), 1)
+
     def test_admin_translation_trace_does_not_read_run_without_login(self):
         with patch(
             "translator_service.admin.routes.get_translation_run_details",
