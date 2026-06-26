@@ -677,8 +677,24 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn(">Logs<", advanced_nav)  # old label must be gone
 
         # Run detail backlink stays verbatim: "Back to run logs".
-        logs_page = self.client.get("/admin/logs")
-        self.assertEqual(logs_page.status_code, 200)
+        logger = TranslationRunLogger.start(
+            root=self.translation_run_log_root,
+            metadata=TranslationRunMetadata(
+                job_id="job-b21-detail-backlink",
+                order_id="order-b21-detail",
+                user_id="telegram:42",
+                file_name="book-b21-detail.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                translator_model="deepseek",
+                total_fragment_count=1,
+            ),
+        )
+        logger.finish(status="ready", result_file_name="book-b21-detail.uk.txt")
+        detail_page = self.client.get(f"/admin/logs/{logger.run_dir.name}")
+        self.assertEqual(detail_page.status_code, 200)
+        self.assertIn("Back to run logs", detail_page.text)
 
     def test_translations_body_renders_primary_workflow_and_emergency_cancel(self):
         from translator_service.admin.translation_logs import TranslationRunSummary
