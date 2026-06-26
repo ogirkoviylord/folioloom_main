@@ -504,7 +504,7 @@ def settings_body(
         </tr>
         """
     return f"""
-    <section class="toolbar-panel">
+    <section class="toolbar-panel fl-status">
       <div>
         <h3>Provider status</h3>
         <p>
@@ -516,7 +516,7 @@ def settings_body(
         {_action_link("Open Providers", "/admin/ai-providers", "view")}
       </div>
     </section>
-    <section class="metrics">
+    <section class="metrics fl-status">
       <div class="metric">
         <span>Total</span>
         <strong>{report.total_count}</strong>
@@ -538,7 +538,7 @@ def settings_body(
         <strong>{report.disabled_count}</strong>
       </div>
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel fl-status">
       <h3>Defaults</h3>
       <p>
         Review current admin defaults and integration configuration state.
@@ -565,7 +565,7 @@ def settings_body(
         Live budget guardrails for the closed beta. These values protect beta
         spend and can pause new translation starts without exposing document text.
       </p>
-      <form class="secret-form key-form" method="post"
+      <form class="secret-form key-form fl-owner-action" method="post"
         action="/admin/settings/beta-safety">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {_beta_safety_setting_inputs(beta_safety_settings)}
@@ -579,7 +579,7 @@ def settings_body(
         the beta cohort is ready.
       </p>
       {_beta_allowlist_toggle(beta_allowlist_enabled, csrf_token)}
-      <form class="secret-form key-form" method="post"
+      <form class="secret-form key-form fl-owner-action" method="post"
         action="/admin/settings/beta-allowlist/add">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <label>
@@ -642,12 +642,13 @@ def _beta_allowlist_toggle(enabled: bool, csrf_token: str) -> str:
         else "All Telegram users can use the bot while the list is off."
     )
     return f"""
-      <div class="key-row">
+      <div class="key-row fl-status">
         <div>
           <strong>Allowlist enforcement: {escape(status)}</strong>
           <span>{escape(detail)}</span>
         </div>
-        <form method="post" action="/admin/settings/beta-allowlist/toggle">
+        <form class="fl-runtime-action" method="post"
+          action="/admin/settings/beta-allowlist/toggle">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
           <input type="hidden" name="enabled" value="{escape(next_enabled)}">
           {_action_button(label, variant, compact=True)}
@@ -679,7 +680,8 @@ def _beta_allowlist_row(user_id: int, csrf_token: str) -> str:
       <tr>
         <td><code>{safe_id}</code></td>
         <td>
-          <form method="post" action="/admin/settings/beta-allowlist/remove">
+          <form class="fl-runtime-action" method="post"
+            action="/admin/settings/beta-allowlist/remove">
             <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
             <input type="hidden" name="telegram_id" value="{safe_id}">
             {_action_button("Remove", "danger", compact=True)}
@@ -771,7 +773,7 @@ def ai_providers_body(
         for summary in summaries
     )
     return f"""
-    <section class="toolbar-panel">
+    <section class="toolbar-panel fl-status">
       <div>
         <h3>AI Providers</h3>
         <p>
@@ -817,7 +819,7 @@ def deepseek_keys_body(
     if not rows:
         rows = '<p class="empty-state">No DeepSeek keys are configured.</p>'
     return f"""
-    <section class="toolbar-panel">
+    <section class="toolbar-panel fl-status">
       <div>
         <h3>DeepSeek Keys</h3>
         <p>
@@ -836,12 +838,12 @@ def deepseek_keys_body(
       </div>
     </section>
     {reload_banner}
-    <section class="metrics">
+    <section class="metrics fl-status">
       {_metric("Ready admin keys", str(active_count))}
       {_metric("Paused admin keys", str(disabled_count))}
       {_metric("Read-only env keys", str(env_count))}
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel fl-status">
       <h3>Field guide</h3>
       <div class="key-table">
         <div class="key-row compact-row">
@@ -872,7 +874,7 @@ def deepseek_keys_body(
         </div>
       </div>
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel fl-owner-action">
       <h3>Add admin-managed key</h3>
       <p class="helper-text">
         New values are stored encrypted. After saving, this page only shows a
@@ -880,7 +882,7 @@ def deepseek_keys_body(
       </p>
       {_ai_provider_key_add_form("deepseek", csrf_token)}
     </section>
-    <section class="panel table-panel">
+    <section class="panel table-panel fl-status">
       <h3>Key inventory</h3>
       <p class="helper-text">
         Admin-managed rows are editable. Server environment rows are read-only
@@ -959,7 +961,7 @@ def _ai_provider_card(
       <div>
         <p class="eyebrow">{escape(summary.category.value.replace("_", " "))}</p>
         <h3>{escape(summary.label)}</h3>
-        <span class="status">{active_key_count} active keys</span>
+        <span class="status fl-status">{active_key_count} active keys</span>
       </div>
       <p>{escape(summary.description)}</p>
       {incident_panel}
@@ -1032,7 +1034,7 @@ def _provider_incident_panel(
         ),
     )
     return f"""
-      <div class="provider-incident-state">
+      <div class="provider-incident-state fl-status">
         <div>
           <h4>Provider incident state</h4>
           <p>
@@ -1184,7 +1186,7 @@ def _degraded_runtime_channel_count(runtime: AIProviderRuntimeStatus) -> int:
 
 def _ai_provider_key_add_form(provider_id: str, csrf_token: str) -> str:
     return f"""
-      <form class="secret-form key-form" method="post"
+      <form class="secret-form key-form fl-owner-action" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/keys">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <label>
@@ -1266,7 +1268,7 @@ def _provider_runtime_panel(
             else f"Consumed at {_format_datetime(reload_state.consumed_at)}"
         )
     return f"""
-      <div class="provider-health">
+      <div class="provider-health fl-status">
         <div>
           <h4>Runtime status</h4>
           <span class="status">{escape(status)}</span>
@@ -1311,7 +1313,7 @@ def _runtime_reload_form(
     label: str = "Reload DeepSeek runtime",
 ) -> str:
     return f"""
-      <form class="secret-form" method="post"
+      <form class="secret-form fl-runtime-action" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/runtime/reload">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {_action_button(label, "change")}
@@ -1574,7 +1576,7 @@ def _provider_capacity_panel(
         for label, value, detail in cards
     )
     return f"""
-      <div class="provider-health">
+      <div class="provider-health fl-status">
         <div>
           <h4>Provider capacity leases</h4>
           <span class="status">{escape(_safe_runtime_text(provider_id))}</span>
@@ -1782,7 +1784,7 @@ def _provider_balance_panel(
         error = _safe_runtime_text(snapshot.error_message)
     safe_top_up = _safe_external_href(top_up_url)
     return f"""
-      <div class="provider-health">
+      <div class="provider-health fl-status">
         <div>
           <h4>DeepSeek account balance</h4>
           <span class="status">{escape(status)}</span>
@@ -1857,7 +1859,7 @@ def _ai_provider_test_all_keys_form(
         disabled_reason=disabled_reason,
     )
     return f"""
-      <form class="secret-form" method="post"
+      <form class="secret-form fl-runtime-action" method="post"
         action="/admin/ai-providers/{escape(provider_id)}/keys/test-all">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {button}
@@ -1889,7 +1891,7 @@ def _provider_health_panel(health: ProviderHealthSummary | None) -> str:
     if health is None:
         return ""
     return f"""
-      <div class="provider-health">
+      <div class="provider-health fl-status">
         <div>
           <h4>Provider health</h4>
           <span class="status">{escape(health.status.replace("_", " "))}</span>
@@ -1925,7 +1927,7 @@ def _ai_provider_key_row(
 ) -> str:
     if is_env_deepseek_key(key):
         return f"""
-    <div class="key-row key-row-readonly">
+    <div class="key-row key-row-readonly fl-status">
       <div>
         <strong>{escape(key.label)}</strong>
         <code>{escape(key.masked_value or "server .env")}</code>
@@ -1962,7 +1964,7 @@ def _ai_provider_key_row(
     remove_button = _action_button("Remove", "danger", name="key_id", value=key.key_id)
     test_button = _action_button("Test key", "probe", name="key_id", value=key.key_id)
     return f"""
-    <div class="key-row">
+    <div class="key-row fl-status">
       <div>
         <strong>{escape(key.label)}</strong>
         <code>{escape(key.masked_value or "missing")}</code>
@@ -1972,7 +1974,7 @@ def _ai_provider_key_row(
         </small>
         {validation_html}
       </div>
-      <form method="post" action="{update_action}">
+      <form class="fl-owner-action" method="post" action="{update_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <input type="hidden" name="key_id" value="{escape(key.key_id)}">
         <label>
@@ -1998,7 +2000,7 @@ def _ai_provider_key_row(
         </label>
         {_action_button("Save label", "change")}
       </form>
-      <form method="post" action="{rotate_action}">
+      <form class="fl-owner-action" method="post" action="{rotate_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <input type="hidden" name="key_id" value="{escape(key.key_id)}">
         <label>
@@ -2010,15 +2012,15 @@ def _ai_provider_key_row(
       </form>
       <span>Weight {key.weight}</span>
       <span>Max parallel requests {key.max_parallel_requests}</span>
-      <form method="post" action="{toggle_action}">
+      <form class="fl-runtime-action" method="post" action="{toggle_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {toggle_button}
       </form>
-      <form method="post" action="{remove_action}">
+      <form class="fl-runtime-action" method="post" action="{remove_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {remove_button}
       </form>
-      <form method="post" action="{test_action}">
+      <form class="fl-runtime-action" method="post" action="{test_action}">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         {test_button}
       </form>
@@ -2684,7 +2686,7 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
         for label, value in metrics
     )
     return f"""
-    <section class="toolbar-panel">
+    <section class="toolbar-panel fl-status">
       <div>
         <h3>Jobs / Queue Operations</h3>
         <p>
@@ -2694,8 +2696,8 @@ def operations_body(overview: OperationsOverview, *, csrf_token: str = "") -> st
         </p>
       </div>
     </section>
-    <section class="metrics">{metric_cards}</section>
-    <section class="panel table-panel">
+    <section class="metrics fl-status">{metric_cards}</section>
+    <section class="panel table-panel fl-status">
       <h3>Job queue</h3>
       <table class="log-table operations-table">
         <thead>
@@ -2736,7 +2738,13 @@ def _operation_job_row(job, csrf_token: str) -> str:
     fragments = f"{job.completed_units}/{job.total_units}"
     trace_href = trace_href_for_log_href(job.log_href)
     logs = (
-        _action_link("Open trace", trace_href, "view", compact=True)
+        _action_link(
+            "Open trace",
+            trace_href,
+            "view",
+            compact=True,
+            extra_class="fl-owner-action",
+        )
         if trace_href
         else '<span class="muted-text">No run</span>'
     )
@@ -2774,7 +2782,11 @@ def _job_actions(job, csrf_token: str) -> str:
     if getattr(job, "deletable", False):
         actions.append(_job_action_form(job.id, "delete", "Delete", csrf_token))
     if actions:
-        return '<div class="job-actions">' + "".join(actions) + "</div>"
+        return (
+            '<div class="job-actions fl-runtime-action">'
+            + "".join(actions)
+            + "</div>"
+        )
     if job.retryable:
         return _action_button(
             "Retry unavailable",
@@ -2800,7 +2812,8 @@ def _job_action_form(
 ) -> str:
     variant = "danger" if action in {"cancel", "delete"} else "change"
     return f"""
-    <form method="post" action="/admin/operations/jobs/{escape(job_id)}/{action}">
+    <form class="fl-runtime-action" method="post"
+      action="/admin/operations/jobs/{escape(job_id)}/{action}">
       <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
       {_action_button(label, variant, compact=True)}
     </form>
@@ -8600,6 +8613,20 @@ header {
   padding-top: 12px;
   display: grid;
   gap: 12px;
+}
+.fl-status {
+  border-color: #d8dee8;
+}
+.fl-owner-action {
+  border-color: rgba(37, 111, 104, 0.38);
+}
+.fl-runtime-action {
+  border-color: rgba(163, 61, 42, 0.32);
+}
+.fl-status .helper-text,
+.fl-status small,
+.fl-status p {
+  color: var(--muted);
 }
 .key-form {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

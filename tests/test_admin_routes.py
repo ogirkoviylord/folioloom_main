@@ -918,6 +918,75 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn('data-action-variant="refresh"', providers_page.text)
             self.assertIn("Refresh balance", providers_page.text)
 
+    def test_b51_provider_surfaces_separate_status_owner_and_runtime_buckets(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "admin.sqlite3")
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        admin_db_path=db_path,
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                        admin_secret_master_key=MASTER_KEY,
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+
+            keys_page = client.get("/admin/ai-providers/deepseek/keys")
+            providers_page = client.get("/admin/ai-providers")
+
+        self.assertEqual(keys_page.status_code, 200)
+        self.assertEqual(providers_page.status_code, 200)
+        for html in (keys_page.text, providers_page.text):
+            self.assertIn("fl-status", html)
+            self.assertIn("fl-owner-action", html)
+            self.assertIn("fl-runtime-action", html)
+        self.assertIn('action="/admin/ai-providers/deepseek/keys"', keys_page.text)
+        self.assertIn(
+            'action="/admin/ai-providers/deepseek/keys/test-all"',
+            keys_page.text,
+        )
+        self.assertIn(
+            'action="/admin/ai-providers/deepseek/runtime/reload"',
+            keys_page.text,
+        )
+        self.assertIn('href="/admin/ai-providers/deepseek/keys"', providers_page.text)
+        for forbidden in (
+            "dangerous action",
+            "audit-worthy",
+            "audit worthy",
+            "privacy warning",
+            "recorded in admin audit",
+            "audit guarantee",
+            "production ready",
+            "release ready",
+            "public admin",
+            "privacy compliant",
+        ):
+            self.assertNotIn(forbidden, (keys_page.text + providers_page.text).lower())
+
+    def test_b51_jobs_queue_separates_status_owner_and_runtime_buckets(self):
+        from translator_service.admin import views
+
+        operations = build_operations_overview(
+            jobs=[{"id": "job-b51-runtime", "status": "translating"}],
+            job_log_hrefs={"job-b51-runtime": "/admin/logs/run-b51-runtime"},
+        )
+
+        html = views.operations_body(operations, csrf_token="csrf-token")
+
+        self.assertIn("fl-status", html)
+        self.assertIn("fl-owner-action", html)
+        self.assertIn("fl-runtime-action", html)
+        self.assertIn('href="/admin/translations/run-b51-runtime/trace"', html)
+        self.assertIn('action="/admin/operations/jobs/job-b51-runtime/pause"', html)
+        self.assertIn('action="/admin/operations/jobs/job-b51-runtime/cancel"', html)
+        self.assertIn('action="/admin/operations/jobs/job-b51-runtime/delete"', html)
+        self.assertIn('name="csrf_token" value="csrf-token"', html)
+        self.assertNotIn("audit guarantee", html.lower())
+        self.assertNotIn("dangerous action", html.lower())
+
     def test_job_actions_use_change_danger_and_disabled_reasons(self):
         from translator_service.admin import views
 
@@ -931,6 +1000,7 @@ class AdminRoutesTest(unittest.TestCase):
         html = views._job_actions(actionable_job, "csrf-token")
         self.assertIn('data-action-variant="change"', html)
         self.assertGreaterEqual(html.count('data-action-variant="danger"'), 2)
+        self.assertIn("fl-runtime-action", html)
         self.assertIn("Pause", html)
         self.assertIn("Cancel", html)
         self.assertIn("Delete", html)
@@ -1036,6 +1106,28 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn('method="post" action="/admin/ai-providers', response.text)
         self.assertNotIn('href="/admin/glossary"', response.text)
         self.assertNotIn('href="/admin/settings/glossary"', response.text)
+
+    def test_b51_settings_separates_status_owner_and_runtime_buckets(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/settings")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("fl-status", response.text)
+        self.assertIn("fl-owner-action", response.text)
+        self.assertIn("fl-runtime-action", response.text)
+        self.assertIn('action="/admin/settings/beta-safety"', response.text)
+        self.assertIn('action="/admin/settings/beta-allowlist/toggle"', response.text)
+        self.assertIn('action="/admin/settings/beta-allowlist/add"', response.text)
+        self.assertNotIn('method="post" action="/admin/ai-providers', response.text)
+        for forbidden in (
+            "dangerous action",
+            "audit-worthy",
+            "privacy warning",
+            "recorded in admin audit",
+            "audit guarantee",
+        ):
+            self.assertNotIn(forbidden, response.text.lower())
 
     def test_beta_controls_route_is_preserved_as_settings_surface(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
