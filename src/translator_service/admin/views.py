@@ -75,7 +75,6 @@ _PRIMARY_NAV_ITEMS = (
     ("translations", "/admin/translations", "Translations"),
     ("users", "/admin/users", "Users"),
     ("providers", "/admin/ai-providers", "Providers"),
-    ("beta_controls", "/admin/beta-controls", "Beta Controls"),
     ("safety", "/admin/upload-safety", "Safety"),
     ("settings", "/admin/settings", "Settings"),
 )
@@ -93,6 +92,7 @@ _ADVANCED_NAV_ITEMS = (
 )
 _NAV_ACTIVE_ALIASES = {
     "providers": ("ai_providers",),
+    "settings": ("beta_controls",),
     "safety": ("upload_safety",),
 }
 _ACTION_VARIANTS = frozenset(
@@ -202,7 +202,7 @@ def admin_page(
   <aside class="sidebar">
     <div>
       <p class="eyebrow">FolioLoom</p>
-      <h1>Admin Console</h1>
+      <div class="brand-title">Admin Console</div>
     </div>
     {nav}
     <form method="post" action="/admin/logout">
@@ -214,7 +214,7 @@ def admin_page(
     <header>
       <div>
         <p class="eyebrow">Signed in as {actor_id}</p>
-        <h2>{escape(title)}</h2>
+        <h1>{escape(title)}</h1>
       </div>
       {environment_badge}
     </header>
@@ -506,43 +506,15 @@ def settings_body(
     return f"""
     <section class="toolbar-panel">
       <div>
-        <h3>Secret &amp; Config Safety</h3>
+        <h3>Provider status</h3>
         <p>
-          Review configured secrets, provider keys, failed validations, and
-          items that need a local check.
+          Read-only Secret &amp; Config Safety summary for configured providers,
+          validations, and local checks. Provider key entry remains on Providers.
         </p>
       </div>
-    </section>
-    <section class="panel table-panel" id="beta-controls">
-      <h3>Closed Beta Allowlist</h3>
-      <p>
-        Add trusted Telegram numeric user IDs now, then enable enforcement when
-        the beta cohort is ready.
-      </p>
-      {_beta_allowlist_toggle(beta_allowlist_enabled, csrf_token)}
-      <form class="secret-form key-form" method="post"
-        action="/admin/settings/beta-allowlist/add">
-        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        <label>
-          <span>Telegram user ID</span>
-          <input name="telegram_id" type="number" min="1" step="1" required>
-        </label>
-        {_action_button("Add ID", "change")}
-      </form>
-      {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
-    </section>
-    <section class="panel table-panel" id="beta-safety-controls">
-      <h3>Beta Safety Controls</h3>
-      <p>
-        Live budget guardrails for the closed beta. These values protect beta
-        spend and can pause new translation starts without exposing document text.
-      </p>
-      <form class="secret-form key-form" method="post"
-        action="/admin/settings/beta-safety">
-        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-        {_beta_safety_setting_inputs(beta_safety_settings)}
-        {_action_button("Save beta safety", "change")}
-      </form>
+      <div class="toolbar-actions">
+        {_action_link("Open Providers", "/admin/ai-providers", "view")}
+      </div>
     </section>
     <section class="metrics">
       <div class="metric">
@@ -567,7 +539,12 @@ def settings_body(
       </div>
     </section>
     <section class="panel table-panel">
-      <h3>Safety summary</h3>
+      <h3>Defaults</h3>
+      <p>
+        Review current admin defaults and integration configuration state.
+        This surface links to owner pages but does not edit provider keys.
+      </p>
+      <h4>Safety summary</h4>
       <table class="log-table">
         <thead>
           <tr>
@@ -581,6 +558,37 @@ def settings_body(
         </thead>
         <tbody>{rows}</tbody>
       </table>
+    </section>
+    <section class="panel table-panel" id="beta-safety-controls">
+      <h3>Limits</h3>
+      <p>
+        Live budget guardrails for the closed beta. These values protect beta
+        spend and can pause new translation starts without exposing document text.
+      </p>
+      <form class="secret-form key-form" method="post"
+        action="/admin/settings/beta-safety">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        {_beta_safety_setting_inputs(beta_safety_settings)}
+        {_action_button("Save beta safety", "change")}
+      </form>
+    </section>
+    <section class="panel table-panel" id="beta-controls">
+      <h3>Beta controls</h3>
+      <p>
+        Add trusted Telegram numeric user IDs now, then enable enforcement when
+        the beta cohort is ready.
+      </p>
+      {_beta_allowlist_toggle(beta_allowlist_enabled, csrf_token)}
+      <form class="secret-form key-form" method="post"
+        action="/admin/settings/beta-allowlist/add">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <label>
+          <span>Telegram user ID</span>
+          <input name="telegram_id" type="number" min="1" step="1" required>
+        </label>
+        {_action_button("Add ID", "change")}
+      </form>
+      {_beta_allowlist_table(beta_allowlist_ids, csrf_token)}
     </section>
     """
 
@@ -7747,7 +7755,12 @@ body > * { min-width: 0; }
   flex-direction: column;
   gap: 24px;
 }
-.sidebar h1, .workspace h2, .panel h3 { margin: 0; }
+.brand-title, .workspace h1, .panel h3 { margin: 0; }
+.brand-title {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
 .sidebar-nav {
   display: grid;
   gap: 14px;

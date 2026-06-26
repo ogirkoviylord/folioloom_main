@@ -496,7 +496,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             request,
             session_manager=session_manager,
             environment=settings.environment,
-            title="Beta Controls",
+            title="Settings",
             active="beta_controls",
             body=lambda session: settings_body(
                 _secret_safety_report(settings),
