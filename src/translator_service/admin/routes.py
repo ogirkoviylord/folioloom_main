@@ -3006,7 +3006,9 @@ def _translation_run_summaries(
         (summary.job_id for summary in summaries),
         now=current_time,
     )
-    active_operations = operations if operations is not None else _operations_overview(settings)
+    active_operations = (
+        operations if operations is not None else _operations_overview(settings)
+    )
     return overlay_translation_run_summaries(
         summaries,
         operations=active_operations,

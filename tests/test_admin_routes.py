@@ -2700,7 +2700,9 @@ class AdminRoutesTest(unittest.TestCase):
         serialized_api = json.dumps(details_api.json(), ensure_ascii=False)
         self.assertNotIn("old-status-sentinel", serialized_api)
 
-    def test_translation_log_api_persistent_fallback_uses_bounded_recent_work_units(self):
+    def test_translation_log_api_persistent_fallback_uses_bounded_recent_work_units(
+        self,
+    ):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             run_root = root / "runs"
