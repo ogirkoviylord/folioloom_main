@@ -734,6 +734,8 @@ class AdminRoutesTest(unittest.TestCase):
                     settings=Settings(
                         translation_run_log_root=str(run_root),
                         admin_db_path=str(root / "admin.sqlite3"),
+                        scheduler_backend="sqlite",
+                        persistent_jobs_db_path=str(root / "jobs.sqlite3"),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
