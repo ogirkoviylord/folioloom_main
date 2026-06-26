@@ -952,6 +952,11 @@ class AdminRoutesTest(unittest.TestCase):
             keys_page.text,
         )
         self.assertIn('href="/admin/ai-providers/deepseek/keys"', providers_page.text)
+        self.assertRegex(
+            providers_page.text,
+            r'<form[^>]*class="[^"]*\bfl-runtime-action\b[^"]*"[^>]*'
+            r'action="/admin/ai-providers/deepseek/balance/refresh"',
+        )
         for forbidden in (
             "dangerous action",
             "audit-worthy",

@@ -1804,7 +1804,7 @@ def _provider_balance_panel(
             <strong>{escape(error)}</strong>
           </div>
         </div>
-        <form class="secret-form" method="post"
+        <form class="secret-form fl-runtime-action" method="post"
           action="/admin/ai-providers/deepseek/balance/refresh">
           <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
           {_action_button("Refresh balance", "refresh")}
