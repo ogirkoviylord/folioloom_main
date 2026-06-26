@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Request
@@ -674,12 +675,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             environment=settings.environment,
             title="Translations",
             active="translations",
-            body=lambda session: translations_body(
-                _translation_run_summaries(settings, **filters),
-                operations=_operations_overview(settings),
-                csrf_token=session.csrf_token,
-                form_action="/admin/translations",
-                **filters,
+            body=lambda session: _translations_page_body(
+                settings,
+                session,
+                filters,
             ),
         )
 
@@ -2546,7 +2545,18 @@ def _overview_action_center(settings: Settings):
     integration_connections = _integration_connection_groups(settings)
     ai_provider_key_pools = _ai_provider_key_pools(settings)
     operations = _operations_overview(settings)
-    live_snapshot = _live_snapshot(settings, operations=operations)
+    current_time = datetime.now(UTC)
+    overview_run_summaries = list_translation_run_summaries(
+        settings.translation_run_log_root,
+        limit=200,
+        now=current_time,
+    )
+    live_snapshot = _live_snapshot(
+        settings,
+        operations=operations,
+        run_summaries=overview_run_summaries,
+        now=current_time,
+    )
     secret_safety_report = _secret_safety_report(settings)
     return build_action_center(
         integration_summaries=integration_summaries,
@@ -2555,6 +2565,7 @@ def _overview_action_center(settings: Settings):
         failed_translation_runs=_overview_failed_translation_runs(
             settings,
             now=live_snapshot.generated_at,
+            summaries=overview_run_summaries[:25],
         ),
         tokens_today=live_snapshot.tokens_today,
         disk_percent=live_snapshot.server.disk_percent,
@@ -2582,15 +2593,25 @@ def _decimal_setting(value: str) -> Decimal | None:
         return None
 
 
-def _overview_failed_translation_runs(settings: Settings, *, now: datetime):
+def _overview_failed_translation_runs(
+    settings: Settings,
+    *,
+    now: datetime,
+    summaries: tuple[TranslationRunSummary, ...] | None = None,
+):
     today = now.astimezone(UTC).date()
-    return tuple(
-        run
-        for run in list_translation_run_summaries(
+    runs = (
+        summaries
+        if summaries is not None
+        else list_translation_run_summaries(
             settings.translation_run_log_root,
             limit=25,
             now=now,
         )
+    )
+    return tuple(
+        run
+        for run in runs
         if run.status in _FAILED_TRANSLATION_STATUSES
         and run.started_at is not None
         and run.started_at.astimezone(UTC).date() == today
@@ -2639,7 +2660,13 @@ def _deepseek_key_count(ai_provider_key_pools) -> int:
     )
 
 
-def _live_snapshot(settings: Settings, *, operations=None):
+def _live_snapshot(
+    settings: Settings,
+    *,
+    operations=None,
+    run_summaries: tuple[TranslationRunSummary, ...] | None = None,
+    now: datetime | None = None,
+):
     active_operations = (
         operations if operations is not None else _operations_overview(settings)
     )
@@ -2652,6 +2679,8 @@ def _live_snapshot(settings: Settings, *, operations=None):
         operations=active_operations,
         progress_snapshots=progress_snapshots,
         runtime_statuses=_ai_provider_runtime_statuses(settings),
+        run_summaries=run_summaries,
+        now=now,
     )
 
 
@@ -2922,6 +2951,25 @@ def _activity_store(settings: Settings) -> SQLiteUserActivityStore:
     return SQLiteUserActivityStore(settings.admin_db_path)
 
 
+def _translations_page_body(
+    settings: Settings,
+    session: AdminSession,
+    filters: dict[str, Any],
+) -> str:
+    operations = _operations_overview(settings)
+    return translations_body(
+        _translation_run_summaries(
+            settings,
+            operations=operations,
+            **filters,
+        ),
+        operations=operations,
+        csrf_token=session.csrf_token,
+        form_action="/admin/translations",
+        **filters,
+    )
+
+
 def _activity_body(settings: Settings, filters: dict[str, str | None]) -> str:
     with _activity_store(settings) as store:
         events = store.list_events(**filters)
@@ -2944,6 +2992,8 @@ def _user_detail_body(settings: Settings, user_id: str) -> str:
 
 def _translation_run_summaries(
     settings: Settings,
+    *,
+    operations=None,
     **filters,
 ) -> tuple[TranslationRunSummary, ...]:
     current_time = filters.get("now") or datetime.now(UTC)
@@ -2956,9 +3006,12 @@ def _translation_run_summaries(
         (summary.job_id for summary in summaries),
         now=current_time,
     )
+    active_operations = (
+        operations if operations is not None else _operations_overview(settings)
+    )
     return overlay_translation_run_summaries(
         summaries,
-        operations=_operations_overview(settings),
+        operations=active_operations,
         progress_snapshots=progress_snapshots,
         now=current_time,
     )

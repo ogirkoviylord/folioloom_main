@@ -83,12 +83,17 @@ def build_live_monitor_snapshot(
     now: datetime | None = None,
     recent_limit: int = 8,
     server: ServerHealthSnapshot | None = None,
+    run_summaries: tuple[TranslationRunSummary, ...] | None = None,
 ) -> LiveMonitorSnapshot:
     current_time = _aware_utc(now or datetime.now(UTC))
-    runs = list_translation_run_summaries(
-        translation_run_log_root,
-        limit=200,
-        now=current_time,
+    runs = (
+        run_summaries
+        if run_summaries is not None
+        else list_translation_run_summaries(
+            translation_run_log_root,
+            limit=200,
+            now=current_time,
+        )
     )
     today = current_time.date()
     one_hour_ago = current_time - timedelta(hours=1)
