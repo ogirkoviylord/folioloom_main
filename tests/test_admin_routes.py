@@ -733,6 +733,7 @@ class AdminRoutesTest(unittest.TestCase):
                 create_app(
                     settings=Settings(
                         translation_run_log_root=str(run_root),
+                        admin_db_path=str(root / "admin.sqlite3"),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
@@ -753,19 +754,22 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertEqual(reader_page.status_code, 200)
 
         reader_helper = (
-            "Reader shows the source and translated text for this run. "
+            "Reader shows source and translated text for this run. "
             "Raw provider bodies and glossary runtime detail are not "
-            "shown here; use Text Diagnostics for that."
+            "shown here; Text Diagnostics focuses on work-unit text "
+            "diagnostics, while the download archive is the provider/glossary "
+            "diagnostics surface when present."
         )
         diagnostics_helper = (
-            "Text Diagnostics shows run-scoped, owner-only diagnostics "
-            "for this run. Information here is bounded to this run and "
-            "is not exported elsewhere."
+            "Text Diagnostics shows run-scoped work-unit text diagnostics "
+            "for this run. Related raw text diagnostics can also appear in "
+            "the download archive when available."
         )
         archive_helper = (
-            "Download archive produces a single file with the run "
-            "output. It does not include raw provider bodies or "
-            "glossary runtime detail."
+            "Download archive produces a single run-output archive. "
+            "When present, it may include admin/run-scoped raw text, "
+            "provider IO diagnostics, glossary runtime detail, and "
+            "diagnostic files; treat it as sensitive."
         )
 
         # Pinned helper sentences render verbatim on each surface.
@@ -808,14 +812,24 @@ class AdminRoutesTest(unittest.TestCase):
         # Cross-surface guard: each helper sentence is targeted at
         # exactly the surface it belongs to — it must not appear on
         # the other two surfaces (preserves boundary clarity).
-        self.assertNotIn(reader_helper, _compact_text(detail_page.text))
-        self.assertNotIn(
-            diagnostics_helper, _compact_text(reader_page.text)
-        )
-        self.assertNotIn(archive_helper, _compact_text(reader_page.text))
-        self.assertNotIn(
-            archive_helper, _compact_text(diagnostics_page.text)
-        )
+        surface_texts = {
+            "reader": _compact_text(reader_page.text),
+            "diagnostics": _compact_text(diagnostics_page.text),
+            "detail": _compact_text(detail_page.text),
+        }
+        expected_surfaces = {
+            reader_helper: "reader",
+            diagnostics_helper: "diagnostics",
+            archive_helper: "detail",
+        }
+        for sentence, expected_surface in expected_surfaces.items():
+            for surface_name, compact in surface_texts.items():
+                expected_count = 1 if surface_name == expected_surface else 0
+                self.assertEqual(
+                    compact.count(sentence),
+                    expected_count,
+                    f"{sentence!r} count on {surface_name}",
+                )
 
         # Out-of-scope guard: B6.1a is views.py only — pinned copy must
         # not leak into translation_logs.py.
