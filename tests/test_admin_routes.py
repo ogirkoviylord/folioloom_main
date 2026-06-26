@@ -120,6 +120,13 @@ def _compact_text(page_text: str) -> str:
     return re.sub(r"\s+", " ", page_text)
 
 
+def _heading_index(page_text: str, heading: str) -> int:
+    match = re.search(rf">{re.escape(heading)}<", page_text)
+    if match is None:
+        raise AssertionError(f"Heading not found: {heading}")
+    return match.start()
+
+
 MASTER_KEY = urlsafe_b64encode(b"2" * 32).decode("ascii")
 
 
@@ -992,12 +999,55 @@ class AdminRoutesTest(unittest.TestCase):
             "Translations",
             "Users",
             "Providers",
-            "Beta Controls",
             "Safety",
             "Settings",
         ):
             self.assertIn(label, primary_nav)
+        self.assertNotIn("Beta Controls", primary_nav)
         self.assertEqual(overview.headers["cache-control"], "no-store")
+
+    def test_settings_page_consolidates_b41_ia(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/settings")
+
+        self.assertEqual(response.status_code, 200)
+        primary_nav = _nav_section(response.text, "primary-nav")
+        self.assertIn('href="/admin/ai-providers"', primary_nav)
+        self.assertIn(">Providers<", primary_nav)
+        self.assertIn('href="/admin/settings" class="active"', primary_nav)
+        self.assertIn(">Settings<", primary_nav)
+        self.assertNotIn("Beta Controls", primary_nav)
+        self.assertNotIn('href="/admin/beta-controls"', primary_nav)
+        self.assertIn("<h1>Settings</h1>", response.text)
+
+        section_order = [
+            _heading_index(response.text, heading)
+            for heading in (
+                "Provider status",
+                "Defaults",
+                "Limits",
+                "Beta controls",
+            )
+        ]
+        self.assertEqual(section_order, sorted(section_order))
+        self.assertNotIn("Danger zone", response.text)
+        self.assertIn('href="/admin/ai-providers"', response.text)
+        self.assertNotIn('method="post" action="/admin/ai-providers', response.text)
+        self.assertNotIn('href="/admin/glossary"', response.text)
+        self.assertNotIn('href="/admin/settings/glossary"', response.text)
+
+    def test_beta_controls_route_is_preserved_as_settings_surface(self):
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+
+        response = self.client.get("/admin/beta-controls")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<h1>Settings</h1>", response.text)
+        primary_nav = _nav_section(response.text, "primary-nav")
+        self.assertIn('href="/admin/settings" class="active"', primary_nav)
+        self.assertNotIn("Beta Controls", primary_nav)
+        self.assertIn('action="/admin/settings/beta-safety"', response.text)
 
     def test_admin_navigation_groups_raw_pages_under_advanced(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
@@ -1464,9 +1514,10 @@ class AdminRoutesTest(unittest.TestCase):
             client.post("/admin/login", data={"password": "owner-pass"})
             page = client.get("/admin/settings")
 
-            self.assertIn("Beta Safety Controls", page.text)
+            self.assertIn("Limits", page.text)
             self.assertIn("Pause all beta translations", page.text)
             self.assertIn("Global daily cost cap USD", page.text)
+            self.assertIn('action="/admin/settings/beta-safety"', page.text)
 
             response = client.post(
                 "/admin/settings/beta-safety",
@@ -1835,7 +1886,7 @@ class AdminRoutesTest(unittest.TestCase):
             ("/admin/integrations", "Integrations"),
             ("/admin/ai-providers", "AI Providers"),
             ("/admin/translations", "Translations"),
-            ("/admin/beta-controls", "Beta Controls"),
+            ("/admin/beta-controls", "Settings"),
             ("/admin/billing", "Billing"),
             ("/admin/costs", "Costs"),
             ("/admin/quality", "Quality"),
