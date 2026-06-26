@@ -611,6 +611,75 @@ class AdminRoutesTest(unittest.TestCase):
         )
         self.assertNotIn("traceback", html.lower())
 
+    def test_admin_redesign_b21_logs_diagnostics_visible_copy(self):
+        """B2.1 pinned visible copy for Logs/Diagnostics slice.
+
+        Asserts the exact pinned strings from the B2.1 spec are emitted by
+        the body helpers (logs_body / translations_body) and that the
+        sidebar Advanced nav exposes the renamed Logs label.
+        """
+        from translator_service.admin.translation_logs import TranslationRunSummary
+        from translator_service.admin.views import (
+            logs_body,
+            translations_body,
+        )
+
+        summary = TranslationRunSummary(
+            job_id="job-b21-logs-diagnostics",
+            status="ready",
+            started_at=datetime(2026, 6, 26, 12, 0, tzinfo=UTC),
+            finished_at=None,
+            order_id="order-b21",
+            user_id="telegram:42",
+            file_name="book-b21.txt",
+            document_kind="txt",
+            source_language="en",
+            target_language="uk",
+            translator_model="deepseek",
+            result_file_name=None,
+            error_message=None,
+            fragment_count=1,
+            total_fragment_count=1,
+            progress_percent=100.0,
+            eta_seconds=None,
+            current_stage="ready",
+            last_event_at=datetime(2026, 6, 26, 12, 1, tzinfo=UTC),
+            total_tokens=42,
+            elapsed_seconds=60.0,
+            run_dir="/tmp/run-b21-logs-diagnostics",
+        )
+
+        # /admin/logs — pinned H1 and help copy.
+        logs_help_sentence = (
+            "Logs are run lifecycle metadata. "
+            "Diagnostics here are run-scoped and owner-only "
+            "where raw text or provider bodies appear."
+        )
+        logs_text = _compact_text(logs_body((summary,)))
+        self.assertIn("Translation Logs", logs_text)
+        self.assertIn(logs_help_sentence, logs_text)
+        # H1 stays "Translation Logs" — sidebar label does not bleed into page body.
+        self.assertNotIn("Run Logs / Diagnostics", logs_text)
+
+        # /admin/translations — pinned helper sentence.
+        translations_text = _compact_text(translations_body((summary,)))
+        self.assertIn(
+            "Advanced run logs and run-scoped diagnostics remain under Advanced.",
+            translations_text,
+        )
+
+        # Sidebar Advanced nav exposes the renamed Logs label exactly.
+        self.client.post("/admin/login", data={"password": "owner-pass"})
+        overview = self.client.get("/admin/overview")
+        self.assertEqual(overview.status_code, 200)
+        advanced_nav = _nav_section(overview.text, "advanced-nav")
+        self.assertIn(">Run Logs / Diagnostics<", advanced_nav)
+        self.assertNotIn(">Logs<", advanced_nav)  # old label must be gone
+
+        # Run detail backlink stays verbatim: "Back to run logs".
+        logs_page = self.client.get("/admin/logs")
+        self.assertEqual(logs_page.status_code, 200)
+
     def test_translations_body_renders_primary_workflow_and_emergency_cancel(self):
         from translator_service.admin.translation_logs import TranslationRunSummary
         from translator_service.admin.views import translations_body
@@ -924,7 +993,7 @@ class AdminRoutesTest(unittest.TestCase):
         advanced_nav = _nav_section(overview.text, "advanced-nav")
         self.assertIn(">Advanced<", overview.text)
         for label in (
-            "Logs",
+            "Run Logs / Diagnostics",
             "Reader Explorer",
             "Activity",
             "Jobs / Queue",
@@ -2530,7 +2599,7 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn('href="/admin/translations"', details.text)
             self.assertIn("Back to translations", details.text)
             self.assertIn('href="/admin/logs"', details.text)
-            self.assertIn("Back to Advanced Logs", details.text)
+            self.assertIn("Back to run logs", details.text)
             self.assertNotIn("return_to", details.text)
             self.assertIn(
                 "Normal detail UI/API shows bounded recent fragment and event rows",
