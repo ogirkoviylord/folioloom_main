@@ -3628,6 +3628,11 @@ def log_detail_body(details: TranslationRunDetails) -> str:
           deeper inspection through Text diagnostics, Reader, or Download
           archive is explicit.
         </p>
+        <p class="helper-text">
+          Download archive produces a single run-output archive. When present,
+          it may include admin/run-scoped raw text, provider IO diagnostics,
+          glossary runtime detail, and diagnostic files; treat it as sensitive.
+        </p>
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to translations", "/admin/translations", "view")}
@@ -4064,6 +4069,11 @@ def translation_text_diagnostics_body(
         <p>
           {escape(summary.file_name)} · {escape(summary.job_id)}
         </p>
+        <p class="helper-text">
+          Text Diagnostics shows run-scoped work-unit text diagnostics for
+          this run. Related raw text diagnostics can also appear in the
+          download archive when available.
+        </p>
       </div>
       <div class="toolbar-actions">
         {_action_link("Back to details", f"/admin/logs/{run_id}", "view")}
@@ -4322,6 +4332,13 @@ def translation_reader_body(
         <p>
           {escape(summary.file_name)} · {escape(summary.source_language)}
           -> {escape(summary.target_language)} · {escape(summary.job_id)}
+        </p>
+        <p class="helper-text">
+          Reader shows source and translated text for this run. Raw provider
+          bodies and glossary runtime detail are not shown here; Text
+          Diagnostics focuses on work-unit text diagnostics, while the
+          download archive is the provider/glossary diagnostics surface when
+          present.
         </p>
       </div>
       <div class="toolbar-actions">
