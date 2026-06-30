@@ -1,0 +1,50 @@
+{
+  "schema_version": "folioloom_figma_spec_v1",
+  "spec_id": "project_overview_cards",
+  "title": "FolioLoom synthetic project overview cards",
+  "metadata": {
+    "product_context": "CAT workbench prototype",
+    "fixture_type": "synthetic UI coverage",
+    "generated_for": "Phase A local Figma paste renderer"
+  },
+  "pages": [
+    {
+      "id": "overview_page",
+      "name": "Project overview",
+      "children": [
+        {
+          "id": "overview_shell",
+          "type": "frame",
+          "name": "Overview shell",
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 640,
+          "layout": "none",
+          "fill": "#F7F8FA",
+          "children": [
+            { "id": "title", "type": "text", "name": "Screen title", "x": 40, "y": 36, "width": 560, "height": 40, "text": "Project workspace", "fontSize": 28, "fontWeight": "semibold", "color": "#172033" },
+            { "id": "subtitle", "type": "text", "name": "Screen subtitle", "x": 42, "y": 82, "width": 640, "height": 26, "text": "Synthetic CAT dashboard for authorized document translation", "fontSize": 14, "fontWeight": "regular", "color": "#586174" },
+            { "id": "project_card", "type": "card", "name": "Project summary card", "x": 40, "y": 140, "width": 270, "height": 180, "fill": "#FFFFFF", "stroke": "#D9DEE8", "strokeWidth": 1, "cornerRadius": 18, "children": [
+              { "id": "project_label", "type": "text", "x": 24, "y": 22, "width": 210, "height": 24, "text": "Current project", "fontSize": 13, "color": "#6B7280" },
+              { "id": "project_name", "type": "text", "x": 24, "y": 58, "width": 210, "height": 34, "text": "Sample manuscript", "fontSize": 22, "fontWeight": "semibold", "color": "#111827" },
+              { "id": "ready_chip", "type": "chip", "x": 24, "y": 120, "width": 118, "height": 32, "text": "Ready for QA", "fontSize": 12, "fill": "#E8F6EE", "stroke": "#BEE5CB", "color": "#156B3A", "cornerRadius": 16 }
+            ] },
+            { "id": "glossary_card", "type": "card", "name": "Glossary summary card", "x": 340, "y": 140, "width": 270, "height": 180, "fill": "#FFFFFF", "stroke": "#D9DEE8", "strokeWidth": 1, "cornerRadius": 18, "children": [
+              { "id": "glossary_label", "type": "text", "x": 24, "y": 22, "width": 210, "height": 24, "text": "Glossary status", "fontSize": 13, "color": "#6B7280" },
+              { "id": "glossary_count", "type": "text", "x": 24, "y": 58, "width": 210, "height": 34, "text": "24 approved terms", "fontSize": 22, "fontWeight": "semibold", "color": "#111827" },
+              { "id": "glossary_chip", "type": "chip", "x": 24, "y": 120, "width": 136, "height": 32, "text": "Locked terms on", "fontSize": 12, "fill": "#EBF2FF", "stroke": "#BDD3FF", "color": "#214E9D", "cornerRadius": 16 }
+            ] },
+            { "id": "export_card", "type": "card", "name": "Export summary card", "x": 640, "y": 140, "width": 270, "height": 180, "fill": "#FFFFFF", "stroke": "#D9DEE8", "strokeWidth": 1, "cornerRadius": 18, "children": [
+              { "id": "export_label", "type": "text", "x": 24, "y": 22, "width": 210, "height": 24, "text": "Export target", "fontSize": 13, "color": "#6B7280" },
+              { "id": "export_value", "type": "text", "x": 24, "y": 58, "width": 210, "height": 34, "text": "DOCX draft", "fontSize": 22, "fontWeight": "semibold", "color": "#111827" },
+              { "id": "export_button", "type": "button", "x": 24, "y": 116, "width": 150, "height": 40, "text": "Review export", "fontSize": 13, "fill": "#172033", "color": "#FFFFFF", "cornerRadius": 12 }
+            ] },
+            { "id": "footer_line", "type": "line", "name": "Footer divider", "x": 40, "y": 374, "width": 870, "height": 1, "stroke": "#D9DEE8", "strokeWidth": 1 },
+            { "id": "footer_note", "type": "text", "x": 42, "y": 406, "width": 760, "height": 24, "text": "All text here is synthetic metadata for local design prototyping.", "fontSize": 13, "color": "#697386" }
+          ]
+        }
+      ]
+    }
+  ]
+}
