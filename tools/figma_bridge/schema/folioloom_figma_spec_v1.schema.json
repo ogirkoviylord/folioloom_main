@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "folioloom_figma_spec_v1.schema.json",
+  "title": "FolioLoom Figma Phase A paste renderer spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "spec_id", "title", "metadata", "pages"],
+  "properties": {
+    "schema_version": { "const": "folioloom_figma_spec_v1" },
+    "spec_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$", "maxLength": 64 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/page" }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_context", "fixture_type", "generated_for"],
+      "properties": {
+        "product_context": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "fixture_type": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "generated_for": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/node" }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "x", "y", "width", "height"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["frame", "section", "text", "rectangle", "line", "chip", "card", "button", "input", "dropzone"] },
+        "name": { "type": "string", "maxLength": 80 },
+        "x": { "$ref": "#/$defs/coord" },
+        "y": { "$ref": "#/$defs/coord" },
+        "width": { "$ref": "#/$defs/size" },
+        "height": { "$ref": "#/$defs/size" },
+        "layout": { "enum": ["none", "vertical", "horizontal"] },
+        "fill": { "$ref": "#/$defs/color" },
+        "stroke": { "$ref": "#/$defs/color" },
+        "strokeWidth": { "type": "number", "minimum": 0, "maximum": 24 },
+        "cornerRadius": { "type": "number", "minimum": 0, "maximum": 80 },
+        "text": { "type": "string", "maxLength": 10000 },
+        "fontSize": { "type": "number", "minimum": 8, "maximum": 96 },
+        "fontWeight": { "enum": ["regular", "medium", "semibold", "bold"] },
+        "color": { "$ref": "#/$defs/color" },
+        "align": { "enum": ["left", "center", "right"] },
+        "children": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "padding": { "type": "number", "minimum": 0, "maximum": 120 },
+        "itemSpacing": { "type": "number", "minimum": 0, "maximum": 120 }
+      }
+    },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$", "maxLength": 64 },
+    "coord": { "type": "integer", "minimum": -10000, "maximum": 10000 },
+    "size": { "type": "integer", "minimum": 1, "maximum": 5000 },
+    "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$" }
+  }
+}

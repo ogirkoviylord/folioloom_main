@@ -1,0 +1,11 @@
+{
+  "name": "FolioLoom Local Bridge Renderer",
+  "id": "folioloom-local-bridge-renderer",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma", "dev"],
+  "networkAccess": {
+    "allowedDomains": ["http://127.0.0.1:47831"]
+  }
+}

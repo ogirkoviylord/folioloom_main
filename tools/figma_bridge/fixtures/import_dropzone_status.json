@@ -1,0 +1,45 @@
+{
+  "schema_version": "folioloom_figma_spec_v1",
+  "spec_id": "import_dropzone_status",
+  "title": "FolioLoom synthetic import dropzone and status",
+  "metadata": {
+    "product_context": "CAT workbench prototype",
+    "fixture_type": "synthetic UI coverage",
+    "generated_for": "Phase A local Figma paste renderer"
+  },
+  "pages": [
+    {
+      "id": "import_page",
+      "name": "Import and status",
+      "children": [
+        {
+          "id": "import_shell",
+          "type": "frame",
+          "name": "Import shell",
+          "x": 0,
+          "y": 0,
+          "width": 900,
+          "height": 620,
+          "fill": "#F5F7FB",
+          "children": [
+            { "id": "heading", "type": "text", "x": 40, "y": 36, "width": 620, "height": 40, "text": "Import authorized document", "fontSize": 28, "fontWeight": "semibold", "color": "#172033" },
+            { "id": "copy", "type": "text", "x": 42, "y": 84, "width": 690, "height": 28, "text": "Synthetic state showing TXT, DOCX, and EPUB readiness checks.", "fontSize": 14, "color": "#586174" },
+            { "id": "dropzone", "type": "dropzone", "name": "Document dropzone", "x": 40, "y": 150, "width": 520, "height": 260, "fill": "#FFFFFF", "stroke": "#9DB5E8", "strokeWidth": 2, "cornerRadius": 24, "children": [
+              { "id": "drop_title", "type": "text", "x": 44, "y": 54, "width": 400, "height": 34, "text": "Drop a document fixture", "fontSize": 24, "fontWeight": "semibold", "color": "#203252" },
+              { "id": "drop_hint", "type": "text", "x": 46, "y": 102, "width": 400, "height": 28, "text": "TXT, DOCX, EPUB synthetic import states", "fontSize": 14, "color": "#64748B" },
+              { "id": "drop_button", "type": "button", "x": 46, "y": 166, "width": 164, "height": 42, "text": "Choose fixture", "fontSize": 13, "fill": "#2957D6", "color": "#FFFFFF", "cornerRadius": 12 }
+            ] },
+            { "id": "status_card", "type": "card", "name": "Status panel", "x": 590, "y": 150, "width": 270, "height": 260, "fill": "#FFFFFF", "stroke": "#D9DEE8", "strokeWidth": 1, "cornerRadius": 20, "children": [
+              { "id": "status_title", "type": "text", "x": 24, "y": 24, "width": 210, "height": 28, "text": "Preflight", "fontSize": 20, "fontWeight": "semibold", "color": "#111827" },
+              { "id": "status_one", "type": "chip", "x": 24, "y": 74, "width": 168, "height": 32, "text": "Structure detected", "fontSize": 12, "fill": "#E8F6EE", "stroke": "#BEE5CB", "color": "#156B3A", "cornerRadius": 16 },
+              { "id": "status_two", "type": "chip", "x": 24, "y": 122, "width": 180, "height": 32, "text": "Glossary pending", "fontSize": 12, "fill": "#FFF6E5", "stroke": "#F8D591", "color": "#8A5200", "cornerRadius": 16 },
+              { "id": "status_three", "type": "chip", "x": 24, "y": 170, "width": 146, "height": 32, "text": "Export clean", "fontSize": 12, "fill": "#EBF2FF", "stroke": "#BDD3FF", "color": "#214E9D", "cornerRadius": 16 }
+            ] },
+            { "id": "divider", "type": "line", "x": 40, "y": 454, "width": 820, "height": 1, "stroke": "#D8DEE9", "strokeWidth": 1 },
+            { "id": "format_note", "type": "text", "x": 42, "y": 486, "width": 680, "height": 28, "text": "No real source text or provider payload is included in this fixture.", "fontSize": 13, "color": "#64748B" }
+          ]
+        }
+      ]
+    }
+  ]
+}
