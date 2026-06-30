@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FolioLoom Phase A Paste Renderer</title>
+  <style>
+    body { margin: 0; padding: 16px; font: 12px Inter, Arial, sans-serif; color: #172033; background: #f7f8fa; }
+    h1 { margin: 0 0 8px; font-size: 16px; }
+    p { margin: 0 0 12px; color: #586174; line-height: 1.4; }
+    textarea { width: 100%; height: 260px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+    button { border: 0; border-radius: 8px; padding: 8px 12px; background: #2957d6; color: #fff; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #dbe4ff; color: #203252; }
+    input[type=file] { font-size: 11px; }
+    #status { white-space: pre-wrap; border-radius: 8px; padding: 10px; background: #fff; border: 1px solid #d9dee8; min-height: 56px; }
+    .ok { color: #156b3a; }
+    .error { color: #a33a24; }
+  </style>
+</head>
+<body>
+  <h1>FolioLoom Phase A Paste Renderer</h1>
+  <p>Paste or load a bounded synthetic JSON fixture. Rendering always creates a new Figma page and does not modify existing nodes.</p>
+  <textarea id="spec" spellcheck="false" placeholder="Paste tools/figma_bridge/fixtures/*.json here"></textarea>
+  <div class="row">
+    <button id="render">Validate and render</button>
+    <button id="clear" class="secondary">Clear input</button>
+    <input id="file" type="file" accept="application/json,.json">
+  </div>
+  <div id="status">Idle.</div>
+
+  <script>
+    const specInput = document.getElementById('spec');
+    const statusBox = document.getElementById('status');
+
+    function setStatus(message, className) {
+      statusBox.className = className || '';
+      statusBox.textContent = message;
+    }
+
+    document.getElementById('render').addEventListener('click', () => {
+      const raw = specInput.value || '';
+      if (new Blob([raw]).size > 1024 * 1024) {
+        setStatus('Error: spec exceeds 1 MiB.', 'error');
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (error) {
+        setStatus('Invalid JSON: ' + error.message, 'error');
+        return;
+      }
+      setStatus('Sending spec to main plugin renderer...', '');
+      parent.postMessage({ pluginMessage: { type: 'render-spec', spec: parsed } }, '*');
+    });
+
+    document.getElementById('clear').addEventListener('click', () => {
+      specInput.value = '';
+      setStatus('Input cleared. Existing Figma nodes were not touched.', '');
+    });
+
+    document.getElementById('file').addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      if (file.size > 1024 * 1024) {
+        setStatus('Error: selected fixture exceeds 1 MiB.', 'error');
+        return;
+      }
+      specInput.value = await file.text();
+      setStatus('Loaded fixture file: ' + file.name, 'ok');
+    });
+
+    window.onmessage = (event) => {
+      const message = event.data.pluginMessage;
+      if (!message) return;
+      if (message.type === 'render-success') {
+        setStatus('Rendered successfully.\nPage: ' + message.pageName + '\nRun: ' + message.runId + '\nSummary: ' + JSON.stringify(message.summary, null, 2), 'ok');
+      } else if (message.type === 'render-error') {
+        setStatus('Render failed.\n' + message.errors.join('\n'), 'error');
+      }
+    };
+  </script>
+</body>
+</html>
