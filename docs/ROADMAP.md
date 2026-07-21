@@ -4,97 +4,101 @@ This roadmap is the active work queue. Historical phase narratives and old backl
 
 ## Current Milestone
 
-Free closed beta.
+CAT-like author workflow reframe.
 
-Goal: trusted users can translate authorized TXT/DOCX/EPUB documents through Telegram with safe limits, visible operations, recoverable runtime state and enough real-file quality evidence.
+Canonical issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813)
+Canonical gate document: `docs/CAT_WORKFLOW_GATES.md`
+
+Goal: prove that FolioLoom can help an author/rightsholder produce a terminology-controlled, structurally valid, reviewable translation draft for authorized TXT/DOCX/EPUB documents. Telegram remains a convenient upload/test/delivery harness, not the defining product surface.
 
 ## Roadmap Principles
 
-- Keep scope tight until closed beta works.
-- Prefer small focused issues over broad rewrites.
-- Do not treat historical plans as active work unless re-linked here.
-- Do not expand formats/channels/payment/public surfaces without owner approval.
-- Release readiness depends on evidence, not docs optimism.
+- Treat the old Telegram-first Gate B/C plan as operational/payment infrastructure, not the product release compass.
+- Glossary/terminology control is a core quality prerequisite, not a later optional enhancement.
+- Prefer manual/author-approved glossary controls before chasing perfect automatic glossary.
+- Keep scope tight: TXT/DOCX/EPUB, authorized documents, owner/trusted design partners.
+- Use representative before/after evidence; do not treat local/fake/provider-boundary evidence as release quality proof.
+- Do not start paid beta/payment work until value, quality and workflow evidence exist.
+- Do not expand formats, channels, payments, public surfaces or runtime data policies without explicit owner approval.
 
 ## Immediate Priorities
 
-### Gate B closure
+### Gate 0 — Product reframe / scope lock
 
-- TTL cleanup/delete verification.
-- Real-file TXT/DOCX/EPUB release matrix and report.
-- EPUBCheck or equivalent validation.
-- DOCX openability/visual QA.
-- Cancel/resume/restart validation.
-- Backup visibility and restore rehearsal evidence.
-- Alerts MVP.
-- Approved beta-server smoke evidence.
+- Keep #813 as the canonical strategy issue.
+- Update active docs and issue titles/comments so agents stop using old Gate B/C as the product roadmap.
+- Split new work only from #813 or a later owner-approved child issue.
 
-### Agent/documentation efficiency
+### Gate 1 — Glossary / terminology control prototype
 
-- Keep owner-local mode.
-- Reduce mandatory context reads.
-- Archive long history without deleting it.
-- Update repo-level skills so routine implementation does not load heavy docs by default.
-- Add `.aiignore` or tool-equivalent exclusions for generated/runtime/archive-heavy paths if supported.
+- Define manual/author-approved glossary controls.
+- Treat automatic candidates as suggestions only until stronger evidence exists.
+- Require visible glossary preflight status and post-run metadata-only compliance report.
+- Run representative before/after evidence for glossary-controlled quality.
+- Keep automatic runtime glossary experimental/shadow/owner-only until representative live evidence passes.
 
-### Glossary readiness
+### Gate 2 — CAT-like workflow thin slice
 
-- Keep scanner v1 plus candidate-quality gates.
-- Treat latest automatic live smoke as no-go.
-- Use local/fake/provider-boundary evidence as planning evidence only.
-- Require new reviewed evidence before runtime glossary quality/rollout claims.
+- Import TXT/DOCX/EPUB into durable structure/segments.
+- Review/edit glossary before translation.
+- Translate a slice/document with approved glossary.
+- Show QA findings.
+- Export usable DOCX/EPUB/TXT.
+- Use Telegram only as harness where helpful.
 
-## Next Priorities
+### Gate 3 — Quality evidence
 
-### Core workflow hardening
+- Build a small representative matrix: fiction with names, terminology-heavy nonfiction, DOCX formatting, EPUB structure and TXT baseline.
+- Collect metadata-only before/after evidence: structural validity, glossary adherence, source residue, reviewer preference, cost/runtime and no raw leak.
 
-- Validate cancellation and partial output behavior on representative files.
-- Validate restart/recovery flows.
-- Review Telegram UX for confusing or failure-prone states.
-- Ensure admin visibility shows enough to operate closed beta safely.
+## Operational Safety Carry-forward
 
-### Real-file quality
+These old Gate B issues remain useful, but they are not the product release compass by themselves:
 
-- Run representative real-file TXT/DOCX/EPUB matrix.
-- Record pass/fail evidence without overclaiming quality.
-- Separate structural validity, semantic quality and release readiness.
-- Keep raw QA evidence owner-local unless explicitly published.
+- #75 CAT real-file import/segment/glossary/export matrix.
+- #76 CAT DOCX export LibreOffice visual QA.
+- #81 CAT workflow cancel/resume/restart recovery.
+- #82 CAT project TTL cleanup/delete behavior.
+- #83 CAT Alerts owner report.
+- #84 CAT Backups owner report.
+- #85 approved backup export manifest verification.
+- #86 restore rehearsal for CAT project state.
+- #87 CAT app/server smoke evidence, bot harness optional.
 
-### Operations
-
-- Make backup status visible enough for beta operation.
-- Rehearse restore flow and record evidence.
-- Confirm server smoke procedure and target environment approval requirements.
-- Keep admin SSH-tunnel-only.
+Old #88 was closed as superseded by #813. Future final readiness reporting should be a CAT Beta Readiness Report.
 
 ## Later / Deferred
 
-- Paid beta.
+- Design partner free alpha after Gates 0-3 have usable evidence.
+- Operational safety closure after CAT workflow is proven enough to protect.
+- Limited paid pilot after quality/workflow/safety evidence.
+- Self-serve paid beta only after paid pilot plus payment ledger/idempotency/refund/support/reconciliation.
 - Public production.
+- Future formats beyond TXT/DOCX/EPUB.
 - Public website/customer portal.
 - WhatsApp/Discord/public API channels.
 - User-facing provider/model picker.
 - Batch ZIP or arbitrary file parser.
-- Future formats beyond TXT/DOCX/EPUB.
-- Advanced BI or large product expansion.
 - Public admin exposure.
 
 ## Backlog Candidates
 
 Keep candidates small and promote only when owner accepts priority.
 
-- Alerts MVP.
-- Backups visibility page.
-- Better owner-only diagnostic archive navigation.
-- Improved real-file QA reporting.
-- Future glossary quality review workflow.
-- Future scanner v2 shadow extractor if evidence warrants it.
-- Future format architecture reviews.
-- Payment support/refund policy draft after free beta evidence.
+- Manual glossary import/export/editor.
+- Glossary compliance report.
+- CAT source-target review surface.
+- Segment/chapter navigation.
+- Selective retranslation after glossary edits.
+- Owner-only reader/QA cockpit (#483/#494 candidate lanes).
+- Service-level real-book QA harness (#775 candidate lane).
+- Future scanner v2 shadow extractor only if fresh evidence warrants it.
+- Future format architecture reviews under #208.
 
 ## How Agents Should Use This Roadmap
 
-- For small implementation, do not read old roadmap history.
-- For planning, start here and then open archive only for older rationale.
-- For future formats/payment/public launch, route through idea intake and architecture/release review.
-- If an item is not here, do not assume an old plan makes it active.
+- Start with `docs/CAT_WORKFLOW_GATES.md` and #813 for strategy/release questions.
+- Do not use old Gate B/C as the main product roadmap.
+- Do not claim paid beta readiness from payment plumbing alone.
+- Do not claim glossary runtime readiness from local/fake/provider-boundary evidence.
+- If an item is not here or under #813, do not assume an old archived plan makes it active.

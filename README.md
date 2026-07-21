@@ -1,8 +1,8 @@
 # FolioLoom
 
-FolioLoom - Telegram-first сервис перевода авторизованных длинных документов:
-книг, глав, рукописей, редакторских материалов, public-domain текстов и
-документов, на которые у пользователя есть права.
+FolioLoom - CAT-like author/rightsholder translation workbench для авторизованных длинных документов: книг, глав, рукописей, редакторских материалов, public-domain текстов и документов, на которые у пользователя есть права.
+
+Telegram-бот остаётся удобным upload/test/delivery harness, но больше не является определяющей продуктовой поверхностью или release compass. Canonical strategy issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813). Canonical gate doc: `docs/CAT_WORKFLOW_GATES.md`.
 
 DeepSeek-compatible APIs - внутренний provider layer. Пользовательский бренд и
 UX остаются FolioLoom.
@@ -11,13 +11,14 @@ UX остаются FolioLoom.
 
 | Область | Статус |
 | --- | --- |
-| Product stage | Working closed-beta foundation |
-| Следующий milestone | Free closed beta |
-| Paid launch | Blocked до отдельного payment/readiness gate |
+| Product stage | CAT-like workflow reframe / active development |
+| Следующий milestone | Gate 1 glossary/terminology control prototype |
+| Paid launch | Blocked до quality/workflow/safety/payment evidence |
 | Public production | Not ready |
-| Форматы beta | TXT, DOCX, EPUB |
+| Форматы текущего scope | TXT, DOCX, EPUB |
+| Primary surface | CAT-like author workflow TBD; Telegram is harness |
 | Admin access | SSH tunnel only |
-| Beta access control | Telegram ID allowlist, admin toggle defaults off |
+| Beta access control | Owner/trusted cohort; Telegram allowlist foundations exist |
 
 Проект уже не является in-memory prototype. В репозитории есть persistent
 jobs/work units, object storage, worker loop, admin console, Docker Compose
@@ -25,12 +26,12 @@ deployment, backup/restore workflow и широкий unittest suite.
 
 ## What FolioLoom Does
 
-- Принимает upload документов в Telegram и ведет пользователя через выбор
-  translation mode, языка, free preview, explicit Continue, progress,
-  cancel/status/history flows.
-- Поддерживает invite-only beta allowlist по Telegram ID: owner может заранее
-  добавлять/удалять ID в admin settings и включить enforcement отдельной
-  кнопкой, когда список готов.
+- Целевой workflow: import authorized TXT/DOCX/EPUB, preserve structure/segments,
+  review/edit glossary, generate translation draft/suggestions, inspect QA
+  findings and export a usable translated document.
+- Telegram remains a harness for upload/test/delivery where convenient.
+- Поддерживает invite-only/trusted testing foundations via Telegram allowlist and
+  owner/admin controls.
 - Переводит TXT/DOCX/EPUB через DeepSeek-compatible provider.
 - Хранит accepted documents, jobs, work units, partial/final results и runtime
   metadata в backend/object storage.
@@ -41,18 +42,18 @@ deployment, backup/restore workflow и широкий unittest suite.
 
 ## Supported / Not Supported
 
-| Supported for beta foundation | Not supported for next beta |
+| Supported foundations | Not supported / not ready |
 | --- | --- |
-| Telegram upload/translate flow | Paid public SaaS |
-| Free preview before full translation | Payment UI or paid jobs |
-| Admin-managed beta allowlist toggle | Public self-serve signup |
-| TXT/DOCX/EPUB | PDF/OCR/MOBI/FB2/batch ZIP |
+| TXT/DOCX/EPUB import/translation foundations | Paid public SaaS |
+| Telegram harness for upload/test/delivery | Payment UI or paid jobs |
+| Manual/author glossary direction under #813 | Automatic glossary quality claim |
+| Admin-managed allowlist/cost/kill-switch foundations | Public self-serve signup |
 | DeepSeek-compatible internal providers | User-facing provider/model picker |
 | Persistent jobs/work units | Arbitrary file parser |
 | Local object storage on server runtime | Public object bucket/product portal |
 | Worker loop and resumable backend foundations | Public admin exposure |
 | Admin console through SSH tunnel | Subscriptions, referrals, coupons, teams |
-| Backup/restore workflow | Stripe/YooKassa/card flow as immediate Telegram path |
+| Backup/restore workflow | Stripe/YooKassa/card flow as immediate path |
 
 Committed future formats:
 
@@ -82,14 +83,15 @@ Telegram Stars/XTR and a payment ledger remain a separate release gate.
 
 ## Source Of Truth
 
+- `docs/CAT_WORKFLOW_GATES.md` - canonical CAT-like workflow gate model.
 - `CURRENT_PROJECT_STATE.md` - фактическое состояние проекта.
 - `DOCUMENT_INDEX.md` - карта активных и historical docs.
-- `docs/restart/folioloom-restart-spec.md` - canonical restart-ТЗ.
-- `docs/restart/release-gates.md` - release gates.
-- `docs/restart/two-week-engineering-plan.md` - ближайший engineering plan.
+- `docs/restart/release-gates.md` - current checklists; old Gate B/C is superseded as primary compass.
 - `docs/restart/real-file-test-matrix.md` - real-file corpus and QA matrix.
 - `docs/restart/upload-safety-and-retention.md` - upload safety, quarantine,
   local malware scanning, TTL and retention rules.
+- `docs/restart/folioloom-restart-spec.md` - historical restart spec / old product boundary; use #813 for current strategy.
+- `docs/restart/two-week-engineering-plan.md` - historical/superseded old free-beta plan.
 
 ## Verification Commands
 

@@ -1,62 +1,54 @@
 # Handoff
 
-Last updated: 2026-06-18
+Last updated: 2026-06-29
 
 ## Current State
 
-FolioLoom is an active development / working closed-beta foundation for Telegram-first translation of authorized long documents.
+FolioLoom is being reframed from a Telegram-first translation bot into a CAT-like author/rightsholder translation workbench for authorized long documents.
 
-Confirmed current user path:
+Canonical strategy issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813)
+Canonical gate document: `docs/CAT_WORKFLOW_GATES.md`
 
-1. Trusted beta user opens Telegram bot.
-2. User uploads TXT/DOCX/EPUB.
-3. Bot validates upload and asks for rights confirmation.
-4. User selects translation mode and target language.
-5. Bot produces preview/estimate.
-6. User explicitly continues/confirms full translation.
-7. Backend creates persistent work.
-8. User sees progress/cancel/status/history.
-9. User receives final or partial output.
+New intended workflow:
+
+1. Import authorized TXT/DOCX/EPUB.
+2. Preserve document structure and stable segments.
+3. Review/edit glossary and terminology.
+4. Generate translation draft/suggestions.
+5. Surface QA/glossary/structure findings.
+6. Export a usable translated document.
+7. Use Telegram as upload/test/delivery harness where useful.
 
 Not current state:
 
-- not public production;
-- not paid beta;
+- not free beta ready;
+- not paid beta ready;
 - not public SaaS;
-- not release-ready until Gate B evidence is complete;
-- not ready to claim glossary runtime quality or rollout success.
+- not public production;
+- not ready to claim automatic glossary runtime quality or rollout success;
+- not ready to claim CAT-like author workflow readiness.
 
 ## Current Focus
 
-Prepare free closed beta by stabilizing core workflow, release gates, operational visibility and real-file quality evidence.
-
 Immediate focus areas:
 
-- Gate B blockers;
-- upload safety and TTL/delete verification;
-- real-file TXT/DOCX/EPUB matrix;
-- DOCX visual/openability QA;
-- EPUBCheck or equivalent validation;
-- cancel/resume/restart validation;
-- backup visibility and restore rehearsal;
-- Alerts MVP;
-- approved beta-server smoke evidence;
-- documentation simplification for agent context efficiency.
+- Gate 0: product reframe / scope lock around #813.
+- Gate 1: manual/author-approved glossary controls and before/after evidence.
+- Gate 2: CAT-like author workflow thin slice.
+- Gate 3: representative quality evidence.
+- Keep old Gate B operational work as carry-forward safety infrastructure, not as the product roadmap.
 
 ## What Works
 
-### Product Flow
+### Existing foundations
 
-- Telegram bot runtime is implemented.
+- Telegram bot runtime is implemented and remains useful as harness.
 - Upload/estimate/confirm/progress/cancel/status/history-oriented flow exists.
 - Rights confirmation exists.
 - Preview before full translation exists.
-- TXT/DOCX/EPUB support exists as current beta scope.
+- TXT/DOCX/EPUB support exists as current format scope.
 - My Books/history foundations exist.
 - Admin owner/operator surfaces exist.
-
-### Backend / Runtime
-
 - Persistent jobs/work units exist.
 - Worker/scheduler loop exists.
 - Local object storage exists.
@@ -65,88 +57,75 @@ Immediate focus areas:
 - Usage/cost accounting and beta safety foundations exist.
 - Docker Compose deployment model exists.
 - Backup/restore scripts exist.
-
-### Provider / Diagnostics
-
 - DeepSeek-compatible provider layer exists.
 - Multiple key/channel foundations exist.
 - Provider health/probe/runtime admin visibility exists.
-- Provider balance visibility exists.
+
+### Glossary foundations
+
+- Local/fake prepared-glossary prep and package validation foundations exist.
+- Candidate-quality gates exist.
 - Owner-only diagnostics boundaries exist.
+- Scanner v2 is deferred unless fresh evidence warrants it.
 
-### Tests
+Blocking caveat:
 
-- Broad Python test suite exists.
-- Common verification commands are documented in `docs/QUALITY_GATES.md`.
-- CI workflow exists but current GitHub run status is `Unknown` unless checked.
+- Automatic/internal glossary runtime is not release-ready.
+- Recent live automatic glossary smoke was no-go.
+- Do not claim live glossary quality, runtime rollout readiness, cache reuse readiness or paid/free beta readiness from current glossary evidence.
 
 ## Active Gaps
 
-Blocking before free closed beta:
+### Product / quality gaps
 
-- TTL cleanup/delete verification.
-- Real-file TXT/DOCX/EPUB release matrix and report.
-- EPUBCheck or equivalent validation.
-- DOCX openability/visual QA.
-- Cancel/resume/restart checks.
-- Backup visibility and restore rehearsal evidence.
-- Alerts MVP.
-- Approved beta-server smoke evidence.
+- Manual glossary import/editor/control path.
+- Preflight glossary readiness/status.
+- Post-run glossary compliance report.
+- Source-target/segment review surface or equivalent CAT thin slice.
+- Representative before/after evidence on real documents.
+- Export from approved/edit state.
 
-Future / not current:
+### Operational safety carry-forward
 
-- paid beta payment ledger and Telegram Stars/XTR flow;
-- public production hardening;
-- support/refund/legal/privacy public policies;
-- future formats beyond TXT/DOCX/EPUB;
-- public web/customer portal;
-- user-facing provider/model picker.
+- #75 CAT real-file import/segment/glossary/export matrix.
+- #76 CAT DOCX export LibreOffice visual QA.
+- #81 CAT workflow cancel/resume/restart recovery.
+- #82 CAT project TTL cleanup/delete behavior.
+- #83 CAT Alerts owner report.
+- #84 CAT Backups owner report.
+- #85 approved backup export manifest verification.
+- #86 restore rehearsal for CAT project state.
+- #87 CAT app/server smoke evidence, bot harness optional.
+
+Old #88 was closed as superseded by #813. Future final report should be a CAT Beta Readiness Report.
 
 ## Recent High-Signal Changes
 
-This section keeps only the recent changes that affect future agent work. Full older issue-by-issue history is preserved at `docs/archive/project-memory/HANDOFF.full-before-trim.md`.
+### 2026-06-29 — CAT-like gate reframe
 
-### 2026-06-18 - Scanner v2 shadow work remains deferred
+Owner accepted that the old Gate B/C plan no longer fits the product direction. The canonical issue is #813 and the canonical doc is `docs/CAT_WORKFLOW_GATES.md`.
 
-Issue #692 keeps scanner v1 active and does not create a scanner-v2 shadow implementation issue from the expanded #688-#692 chain. The #688 suspected missing target-backed durable candidates were present in scanner v1 output, and #690 resolved the checked missing count through #689 quality filtering plus quality-approved reducer diagnostic backfill. Future scanner-v2 work now requires fresh metadata-only evidence of persistent scanner-level misses after #689/#690 gates; real provider behavior, real-book translation quality and broader fixture coverage remain `Unknown`.
+Key decision:
 
-### 2026-06-18 - Prepared glossary reducer backfill after quality drops
+- Telegram is retained as harness.
+- The product direction is author/rightsholder CAT-like workflow.
+- Glossary/terminology control is a core quality prerequisite.
+- Old Gate B items are operational-safety carry-forward.
+- Paid beta is blocked until quality/workflow evidence exists.
 
-Issue #690 keeps the prepared glossary cap direction but lets reducer `diagnostic_only` candidates backfill after #689 quality drops, still under the final `max_candidates` cap and after the same candidate-quality gate. Post-#690 local evidence recorded 12 of 12 checked target-backed durable candidates selected, with suspected missing count 0. This does not change scanner v1, implement scanner v2, increase the prepared packet cap, call live providers, operate Telegram, approve rollout/cache reuse or make release/privacy/legal/support claims.
+### 2026-06-29 — Old Gate B issue cleanup/rewrite
 
-### 2026-06-18 - Prepared glossary candidate-quality tuning
+Old operational issues #75-#87 were retitled/commented as CAT operational-safety carry-forward. Old #88 was closed as superseded by #813.
 
-Issue #689 narrows the prepared candidate-quality policy after #688/#690 metadata-only evidence showed low-value repeated-term phrase shapes consuming the prepared prep editor cap. The local reason code is `candidate_quality_low_value_repeated_term_phrase`; representative durable terms still pass and ordinary metadata remains raw-free. This does not change scanner v1, reducer scoring, provider/package boundaries, runtime rollout, cache reuse, provider config, storage/admin/retention or release/privacy/legal/support claims.
+### 2026-06-18 — Scanner v2 shadow work remains deferred
 
-### 2026-06-18 - Glossary cap config diagnostics
+Issue #692 keeps scanner v1 active and does not create a scanner-v2 shadow implementation issue from the expanded #688-#692 chain. Future scanner-v2 work requires fresh metadata-only evidence of persistent scanner-level misses after #689/#690 gates.
 
-Glossary prep, runtime adapter and persistent resolver cap defaults are named in code and surfaced in metadata-only diagnostics (`caps`, `runtime_caps`, `resolver_caps`). Defaults and behavior are unchanged; do not raise or remove caps without a separate owner-approved issue.
+### 2026-06-18 — Prepared glossary candidate-quality / reducer work
 
-### 2026-06-18 - Prepared glossary provider readiness design
+Prepared glossary local/default-safe candidate-quality filtering and reducer diagnostic backfill improved local evidence, but did not prove real provider behavior, real-book translation quality, runtime rollout, cache reuse or release readiness.
 
-`docs/superpowers/specs/2026-06-18-prepared-glossary-provider-readiness-design.md` defines a proposed metadata-only readiness envelope and state matrix for prepared-glossary provider/config/package/runtime diagnostics. Implementation, provider behavior changes, admin visibility and fail-closed policy changes still need separate owner approval.
-
-### 2026-06-18 - Glossary cache reuse remains deferred
-
-`docs/superpowers/specs/2026-06-18-glossary-cache-reuse-after-465-design.md` updates the future glossary-aware cache reuse design after #465 evidence. Current behavior remains cache bypass for glossary-injected enabled/test-path units; cache reuse, durable cache changes and migration/invalidation still need separate owner approval.
-
-### 2026-06-18 - Agent local privacy posture simplified
-
-Owner local development mode allows local reading and owner-chat discussion of raw text, `.env*`, secrets, provider payloads, translations, diagnostics and runtime files when relevant. Publication, commits, external sharing, destructive operations and production-facing changes still need exact owner intent.
-
-### 2026-06-17 - Glossary scanner v2 deferred
-
-The local audit after prepared-glossary candidate-quality gates was sufficient to keep deterministic scanner v1 for now. Scanner v2 should be a future separately approved shadow extractor only if evidence warrants it.
-
-### 2026-06-17 - Prepared glossary candidate-quality gates
-
-Local/default-safe candidate-quality filtering now rejects obvious low-value candidates before prep/provider boundaries and before READY package status. This is metadata/local evidence, not semantic proof or release readiness.
-
-### 2026-06-16 - Automatic Telegram glossary prep wiring repair
-
-Settings-based runtime config can build the existing prepared-glossary provider through the existing DeepSeek runtime channel pool when available. If a `with_glossary` run has no package source, diagnostics must show high-severity not-effective metadata.
-
-### 2026-06-16 - Automatic glossary live smoke no-go
+### 2026-06-16 — Automatic glossary live smoke no-go
 
 Bounded live smoke after local/provider wiring failed readiness:
 
@@ -155,23 +134,14 @@ Bounded live smoke after local/provider wiring failed readiness:
 
 Treat as useful evidence, not successful live quality evidence.
 
-### 2026-06-15 - User-facing glossary selector removed
-
-Temporary with/without glossary Telegram selector was superseded by internal automatic glossary policy. Normal user flow should not expose glossary mode buttons.
-
-### 2026-06-15 - Automatic glossary local/fake foundations
-
-Local/fake prepared-glossary prep service, beta-safety reservation around prep, generic TXT/DOCX/EPUB prepared-package runtime resolver and owner-only diagnostic sidecar extensions were added. These do not approve rollout, cache reuse, release claims or live provider use by themselves.
-
 ## Open Owner Questions
 
-- When should free closed beta go/no-go happen after Gate B evidence?
-- What is the final retention/delete/TTL policy for beta?
-- What is the acceptable DOCX visual QA threshold?
-- What is the restore rehearsal cadence?
-- When should paid beta planning restart?
-- Which future formats should be prioritized after TXT/DOCX/EPUB stabilize?
-- How much raw diagnostic material should be retained in owner-only archives for release-version runs?
+- What exact ICP should Gate 0 target first: author, editor, rightsholder or small publisher?
+- What is the minimum manual glossary control surface for Gate 1?
+- Which 3-5 representative documents should be used for first before/after evidence?
+- What threshold makes a translation “usable draft” for design-partner alpha?
+- What is the final retention/delete/TTL policy for CAT projects?
+- When should paid beta planning restart after quality/workflow evidence?
 
 ## Safe Tasks For Agents
 
@@ -182,7 +152,7 @@ Proceed without extra confirmation:
 - local inspection of outputs, `var`, diagnostics, `.env*`, secrets and raw text when relevant;
 - translation QA over owner/local materials;
 - docs cleanup and archive organization;
-- non-destructive local analysis.
+- no-code planning and issue comments that stay metadata-only and within owner instructions.
 
 Ask first:
 
@@ -200,10 +170,12 @@ Ask first:
 Start with the task, not the archive.
 
 1. Read `AGENTS.md`.
-2. Read this handoff only for current-state/context tasks.
-3. Read touched files and nearby tests for implementation.
-4. Use `DOCUMENT_INDEX.md` and `docs/archive/README.md` for historical lookup.
-5. Do not treat archived history as current instructions unless the active docs link to it or the owner asks.
+2. For strategy/release questions, read `docs/CAT_WORKFLOW_GATES.md` and #813 first.
+3. For current-state/context tasks, read this handoff and `CURRENT_PROJECT_STATE.md`.
+4. For implementation, read touched files and nearby tests.
+5. Use `DOCUMENT_INDEX.md` and `docs/archive/README.md` for historical lookup.
+6. Do not treat old Gate B/C as the active product roadmap.
+7. Do not treat archived history as current instructions unless the active docs link to it or the owner asks.
 
 ## Archive Links
 
