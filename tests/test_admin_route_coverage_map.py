@@ -968,12 +968,12 @@ ROUTE_COVERAGE_MAP = (
         "method": "POST",
         "path": "/admin/workbench/glossary/terms/add",
         "handler": "workbench_term_add",
-        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
         "mutating": True,
         "destructive": False,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": "local_only_not_wired",
+        "audit_coverage": "local_only_ephemeral",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_WORKBENCH_MUTATE",
     },
@@ -981,12 +981,12 @@ ROUTE_COVERAGE_MAP = (
         "method": "POST",
         "path": "/admin/workbench/glossary/terms/{term_id}/edit",
         "handler": "workbench_term_edit",
-        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
         "mutating": True,
         "destructive": False,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": "local_only_not_wired",
+        "audit_coverage": "local_only_ephemeral",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_WORKBENCH_MUTATE",
     },
@@ -1000,6 +1000,19 @@ ROUTE_COVERAGE_MAP = (
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
         "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/delete",
+        "handler": "workbench_term_delete",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
+        "mutating": True,
+        "destructive": True,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_ephemeral",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_WORKBENCH_MUTATE",
     },
@@ -1057,16 +1070,29 @@ ROUTE_COVERAGE_MAP = (
     },
     {
         "method": "POST",
-        "path": "/admin/workbench/glossary/check",
-        "handler": "workbench_check_selected",
-        "sensitivity": "workbench_glossary_read",
+        "path": "/admin/workbench/glossary/approve",
+        "handler": "workbench_approve_glossary",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
         "mutating": True,
         "destructive": False,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "audit_coverage": "local_only_ephemeral",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
-        "future_permission": "TBD_WORKBENCH_VIEW",
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/check",
+        "handler": "workbench_check_selected",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_ephemeral",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
     },
 )
 
@@ -1117,8 +1143,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 79)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 32)
+        self.assertEqual(len(actual), 81)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 34)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1136,8 +1162,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 32)
-        self.assertEqual(len(destructive), 4)
+        self.assertEqual(len(mutating), 34)
+        self.assertEqual(len(destructive), 5)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
         self.assertIn("TBD_USER_ACTIVITY_VIEW", tbd_permissions)
@@ -1149,6 +1175,35 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             "TBD_QUALITY_RUN_MUTATION",
         )
         self.assertNotEqual(quality_run_entry["future_permission"], "VIEW_OPERATIONS")
+
+        glossary_entries = {
+            entry["path"]: entry
+            for entry in ROUTE_COVERAGE_MAP
+            if entry["method"] == "POST"
+            and entry["path"]
+            in {
+                "/admin/workbench/glossary/terms/add",
+                "/admin/workbench/glossary/terms/{term_id}/edit",
+                "/admin/workbench/glossary/approve",
+                "/admin/workbench/glossary/check",
+                "/admin/workbench/glossary/terms/{term_id}/delete",
+            }
+        }
+        self.assertEqual(len(glossary_entries), 5)
+        for path, entry in glossary_entries.items():
+            with self.subTest(glossary_route=path):
+                self.assertEqual(
+                    entry["sensitivity"],
+                    "workbench_glossary_local_ephemeral_mutation",
+                )
+                self.assertEqual(entry["audit_coverage"], "local_only_ephemeral")
+                self.assertTrue(entry["mutating"])
+                self.assertEqual(entry["future_permission"], "TBD_WORKBENCH_MUTATE")
+        self.assertTrue(
+            glossary_entries["/admin/workbench/glossary/terms/{term_id}/delete"][
+                "destructive"
+            ]
+        )
 
         for entry in ROUTE_COVERAGE_MAP:
             with self.subTest(route=(entry["method"], entry["path"])):

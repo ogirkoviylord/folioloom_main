@@ -225,12 +225,8 @@ def create_workbench_router(
     router = APIRouter(include_in_schema=False)
     csrf_guarded = _WorkbenchCSRFGuard(session_manager)
 
-    def _render_select(
-        *, injected: bool, csrf_token: str = ""
-    ) -> HTMLResponse:
-        return _html(
-            render_workbench_select(csrf_token=csrf_token, injected=injected)
-        )
+    def _render_select(*, injected: bool, csrf_token: str = "") -> HTMLResponse:
+        return _html(render_workbench_select(csrf_token=csrf_token, injected=injected))
 
     def _render_recovery(*, reason: str, document_id: str = "") -> HTMLResponse:
         return _html(
@@ -249,12 +245,8 @@ def create_workbench_router(
     ) -> WorkbenchSessionState:
         sid = session.actor_id if session is not None else None
         if not document_id:
-            return get_or_seed_workbench_session(
-                document_id=None, session_id=sid
-            )
-        return get_or_seed_workbench_session(
-            document_id=document_id, session_id=sid
-        )
+            return get_or_seed_workbench_session(document_id=None, session_id=sid)
+        return get_or_seed_workbench_session(document_id=document_id, session_id=sid)
 
     def _maybe_apply_stale_drift(
         state: WorkbenchSessionState,
@@ -286,9 +278,7 @@ def create_workbench_router(
     async def workbench_root(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         document_id = request.query_params.get("document") or None
         if not document_id:
             return RedirectResponse(
@@ -303,33 +293,25 @@ def create_workbench_router(
     async def workbench_select(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         return _render_select(injected=False, csrf_token=session.csrf_token)
 
     @router.get("/recovery", response_class=HTMLResponse)
     async def workbench_recovery(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         reason = request.query_params.get("reason") or "invalid"
         if reason not in {"stale", "unavailable", "not-wired", "invalid"}:
             reason = "invalid"
         document_id = request.query_params.get("document") or ""
-        return _render_recovery(
-            reason=reason, document_id=document_id
-        )
+        return _render_recovery(reason=reason, document_id=document_id)
 
     @router.get("/glossary", response_class=HTMLResponse)
     async def workbench_glossary(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         document_id = request.query_params.get("document") or None
         state = _resolve_state(document_id, session=session)
         _maybe_apply_stale_drift(state, document_id=document_id)
@@ -346,15 +328,18 @@ def create_workbench_router(
                 state=state,
                 csrf_token=session.csrf_token,
                 show_add_form=request.query_params.get("add") == "1",
+                edit_term_id=request.query_params.get("edit"),
                 active_filter=active_filter,
                 not_wired_after_post=not_wired,
                 glossary_projection=(
                     project_workbench_glossary_rehearsal(
-                        glossary_rehearsal_fixture
+                        state.local_check_result or glossary_rehearsal_fixture
                     )
-                    if glossary_rehearsal_fixture is not None
+                    if state.local_check_result is not None
+                    or glossary_rehearsal_fixture is not None
                     else None
                 ),
+                local_check_block_reason=state.local_check_block_reason,
             )
         )
 
@@ -362,9 +347,7 @@ def create_workbench_router(
     async def workbench_future(request: Request) -> Response:
         session = _session_or_none(request, session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         stage = request.query_params.get("stage") or "translate"
         return _render_future(stage=stage)
 
@@ -385,9 +368,7 @@ def create_workbench_router(
         if state.document.document_id:
             document = quote(state.document.document_id, safe="")
             target = f"/admin/workbench/glossary?document={document}&not_wired=1"
-        return RedirectResponse(
-            target, status_code=HTTPStatus.SEE_OTHER
-        )
+        return RedirectResponse(target, status_code=HTTPStatus.SEE_OTHER)
 
     @router.post(
         "/glossary/terms/add",
@@ -398,8 +379,18 @@ def create_workbench_router(
         if not isinstance(session, AdminSession):
             return session  # already a 401/403 Response
         document_id = request.query_params.get("document") or None
-        return await _mutating_glossary_redirect(
-            request, session=session, document_id=document_id
+        form = await _urlencoded_form(request)
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.append_term(
+            source=form.get("source", ""),
+            target=form.get("target", ""),
+            type_=form.get("type", "term"),
+            notes=form.get("notes", ""),
+        )
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.post(
@@ -411,17 +402,57 @@ def create_workbench_router(
         if not isinstance(session, AdminSession):
             return session
         document_id = request.query_params.get("document") or None
-        return await _mutating_glossary_redirect(
-            request, session=session, document_id=document_id
+        form = await _urlencoded_form(request)
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.replace_term(
+            term_id,
+            source=form.get("source", ""),
+            target=form.get("target", ""),
+            type_=form.get("type", "term"),
+            notes=form.get("notes", ""),
+        )
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/delete",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_delete(request: Request, term_id: str) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.delete_term(term_id)
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.post("/glossary/approve", response_class=HTMLResponse)
+    async def workbench_approve_glossary(request: Request) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.approve_current_glossary()
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.post(
         "/glossary/terms/{term_id}/accept",
         response_class=HTMLResponse,
     )
-    async def workbench_term_accept(
-        request: Request, term_id: str
-    ) -> Response:
+    async def workbench_term_accept(request: Request, term_id: str) -> Response:
         session = await csrf_guarded.verify(request)
         if not isinstance(session, AdminSession):
             return session
@@ -434,9 +465,7 @@ def create_workbench_router(
         "/glossary/terms/{term_id}/reject",
         response_class=HTMLResponse,
     )
-    async def workbench_term_reject(
-        request: Request, term_id: str
-    ) -> Response:
+    async def workbench_term_reject(request: Request, term_id: str) -> Response:
         session = await csrf_guarded.verify(request)
         if not isinstance(session, AdminSession):
             return session
@@ -449,9 +478,7 @@ def create_workbench_router(
         "/glossary/terms/{term_id}/lock",
         response_class=HTMLResponse,
     )
-    async def workbench_term_lock(
-        request: Request, term_id: str
-    ) -> Response:
+    async def workbench_term_lock(request: Request, term_id: str) -> Response:
         session = await csrf_guarded.verify(request)
         if not isinstance(session, AdminSession):
             return session
@@ -464,9 +491,7 @@ def create_workbench_router(
         "/glossary/terms/{term_id}/unlock",
         response_class=HTMLResponse,
     )
-    async def workbench_term_unlock(
-        request: Request, term_id: str
-    ) -> Response:
+    async def workbench_term_unlock(request: Request, term_id: str) -> Response:
         session = await csrf_guarded.verify(request)
         if not isinstance(session, AdminSession):
             return session
@@ -484,8 +509,54 @@ def create_workbench_router(
         if not isinstance(session, AdminSession):
             return session
         document_id = request.query_params.get("document") or None
-        return await _mutating_glossary_redirect(
-            request, session=session, document_id=document_id
+        form = await _urlencoded_form(request)
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        from translator_service.format_adapters.contracts import (
+            FormatTextBlock,
+            FormatTranslationUnit,
+        )
+        from translator_service.glossary_selection import GlossarySelectionBudget
+        from translator_service.manual_glossary_rehearsal import (
+            ManualGlossaryRehearsalBoundaryError,
+        )
+        from translator_service.structure_optimizer import PromptTier, TextBlockKind
+        from translator_service.workbench_glossary_bridge import (
+            rehearse_workbench_glossary,
+        )
+
+        selected = state.terms.get(form.get("selected_term_ids", ""))
+        if selected is None:
+            state.local_check_result = None
+            state.local_check_block_reason = "missing_selected_term"
+        else:
+            work_unit = FormatTranslationUnit(
+                sequence=1,
+                blocks=(
+                    FormatTextBlock(
+                        index=0,
+                        source_block_id=f"workbench-block:{selected.id}",
+                        text=selected.source,
+                        kind=TextBlockKind.PLAIN,
+                    ),
+                ),
+                prompt_tier=PromptTier.PLAIN,
+            )
+            try:
+                state.local_check_result = rehearse_workbench_glossary(
+                    state.document.document_id,
+                    state.manual_approval,
+                    state.glossary_snapshot(),
+                    work_unit,
+                    selection_budget=GlossarySelectionBudget(max_prompt_tokens=200),
+                )
+                state.local_check_block_reason = None
+            except ManualGlossaryRehearsalBoundaryError as error:
+                state.local_check_result = None
+                state.local_check_block_reason = error.reason
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.post(
@@ -520,9 +591,7 @@ class _WorkbenchCSRFGuard:
     async def verify(self, request: Request) -> Response | AdminSession:
         session = _session_or_none(request, self._session_manager)
         if session is None:
-            return RedirectResponse(
-                "/admin/login", status_code=HTTPStatus.SEE_OTHER
-            )
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         form = await _urlencoded_form(request)
         if not self._session_manager.verify_csrf(session, form.get("csrf_token")):
             return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
@@ -664,9 +733,7 @@ def create_admin_router(settings: Settings) -> APIRouter:
             active="ai_providers",
             body=lambda session: deepseek_keys_body(
                 csrf_token=session.csrf_token,
-                key_pools=(
-                    key_pools := _ai_provider_key_pools(settings)
-                ),
+                key_pools=(key_pools := _ai_provider_key_pools(settings)),
                 runtime_reload_states=_ai_provider_runtime_reload_states(settings),
                 key_validations=dict(
                     _ai_provider_key_validation_views(
@@ -3473,9 +3540,13 @@ def _translation_result_file_name(
     if not object_key:
         return None
     try:
-        return LocalObjectStorage(settings.object_storage_root).get_metadata(
-            object_key,
-        ).file_name
+        return (
+            LocalObjectStorage(settings.object_storage_root)
+            .get_metadata(
+                object_key,
+            )
+            .file_name
+        )
     except (FileNotFoundError, OSError, ValueError):
         return None
 
@@ -3515,9 +3586,7 @@ def _translation_progress_snapshots(
     finally:
         store.close()
     return {
-        job_id: snapshot
-        for job_id, snapshot in snapshots.items()
-        if snapshot.available
+        job_id: snapshot for job_id, snapshot in snapshots.items() if snapshot.available
     }
 
 
@@ -3605,11 +3674,9 @@ def _translation_text_diagnostics(
             store.list_work_units(job_id),
             key=lambda unit: getattr(unit, "sequence", 0),
         )
-        selected = [
-            unit
-            for unit in units
-            if unit.sequence >= start_sequence
-        ][: max(0, limit)]
+        selected = [unit for unit in units if unit.sequence >= start_sequence][
+            : max(0, limit)
+        ]
         rows = []
         for unit in selected:
             rows.append(
