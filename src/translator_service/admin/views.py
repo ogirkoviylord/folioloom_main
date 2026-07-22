@@ -398,6 +398,7 @@ def overview_body(action_center: ActionCenter) -> str:
         </div>
         """
     return f"""
+    {overview_open_workbench_cta()}
     <section class="toolbar-panel">
       <div>
         <h3>Triage inbox</h3>
@@ -409,6 +410,21 @@ def overview_body(action_center: ActionCenter) -> str:
     </section>
     <section class="panel action-center">
       <div class="action-list">{rows}</div>
+    </section>
+    """
+
+
+def overview_open_workbench_cta() -> str:
+    """Single calm entry point for the bounded Workbench rehearsal."""
+    return """
+    <section class="panel workbench-entry-cta">
+      <div>
+        <h3>Workbench</h3>
+        <p>Open the local glossary rehearsal for a selected document.</p>
+      </div>
+      <a class="action-control action-control-view" href="/admin/workbench-entry">
+        Open Workbench
+      </a>
     </section>
     """
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Protocol, cast
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIRouter
 
 from translator_service.admin.routes import create_admin_router
 from translator_service.config import Settings
@@ -884,7 +886,216 @@ ROUTE_COVERAGE_MAP = (
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "VIEW_AUDIT_LOG",
     },
+    {
+        "method": "GET",
+        "path": "/admin/workbench-entry",
+        "handler": "workbench_entry",
+        "sensitivity": "owner_only_redirect",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_ENTRY",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/",
+        "handler": "workbench_root",
+        "sensitivity": "workbench_shell_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/select",
+        "handler": "workbench_select",
+        "sensitivity": "workbench_shell_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/recovery",
+        "handler": "workbench_recovery",
+        "sensitivity": "workbench_shell_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/glossary",
+        "handler": "workbench_glossary",
+        "sensitivity": "workbench_glossary_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/future",
+        "handler": "workbench_future",
+        "sensitivity": "workbench_placeholder_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/add",
+        "handler": "workbench_term_add",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/edit",
+        "handler": "workbench_term_edit",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/accept",
+        "handler": "workbench_term_accept",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/reject",
+        "handler": "workbench_term_reject",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/lock",
+        "handler": "workbench_term_lock",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/unlock",
+        "handler": "workbench_term_unlock",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/terms/lock-all-approved",
+        "handler": "workbench_lock_all_approved",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/check",
+        "handler": "workbench_check_selected",
+        "sensitivity": "workbench_glossary_read",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
+    },
 )
+
+
+class _RouteInventoryEntry(Protocol):
+    methods: set[str]
+    name: str
+    path: str
+
+
+class _EffectiveRouteContext(Protocol):
+    original_route: object
+
+
+def _router_api_routes(router: APIRouter) -> Iterator[_RouteInventoryEntry]:
+    """Yield effective API routes across FastAPI router storage layouts."""
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            yield route
+            continue
+
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        if not callable(effective_route_contexts):
+            continue
+        iter_contexts = cast(Callable[[], Iterator[object]], effective_route_contexts)
+        for raw_context in iter_contexts():
+            context = cast(_EffectiveRouteContext, raw_context)
+            if isinstance(context.original_route, APIRoute):
+                yield cast(_RouteInventoryEntry, raw_context)
 
 
 class AdminRouteCoverageMapTest(unittest.TestCase):
@@ -897,8 +1108,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
         )
         actual = {
             (method, route.path): route.name
-            for route in router.routes
-            if isinstance(route, APIRoute)
+            for route in _router_api_routes(router)
             for method in route.methods
             if method not in {"HEAD", "OPTIONS"}
         }
@@ -907,8 +1117,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 65)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 24)
+        self.assertEqual(len(actual), 79)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 32)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -926,7 +1136,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 24)
+        self.assertEqual(len(mutating), 32)
         self.assertEqual(len(destructive), 4)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
