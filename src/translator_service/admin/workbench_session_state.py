@@ -210,6 +210,9 @@ class WorkbenchSessionState:
     )
     approval_state: ApprovalState = ApprovalState.READY
     last_error: str | None = None
+    manual_approval: object | None = None
+    local_check_result: object | None = None
+    local_check_block_reason: str | None = None
 
     # --- helpers ----------------------------------------------------------
 
@@ -246,8 +249,7 @@ class WorkbenchSessionState:
             term.status == TermStatus.LOCKED for term in self.terms.values()
         )
         has_approved = any(
-            term.status == TermStatus.APPROVED
-            for term in self.terms.values()
+            term.status == TermStatus.APPROVED for term in self.terms.values()
         )
         if not self.terms:
             # Packet §5.2 row 7: empty seed → READY-by-default.
@@ -270,6 +272,75 @@ class WorkbenchSessionState:
         for term in self.terms.values():
             snapshot[term.status.value] += 1
         self.health_snapshot = snapshot
+
+    def glossary_snapshot(self):
+        """Build the current local-only snapshot deterministically from terms."""
+        from translator_service.glossary_contracts import (
+            GlossaryEntry,
+            GlossaryEntryCategory,
+            GlossaryEntryStatus,
+            GlossaryEvidenceRef,
+            GlossaryEvidenceSurface,
+            GlossaryEvidenceType,
+            GlossaryLayer,
+            GlossarySnapshot,
+            GlossaryStrategy,
+        )
+
+        entries = []
+        evidence = []
+        for index, term in enumerate(self.terms.values(), start=1):
+            evidence_id = f"workbench:{term.id}"
+            evidence.append(
+                GlossaryEvidenceRef(
+                    evidence_id=evidence_id,
+                    evidence_type=GlossaryEvidenceType.OWNER_PIN,
+                    unit_sequence=index,
+                    source_block_id=f"workbench-block:{term.id}",
+                    surface=GlossaryEvidenceSurface.BODY,
+                )
+            )
+            entries.append(
+                GlossaryEntry(
+                    entry_id=f"workbench-entry:{term.id}",
+                    category=(
+                        GlossaryEntryCategory.NAME
+                        if term.type == "name"
+                        else GlossaryEntryCategory.TERM
+                    ),
+                    layer=GlossaryLayer.HARD,
+                    status=GlossaryEntryStatus.OWNER_PINNED,
+                    source_canonical=term.source,
+                    target_canonical=term.target,
+                    evidence_refs=(evidence_id,),
+                    confidence=1.0,
+                    strategy=GlossaryStrategy.TRANSLITERATE,
+                )
+            )
+        return GlossarySnapshot(
+            snapshot_id=f"workbench:{self.document.signature}",
+            source_language=self.document.source_language,
+            target_language=self.document.target_language,
+            entries=tuple(entries),
+            evidence=tuple(evidence),
+        )
+
+    def approve_current_glossary(self) -> None:
+        """Record explicit local approval for this exact document/snapshot."""
+        from translator_service.glossary_contracts import glossary_snapshot_signature
+        from translator_service.manual_glossary_rehearsal import ManualGlossaryApproval
+
+        snapshot = self.glossary_snapshot()
+        self.manual_approval = ManualGlossaryApproval(
+            document_ref=self.document.document_id,
+            glossary_signature=glossary_snapshot_signature(snapshot),
+        )
+        self.local_check_result = None
+        self.local_check_block_reason = None
+
+    def clear_local_check_observation(self) -> None:
+        self.local_check_result = None
+        self.local_check_block_reason = None
 
     # --- mutating actions (all fail-closed at this slice) ----------------
 
@@ -303,6 +374,7 @@ class WorkbenchSessionState:
             notes=notes.strip(),
         )
         self.terms[term.id] = term
+        self.clear_local_check_observation()
         self.refresh_health_snapshot()
         self.refresh_approval_state()
         return term, None
@@ -344,13 +416,12 @@ class WorkbenchSessionState:
             existing.status = TermStatus.DRAFT
             existing.locked = False
         existing.recompute_signature()
+        self.clear_local_check_observation()
         self.refresh_health_snapshot()
         self.refresh_approval_state()
         return existing, None
 
-    def accept_term(
-        self, term_id: str
-    ) -> tuple[Term | None, str | None]:
+    def accept_term(self, term_id: str) -> tuple[Term | None, str | None]:
         """Accept a candidate / draft as locally-approved.
 
         Allowed from :attr:`TermStatus.DRAFT` or
@@ -363,9 +434,7 @@ class WorkbenchSessionState:
             return None, "already_approved"
         return self._apply_term_status(existing, target=TermStatus.APPROVED)
 
-    def reject_term(
-        self, term_id: str
-    ) -> tuple[Term | None, str | None]:
+    def reject_term(self, term_id: str) -> tuple[Term | None, str | None]:
         """Reject a term. Allowed from any non-locked status."""
         existing, reason = self._mutating_precheck(term_id)
         if existing is None:
@@ -374,9 +443,7 @@ class WorkbenchSessionState:
             return None, "locked"
         return self._apply_term_status(existing, target=TermStatus.REJECTED)
 
-    def lock_term(
-        self, term_id: str
-    ) -> tuple[Term | None, str | None]:
+    def lock_term(self, term_id: str) -> tuple[Term | None, str | None]:
         """Lock an approved term. Allowed only from :attr:`TermStatus.APPROVED`."""
         existing, reason = self._mutating_precheck(term_id)
         if existing is None:
@@ -385,9 +452,7 @@ class WorkbenchSessionState:
             return None, "not_approvable"
         return self._apply_term_status(existing, target=TermStatus.LOCKED)
 
-    def unlock_term(
-        self, term_id: str
-    ) -> tuple[Term | None, str | None]:
+    def unlock_term(self, term_id: str) -> tuple[Term | None, str | None]:
         """Unlock a locked term back to approved.
 
         Allowed only from :attr:`TermStatus.LOCKED`.
@@ -414,9 +479,7 @@ class WorkbenchSessionState:
                     locked_ids.append(updated.id)
         return locked_ids
 
-    def _mutating_precheck(
-        self, term_id: str
-    ) -> tuple[Term | None, str | None]:
+    def _mutating_precheck(self, term_id: str) -> tuple[Term | None, str | None]:
         if self.last_error == "not-wired":
             return None, "not-wired"
         if self.approval_state in (ApprovalState.STALE, ApprovalState.UNAVAILABLE):
@@ -435,9 +498,8 @@ class WorkbenchSessionState:
         existing.recompute_signature()
         if target == TermStatus.REJECTED:
             # Reject clears the "approved+locked AND 0 conflict" gate.
-            if (
-                self.approval_state == ApprovalState.READY
-                and not any(t.status == TermStatus.LOCKED for t in self.terms.values())
+            if self.approval_state == ApprovalState.READY and not any(
+                t.status == TermStatus.LOCKED for t in self.terms.values()
             ):
                 self.approval_state = ApprovalState.NOT_READY
         self.refresh_health_snapshot()
@@ -582,6 +644,7 @@ def empty_workbench_session() -> WorkbenchSessionState:
     global :data:`WORKBENCH_SESSION_STATE`.
     """
     from datetime import UTC, datetime
+
     now = datetime.now(UTC)
     doc = DocumentContext(
         document_id="",

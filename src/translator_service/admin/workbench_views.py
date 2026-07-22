@@ -53,25 +53,17 @@ WORKBENCH_PLACEHOLDER_STAGES: tuple[tuple[str, str], ...] = (
 #: Exact copy (packet §5.4). Kept as a module-level table so the tests can
 #: pin every literal and the implementation stays honest.
 WORKBENCH_COPY = {
-    "not_injected": (
-        "Select a document in Admin to open it in Workbench."
-    ),
+    "not_injected": ("Select a document in Admin to open it in Workbench."),
     "injected_but_invalid": (
         "This document reference is not available in this slice. "
         "Return to Admin and try again."
     ),
-    "stale_injection": (
-        "Document reference is stale. Refresh in Admin and reopen."
-    ),
+    "stale_injection": ("Document reference is stale. Refresh in Admin and reopen."),
     "glossary_empty": (
         "No terms yet. Add your first term to begin shaping the glossary."
     ),
-    "ready_helper": (
-        "Glossary is ready. Lock approved terms so they cannot drift."
-    ),
-    "not_ready_helper": (
-        "Approve at least one term to mark the glossary as ready."
-    ),
+    "ready_helper": ("Glossary is ready. Lock approved terms so they cannot drift."),
+    "not_ready_helper": ("Approve at least one term to mark the glossary as ready."),
     "stale_top_strip": (
         "This document was changed since the glossary was opened. "
         "Reopen from Admin to refresh."
@@ -79,12 +71,9 @@ WORKBENCH_COPY = {
     "unavailable_inline": (
         "Glossary control is not available right now. Try again in a moment."
     ),
-    "conflict_helper": (
-        "One or more terms are in conflict. Resolve them row by row."
-    ),
+    "conflict_helper": ("One or more terms are in conflict. Resolve them row by row."),
     "not_wired_after_post": (
-        "Saving is not wired in this slice. Your changes stay only "
-        "until you reload."
+        "Saving is not wired in this slice. Your changes stay only until you reload."
     ),
     "recovery_stale": (
         "This document was changed since the glossary was opened. "
@@ -94,19 +83,13 @@ WORKBENCH_COPY = {
         "Glossary control is not available right now. Try again in a moment."
     ),
     "recovery_not_wired": (
-        "Saving is not wired in this slice. Your terms stay only "
-        "until you reload."
+        "Saving is not wired in this slice. Your terms stay only until you reload."
     ),
-    "recovery_invalid": (
-        "This document reference is not valid. Return to Admin."
-    ),
+    "recovery_invalid": ("This document reference is not valid. Return to Admin."),
     "future_placeholder": (
-        "{title} is not part of this slice. It will appear here in a later "
-        "stage."
+        "{title} is not part of this slice. It will appear here in a later stage."
     ),
-    "locked_row_tooltip": (
-        "Locked. Unlock the term to edit or reject it."
-    ),
+    "locked_row_tooltip": ("Locked. Unlock the term to edit or reject it."),
     "disabled_row_tooltip": (
         "Glossary control is read-only until the document is reopened."
     ),
@@ -565,14 +548,12 @@ def _workbench_header(document_id: str, ephemeral_session_id: str) -> str:
 
 
 def _workbench_nav(active: str, document_id: str | None) -> str:
-    document_qs = (
-        f"?document={_safe_attr(document_id)}" if document_id else ""
-    )
+    document_qs = f"?document={_safe_attr(document_id)}" if document_id else ""
     glossary_href = f"/admin/workbench/glossary{document_qs}"
     aria_current_attr = ' aria-current="page"' if active == "glossary" else ""
     glossary_link = (
         f'<a class="wb-nav__link" href="{glossary_href}"{aria_current_attr}>'
-        '<span>Glossary</span></a>'
+        "<span>Glossary</span></a>"
     )
     placeholder_links: list[str] = []
     for stage_key, title in WORKBENCH_PLACEHOLDER_STAGES:
@@ -586,7 +567,7 @@ def _workbench_nav(active: str, document_id: str | None) -> str:
     return f"""
 <nav class="wb-nav" aria-label="Workbench navigation">
   {glossary_link}
-  {''.join(placeholder_links)}
+  {"".join(placeholder_links)}
 </nav>
 """
 
@@ -663,19 +644,11 @@ def _workbench_toolbar(
     no_terms = state.health_snapshot.get("total", 0) == 0
     has_approved = state.health_snapshot.get("approved", 0) > 0
     locked_or_approved = state.approval_state == ApprovalState.READY
-    disable_check = (
-        no_terms or state.approval_state == ApprovalState.CONFLICT
-    )
-    disable_lock_all = (
-        not has_approved
-        or not locked_or_approved
-    )
-    check_disabled_attr = (
-        ' disabled aria-disabled="true"' if disable_check else ""
-    )
-    lock_disabled_attr = (
-        ' disabled aria-disabled="true"' if disable_lock_all else ""
-    )
+    disable_check = no_terms or state.approval_state == ApprovalState.CONFLICT
+    disable_lock_all = not has_approved or not locked_or_approved
+    check_disabled_attr = ' disabled aria-disabled="true"' if disable_check else ""
+    approve_disabled_attr = ' disabled aria-disabled="true"' if no_terms else ""
+    lock_disabled_attr = ' disabled aria-disabled="true"' if disable_lock_all else ""
     document_qs = (
         f"?document={quote(state.document.document_id, safe='')}"
         if state.document.document_id
@@ -698,6 +671,11 @@ def _workbench_toolbar(
   <div class="wb-toolbar__buttons">
     {add_control}
     <button type="submit" class="wb-button wb-button--secondary"
+      data-action="approve-glossary"{approve_disabled_attr}
+      formaction="/admin/workbench/glossary/approve{document_qs}"
+      title="Explicitly approve this exact local glossary snapshot">
+      Approve current snapshot</button>
+    <button type="submit" class="wb-button wb-button--secondary"
       data-action="check-selected"{check_disabled_attr}
       title="Runs a local-only check shape on selected terms">
       Check selected terms</button>
@@ -717,9 +695,7 @@ def _workbench_toolbar(
 """
 
 
-def _filter_chip(
-    key: str, label: str, active_filter: str, document_qs: str
-) -> str:
+def _filter_chip(key: str, label: str, active_filter: str, document_qs: str) -> str:
     safe_label = _safe_attr(label)
     is_active = active_filter == key
     href = f"/admin/workbench/glossary{document_qs}" + (
@@ -727,9 +703,7 @@ def _filter_chip(
     )
     aria_current = ' aria-current="page"' if is_active else ""
     css = "wb-pill wb-pill--locked" if is_active else "wb-pill wb-pill--pending"
-    return (
-        f'<a class="{css}" href="{href}"{aria_current}>{safe_label}</a>'
-    )
+    return f'<a class="{css}" href="{href}"{aria_current}>{safe_label}</a>'
 
 
 # ---------------------------------------------------------------------------
@@ -747,7 +721,7 @@ def _workbench_term_form(
     is_edit = mode == "edit"
     document_qs = f"?document={quote(document_id, safe='')}" if document_id else ""
     action = (
-        f"/admin/workbench/glossary/terms/{_safe_attr(term.id)}/edit"
+        f"/admin/workbench/glossary/terms/{_safe_attr(term.id)}/edit{document_qs}"
         if is_edit and term is not None
         else f"/admin/workbench/glossary/terms/add{document_qs}"
     )
@@ -760,7 +734,7 @@ def _workbench_term_form(
         type_value = "term"
     type_options = "".join(
         f'<option value="{_safe_attr(t)}"'
-        + (' selected' if t == type_value else "")
+        + (" selected" if t == type_value else "")
         + f">{_safe_attr(t.capitalize())}</option>"
         for t in TERM_TYPES
     )
@@ -786,7 +760,7 @@ def _workbench_term_form(
   </div>
   <div class="wb-term-form__actions">
     <button type="submit" class="wb-button wb-button--primary">
-      {'Save changes' if is_edit else 'Add term'}
+      {"Save changes" if is_edit else "Add term"}
     </button>
     <a class="wb-button wb-button--secondary" href="/admin/workbench/glossary">
       Cancel
@@ -828,16 +802,12 @@ def _workbench_term_row(
         edit_disabled = False
         reject_disabled = is_conflict  # conflict row keeps Reject disabled
 
-    accept_disabled = (
-        row_actions_disabled
-        or term.status in (TermStatus.APPROVED, TermStatus.LOCKED)
+    accept_disabled = row_actions_disabled or term.status in (
+        TermStatus.APPROVED,
+        TermStatus.LOCKED,
     )
-    lock_disabled = (
-        row_actions_disabled or term.status != TermStatus.APPROVED
-    )
-    unlock_disabled = (
-        row_actions_disabled or term.status != TermStatus.LOCKED
-    )
+    lock_disabled = row_actions_disabled or term.status != TermStatus.APPROVED
+    unlock_disabled = row_actions_disabled or term.status != TermStatus.LOCKED
     selection_disabled = (
         row_actions_disabled or state.approval_state == ApprovalState.CONFLICT
     )
@@ -854,9 +824,7 @@ def _workbench_term_row(
         action: str,
     ) -> str:
         cls = "wb-button wb-button--secondary"
-        attr_disabled = (
-            ' disabled aria-disabled="true"' if disabled else ""
-        )
+        attr_disabled = ' disabled aria-disabled="true"' if disabled else ""
         return (
             f'<form method="post" action="{endpoint}" '
             f'style="display:inline">'
@@ -868,12 +836,17 @@ def _workbench_term_row(
             f'value="{_safe_attr(csrf_token)}"></form>'
         )
 
-    edit_action = _action(
-        label="Edit",
-        endpoint=f"/admin/workbench/glossary/terms/{term.id}/edit",
-        disabled=edit_disabled,
-        title=edit_title,
-        action="edit",
+    document_qs = f"?document={quote(state.document.document_id, safe='')}"
+    edit_action = (
+        '<button type="button" class="wb-button wb-button--secondary" '
+        f'disabled aria-disabled="true" title="{_safe_attr(edit_title)}" '
+        'data-action="edit">Edit</button>'
+        if edit_disabled
+        else (
+            '<a class="wb-button wb-button--secondary" '
+            f'href="/admin/workbench/glossary{document_qs}&amp;edit={_safe_attr(term.id)}" '  # noqa: E501
+            f'title="{_safe_attr(edit_title)}" data-action="edit">Edit</a>'
+        )
     )
     accept_a = _action(
         label="Accept",
@@ -912,14 +885,14 @@ def _workbench_term_row(
 <article class="wb-term" id="wb-term-{_safe_attr(term.id)}"
   data-term-id="{_safe_attr(term.id)}"
   data-status="{_safe_attr(term.status.value)}"
-  data-locked="{('true' if locked else 'false')}">
+  data-locked="{("true" if locked else "false")}">
   <div class="wb-term__col">
     <small>Source</small>
-    <strong>{escape(term.source or '—')}</strong>
+    <strong>{escape(term.source or "—")}</strong>
   </div>
   <div class="wb-term__col">
     <small>Target</small>
-    <strong>{escape(term.target or '—')}</strong>
+    <strong>{escape(term.target or "—")}</strong>
   </div>
   <div class="wb-term__col">
     <small>Type / status</small>
@@ -941,7 +914,7 @@ def _workbench_term_row(
   </div>
   <details class="wb-term__details">
     <summary>Details</summary>
-    <p>Notes: {escape(term.notes) or '—'}</p>
+    <p>Notes: {escape(term.notes) or "—"}</p>
     <p>Last edited: <time datetime="{_safe_attr(last_edited)}">
       {_safe_attr(last_edited)}</time></p>
     <p>Signature: <code>{_safe_attr(term.signature)}</code></p>
@@ -950,9 +923,7 @@ def _workbench_term_row(
 """
 
 
-def _filter_terms(
-    terms: Iterable[Term], active_filter: str
-) -> list[Term]:
+def _filter_terms(terms: Iterable[Term], active_filter: str) -> list[Term]:
     rows = list(terms)
     if active_filter == "all":
         return rows
@@ -1016,13 +987,13 @@ def _workbench_helper_rail(
     <h3><span class="wb-helper-rail__dot wb-helper-rail__dot--{css_key}"
       aria-hidden="true"></span>Glossary health</h3>
     <dl class="wb-helper-rail__health">
-      <dt>Total</dt><dd>{int(health.get('total', 0))}</dd>
-      <dt>Approved</dt><dd>{int(health.get('approved', 0))}</dd>
-      <dt>Locked</dt><dd>{int(health.get('locked', 0))}</dd>
-      <dt>Pending</dt><dd>{int(health.get('pending', 0))}</dd>
-      <dt>Draft</dt><dd>{int(health.get('draft', 0))}</dd>
-      <dt>Rejected</dt><dd>{int(health.get('rejected', 0))}</dd>
-      <dt>Conflict</dt><dd>{int(health.get('conflict', 0))}</dd>
+      <dt>Total</dt><dd>{int(health.get("total", 0))}</dd>
+      <dt>Approved</dt><dd>{int(health.get("approved", 0))}</dd>
+      <dt>Locked</dt><dd>{int(health.get("locked", 0))}</dd>
+      <dt>Pending</dt><dd>{int(health.get("pending", 0))}</dd>
+      <dt>Draft</dt><dd>{int(health.get("draft", 0))}</dd>
+      <dt>Rejected</dt><dd>{int(health.get("rejected", 0))}</dd>
+      <dt>Conflict</dt><dd>{int(health.get("conflict", 0))}</dd>
     </dl>
   </section>
   <section class="wb-card">
@@ -1032,7 +1003,7 @@ def _workbench_helper_rail(
   </section>
   <details class="wb-card wb-helper-rail__about">
     <summary>About this slice</summary>
-    <p>{_safe_attr(WORKBENCH_COPY['about_this_slice'])}</p>
+    <p>{_safe_attr(WORKBENCH_COPY["about_this_slice"])}</p>
   </details>
 </aside>
 """
@@ -1061,11 +1032,7 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
     if state.approval_state == ApprovalState.CONFLICT:
         # Deep-link to first conflict term id if any.
         first_conflict = next(
-            (
-                t
-                for t in state.terms.values()
-                if t.status == TermStatus.CONFLICT
-            ),
+            (t for t in state.terms.values() if t.status == TermStatus.CONFLICT),
             None,
         )
         if first_conflict is not None:
@@ -1173,9 +1140,7 @@ def _filter_chip_from_request(filter_value: str | None) -> str:
     )
 
 
-def render_workbench_select(
-    *, csrf_token: str, injected: bool = False
-) -> str:
+def render_workbench_select(*, csrf_token: str, injected: bool = False) -> str:
     """Render the Select screen (packet §4.1).
 
     Args:
@@ -1213,9 +1178,11 @@ def render_workbench_glossary(
     state: WorkbenchSessionState,
     csrf_token: str,
     show_add_form: bool = False,
+    edit_term_id: str | None = None,
     active_filter: str = "all",
     not_wired_after_post: bool = False,
     glossary_projection: WorkbenchGlossaryProjection | None = None,
+    local_check_block_reason: str | None = None,
 ) -> str:
     """Render the main Glossary screen with an optional local observation."""
     rows = _filter_terms(state.terms.values(), active_filter)
@@ -1233,13 +1200,19 @@ def render_workbench_glossary(
         term_list_html = (
             '<div class="wb-term-list">'
             + "".join(
-                _workbench_term_row(state, t, csrf_token=csrf_token)
-                for t in rows
+                _workbench_term_row(state, t, csrf_token=csrf_token) for t in rows
             )
             + "</div>"
         )
     add_form = ""
-    if show_add_form:
+    if edit_term_id in state.terms:
+        add_form = _workbench_term_form(
+            mode="edit",
+            csrf_token=csrf_token,
+            document_id=state.document.document_id,
+            term=state.terms[edit_term_id],
+        )
+    elif show_add_form:
         add_form = _workbench_term_form(
             mode="add",
             csrf_token=csrf_token,
@@ -1248,6 +1221,16 @@ def render_workbench_glossary(
         )
     body = (
         document_strip
+        + (
+            '<section class="wb-card" '  # noqa: E501
+            'data-workbench-glossary-observation="fail-closed">'
+            "<h3>Local glossary check blocked</h3>"
+            f"<p>State: fail closed. Reason: "
+            f"<code>{_safe_attr(local_check_block_reason)}</code>.</p>"
+            "</section>"
+            if local_check_block_reason
+            else ""
+        )
         + _workbench_glossary_observation(glossary_projection)
         + toolbar
         + add_form
