@@ -21,6 +21,7 @@ import os
 import re
 import unittest
 from tempfile import TemporaryDirectory
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
@@ -121,25 +122,58 @@ class WorkbenchRoutesTest(unittest.TestCase):
         # Helper rail is hidden when total=0.
         self.assertNotIn('aria-label="Workbench helper rail"', response.text)
 
-    def test_add_term_control_opens_form_with_document_and_csrf(self) -> None:
-        document_id = "opaque-add-control"
+    def test_add_term_form_preserves_encoded_document_context(self) -> None:
+        document_id = "proof document/&?"
+        encoded_document_id = quote(document_id, safe="")
+        add_form_action = (
+            "/admin/workbench/glossary/terms/add"
+            f"?document={encoded_document_id}"
+        )
         response = self.client.get(
-            f"/admin/workbench/glossary?document={document_id}"
+            f"/admin/workbench/glossary?document={encoded_document_id}"
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(
-            f'href="/admin/workbench/glossary?document={document_id}&amp;add=1"',
+            f'href="/admin/workbench/glossary?document={encoded_document_id}&amp;add=1"',
             response.text,
         )
 
         form_page = self.client.get(
-            f"/admin/workbench/glossary?document={document_id}&add=1"
+            f"/admin/workbench/glossary?document={encoded_document_id}&add=1"
         )
         self.assertEqual(form_page.status_code, 200)
         self.assertIn('id="wb-add-term-form"', form_page.text)
+        self.assertIn(f'action="{add_form_action}"', form_page.text)
         self.assertIn(
             f'name="csrf_token" value="{self.csrf_token}"', form_page.text
         )
+
+        successful_post = self.client.post(
+            add_form_action,
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(successful_post.status_code, 303)
+        self.assertEqual(
+            successful_post.headers["location"],
+            f"/admin/workbench/glossary?document={encoded_document_id}&not_wired=1",
+        )
+
+        bad_csrf = self.client.post(
+            add_form_action,
+            data={"csrf_token": "wrong-token"},
+            follow_redirects=False,
+        )
+        self.assertEqual(bad_csrf.status_code, 403)
+
+        self.client.cookies.clear()
+        anonymous_post = self.client.post(
+            add_form_action,
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(anonymous_post.status_code, 303)
+        self.assertTrue(anonymous_post.headers["location"].endswith("/admin/login"))
 
     def test_term_rows_expose_selection_inputs_for_check_form(self) -> None:
         document_id = "opaque-term-selection"

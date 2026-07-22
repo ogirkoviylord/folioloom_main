@@ -736,13 +736,15 @@ def _workbench_term_form(
     *,
     mode: str,
     csrf_token: str,
+    document_id: str,
     term: Term | None = None,
 ) -> str:
     is_edit = mode == "edit"
+    document_qs = f"?document={quote(document_id, safe='')}" if document_id else ""
     action = (
         f"/admin/workbench/glossary/terms/{_safe_attr(term.id)}/edit"
         if is_edit and term is not None
-        else "/admin/workbench/glossary/terms/add"
+        else f"/admin/workbench/glossary/terms/add{document_qs}"
     )
     legend = "Edit term" if is_edit else "Add term"
     source_value = _safe_attr(term.source) if term else ""
@@ -1209,7 +1211,10 @@ def render_workbench_glossary(
     add_form = ""
     if show_add_form:
         add_form = _workbench_term_form(
-            mode="add", csrf_token=csrf_token, term=None
+            mode="add",
+            csrf_token=csrf_token,
+            document_id=state.document.document_id,
+            term=None,
         )
     body = (
         document_strip
