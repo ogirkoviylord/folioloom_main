@@ -121,6 +121,61 @@ class WorkbenchRoutesTest(unittest.TestCase):
         # Helper rail is hidden when total=0.
         self.assertNotIn('aria-label="Workbench helper rail"', response.text)
 
+    def test_add_term_control_opens_form_with_document_and_csrf(self) -> None:
+        document_id = "opaque-add-control"
+        response = self.client.get(
+            f"/admin/workbench/glossary?document={document_id}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            f'href="/admin/workbench/glossary?document={document_id}&amp;add=1"',
+            response.text,
+        )
+
+        form_page = self.client.get(
+            f"/admin/workbench/glossary?document={document_id}&add=1"
+        )
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn('id="wb-add-term-form"', form_page.text)
+        self.assertIn(
+            f'name="csrf_token" value="{self.csrf_token}"', form_page.text
+        )
+
+    def test_term_rows_expose_selection_inputs_for_check_form(self) -> None:
+        document_id = "opaque-term-selection"
+        initial = self.client.get(
+            f"/admin/workbench/glossary?document={document_id}"
+        )
+        self.assertEqual(initial.status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="source-only-in-row",
+            target="target-only-in-row",
+            type_="term",
+            notes="",
+        )
+        self.assertIsNone(reason)
+        assert term is not None
+
+        page = self.client.get(
+            f"/admin/workbench/glossary?document={document_id}"
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="wb-check-selected-form"', page.text)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/check?document={document_id}"',
+            page.text,
+        )
+        self.assertIn(f'id="wb-term-select-{term.id}"', page.text)
+        self.assertIn('name="selected_term_ids"', page.text)
+        self.assertIn(f'value="{term.id}"', page.text)
+        self.assertIn('form="wb-check-selected-form"', page.text)
+        self.assertRegex(
+            page.text,
+            rf'<label class="wb-term__selection" for="wb-term-select-{term.id}">'
+            r"[\s\S]*?Select term for local check",
+        )
+
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
         response = self.client.get(
             "/admin/workbench/glossary?document=opaque-2"

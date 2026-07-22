@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 from html import escape
+from urllib.parse import quote
 
 from translator_service.admin.workbench_session_state import (
     TERM_TYPES,
@@ -402,6 +403,13 @@ def _workbench_css() -> str:
   font-size: 0.75rem;
 }
 .wb-term__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.wb-term__selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--wb-ink-soft);
+}
 .wb-term__details {
   grid-column: 1 / -1;
   border-top: 1px solid var(--wb-line);
@@ -657,9 +665,6 @@ def _workbench_toolbar(
         not has_approved
         or not locked_or_approved
     )
-    add_disabled_attr = (
-        ' disabled aria-disabled="true"' if disabled_add else ""
-    )
     check_disabled_attr = (
         ' disabled aria-disabled="true"' if disable_check else ""
     )
@@ -667,20 +672,28 @@ def _workbench_toolbar(
         ' disabled aria-disabled="true"' if disable_lock_all else ""
     )
     document_qs = (
-        f"?document={_safe_attr(state.document.document_id)}"
+        f"?document={quote(state.document.document_id, safe='')}"
         if state.document.document_id
         else ""
     )
+    add_control = (
+        '<button type="button" class="wb-button wb-button--primary" '
+        'data-action="add-term" disabled aria-disabled="true" '
+        'aria-controls="wb-add-term-form">Add term</button>'
+        if disabled_add
+        else (
+            '<a class="wb-button wb-button--primary" data-action="add-term" '
+            f'href="/admin/workbench/glossary{document_qs}&amp;add=1" '
+            'aria-controls="wb-add-term-form">Add term</a>'
+        )
+    )
     return f"""
-<form class="wb-toolbar" method="post" action="/admin/workbench/glossary/terms/add">
+<form id="wb-check-selected-form" class="wb-toolbar" method="post"
+  action="/admin/workbench/glossary/check{document_qs}">
   <div class="wb-toolbar__buttons">
-    <button type="button" class="wb-button wb-button--primary"
-      data-action="add-term"{add_disabled_attr}
-      aria-controls="wb-add-term-form"
-      aria-expanded="false">Add term</button>
+    {add_control}
     <button type="submit" class="wb-button wb-button--secondary"
       data-action="check-selected"{check_disabled_attr}
-      formaction="/admin/workbench/glossary/check"
       title="Runs a local-only check shape on selected terms">
       Check selected terms</button>
     <button type="submit" class="wb-button wb-button--secondary"
@@ -818,6 +831,9 @@ def _workbench_term_row(
     unlock_disabled = (
         row_actions_disabled or term.status != TermStatus.LOCKED
     )
+    selection_disabled = (
+        row_actions_disabled or state.approval_state == ApprovalState.CONFLICT
+    )
 
     def _attr(name: str, value: str) -> str:
         return f'{name}="{_safe_attr(value)}"'
@@ -881,6 +897,10 @@ def _workbench_term_row(
         action="unlock",
     )
     last_edited = _format_iso(term.last_edited_at)
+    selection_disabled_attr = (
+        ' disabled aria-disabled="true"' if selection_disabled else ""
+    )
+    selection_id = f"wb-term-select-{_safe_attr(term.id)}"
     return f"""
 <article class="wb-term" id="wb-term-{_safe_attr(term.id)}"
   data-term-id="{_safe_attr(term.id)}"
@@ -900,6 +920,12 @@ def _workbench_term_row(
     {_workbench_status_pill(term.status)}
   </div>
   <div class="wb-term__actions">
+    <label class="wb-term__selection" for="{selection_id}">
+      <input id="{selection_id}" type="checkbox" name="selected_term_ids"
+        value="{_safe_attr(term.id)}" form="wb-check-selected-form"
+        data-term-id="{_safe_attr(term.id)}"{selection_disabled_attr}>
+      Select term for local check
+    </label>
     {edit_action}
     {accept_a}
     {reject_a}
