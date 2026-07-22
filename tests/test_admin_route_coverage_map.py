@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from typing import Callable, Iterator, Protocol, cast
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIRouter
 
 from translator_service.admin.routes import create_admin_router
 from translator_service.config import Settings
@@ -1069,6 +1070,33 @@ ROUTE_COVERAGE_MAP = (
 )
 
 
+class _RouteInventoryEntry(Protocol):
+    methods: set[str]
+    name: str
+    path: str
+
+
+class _EffectiveRouteContext(Protocol):
+    original_route: object
+
+
+def _router_api_routes(router: APIRouter) -> Iterator[_RouteInventoryEntry]:
+    """Yield effective API routes across FastAPI router storage layouts."""
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            yield route
+            continue
+
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        if not callable(effective_route_contexts):
+            continue
+        iter_contexts = cast(Callable[[], Iterator[object]], effective_route_contexts)
+        for raw_context in iter_contexts():
+            context = cast(_EffectiveRouteContext, raw_context)
+            if isinstance(context.original_route, APIRoute):
+                yield cast(_RouteInventoryEntry, raw_context)
+
+
 class AdminRouteCoverageMapTest(unittest.TestCase):
     def test_route_coverage_map_matches_current_router_inventory(self) -> None:
         router = create_admin_router(
@@ -1079,8 +1107,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
         )
         actual = {
             (method, route.path): route.name
-            for route in router.routes
-            if isinstance(route, APIRoute)
+            for route in _router_api_routes(router)
             for method in route.methods
             if method not in {"HEAD", "OPTIONS"}
         }
