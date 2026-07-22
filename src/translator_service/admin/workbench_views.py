@@ -993,10 +993,14 @@ def _workbench_helper_rail(
         ApprovalState.UNAVAILABLE: ("unavailable", "Unavailable"),
         ApprovalState.CONFLICT: ("conflict", "Conflicts present"),
     }
-    css_key, helper_label = state_label_map.get(
-        state.approval_state, ("unavailable", "Unavailable")
-    )
-    helper_copy = _state_helper_copy(state.approval_state)
+    if state.has_current_manual_approval():
+        css_key, helper_label = ("ready", "Glossary snapshot approved")
+        helper_copy = WORKBENCH_COPY["ready_helper"]
+    else:
+        css_key, helper_label = state_label_map.get(
+            state.approval_state, ("unavailable", "Unavailable")
+        )
+        helper_copy = _state_helper_copy(state.approval_state)
     next_action = _helper_next_action(state)
     return f"""
 <aside class="wb-rail" aria-label="Workbench helper rail">
