@@ -133,6 +133,9 @@ from translator_service.admin.views import (
     user_detail_body,
     users_body,
 )
+from translator_service.admin.workbench_glossary_projection import (
+    project_workbench_glossary_rehearsal,
+)
 from translator_service.beta_access import (
     BETA_ALLOWLIST_ENABLED_SETTING,
     BETA_ALLOWLIST_SETTING,
@@ -187,7 +190,10 @@ _INTERNAL_READER_FORMAT_BY_SUFFIX = {
 
 
 def create_workbench_router(
-    settings: Settings, session_manager: AdminSessionManager
+    settings: Settings,
+    session_manager: AdminSessionManager,
+    *,
+    glossary_rehearsal_fixture: object | None = None,
 ) -> APIRouter:
     """Bounded Workbench router for the glossary-first slice (packet §3.1).
 
@@ -342,6 +348,13 @@ def create_workbench_router(
                 show_add_form=request.query_params.get("add") == "1",
                 active_filter=active_filter,
                 not_wired_after_post=not_wired,
+                glossary_projection=(
+                    project_workbench_glossary_rehearsal(
+                        glossary_rehearsal_fixture
+                    )
+                    if glossary_rehearsal_fixture is not None
+                    else None
+                ),
             )
         )
 
