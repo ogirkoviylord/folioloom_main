@@ -1,8 +1,6 @@
 # FolioLoom Restart Specification
 
-Canonical restart-ТЗ для следующей фазы проекта. Этот документ заменяет старые
-prototype-era roadmap формулировки. Для конкретных stage gates см.
-`docs/restart/release-gates.md`.
+> **Historical/superseded product boundary (2026-06-29):** This document records the old Telegram-first restart/free-closed-beta framing. Current strategy is #813 and `docs/CAT_WORKFLOW_GATES.md`. Use this file only for historical operational context unless an active task explicitly asks for old restart rationale.
 
 ## Product Definition
 

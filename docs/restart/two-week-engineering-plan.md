@@ -1,8 +1,8 @@
 # Two-Week Engineering Plan
 
-Goal: reach a credible free closed-beta go/no-go without adding new product
-scope. Do not build payment, new formats, subscriptions, public admin, public
-website or user-facing provider selection in this window.
+> **Historical/superseded (2026-06-29):** This plan describes the old Telegram-first free closed-beta push. It is preserved for history only. Current strategy is #813 and `docs/CAT_WORKFLOW_GATES.md`; old Gate B work now carries forward as operational safety around a CAT-like author workflow.
+
+Goal: historical free closed-beta go/no-go plan before the CAT-like reframe. Do not use this as the active roadmap.
 
 ## Week 1
 

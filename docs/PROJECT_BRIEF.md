@@ -2,190 +2,170 @@
 
 ## 1. Краткое описание проекта
 
-FolioLoom - это Telegram-first сервис для перевода авторизованных длинных документов: книг, глав, рукописей, редакторских материалов, public-domain текстов и документов, на которые у пользователя есть права. Основная проблема проекта - дать пользователю понятный путь от загрузки TXT/DOCX/EPUB до готового переведенного файла с прогрессом, отменой, частичным результатом и историей. Основной пользователь сейчас - доверенный участник будущей free closed beta, который загружает документ в Telegram и получает перевод через внутренний DeepSeek-compatible provider layer. Владелец/оператор управляет beta-доступом, лимитами, ключами провайдера, состоянием задач и диагностикой через SSH-tunneled admin console. Проект пока не является публичным production-сервисом или платным SaaS.
+FolioLoom — это CAT-like author/rightsholder translation workbench для авторизованных длинных документов. Проект помогает импортировать TXT/DOCX/EPUB, сохранить структуру документа, управлять глоссарием/терминологией, получать AI-assisted translation draft, видеть QA/glossary/structure findings и экспортировать usable translated document.
+
+Telegram-бот сохраняется как удобный upload/test/delivery harness, но больше не является определяющей продуктовой поверхностью. Старый Telegram-first Gate B/C план больше не считается главным release compass.
+
+Canonical strategy issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813)
+Canonical gate document: `docs/CAT_WORKFLOW_GATES.md`
+
+Проект пока не является free beta, paid beta, public production или публичным SaaS.
 
 ## 2. Целевая аудитория
 
-### Доверенные beta-пользователи
+### Авторы / правообладатели / редакторы / small publishers
 
-- Кто это: пользователи из invite-only cohort, идентифицируемые по Telegram ID.
-- Зачем им продукт: переводить свои или разрешенные длинные документы в поддерживаемых форматах TXT, DOCX и EPUB.
-- Ограничения и ожидания: должны подтверждать права на документ; ожидают понятный Telegram-flow, оценку, прогресс, отмену, частичный или финальный результат; должны принимать ограничения closed beta по форматам, лимитам и доступности.
+- Кто это: люди или команды, у которых есть права на длинный документ и которым нужен контролируемый translation draft.
+- Зачем им продукт: управлять терминологией/именами, получать структурно сохранённый перевод, видеть QA/compliance findings и экспортировать результат для дальнейшей редакторской работы.
+- Ограничения и ожидания: должны понимать, что это AI-assisted draft workflow, а не обещание human/publisher-ready перевода без review.
 
 ### Владелец/оператор сервиса
 
 - Кто это: owner/admin проекта.
-- Зачем им продукт: запускать и контролировать закрытую beta, управлять allowlist, лимитами, kill switch, DeepSeek-ключами, диагностикой, бэкапами и release gates.
-- Ограничения и ожидания: admin должен оставаться SSH-tunnel-only; секреты не
-  должны показываться в админке или логах; raw document/translation text
-  доступен владельцу только через dedicated owner-only text diagnostics и не
-  должен попадать в обычные admin pages, логи, архивы, telemetry, issues/PRs
-  или support notes; deployment и payment/readiness gates требуют ручного
-  контроля.
+- Зачем им продукт: тестировать, управлять качеством, лимитами, provider diagnostics, workflow evidence, beta/design-partner cohorts и operational safety.
+- Ограничения и ожидания: admin должен оставаться SSH-tunnel-only; raw text/secrets не должны попадать в обычные admin pages, логи, archives, telemetry, GitHub issues/PRs/docs или публичные/support artifacts.
+
+### Trusted design partners
+
+- Кто это: небольшая high-touch группа авторов/редакторов/правообладателей.
+- Зачем им продукт: проверить, помогает ли controlled glossary + review workflow получить useful draft.
+- Ограничения и ожидания: это research/design-partner alpha, не self-serve paid beta.
 
 ### Будущие платные пользователи
 
-- Кто это: TBD. Репозиторий описывает paid beta как будущую стадию, но не фиксирует конкретные сегменты.
-- Зачем им продукт: Assumption - получать более надежный перевод длинных документов внутри Telegram после появления безопасного платежного потока.
-- Ограничения и ожидания: paid beta заблокирована до Telegram Stars/XTR flow, payment ledger, refund/support path, reconciliation и support/refund policy.
+- Кто это: TBD после design-partner evidence.
+- Зачем им продукт: платить не за “бот перевёл книгу”, а за controlled terminology, structure-preserving draft, QA evidence, editable/retryable workflow and usable export.
+- Ограничения и ожидания: paid beta blocked until quality/workflow/safety evidence and payment/support/refund/reconciliation gates pass.
 
 ## 3. Главная ценность продукта
 
-Подтвержденная ценность FolioLoom - перевод длинных документов прямо из Telegram с сохранением структуры и управляемым backend-процессом. Проект делает упор не на одноразовый prompt, а на durable workflow: accepted documents, jobs, work units, partial/final results, object storage, worker loop и админскую наблюдаемость. Ключевые функции: upload/validation для TXT/DOCX/EPUB, выбор языка, rights confirmation, estimate/confirmation, progress/cancel/status/history, My Books/history, persistent jobs/work units, worker execution, beta allowlist, cost caps, admin kill switch, DeepSeek-compatible provider layer и backup/restore workflow. Для beta важна не публичная монетизация, а проверка качества, надежности и безопасности на реальных авторизованных документах.
+Новая проверяемая ценность FolioLoom:
+
+> помочь автору/правообладателю получить терминологически контролируемый, структурно полный, reviewable translation draft лучше сырого generic machine translation.
+
+Ключевые функции для доказательства ценности:
+
+- TXT/DOCX/EPUB import and structure preservation.
+- Stable document/chapter/segment state.
+- Manual/author-approved glossary controls.
+- Automatic glossary candidates as suggestions only until stronger evidence exists.
+- Translation draft/suggestions.
+- Glossary compliance and QA reports.
+- Export to usable document formats.
+- Telegram harness for convenient upload/delivery/testing.
 
 ## 4. Текущая стадия проекта
 
-Стадия: active development / working closed-beta foundation.
+Стадия: active development / CAT-like workflow reframe.
 
-Репозиторий прямо указывает, что проект уже не in-memory prototype: реализованы persistent jobs/work units, local object storage, worker loop, FastAPI admin console, Docker Compose deployment, backup/restore workflow и широкий unittest suite. Следующий milestone - free closed beta. Public production не готов, paid launch заблокирован отдельным payment/readiness gate.
-
-Уже реализовано:
+Уже реализованы важные foundations:
 
 - Telegram bot runtime на aiogram с upload/estimate/confirm/progress/cancel/status/history-oriented flows.
-- TXT/DOCX/EPUB adapters, planners, assembly и quality/profile foundations для русского и украинского.
-- Backend foundation: persistent job/work-unit store, PostgreSQL scheduler store для server runtime, local object storage, worker loop.
-- Admin console: owner auth, settings, allowlist, provider keys/health, operations, live monitor, costs, audit/security surfaces и deployment smoke checks.
+- TXT/DOCX/EPUB adapters, planners, assembly and structure-preservation foundations.
+- Persistent job/work-unit stores, PostgreSQL scheduler store, local object storage, worker loop.
+- FastAPI admin console with owner auth, settings, allowlist, provider keys/health, operations, live monitor, costs, audit/security surfaces.
 - Docker Compose services: `api`, `bot`, `worker`, `postgres`, `redis`.
-- Backup/restore scripts и deployment runbooks.
+- Backup/restore scripts and deployment runbooks.
+- Local/fake prepared-glossary foundations and candidate-quality gates.
 
-Выглядит незавершенным:
+Still not ready:
 
-- TTL cleanup/delete verification.
-- Real-file TXT/DOCX/EPUB release matrix and report.
-- EPUBCheck or equivalent validation.
-- DOCX openability/visual QA.
-- Alerts MVP and Backups visibility page.
-- Paid beta payment flow and ledger.
-
-Где нужны решения владельца проекта:
-
-- Go/no-go для free closed beta после release gates.
-- Политика платного запуска, refund/support и reconciliation.
-- Юридические/privacy/AUP документы перед public production.
-- Решение по публичному admin hardening, offsite backups, support workflow и incident runbooks.
+- manual/author-approved glossary control surface;
+- CAT-like source-target/segment review workflow;
+- representative before/after quality evidence;
+- automatic glossary runtime readiness;
+- CAT project retention/delete policy and evidence;
+- design-partner alpha readiness;
+- paid beta/payment readiness.
 
 ## 5. Основные пользовательские сценарии
 
-### Сценарий: перевод документа в Telegram
+### Сценарий: CAT-like author workflow
 
-- Пользователь: доверенный beta-пользователь.
-- Шаги: открыть бота, выбрать язык интерфейса, загрузить TXT/DOCX/EPUB, пройти validation, подтвердить права, выбрать целевой язык, получить estimate, подтвердить перевод, отслеживать progress, получить финальный или частичный файл.
-- Ожидаемый результат: пользователь получает переведенный документ или безопасное сообщение об ошибке/частичный результат.
-- Текущая готовность: partial. Основной flow реализован, issue #73 records
-  local synthetic upload hardening/quarantine evidence and issue #95 records
-  local malware/AV scanning evidence, but release matrix, TTL cleanup and other
-  Gate B blockers remain gaps.
+- Пользователь: автор/редактор/правообладатель или owner/operator.
+- Шаги: import TXT/DOCX/EPUB, review/edit glossary, translate selected slice/document, inspect QA findings, export result.
+- Ожидаемый результат: usable AI-assisted translation draft with terminology control and review evidence.
+- Текущая готовность: planning/foundation. Foundations exist, but thin CAT workflow and evidence remain to be built/proven.
 
-### Сценарий: отмена или продолжение работы
+### Сценарий: Telegram harness
 
-- Пользователь: beta-пользователь.
-- Шаги: во время перевода нажать cancel или открыть history/My Books, посмотреть статус, скачать результат, продолжить/отменить доступные задачи или удалить книгу.
-- Ожидаемый результат: отмена кооперативно останавливает работу после текущего фрагмента, сохраняет доступный partial output, история показывает доступные файлы.
-- Текущая готовность: partial. В репозитории есть cancellation, partial output, My Books/history foundations, но release gates требуют cancel/resume/restart validation.
+- Пользователь: owner/trusted tester/design partner.
+- Шаги: upload/deliver/test via Telegram where convenient.
+- Ожидаемый результат: Telegram helps exercise backend workflows but does not define product readiness.
+- Текущая готовность: foundations implemented; still not a substitute for CAT workflow evidence.
 
-### Сценарий: управление closed beta
+### Сценарий: glossary-controlled quality check
 
-- Пользователь: owner/admin.
-- Шаги: открыть admin через SSH tunnel, войти, настроить allowlist, включить enforcement, проверить Costs/Settings/Live, при необходимости включить kill switch.
-- Ожидаемый результат: beta-доступ и нагрузка ограничены, новые uploads/jobs блокируются при паузе или превышении caps.
-- Текущая готовность: confirmed для основных admin allowlist/cost/kill-switch функций; partial для полного release readiness.
+- Пользователь: author/operator/reviewer.
+- Шаги: provide/approve glossary terms, run before/after translation, inspect metadata-only compliance findings.
+- Ожидаемый результат: critical term consistency improves without structural regressions or raw leaks.
+- Текущая готовность: local/fake foundations; automatic live glossary evidence is no-go; manual author controls need focused work.
 
 ### Сценарий: эксплуатация и восстановление
 
 - Пользователь: owner/operator.
-- Шаги: deploy через `scripts/deploy_server.sh`, проверить `scripts/server_smoke_check.sh` и `scripts/server_status.sh`, создать backup, проверить manifest, выполнить restore rehearsal по runbook.
-- Ожидаемый результат: Docker Compose stack работает, данные можно проверить и восстановить по документированной процедуре.
-- Текущая готовность: partial. Скрипты и runbooks есть, но release gates требуют backup visibility, restore rehearsal и серверные smoke artifacts.
+- Шаги: run app/server smoke, inspect safe diagnostics, verify backups, rehearse restore, verify retention/delete behavior.
+- Ожидаемый результат: CAT project state and exports can be operated and recovered safely.
+- Текущая готовность: scripts/runbooks/foundations exist; operational-safety evidence remains carry-forward work.
 
 ## 6. Основные компоненты продукта
 
 | Компонент | Назначение | Где находится | Готовность | Риски/неясности |
 | --- | --- | --- | --- | --- |
-| Backend/API | Health endpoint и FastAPI admin router | `src/translator_service/api.py`, `src/translator_service/admin/` | partial/confirmed foundation | Admin не должен становиться публичным до hardening. |
-| Telegram bot | Пользовательский Telegram-flow | `src/translator_service/bot/`, `src/translator_service/bot_translation_service.py` | partial | Нужны release checks для preview, resume/restart и real files. |
-| Worker | Выполнение persistent work units | `src/translator_service/worker.py`, `src/translator_service/scheduler_runner.py` | partial | Требуется подтверждать scheduler/runtime consistency на сервере. |
-| Translation core | Extraction, planning, translation, assembly, policy, quality checks | `src/translator_service/format_adapters/`, `translation_runner.py`, `persistent_planner.py`, `persistent_assembly.py`, quality/profile modules | partial | DOCX/EPUB fidelity требует openability/visual/EPUBCheck gates. |
-| Database/state | PostgreSQL scheduler state, SQLite fallback/runtime stores | `docker-compose.yml`, `persistent_jobs.py`, `persistent_job_store.py`, `postgres_scheduler.py` | partial | Production correctness должна опираться на Postgres; SQLite paths остаются fallback/runtime. |
-| Storage | Local object storage for source/intermediate/partial/final files | `src/translator_service/file_storage.py`, host `./var`, container `/data` | partial | TTL cleanup/delete verification остается gap. |
-| Admin console | Owner operations, settings, allowlist, provider health, costs, logs, audit | `src/translator_service/admin/` | partial | Alerts MVP и Backups visibility еще нужны. |
-| External APIs | DeepSeek-compatible chat completion providers; Telegram Bot API | `deepseek_client.py`, `deepseek_key_pool.py`, `ai_provider_runtime.py`, bot runtime | partial | Provider failures, auth/billing failures and balance must stay diagnosable without leaking secrets/text. |
-| Tests | Unit/regression suite | `tests/`, `test_samples/` | confirmed broad coverage | Последний полный passing status подтвержден документацией, не текущим запуском в этой задаче. |
-| CI | minimal workflow present / current run status Unknown | `.github/workflows/checks.yml` | partial | Workflow runs compile and unit tests on PRs and pushes to `main`, but this task did not verify any GitHub run status. |
-| Deployment | Docker Compose VPS model | `Dockerfile`, `docker-compose.yml`, `scripts/deploy_server.sh`, `docs/deployment/` | partial | Production deployment требует human approval; public production не готов. |
+| CAT workflow | Import, glossary, review, QA, export | TBD / existing adapters/admin foundations | planning/foundation | Needs Gate 1-3 evidence. |
+| Telegram bot | Harness for upload/test/delivery | `src/translator_service/bot/`, `bot_translation_service.py` | foundation | Not primary product surface. |
+| Translation core | Extraction, planning, assembly, quality/profile checks | `src/translator_service/format_adapters/`, `translation_runner.py`, `persistent_planner.py`, `persistent_assembly.py` | partial | Needs CAT segmentation/review/export evidence. |
+| Glossary | Manual/auto terminology control | glossary/prepared-package modules | foundation/no-go live readiness | Manual controls and compliance evidence missing. |
+| Backend/API | Health endpoint and FastAPI/admin app | `src/translator_service/api.py`, `src/translator_service/admin/` | foundation | CAT editor/workbench surface TBD. |
+| Worker | Persistent work execution | `worker.py`, `scheduler_runner.py` | foundation | Needs CAT workflow recovery evidence. |
+| Storage/state | Job/work-unit/object storage | `persistent_jobs.py`, `postgres_scheduler.py`, `file_storage.py` | foundation | CAT project retention/delete/restore evidence missing. |
+| Admin/Ops | Owner operations and diagnostics | `src/translator_service/admin/` | foundation | Alerts/backups reports need CAT interpretation. |
+| Provider layer | DeepSeek-compatible providers | `deepseek_client.py`, `deepseek_key_pool.py`, `ai_provider_runtime.py` | foundation | Provider evidence is not quality proof. |
 
 ## 7. Неприкосновенные ограничения
 
-- Не менять secrets, `.env` files, deployment, payments, pricing, auth, security, legal/privacy text, user data handling или database migrations без явного human approval.
-- Не выполнять production deployment без явного human approval.
-- Не добавлять production dependencies без явного human approval.
-- Не пушить и не мержить напрямую в `main`.
-- Не ослаблять guardrails вокруг прав на документы, beta allowlist, cost caps,
-  kill switch, secret redaction и raw document text handling. Dedicated
-  owner-only text diagnostics остается утвержденным исключением; остальные
-  admin/log/archive/telemetry surfaces остаются redacted/metadata-only.
-- Не показывать payment UI и не запускать paid jobs до Gate C.
-- Не расширять beta formats за пределы TXT/DOCX/EPUB без отдельного approved
-  format-specific implementation issue.
-- Не реализовывать committed future formats, включая FB2 из GitHub issue
-  [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23), без
-  owner implementation approval, Architect review, supported-subset decision,
-  safety plan, rights-approved fixtures и отдельной agent-ready implementation
-  issue.
-- Не делать большие переписывания без отдельного плана и review.
-- Не публиковать admin console в интернет до public-production hardening.
-- Не трактовать beta safety accounting как paid ledger.
-- Не копировать AGPL code, prompts, file layout, class/function names, tests или implementation details из AGPL-проектов.
+- Do not claim free beta, paid beta, public production, glossary runtime quality or translation-quality readiness without evidence.
+- Do not treat old Gate B/C as the product roadmap; use #813 and `docs/CAT_WORKFLOW_GATES.md`.
+- Do not make paid beta/payment work active until quality/workflow evidence exists.
+- Do not publish raw source text, translations, prompts, provider bodies, secrets or private diagnostics in GitHub/docs/PRs/release/public/support artifacts.
+- Do not deploy, operate servers, mutate runtime data, run backup/restore/destructive cleanup, change retention/TTL, add production dependencies, change auth/security/payment/legal/public text or expand formats/channels without explicit owner approval.
+- Do not weaken rights confirmation, beta allowlist, cost caps, kill switch, secret redaction, SSH-tunnel-only admin posture or metadata-only public artifact boundaries.
+- Keep current format scope TXT/DOCX/EPUB until future format work is approved under #208 or successor issues.
 
-## 8. Что считается успехом проекта
+## 8. What counts as success now
 
-Формальные free beta success metrics утверждены владельцем 2026-05-17 в рамках
-GitHub issue #71. Метрики разделены на hard launch guardrails и
-translation-quality learning metrics.
+Near-term success:
 
-Hard launch guardrails:
+- Gate 0 scope lock is clear.
+- Manual/author-approved glossary path is defined and tested.
+- Representative before/after evidence shows glossary-controlled improvement on critical terms.
+- CAT-like thin workflow can import, review glossary, translate, show QA and export.
+- Operational safety work is mapped to the CAT workflow.
 
-- Gate B complete before free beta.
-- Recovery reliability: `0` lost accepted jobs in Gate B
-  cancel/resume/bot-restart/worker-restart checks.
-- Safety/privacy: `0` known raw document text, prompt, translation or API key
-  leaks in logs, admin views, telemetry or artifacts.
-- Cost/control: `0` cap or kill-switch breaches.
+Paid success is later:
 
-Translation-quality learning metrics:
+- users pay or commit to pay for the workflow;
+- support/refund burden is understood;
+- payment/accounting/reconciliation are ready;
+- quality/workflow/safety evidence remains positive.
 
-- For every completed beta document, collect per-target-language human
-  feedback: `usable`, `not usable` or `needs review`, plus short reason tags.
-- Existing automated Russian/Ukrainian quality metrics may be used as
-  regression diagnostics where reference samples exist.
-- Automated Russian/Ukrainian quality scores are not a universal success metric
-  for every target language.
+## 9. What is not a goal now
 
-## 9. Что не является целью сейчас
-
-- Paid public SaaS или public production launch.
-- Paid beta без Telegram Stars/XTR invoice flow, payment ledger, idempotency, refunds, `/paysupport`, reconciliation и support/refund policy.
-- Stripe/YooKassa/card flow как immediate Telegram path.
-- Subscriptions, referrals, coupons, teams.
-- Immediate PDF, OCR, MOBI, FB2, batch ZIP или arbitrary file parser
-  implementation.
-- Committed future formats beyond TXT/DOCX/EPUB are RTF (#4), FB2 from GitHub
-  issue [#23](https://github.com/ogirkoviylord/folioloom_main/issues/23),
-  PDF/OCR, HTML/HTM, ODT, legacy DOC, MOBI, AZW3/KPF and CBZ/CBR/DJVU. They are
-  not current MVP scope; implementation order, supported subsets,
-  rights-approved fixtures, dependency impact and verification depth remain
-  `TBD` through issue #208 and format-specific architecture review.
+- Broad free beta launch.
+- Paid beta launch.
+- Public production launch.
 - Public website/customer portal.
-- WhatsApp, Discord, public API или другие каналы.
-- User-facing provider/model picker.
-- Arbitrary custom prompts или full glossary UI.
+- Full automatic glossary quality claim.
+- Perfect scanner v2 / perfect automatic terminology extraction.
+- Immediate PDF/OCR/MOBI/FB2/batch ZIP/arbitrary parser work.
 - Public admin exposure.
-- Advanced BI и большие product expansions до стабилизации closed beta.
-- Repo-wide ruff cleanup как release blocker.
+- User-facing provider/model picker.
+- Repo-wide ruff cleanup as release blocker.
 
-## 10. Как AI-агенты должны использовать этот файл
+## 10. How AI agents should use this file
 
-- Orchestrator Agent читает этот brief перед разбиением больших целей на маленькие задачи и сверяет их с текущей стадией.
-- Architect Agent проверяет, не нарушают ли предложения ограничения, release gates, privacy/security/payment/deployment guardrails.
-- Implementer Agent делает только маленькие focused changes и не выходит за продуктовые границы без отдельного approval.
-- Reviewer Agent проверяет diff, tests, scope и соответствие цели closed-beta foundation.
-- Scribe Agent обновляет этот файл, когда меняются стадия проекта, целевые сценарии, ограничения, release gates или подтвержденные факты.
+- Start strategy/release work from #813 and `docs/CAT_WORKFLOW_GATES.md`.
+- Treat Telegram bot work as harness/supporting flow unless a task explicitly says otherwise.
+- Treat old Gate B issues as operational-safety carry-forward, not product readiness.
+- For implementation, require a narrow owner-approved issue with acceptance criteria.
+- For docs sync, update this brief when product direction, gates, confirmed state or non-goals change.

@@ -11,6 +11,14 @@
 - Do not push or merge directly to `main`.
 - Respond to the owner in Russian by default unless explicitly asked otherwise; keep code, commands, file paths, tool names and quoted source text in their original language.
 
+## Current Product Direction
+
+Canonical strategy issue: #813. Canonical gate doc: `docs/CAT_WORKFLOW_GATES.md`.
+
+FolioLoom is now evaluated as a CAT-like author/rightsholder translation workbench for authorized TXT/DOCX/EPUB documents. Telegram remains a useful upload/test/delivery harness, but it is no longer the defining product surface or release compass.
+
+Old Telegram-first Gate B/C is operational/payment infrastructure only. Do not treat old Gate B closure as product readiness, glossary quality proof, free beta readiness or paid beta readiness. Glossary/terminology control is a core quality prerequisite; manual/author-approved glossary controls are the MVP quality path until automatic glossary runtime has representative evidence.
+
 ## Owner Local Development Mode
 
 Default assumption in this repository: the current chat is an owner-operated local development workspace.
@@ -40,7 +48,7 @@ Ask for explicit owner confirmation before:
   tests;
 - adding production dependencies;
 - publishing raw text/secrets/diagnostics outside the local owner workspace;
-- expanding MVP scope beyond Telegram-first closed beta and TXT/DOCX/EPUB.
+- expanding product scope beyond the owner-approved CAT-like author workflow, Telegram harness role, TXT/DOCX/EPUB format scope, or the current #813 gate model.
 
 If approval is missing, stop at analysis for that specific risky action and propose a safe local plan.
 
@@ -110,7 +118,7 @@ Read the smallest useful context set. Do not load large history files by default
 | --- | --- | --- |
 | Small bugfix / implementation | `AGENTS.md`, touched files, nearby tests | relevant `docs/QUALITY_GATES.md` section, exact issue/spec |
 | Docs-only | `AGENTS.md`, target doc, evidence source | `docs/DECISIONS.md` if changing decisions; archive if checking history |
-| Current state / handoff | `docs/HANDOFF.md`, `CURRENT_PROJECT_STATE.md` | `docs/ROADMAP.md`, `docs/DECISIONS.md` |
+| Current state / handoff | `docs/CAT_WORKFLOW_GATES.md`, `docs/HANDOFF.md`, `CURRENT_PROJECT_STATE.md` | `docs/ROADMAP.md`, `docs/DECISIONS.md` |
 | Architecture / risky work | `AGENTS.md`, `docs/CONTEXT_MAP.md`, exact relevant decision/spec, relevant risk section | archive only for older rationale |
 | Review | diff, touched files, nearby tests, relevant gates | full risk/release docs only for risky diffs |
 | Release / deploy / rollback | `docs/RELEASE_CHECKLIST.md`, `docs/QUALITY_GATES.md`, exact deployment/release docs | `docs/RISK_REGISTER.md`, `docs/DECISIONS.md` |
