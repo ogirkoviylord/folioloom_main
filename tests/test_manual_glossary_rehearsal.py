@@ -708,6 +708,29 @@ class RehearsalMetadataSafetyTests(unittest.TestCase):
             self.assertIn(safe_key, result.renderer_observation)
 
 
+def _direct_import_targets(source: str) -> set[str]:
+    module_tree = ast.parse(source)
+    targets = {
+        alias.name
+        for node in ast.walk(module_tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    targets.update(
+        node.module
+        for node in ast.walk(module_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    )
+    targets.update(
+        f"{node.module}.{alias.name}"
+        for node in ast.walk(module_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "translator_service"
+        for alias in node.names
+    )
+    return targets
+
+
 class RehearsalImportBoundaryTests(unittest.TestCase):
     """Acceptance criterion 6: zero calls to runner/translator/provider/cache/...
 
@@ -725,17 +748,8 @@ class RehearsalImportBoundaryTests(unittest.TestCase):
             "translator_service.deepseek_client",
             "translator_service.glossary_persistent_runtime_resolver",
         }
-        module_tree = ast.parse(inspect.getsource(rehearsal_module))
-        directly_imported_modules = {
-            alias.name
-            for node in ast.walk(module_tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        }
-        directly_imported_modules.update(
-            node.module
-            for node in ast.walk(module_tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
+        directly_imported_modules = _direct_import_targets(
+            inspect.getsource(rehearsal_module)
         )
 
         for name in forbidden_modules:
@@ -744,6 +758,33 @@ class RehearsalImportBoundaryTests(unittest.TestCase):
                 directly_imported_modules,
                 f"forbidden collaborator directly imported by rehearsal module: {name}",
             )
+
+    def test_direct_import_targets_include_package_member_imports(self):
+        forbidden_modules = {
+            "translator_service.bot_translation_service",
+            "translator_service.worker",
+            "translator_service.persistent_jobs",
+            "translator_service.deepseek_client",
+            "translator_service.glossary_persistent_runtime_resolver",
+        }
+
+        import_forms = "\n".join(
+            "\n".join(
+                (
+                    f"import {module} as direct_module_{index}",
+                    f"from {module} import collaborator as direct_member_{index}",
+                    "from translator_service import "
+                    f"{module.rsplit('.', maxsplit=1)[1]} as package_member_{index}",
+                )
+            )
+            for index, module in enumerate(sorted(forbidden_modules))
+        )
+
+        self.assertSetEqual(
+            forbidden_modules,
+            forbidden_modules
+            & _direct_import_targets(import_forms),
+        )
 
 
 if __name__ == "__main__":
