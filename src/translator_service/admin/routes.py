@@ -186,6 +186,322 @@ _INTERNAL_READER_FORMAT_BY_SUFFIX = {
 }
 
 
+def create_workbench_router(
+    settings: Settings, session_manager: AdminSessionManager
+) -> APIRouter:
+    """Bounded Workbench router for the glossary-first slice (packet §3.1).
+
+    The router is mounted inside :func:`create_admin_router` so it reuses
+    the same session/CSRF guards as Admin. It owns no persistent state;
+    all mutations are fail-closed at this slice (packet §6, §11).
+
+    UI non-claims (mirrored in the helper rail ``About this slice``
+    disclosure):
+
+    * No save / provider / runner / cache / Telegram / resolver / job /
+      archive / DB / filesystem evidence root.
+    * ``ManualGlossaryApproval`` is still an owner-blocker (GATE1 audit
+      C1); locally-approved terms are NOT authoritative approvals.
+    """
+    from translator_service.admin.workbench_session_state import (
+        ApprovalState,
+        DocumentContext,
+        WorkbenchSessionState,
+        get_or_seed_workbench_session,
+    )
+    from translator_service.admin.workbench_views import (
+        render_workbench_future,
+        render_workbench_glossary,
+        render_workbench_recovery,
+        render_workbench_select,
+    )
+
+    router = APIRouter(include_in_schema=False)
+    csrf_guarded = _WorkbenchCSRFGuard(session_manager)
+
+    def _render_select(
+        *, injected: bool, csrf_token: str = ""
+    ) -> HTMLResponse:
+        return _html(
+            render_workbench_select(csrf_token=csrf_token, injected=injected)
+        )
+
+    def _render_recovery(*, reason: str, document_id: str = "") -> HTMLResponse:
+        return _html(
+            render_workbench_recovery(
+                reason=reason, csrf_token="", document_id=document_id
+            )
+        )
+
+    def _render_future(*, stage: str) -> HTMLResponse:
+        return _html(render_workbench_future(stage=stage, csrf_token=""))
+
+    def _resolve_state(
+        document_id: str | None,
+        *,
+        session: AdminSession | None,
+    ) -> WorkbenchSessionState:
+        sid = session.actor_id if session is not None else None
+        if not document_id:
+            return get_or_seed_workbench_session(
+                document_id=None, session_id=sid
+            )
+        return get_or_seed_workbench_session(
+            document_id=document_id, session_id=sid
+        )
+
+    def _maybe_apply_stale_drift(
+        state: WorkbenchSessionState,
+        *,
+        document_id: str | None,
+    ) -> None:
+        """Re-derive state from the caller-supplied document signature.
+
+        The packet treats ``document_id`` as an opaque caller signature
+        (§3.1 root rule, §6 ``STALE`` row). When the same session is
+        revisited with a different id we set the document context to the
+        new value, which moves the state to :attr:`ApprovalState.STALE`
+        via :meth:`refresh_approval_state`.
+        """
+        if not document_id:
+            return
+        if state.document.document_id == document_id:
+            return
+        state.document = DocumentContext.from_query(document_id=document_id)
+        state.refresh_approval_state()
+
+    # ------------------------------------------------------------------
+    # /admin/workbench-entry — registered as an Admin route, not a
+    # Workbench route, because the caller is Admin. Lives in
+    # create_admin_router below; this factory only owns /workbench/*.
+    # ------------------------------------------------------------------
+
+    @router.get("/", response_class=HTMLResponse)
+    async def workbench_root(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        document_id = request.query_params.get("document") or None
+        if not document_id:
+            return RedirectResponse(
+                "/admin/workbench/select", status_code=HTTPStatus.SEE_OTHER
+            )
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(document_id, safe='')}",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.get("/select", response_class=HTMLResponse)
+    async def workbench_select(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        return _render_select(injected=False, csrf_token=session.csrf_token)
+
+    @router.get("/recovery", response_class=HTMLResponse)
+    async def workbench_recovery(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        reason = request.query_params.get("reason") or "invalid"
+        if reason not in {"stale", "unavailable", "not-wired", "invalid"}:
+            reason = "invalid"
+        document_id = request.query_params.get("document") or ""
+        return _render_recovery(
+            reason=reason, document_id=document_id
+        )
+
+    @router.get("/glossary", response_class=HTMLResponse)
+    async def workbench_glossary(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        document_id = request.query_params.get("document") or None
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        if state.approval_state == ApprovalState.STALE:
+            return _render_recovery(
+                reason="stale", document_id=state.document.document_id
+            )
+        active_filter = request.query_params.get("filter") or "all"
+        if active_filter not in {"all", "approved", "locked", "pending"}:
+            active_filter = "all"
+        not_wired = request.query_params.get("not_wired") == "1"
+        return _html(
+            render_workbench_glossary(
+                state=state,
+                csrf_token=session.csrf_token,
+                show_add_form=request.query_params.get("add") == "1",
+                active_filter=active_filter,
+                not_wired_after_post=not_wired,
+            )
+        )
+
+    @router.get("/future", response_class=HTMLResponse)
+    async def workbench_future(request: Request) -> Response:
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        stage = request.query_params.get("stage") or "translate"
+        return _render_future(stage=stage)
+
+    # ------------------------------------------------------------------
+    # Mutating POST endpoints — fail-closed at this slice (packet §6).
+    # ------------------------------------------------------------------
+
+    async def _mutating_glossary_redirect(
+        request: Request,
+        *,
+        session: AdminSession,
+        document_id: str | None,
+    ) -> Response:
+        """Return the Glossary page with the ``not-wired`` notice."""
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        target = "/admin/workbench/glossary?not_wired=1"
+        if state.document.document_id:
+            document = quote(state.document.document_id, safe="")
+            target = f"/admin/workbench/glossary?document={document}&not_wired=1"
+        return RedirectResponse(
+            target, status_code=HTTPStatus.SEE_OTHER
+        )
+
+    @router.post(
+        "/glossary/terms/add",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_add(request: Request) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session  # already a 401/403 Response
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/edit",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_edit(request: Request, term_id: str) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/accept",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_accept(
+        request: Request, term_id: str
+    ) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/reject",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_reject(
+        request: Request, term_id: str
+    ) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/lock",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_lock(
+        request: Request, term_id: str
+    ) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/terms/{term_id}/unlock",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_unlock(
+        request: Request, term_id: str
+    ) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    @router.post(
+        "/glossary/check",
+        response_class=HTMLResponse,
+    )
+    async def workbench_check_selected(request: Request) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
+    return router
+
+
+class _WorkbenchCSRFGuard:
+    """Minimal CSRF guard for Workbench mutating POSTs.
+
+    All mutating endpoints require a valid ``AdminSession`` cookie AND a
+    matching ``csrf_token`` form field. Mirrors the existing Admin
+    ``_session_or_none`` + ``session_manager.verify_csrf`` pattern
+    (packet §3.1 ``csrf_guard`` column).
+    """
+
+    def __init__(self, session_manager: AdminSessionManager) -> None:
+        self._session_manager = session_manager
+
+    async def verify(self, request: Request) -> Response | AdminSession:
+        session = _session_or_none(request, self._session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        form = await _urlencoded_form(request)
+        if not self._session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        return session
+
+
 def create_admin_router(settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/admin", include_in_schema=False)
     session_manager = AdminSessionManager(
@@ -286,6 +602,31 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 balance_stale_seconds=settings.admin_deepseek_balance_stale_seconds,
                 top_up_url=settings.admin_deepseek_top_up_url,
             ),
+        )
+
+    @router.get("/workbench-entry", response_class=HTMLResponse)
+    async def workbench_entry(request: Request) -> Response:
+        """Owner-only redirect to the Workbench glossary (packet §3.1).
+
+        Admin → Workbench handoff: this is the single calm CTA the
+        packet allows. We mint a small opaque document id so the
+        caller-injected contract has a value to mirror. The Workbench
+        root decides where to redirect based on that id.
+        """
+        session = _session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse(
+                "/admin/login", status_code=HTTPStatus.SEE_OTHER
+            )
+        # No real caller contract yet; mint an opaque id (packet §10
+        # ``Unknown: exact shape of caller-provided document_id``).
+        opaque_id = quote(
+            f"opaque-{session.actor_id}-{int(datetime.now(UTC).timestamp())}",
+            safe="",
+        )
+        return RedirectResponse(
+            f"/admin/workbench/?document={opaque_id}",
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.get("/ai-providers/deepseek/keys", response_class=HTMLResponse)
@@ -1952,6 +2293,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             "Every sensitive admin change will be visible here with actor, "
             "outcome, reason, and redacted metadata."
         ),
+    )
+    router.include_router(
+        create_workbench_router(settings, session_manager),
+        prefix="/workbench",
     )
     return router
 
