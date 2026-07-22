@@ -16,6 +16,9 @@ from translator_service.glossary_contracts import (
     GlossarySnapshot,
     validate_glossary_snapshot,
 )
+from translator_service.glossary_effective_decision import (
+    effective_glossary_runtime_adapter_decision,
+)
 from translator_service.glossary_prompt_context import GlossaryPromptContextConfig
 from translator_service.glossary_selection import GlossarySelectionBudget
 from translator_service.manual_glossary_rehearsal import (
@@ -27,8 +30,6 @@ from translator_service.manual_glossary_rehearsal import (
 )
 from translator_service.translation_policy import (
     GlossaryPromptPolicyAdapterConfig,
-    GlossaryPromptPolicyAdapterDecision,
-    GlossaryPromptPolicyAdapterStatus,
     build_glossary_prompt_policy_adapter_decision,
 )
 
@@ -128,9 +129,9 @@ def preflight_docx_manual_glossary_approval(
         _runner_compatible_plan(rehearsal, snapshot),
         config=GlossaryPromptPolicyAdapterConfig(enabled=True, work_unit_sequence=0),
     )
-    effective = _effective_glossary_runtime_adapter_decision(
+    effective = effective_glossary_runtime_adapter_decision(
         decision,
-        {"status": "ready"},
+        _structural_preflight(rehearsal),
     )
     if effective is None:
         return _deny(
@@ -150,14 +151,16 @@ def preflight_docx_manual_glossary_approval(
     )
 
 
-def _effective_glossary_runtime_adapter_decision(
-    decision: GlossaryPromptPolicyAdapterDecision,
-    preflight: dict[str, str],
-) -> GlossaryPromptPolicyAdapterDecision | None:
-    """Apply the runner's existing ready/non-ready effective-decision rule."""
-    if decision.status is not GlossaryPromptPolicyAdapterStatus.READY:
-        return None
-    return decision if preflight.get("status") == "ready" else None
+def _structural_preflight(
+    rehearsal: ManualGlossaryRehearsalResult,
+) -> dict[str, str | int | bool]:
+    """Build the metadata-only effective-decision input for this observation."""
+    return {
+        "status": "ready" if rehearsal.included_entry_count else "skipped",
+        "metadata_only": True,
+        "selected_entry_count": rehearsal.selected_entry_count,
+        "included_entry_count": rehearsal.included_entry_count,
+    }
 
 
 def _runner_compatible_plan(

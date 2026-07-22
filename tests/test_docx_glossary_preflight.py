@@ -6,6 +6,7 @@ import ast
 import inspect
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest import mock
 
 from translator_service.format_adapters.contracts import (
@@ -26,8 +27,12 @@ from translator_service.glossary_contracts import (
     glossary_snapshot_signature,
 )
 from translator_service.glossary_selection import GlossarySelectionBudget
-from translator_service.manual_glossary_rehearsal import ManualGlossaryApproval
+from translator_service.manual_glossary_rehearsal import (
+    ManualGlossaryApproval,
+    ManualGlossaryRehearsalBoundaryError,
+)
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
+from translator_service.translation_policy import GlossaryPromptPolicyAdapterStatus
 
 _DOC_REF = "owner://document/approved-docx"
 
@@ -161,6 +166,24 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
                 result = self._run(**overrides)
             self.assertEqual(result.reason, reason)
 
+    def test_unexpected_boundary_error_propagates(self):
+        error = ManualGlossaryRehearsalBoundaryError(
+            reason="unknown_new_reason",
+            message="Unexpected rehearsal boundary error.",
+        )
+        with mock.patch.object(
+            self.module,
+            "rehearse_manual_glossary_approval",
+            side_effect=error,
+        ):
+            with self.assertRaisesRegex(
+                ManualGlossaryRehearsalBoundaryError,
+                "Unexpected rehearsal boundary error",
+            ) as caught:
+                self._run()
+
+        self.assertIs(caught.exception, error)
+
     def test_hard_entry_omission_is_a_typed_denial(self):
         from translator_service.glossary_prompt_context import (
             GlossaryPromptContextConfig,
@@ -175,6 +198,128 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         )
         self.assertEqual(result.reason, "required_hard_entry_omitted")
 
+    def test_shared_effective_decision_preserves_runner_semantics(self):
+        from translator_service.glossary_effective_decision import (
+            effective_glossary_runtime_adapter_decision,
+        )
+
+        ready = SimpleNamespace(status=GlossaryPromptPolicyAdapterStatus.READY)
+        non_ready = SimpleNamespace(status=GlossaryPromptPolicyAdapterStatus.FALLBACK)
+
+        self.assertIsNone(
+            effective_glossary_runtime_adapter_decision(None, {"status": "ready"})
+        )
+        self.assertIs(
+            ready,
+            effective_glossary_runtime_adapter_decision(ready, None),
+        )
+        self.assertIs(
+            non_ready,
+            effective_glossary_runtime_adapter_decision(
+                non_ready,
+                {"status": "skipped"},
+            ),
+        )
+        self.assertIs(
+            ready,
+            effective_glossary_runtime_adapter_decision(ready, {"status": "ready"}),
+        )
+        self.assertIsNone(
+            effective_glossary_runtime_adapter_decision(ready, {"status": "skipped"})
+        )
+
+    def test_effective_decision_receives_structural_metadata_preflight(self):
+        with mock.patch.object(
+            self.module,
+            "effective_glossary_runtime_adapter_decision",
+            wraps=self.module.effective_glossary_runtime_adapter_decision,
+        ) as effective_decision:
+            result = self._run()
+
+        self.assertEqual(result.status, "approved")
+        _, preflight = effective_decision.call_args.args
+        self.assertEqual(preflight["status"], "ready")
+        self.assertTrue(preflight["metadata_only"])
+        self.assertEqual(preflight["selected_entry_count"], 1)
+        self.assertEqual(preflight["included_entry_count"], 1)
+        self.assertEqual(set(preflight), {
+            "status",
+            "metadata_only",
+            "selected_entry_count",
+            "included_entry_count",
+        })
+
+    def test_non_ready_effective_decision_is_a_typed_denial(self):
+        with mock.patch.object(
+            self.module,
+            "effective_glossary_runtime_adapter_decision",
+            return_value=None,
+        ):
+            result = self._run()
+
+        self.assertEqual(result.reason, "effective_decision_not_ready")
+
+    def test_validation_order_reaches_shared_effective_decision_last(self):
+        observed: list[str] = []
+
+        def observe(name, implementation):
+            def wrapper(*args, **kwargs):
+                observed.append(name)
+                return implementation(*args, **kwargs)
+
+            return wrapper
+
+        with mock.patch.object(
+            self.module,
+            "validate_glossary_snapshot",
+            side_effect=observe(
+                "snapshot",
+                self.module.validate_glossary_snapshot,
+            ),
+        ), mock.patch.object(
+            self.module,
+            "rehearse_manual_glossary_approval",
+            side_effect=observe(
+                "approval_rehearsal",
+                self.module.rehearse_manual_glossary_approval,
+            ),
+        ), mock.patch.object(
+            self.module,
+            "build_glossary_prompt_policy_adapter_decision",
+            side_effect=observe(
+                "policy",
+                self.module.build_glossary_prompt_policy_adapter_decision,
+            ),
+        ), mock.patch.object(
+            self.module,
+            "effective_glossary_runtime_adapter_decision",
+            side_effect=observe(
+                "effective_decision",
+                self.module.effective_glossary_runtime_adapter_decision,
+            ),
+        ):
+            result = self._run()
+
+        self.assertEqual(result.status, "approved")
+        self.assertEqual(
+            observed,
+            ["snapshot", "approval_rehearsal", "policy", "effective_decision"],
+        )
+
+    def test_runner_and_preflight_import_the_shared_effective_decision_rule(self):
+        from translator_service import translation_runner
+
+        runner_source = inspect.getsource(translation_runner)
+        self.assertIn(
+            "from translator_service.glossary_effective_decision import (",
+            runner_source,
+        )
+        self.assertIn("effective_glossary_runtime_adapter_decision(", runner_source)
+        self.assertNotIn(
+            "def _effective_glossary_runtime_adapter_decision(",
+            runner_source,
+        )
+
     def test_module_has_no_forbidden_direct_imports(self):
         source = inspect.getsource(self.module)
         imports = {
@@ -185,6 +330,7 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         forbidden = (
             "translator_service.job_runner",
             "translator_service.translation_runner",
+            "translator_service.worker",
             "translator_service.bot_translation_service",
             "translator_service.translation_cache",
             "translator_service.deepseek_client",

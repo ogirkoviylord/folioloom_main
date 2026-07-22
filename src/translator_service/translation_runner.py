@@ -30,6 +30,9 @@ from translator_service.format_adapters.docx_structure import (
     group_docx_blocks,
     read_docx_xml,
 )
+from translator_service.glossary_effective_decision import (
+    effective_glossary_runtime_adapter_decision,
+)
 from translator_service.glossary_prompt_context import (
     GlossaryPromptContextConfig,
     GlossaryPromptContextResult,
@@ -1505,7 +1508,7 @@ def _translate_docx_units(
             source_texts=[block.text for block in unit.blocks],
         )
         effective_glossary_adapter_decision = (
-            _effective_glossary_runtime_adapter_decision(
+            effective_glossary_runtime_adapter_decision(
                 glossary_adapter_decision,
                 glossary_useful_preflight,
             )
@@ -2573,7 +2576,7 @@ def _translate_epub_units(
             source_texts=[block.text for block in unit.blocks],
         )
         effective_glossary_adapter_decision = (
-            _effective_glossary_runtime_adapter_decision(
+            effective_glossary_runtime_adapter_decision(
                 glossary_adapter_decision,
                 glossary_useful_preflight,
             )
@@ -3105,19 +3108,6 @@ def _glossary_runtime_prompt_context(
         )
     except ValueError:
         return None
-
-
-def _effective_glossary_runtime_adapter_decision(
-    decision: GlossaryPromptPolicyAdapterDecision | None,
-    preflight: Mapping[str, object] | None,
-) -> GlossaryPromptPolicyAdapterDecision | None:
-    if decision is None or preflight is None:
-        return decision
-    if decision.status.value != "ready":
-        return decision
-    if preflight.get("status") == "ready":
-        return decision
-    return None
 
 
 def _glossary_runtime_useful_preflight(
