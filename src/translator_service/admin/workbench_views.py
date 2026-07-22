@@ -21,6 +21,10 @@ from datetime import datetime
 from html import escape
 from urllib.parse import quote
 
+from translator_service.admin.workbench_glossary_projection import (
+    WorkbenchGlossaryProjection,
+    WorkbenchGlossaryProjectionState,
+)
 from translator_service.admin.workbench_session_state import (
     TERM_TYPES,
     ApprovalState,
@@ -957,6 +961,30 @@ def _filter_terms(
     return [t for t in rows if t.status.value == active_filter]
 
 
+def _workbench_glossary_observation(
+    projection: WorkbenchGlossaryProjection | None,
+) -> str:
+    """Render only an injected projection's metadata-safe local shape."""
+    if projection is None:
+        return ""
+    if projection.state == WorkbenchGlossaryProjectionState.FAIL_CLOSED:
+        reason = _safe_attr(projection.reason_code or "unavailable")
+        return f"""
+<section class="wb-card" data-workbench-glossary-observation="fail-closed">
+  <h3>Local glossary observation unavailable</h3>
+  <p>State: fail closed. Reason: <code>{reason}</code>.</p>
+</section>
+"""
+    return f"""
+<section class="wb-card" data-workbench-glossary-observation="local-structural-ready">
+  <h3>Local glossary structural observation</h3>
+  <p>Selected: {projection.selected_entry_count};
+    rendered: {projection.rendered_entry_count};
+    omitted: {projection.omitted_entry_count}.</p>
+</section>
+"""
+
+
 # ---------------------------------------------------------------------------
 # Helper rail (packet §4.2)
 # ---------------------------------------------------------------------------
@@ -1187,8 +1215,9 @@ def render_workbench_glossary(
     show_add_form: bool = False,
     active_filter: str = "all",
     not_wired_after_post: bool = False,
+    glossary_projection: WorkbenchGlossaryProjection | None = None,
 ) -> str:
-    """Render the main Glossary screen (packet §4.2)."""
+    """Render the main Glossary screen with an optional local observation."""
     rows = _filter_terms(state.terms.values(), active_filter)
     document_strip = _workbench_document_strip(state)
     toolbar = _workbench_toolbar(
@@ -1219,6 +1248,7 @@ def render_workbench_glossary(
         )
     body = (
         document_strip
+        + _workbench_glossary_observation(glossary_projection)
         + toolbar
         + add_form
         + term_list_html
