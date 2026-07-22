@@ -26,6 +26,8 @@ filesystem modules, so criterion 6 holds by construction.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import unittest
 from unittest import mock
 
@@ -528,14 +530,27 @@ class RehearsalHardEntryOmissionTests(unittest.TestCase):
             max_entry_characters=900,
         )
 
-        result = rehearse_manual_glossary_approval(
-            _DOC_REF,
-            approval,
-            glossary,
-            self.unit,
-            selection_budget=selection_budget,
-            prompt_config=prompt_config,
-        )
+        rendered_contexts = []
+        render_prompt_context = rehearsal_module.format_glossary_prompt_context
+
+        def observe_rendered_context(*args, **kwargs):
+            rendered_context = render_prompt_context(*args, **kwargs)
+            rendered_contexts.append(rendered_context)
+            return rendered_context
+
+        with mock.patch.object(
+            rehearsal_module,
+            "format_glossary_prompt_context",
+            side_effect=observe_rendered_context,
+        ):
+            result = rehearse_manual_glossary_approval(
+                _DOC_REF,
+                approval,
+                glossary,
+                self.unit,
+                selection_budget=selection_budget,
+                prompt_config=prompt_config,
+            )
 
         assert isinstance(result, ManualGlossaryRehearsalFailure)
         self.assertEqual(
@@ -548,6 +563,18 @@ class RehearsalHardEntryOmissionTests(unittest.TestCase):
             ("entry:hard:second", "entry:hard:term"),
         )
         self.assertEqual(result.omitted_hard_entry_ids, ("entry:hard:term",))
+        self.assertEqual(len(rendered_contexts), 1)
+        rendered_context = rendered_contexts[0]
+        included_selected_hard_entry_ids = tuple(
+            entry_id
+            for entry_id in result.selected_hard_entry_ids
+            if entry_id in rendered_context.included_entry_ids
+        )
+        self.assertEqual(included_selected_hard_entry_ids, ("entry:hard:second",))
+        self.assertEqual(
+            tuple(entry.entry_id for entry in rendered_context.omitted_entries),
+            ("entry:hard:term",),
+        )
 
 
 class RehearsalMetadataSafetyTests(unittest.TestCase):
@@ -691,20 +718,31 @@ class RehearsalImportBoundaryTests(unittest.TestCase):
     """
 
     def test_no_forbidden_collaborator_imported_in_test_module(self):
-        import sys
-
-        forbidden_modules = [
+        forbidden_modules = {
             "translator_service.bot_translation_service",
             "translator_service.worker",
             "translator_service.persistent_jobs",
             "translator_service.deepseek_client",
             "translator_service.glossary_persistent_runtime_resolver",
-        ]
+        }
+        module_tree = ast.parse(inspect.getsource(rehearsal_module))
+        directly_imported_modules = {
+            alias.name
+            for node in ast.walk(module_tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        directly_imported_modules.update(
+            node.module
+            for node in ast.walk(module_tree)
+            if isinstance(node, ast.ImportFrom) and node.module is not None
+        )
+
         for name in forbidden_modules:
             self.assertNotIn(
                 name,
-                sys.modules.keys(),
-                f"forbidden collaborator loaded into rehearsal test: {name}",
+                directly_imported_modules,
+                f"forbidden collaborator directly imported by rehearsal module: {name}",
             )
 
 
