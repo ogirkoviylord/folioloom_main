@@ -632,12 +632,10 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return RedirectResponse(
                 "/admin/login", status_code=HTTPStatus.SEE_OTHER
             )
-        # No real caller contract yet; mint an opaque id (packet §10
-        # ``Unknown: exact shape of caller-provided document_id``).
-        opaque_id = quote(
-            f"opaque-{session.actor_id}-{int(datetime.now(UTC).timestamp())}",
-            safe="",
-        )
+        # No real caller contract yet. Keep the owner-local placeholder stable
+        # within the Admin actor so reopening this demo does not masquerade as
+        # a changed document and falsely enter the stale recovery state.
+        opaque_id = quote(f"opaque-{session.actor_id}-local-workbench", safe="")
         return RedirectResponse(
             f"/admin/workbench/?document={opaque_id}",
             status_code=HTTPStatus.SEE_OTHER,

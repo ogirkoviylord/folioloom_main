@@ -20,7 +20,9 @@ from __future__ import annotations
 import os
 import re
 import unittest
+from datetime import UTC, datetime, timedelta
 from tempfile import TemporaryDirectory
+from unittest import mock
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
@@ -309,6 +311,26 @@ class WorkbenchRoutesTest(unittest.TestCase):
         # Recovery shell renders a calm panel without the term list.
         self.assertIn("Reopen latest document", response.text)
         self.assertNotIn("Saving is not wired in this slice.", response.text)
+
+    def test_workbench_entry_reopens_local_demo_without_stale_recovery(self) -> None:
+        first_now = datetime(2026, 7, 22, 17, 0, tzinfo=UTC)
+        with mock.patch("translator_service.admin.routes.datetime") as clock:
+            clock.now.side_effect = (first_now, first_now + timedelta(seconds=1))
+            first = self.client.get("/admin/workbench-entry")
+            self.assertEqual(first.status_code, 200)
+            self.assertNotIn("Reopen latest document", first.text)
+            second = self.client.get("/admin/workbench-entry")
+        self.assertEqual(second.status_code, 200)
+        self.assertNotIn("Reopen latest document", second.text)
+        self.assertIn("No terms yet.", second.text)
+
+    def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
+        response = self.client.get("/admin/workbench/recovery?reason=stale")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            ".workbench a.wb-button--primary { color: #FFFFFF; }",
+            response.text,
+        )
 
     def test_workbench_future_renders_per_stage(self) -> None:
         for stage, title in (
