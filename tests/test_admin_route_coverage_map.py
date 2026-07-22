@@ -1005,6 +1005,19 @@ ROUTE_COVERAGE_MAP = (
     },
     {
         "method": "POST",
+        "path": "/admin/workbench/glossary/terms/{term_id}/delete",
+        "handler": "workbench_term_delete",
+        "sensitivity": "workbench_glossary_local_ephemeral_mutation",
+        "mutating": True,
+        "destructive": True,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_ephemeral",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
         "path": "/admin/workbench/glossary/terms/{term_id}/reject",
         "handler": "workbench_term_reject",
         "sensitivity": "workbench_glossary_mutation_not_wired",
@@ -1054,6 +1067,19 @@ ROUTE_COVERAGE_MAP = (
         "audit_coverage": "local_only_not_wired",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/glossary/approve",
+        "handler": "workbench_approve_glossary",
+        "sensitivity": "workbench_glossary_read",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_VIEW",
     },
     {
         "method": "POST",
@@ -1117,8 +1143,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 79)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 32)
+        self.assertEqual(len(actual), 81)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 34)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1136,8 +1162,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 32)
-        self.assertEqual(len(destructive), 4)
+        self.assertEqual(len(mutating), 34)
+        self.assertEqual(len(destructive), 5)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
         self.assertIn("TBD_USER_ACTIVITY_VIEW", tbd_permissions)
