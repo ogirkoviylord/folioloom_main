@@ -10,6 +10,8 @@
 
 - `README.md` - main repository entry point and commands.
 - `README.project.md` - project overview.
+- `docs/CAT_WORKFLOW_GATES.md` - canonical CAT-like author workflow gate model; start here for strategy/release questions.
+- `docs/GATE1_GLOSSARY_SOURCE_SEAM_AUDIT.md` - source-backed source seam audit and conditional next technical rehearsal for manual glossary control.
 - `docs/PROJECT_BRIEF.md` - product scope, audience, value, components and non-goals.
 - `docs/ROADMAP.md` - current milestone, immediate/next/later work.
 - `docs/DECISIONS.md` - active decisions and short rationale.
@@ -18,7 +20,7 @@
 
 - `docs/RISK_REGISTER.md` - active risk lookup.
 - `docs/RELEASE_CHECKLIST.md` - release/deploy/go-no-go checklist.
-- `docs/restart/release-gates.md` - Gate A-D details.
+- `docs/restart/release-gates.md` - current gate checklists; old Gate A-D/B-C is superseded as primary release compass.
 - `docs/restart/real-file-test-matrix.md` - real-file QA matrix.
 - `docs/restart/upload-safety-and-retention.md` - upload safety, quarantine, malware scanning, TTL and retention rules.
 - `docs/restart/folioloom-restart-spec.md` - restart spec and product boundary.

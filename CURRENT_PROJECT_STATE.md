@@ -1,17 +1,37 @@
 # FolioLoom Current Project State
 
-Date: 2026-06-18
+Date: 2026-06-29
 
 ## Summary
 
-FolioLoom is a working closed-beta foundation for Telegram-first translation of authorized long documents. The product path is: trusted beta user uploads TXT/DOCX/EPUB in Telegram, confirms rights, selects translation mode and target language, receives preview/estimate, explicitly continues/confirms, then gets progress/cancel/status/history and a final or partial translated file.
+FolioLoom is being reframed from a Telegram-first translation bot into a CAT-like author/rightsholder translation workbench for authorized long documents.
 
-The project is not paid beta and not public production.
+Current product thesis:
+
+1. import authorized TXT/DOCX/EPUB;
+2. preserve document structure and stable segments;
+3. let the author/operator review and edit glossary/terminology;
+4. generate translation draft/suggestions;
+5. surface QA/glossary/structure findings;
+6. export a usable translated document;
+7. keep Telegram as a convenient upload/test/delivery harness, not the defining product surface.
+
+Canonical strategy issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813)
+Canonical gate document: `docs/CAT_WORKFLOW_GATES.md`
+
+The project is not free beta ready, paid beta ready or public production ready.
+
+## Workbench Visual Direction (owner decision)
+
+- The current visual/product baseline is **Premium Author Studio**, selected after a local Figma comparison. It is a design reference for later Workbench work, not an implementation approval.
+- The primary Workbench should be a calm author-centred product room, not the existing Admin, Telegram harness, a generic AI dashboard, CAT/TMS cockpit, spreadsheet-like glossary table, or a text-editor-first shell.
+- The prior Reader-First exploration is not the default product surface. A future distraction-free editor/focus mode may hide surrounding chrome while retaining editor capability; a separate warm, low-strain comfort-reading mode is also a deferred possibility. Its control belongs in later interface settings/exploration rather than the main Workbench screen.
+- No code, interaction contract, storage/auth model, Figma implementation packet, or release/readiness claim follows from this visual choice.
 
 ## Stack
 
 - Python 3.13.
-- aiogram Telegram runtime.
+- aiogram Telegram runtime, now treated as harness/auxiliary channel.
 - FastAPI API/admin app.
 - Docker Compose services: `api`, `bot`, `worker`, `postgres`, `redis`.
 - PostgreSQL scheduler storage for server runtime.
@@ -24,25 +44,34 @@ The project is not paid beta and not public production.
 
 ### Bot and User Flow
 
-- `/start`, menu/help/language flows.
-- TXT/DOCX/EPUB upload and validation path.
-- Rights confirmation before translation work.
-- Translation mode and target language selection.
-- Preview/estimate before full translation.
-- Continue/confirm before full processing.
-- Progress/cancel/status/history-oriented flows.
-- Partial/final output handling.
-- My Books/history foundations.
-- UI localization foundations across supported interface languages.
+- Telegram upload/estimate/confirm/progress/cancel/status/history-oriented flow exists.
+- Rights confirmation exists.
+- Preview before full translation exists.
+- Partial/final output handling exists.
+- My Books/history foundations exist.
+
+These foundations remain useful for testing and delivery, but Telegram is no longer the primary product definition.
 
 ### Translation Core
 
-- TXT, DOCX and EPUB extraction/planning/assembly.
-- Persistent planners and persistent assembly for final and partial outputs.
-- Format adapters with structure preservation foundations.
-- Output contract checks and repair path for unsafe provider outputs.
-- Russian and Ukrainian quality/profile foundations.
-- Glossary/prepared-package foundations are in development; current live evidence does not prove rollout readiness.
+- TXT, DOCX and EPUB extraction/planning/assembly exist.
+- Persistent planners and persistent assembly exist for final and partial outputs.
+- Format adapters have structure preservation foundations.
+- Output contract checks and repair paths exist.
+- Russian/Ukrainian quality/profile foundations exist.
+
+### Glossary / Terminology
+
+- Local/fake prepared-glossary foundations exist.
+- Candidate-quality gates exist.
+- Owner-only diagnostics boundaries exist for glossary runtime sidecars.
+- Scanner v2 is deferred unless fresh evidence warrants it.
+
+Blocking caveat:
+
+- Automatic/internal glossary runtime is not release-ready.
+- Recent live automatic glossary evidence was no-go: RU prep did not produce a READY package; UK rendered glossary context but runtime structural validation failed.
+- Do not claim glossary runtime quality, rollout readiness, cache reuse readiness or release readiness without new reviewed evidence.
 
 ### Backend, Persistence and Worker
 
@@ -54,7 +83,7 @@ The project is not paid beta and not public production.
 - Beta-safe concurrency and provider-capacity foundations.
 - Beta safety guard: kill switch, cost caps, reservation/accounting and admin visibility.
 
-### Provider Layer
+### Provider / Diagnostics
 
 - DeepSeek-compatible chat completion client.
 - Multiple internal API channel/key support.
@@ -66,39 +95,52 @@ The project is not paid beta and not public production.
 
 - Owner/admin login/session foundation.
 - Settings, beta allowlist, provider keys/health, operations, live monitor, costs, security/audit surfaces.
-- SSH-tunnel-only admin posture for closed beta.
+- SSH-tunnel-only admin posture for owner/trusted operation.
 - Docker Compose stack and deployment/restore scripts.
 - Backup/restore tooling and runbooks.
 
-## Main Gaps Before Free Closed Beta
+## Current Main Gaps
 
-- TTL cleanup/delete verification.
-- Real-file TXT/DOCX/EPUB release matrix and report.
-- EPUBCheck or equivalent release validation.
-- DOCX openability/visual QA.
-- Cancel/resume/restart validation.
-- Backup visibility page and restore rehearsal evidence.
-- Alerts MVP.
-- Approved beta-server smoke evidence.
-- Release-ready legal/privacy/AUP/support materials remain future/public-production work.
+### Product / quality gaps before design-partner alpha
 
-## Current Glossary Posture
+- Manual/author-approved glossary import/editor/control path.
+- Glossary preflight status and post-run compliance report.
+- CAT-like source-target/segment review workflow.
+- Representative before/after quality evidence with glossary controls.
+- Export from current approved/edit state.
 
-Automatic/internal glossary work is active but not release-ready.
+### Operational safety carry-forward
 
-Confirmed:
+Old Gate B items remain useful but are not the product release compass by themselves:
 
-- temporary user-facing glossary selector was superseded by internal automatic policy;
-- local/fake prepared-glossary prep and package validation foundations exist;
-- candidate-quality gates were added locally;
-- scanner v2 was deferred for now;
-- owner-only diagnostics boundaries exist for glossary runtime sidecars.
+- CAT real-file import/segment/glossary/export matrix (#75).
+- CAT DOCX export LibreOffice visual QA (#76).
+- CAT workflow cancel/resume/restart recovery (#81).
+- CAT project TTL cleanup/delete behavior (#82).
+- CAT Alerts owner report (#83).
+- CAT Backups owner report (#84).
+- Approved backup export manifest verification (#85).
+- Restore rehearsal for CAT project state (#86).
+- CAT app/server smoke evidence, bot harness optional (#87).
 
-Blocking caveat:
+## Current Gates
 
-- the bounded live automatic glossary smoke after the local/provider wiring was no-go: RU prep did not produce a READY package; UK rendered glossary context but runtime structural validation failed.
+Active gate model lives in `docs/CAT_WORKFLOW_GATES.md`.
 
-Do not claim live glossary quality, runtime rollout readiness, cache reuse readiness or release readiness without new reviewed evidence.
+Immediate gates:
+
+- Gate 0: product reframe / scope lock.
+- Gate 1: glossary / terminology control prototype.
+- Gate 2: CAT-like author workflow thin slice.
+- Gate 3: quality evidence gate.
+
+Later gates:
+
+- design partner free alpha;
+- operational safety gate;
+- paid pilot;
+- self-serve paid beta;
+- public production.
 
 ## Common Verification
 

@@ -11,21 +11,31 @@
 
 ## Active Product Decisions
 
-### Free closed beta before paid/public launch
+### Workbench visual direction: Premium Author Studio baseline
+
+- Status: Active / Deferred implementation.
+- Summary: Future FolioLoom Workbench concepts should start from the **Premium Author Studio** direction selected by the owner after local Figma comparison. Treat it as a visual/product reference, not as an approved implementation packet or a pixel-for-pixel template.
+- Current palette: Retain the selected Premium Author Studio warm-neutral palette as the single default for now. It is a design baseline, not a runtime theme/settings feature.
+- Intent: The Workbench should feel like a calm, author-centred product room for working with a book and its terminology, rather than a Telegram harness, generic AI SaaS, CAT/TMS cockpit, spreadsheet, text-editor shell, or the current Admin surface.
+- Rejected as primary directions: the table/card/dashboard-like Editorial, Precision and Guided Workflow explorations; Reader-First as the default Workbench surface. Do not revive their permanent queues, dense multi-column layouts, spreadsheet-like term tables, or document-reader shell as the default solely because they already exist in Figma.
+- Deferred future ideas: (1) a distraction-free editor/focus mode that can hide surrounding chrome while retaining editor capability; (2) a warm, low-strain comfort-reading mode for an author rereading work; (3) selectable curated visual skins and later, potentially constrained palette choice. These belong in later UI/settings exploration, not the current primary screens. The comfort-reading control should not be placed on the main Workbench surface by default; palette customization must preserve readable contrast and semantic status colors rather than become arbitrary per-element color editing.
+- Boundary: This does not approve code, a production UI, role/auth changes, reader/editor implementation, settings implementation, release claims, or a decision to expose raw manuscript text outside the authorized project context.
+
+### CAT-like author workflow before paid/public launch
 
 - Status: Active.
-- Summary: The next meaningful milestone is free closed beta, not paid beta or public production.
-- Rationale: The technical foundation is strong enough for trusted-user learning, but real-file quality, TTL/delete, restore, server smoke, alerts, support/legal/privacy and payment gates remain incomplete.
+- Summary: The next meaningful milestone is a CAT-like author/rightsholder workflow with glossary-controlled quality evidence, not paid beta or public production.
+- Rationale: The technical foundation is strong enough for owner/trusted design-partner learning, but controlled terminology quality, review workflow, real-file quality, TTL/delete, restore, server smoke, alerts, support/legal/privacy and payment gates remain incomplete.
 - Applies to: roadmap, release readiness, product claims, docs.
-- Boundary: Do not call the project public production-ready or paid-beta-ready without explicit owner approval and evidence.
+- Boundary: Do not call the project free-beta-ready, paid-beta-ready, public-production-ready, glossary-runtime-ready or quality-ready without explicit owner approval and evidence.
 
-### Current MVP scope is Telegram-first TXT/DOCX/EPUB
+### Current scope is CAT-like TXT/DOCX/EPUB with Telegram harness
 
 - Status: Active.
-- Summary: The current closed-beta product scope is Telegram bot translation for authorized TXT/DOCX/EPUB documents.
-- Rationale: This keeps quality, safety, operations and release gates tractable.
-- Applies to: bot, adapters, QA, roadmap, future-format planning.
-- Boundary: Future formats need separate approval, architecture review, fixtures and scoped issues.
+- Summary: The current product direction is an author/rightsholder workbench for authorized TXT/DOCX/EPUB documents: import, structure/segments, glossary review/edit, translation draft, QA findings and export. Telegram is a harness, not the defining product surface.
+- Rationale: This keeps quality, safety, operations and release gates tractable while focusing on the quality problem that blocks real user value.
+- Applies to: CAT workflow, bot harness, adapters, QA, roadmap, future-format planning.
+- Boundary: Future formats, public channels, paid flows and public surfaces need separate approval, architecture review, fixtures and scoped issues.
 
 ### Future formats are committed direction, not current implementation approval
 
@@ -115,11 +125,26 @@
 
 ## Active Release / Safety Decisions
 
-### Gate B before free closed beta
+### CAT-like author workflow reframe
 
 - Status: Active.
-- Summary: Free closed beta requires Gate B evidence before go/no-go.
-- Includes: real-file matrix, upload safety/TTL, DOCX/EPUB validation, restart/recovery, backup/restore, alerts/server smoke evidence.
+- Canonical issue: [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813).
+- Canonical doc: `docs/CAT_WORKFLOW_GATES.md`.
+- Summary: FolioLoom is now evaluated as an author/rightsholder translation workbench: import authorized TXT/DOCX/EPUB, preserve structure/segments, review/edit glossary, generate translation draft/suggestions, surface QA findings and export a usable document.
+- Boundary: Telegram remains a harness / auxiliary channel, not the defining product surface.
+- Boundary: Old Gate B/C is operational/payment infrastructure, not product readiness proof.
+
+### Glossary / terminology control is a core quality prerequisite
+
+- Status: Active.
+- Summary: Paid beta and broader beta claims require evidence that glossary/terminology controls improve representative book/manuscript translation quality.
+- Boundary: Manual/author-approved glossary controls are the MVP path; automatic glossary runtime remains experimental/shadow until representative live evidence passes.
+
+### Operational safety carry-forward
+
+- Status: Active.
+- Summary: Old Gate B safety items remain useful under Gate 5 of `docs/CAT_WORKFLOW_GATES.md`: real-file matrix, upload safety/TTL, DOCX/EPUB validation, restart/recovery, backup/restore, alerts/server smoke evidence.
+- Boundary: Completing operational safety items alone does not prove CAT workflow value, glossary quality, free beta readiness or paid beta readiness.
 
 ### Beta safety accounting is not paid billing
 
@@ -133,11 +158,14 @@
 
 ## Decisions Still Needed
 
-- Free closed beta go/no-go after Gate B evidence.
-- Final TTL/delete/retention policy for beta.
+- Gate 0 ICP and first representative evidence corpus for CAT-like workflow.
+- Minimum manual glossary control surface for Gate 1.
+- CAT workflow thin-slice scope and acceptance criteria.
+- Design-partner free alpha timing and cohort.
+- Final TTL/delete/retention policy for CAT project data.
 - Restore rehearsal cadence and backup visibility target.
-- Alerts MVP definition.
-- Paid beta timing and policy.
+- Alerts MVP definition for CAT workflow health.
+- Paid pilot timing and policy after quality/workflow evidence.
 - Public admin hardening path, if ever exposed.
 - Future format prioritization and fixture policy.
 

@@ -20,7 +20,8 @@ or production-related decisions. Full prior checklist detail is archived at
 | --- | --- |
 | Documentation-only | Allowed with evidence review; no code tests unless docs change behavior/claims. |
 | Internal development | Allowed for local/PR work with focused verification. |
-| Closed beta | Current target stage; needs Gate B evidence or owner-approved deferrals. |
+| Closed alpha / design partner | Current target direction; needs Gates 0-4 evidence. |
+| Operational safety | Old Gate B carry-forward; needed before broader real-file operation. |
 | Public beta | `TBD`; do not claim ready. |
 | Paid beta | Future gated stage; do not claim ready. |
 | Production | Future gated stage; do not claim ready without Gate D and owner approval. |
@@ -29,6 +30,7 @@ or production-related decisions. Full prior checklist detail is archived at
 
 Before any beta/deploy/release decision, check:
 
+- `docs/CAT_WORKFLOW_GATES.md` for current product/release gate model.
 - `docs/ROADMAP.md` for stage and scope.
 - `docs/DECISIONS.md` for active boundaries.
 - `docs/RISK_REGISTER.md` for high/critical risks.
@@ -71,8 +73,7 @@ Checklist:
 
 ## Product And Safety Checks
 
-- [ ] Current scope remains Telegram-first closed beta for TXT/DOCX/EPUB unless
-  owner approved a scope change.
+- [ ] Current scope remains within #813 CAT-like author workflow, Telegram harness role and TXT/DOCX/EPUB unless owner approved a scope change.
 - [ ] Rights confirmation, beta allowlist, cost caps and kill switch are not
   weakened.
 - [ ] User-facing errors do not expose provider internals, secrets or raw private

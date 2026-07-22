@@ -1,5 +1,7 @@
 # Real-File Test Matrix
 
+> **Strategy update (2026-06-29):** This matrix remains useful, but it is now operational/quality evidence for the CAT-like author workflow under #813 and `docs/CAT_WORKFLOW_GATES.md`. Do not treat old Telegram-first Gate B real-file evidence as product readiness or paid readiness by itself.
+
 The unittest suite is strong, but closed beta needs a real-file corpus. The
 purpose is to prove that FolioLoom can process authorized files that resemble
 real user documents, not only synthetic unit fixtures.

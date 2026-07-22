@@ -80,19 +80,20 @@ Ask before changing, publishing, deploying, destructively operating on or extern
 - payments/pricing/refunds/paid jobs/payment providers;
 - public legal/privacy/AUP/support/refund text;
 - production dependencies;
-- scope expansion beyond current MVP.
+- scope expansion beyond the current #813 CAT-like author workflow, Telegram harness role or TXT/DOCX/EPUB format scope.
 
 ## Release Gate
 
 Release/deploy/go-no-go work requires:
 
 - owner approval;
+- `docs/CAT_WORKFLOW_GATES.md` reviewed for current product gate status;
 - relevant release checklist reviewed;
 - `scripts/predeploy_check.sh` evidence;
 - server smoke/status only with approved environment access;
 - rollback/restore expectations;
-- Gate A/B/C/D status or explicit deferral;
-- no production-ready claim without evidence.
+- current CAT gate / operational safety / paid gate status or explicit deferral;
+- no free beta, paid beta, production-ready, glossary-runtime-ready or quality-ready claim without evidence.
 
 ## Area-Specific Notes
 

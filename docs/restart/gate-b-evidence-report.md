@@ -1,5 +1,7 @@
 # Gate B Evidence Report - FolioLoom Free Closed Beta
 
+> **Superseded release compass (2026-06-29):** This report is preserved as historical/operational evidence for the old Telegram-first Gate B plan. Do not use it as the current product roadmap or as proof of free beta / paid beta readiness. Current strategy lives in [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813) and `docs/CAT_WORKFLOW_GATES.md`. Old Gate B items now carry forward under Gate 5 Operational Safety for the CAT-like author workflow.
+
 Date: 2026-06-04
 
 Task classification: docs-only / release-related evidence collection.
