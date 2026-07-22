@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import inspect
 import unittest
 from dataclasses import replace
@@ -226,6 +227,14 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         )
         self.assertIsNone(
             effective_glossary_runtime_adapter_decision(ready, {"status": "skipped"})
+        )
+
+    def test_worker_import_uses_shared_effective_decision_helper(self):
+        worker = importlib.import_module("translator_service.worker")
+
+        self.assertIs(
+            worker.effective_glossary_runtime_adapter_decision,
+            self.module.effective_glossary_runtime_adapter_decision,
         )
 
     def test_effective_decision_receives_structural_metadata_preflight(self):
