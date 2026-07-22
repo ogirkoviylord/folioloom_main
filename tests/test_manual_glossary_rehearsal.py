@@ -45,8 +45,6 @@ from translator_service.glossary_contracts import (
     GlossaryLayer,
     GlossarySnapshot,
     GlossaryStrategy,
-)
-from translator_service.glossary_contracts import (
     glossary_snapshot_signature,
 )
 from translator_service.glossary_prompt_context import (
@@ -64,7 +62,6 @@ from translator_service.manual_glossary_rehearsal import (
     rehearse_manual_glossary_approval,
 )
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
-
 
 _DOC_REF = "owner://book-12345/translation-batch-001"
 
@@ -497,6 +494,60 @@ class RehearsalHardEntryOmissionTests(unittest.TestCase):
         self.assertIn("entry:hard:term", result.omitted_hard_entry_ids)
         self.assertEqual(result.document_ref, _DOC_REF)
         self.assertEqual(result.glossary_signature, self.signature)
+
+    def test_partial_hard_entry_omission_yields_distinct_failure(self):
+        second_hard_entry = _entry(
+            "entry:hard:second",
+            "ZXQPROTECTED002QXZ",
+            layer=GlossaryLayer.HARD,
+            status=GlossaryEntryStatus.LOCKED,
+            evidence_refs=("ev:hard:2",),
+        )
+        glossary = _glossary(
+            (*self.glossary.entries, second_hard_entry),
+            evidence=(
+                *self.glossary.evidence,
+                _evidence("ev:hard:2", 1, "txt:segment:1"),
+            ),
+        )
+        approval = ManualGlossaryApproval(
+            document_ref=_DOC_REF,
+            glossary_signature=glossary_snapshot_signature(glossary),
+        )
+        selection_budget = GlossarySelectionBudget(
+            max_prompt_tokens=200,
+            max_entries=8,
+            max_diagnostic_entries=4,
+        )
+        # The renderer accepts the first selected hard entry, then omits the
+        # second because its one-entry budget is exhausted.
+        prompt_config = GlossaryPromptContextConfig(
+            max_entries=1,
+            max_prompt_tokens=200,
+            max_characters=6_000,
+            max_entry_characters=900,
+        )
+
+        result = rehearse_manual_glossary_approval(
+            _DOC_REF,
+            approval,
+            glossary,
+            self.unit,
+            selection_budget=selection_budget,
+            prompt_config=prompt_config,
+        )
+
+        assert isinstance(result, ManualGlossaryRehearsalFailure)
+        self.assertEqual(
+            result.reason,
+            ManualGlossaryRehearsalFailureReason
+            .HARD_ENTRY_OMITTED_BY_PROMPT_BUDGET,
+        )
+        self.assertEqual(
+            result.selected_hard_entry_ids,
+            ("entry:hard:second", "entry:hard:term"),
+        )
+        self.assertEqual(result.omitted_hard_entry_ids, ("entry:hard:term",))
 
 
 class RehearsalMetadataSafetyTests(unittest.TestCase):

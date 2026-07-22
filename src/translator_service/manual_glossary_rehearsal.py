@@ -60,7 +60,6 @@ from translator_service.glossary_selection import (
     select_glossary_subset_for_work_unit,
 )
 
-
 __all__ = [
     "ManualGlossaryApproval",
     "ManualGlossaryRehearsalBoundaryError",
@@ -310,10 +309,10 @@ def rehearse_manual_glossary_approval(
     hard_omitted = tuple(
         entry_id for entry_id in hard_selected_ids if entry_id in omitted_ids
     )
-    if hard_selected_ids and not hard_included:
-        # A selected hard/locked entry was fully omitted by the renderer. This
-        # is a fail-closed rehearsal failure, not a success and not a
-        # no-glossary fallback.
+    if hard_omitted:
+        # Any selected hard/locked entry omitted by the renderer is a
+        # fail-closed rehearsal failure, not a success and not a no-glossary
+        # fallback.
         return ManualGlossaryRehearsalFailure(
             reason=ManualGlossaryRehearsalFailureReason
             .HARD_ENTRY_OMITTED_BY_PROMPT_BUDGET,
