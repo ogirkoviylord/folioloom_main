@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator, Protocol, cast
+from typing import Protocol, cast
 
 from fastapi.routing import APIRoute, APIRouter
 
