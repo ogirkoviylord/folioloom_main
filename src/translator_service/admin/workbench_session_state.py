@@ -338,6 +338,19 @@ class WorkbenchSessionState:
         self.local_check_result = None
         self.local_check_block_reason = None
 
+    def has_current_manual_approval(self) -> bool:
+        """Whether local approval still matches this exact glossary snapshot."""
+        from translator_service.glossary_contracts import glossary_snapshot_signature
+
+        approval = self.manual_approval
+        if approval is None:
+            return False
+        return (
+            getattr(approval, "document_ref", None) == self.document.document_id
+            and getattr(approval, "glossary_signature", None)
+            == glossary_snapshot_signature(self.glossary_snapshot())
+        )
+
     def clear_local_check_observation(self) -> None:
         self.local_check_result = None
         self.local_check_block_reason = None
@@ -374,6 +387,7 @@ class WorkbenchSessionState:
             notes=notes.strip(),
         )
         self.terms[term.id] = term
+        self.manual_approval = None
         self.clear_local_check_observation()
         self.refresh_health_snapshot()
         self.refresh_approval_state()
@@ -416,6 +430,7 @@ class WorkbenchSessionState:
             existing.status = TermStatus.DRAFT
             existing.locked = False
         existing.recompute_signature()
+        self.manual_approval = None
         self.clear_local_check_observation()
         self.refresh_health_snapshot()
         self.refresh_approval_state()
