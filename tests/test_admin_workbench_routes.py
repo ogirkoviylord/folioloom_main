@@ -389,6 +389,82 @@ class WorkbenchRoutesTest(unittest.TestCase):
             edited_page.text,
         )
 
+    def test_add_after_approval_invalidates_helper_and_local_check(self) -> None:
+        document_id = "add-invalidation-synthetic-document"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+
+        first_added = self.client.post(
+            f"/admin/workbench/glossary/terms/add?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Aster",
+                "target": "Астер",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(first_added.status_code, 303)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        first_term_id = next(iter(state.terms))
+
+        approved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(approved.status_code, 303)
+        self.assertIn(
+            "This exact current glossary snapshot has explicit local approval.",
+            self.client.get(glossary_url).text,
+        )
+
+        added_after_approval = self.client.post(
+            f"/admin/workbench/glossary/terms/add?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Beryl",
+                "target": "Берил",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(added_after_approval.status_code, 303)
+        self.assertIsNone(state.manual_approval)
+        stale_page = self.client.get(glossary_url)
+        self.assertNotIn(
+            "This exact current glossary snapshot has explicit local approval.",
+            stale_page.text,
+        )
+        self.assertIn(
+            "The exact current glossary snapshot needs explicit local approval ",
+            stale_page.text,
+        )
+
+        blocked = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": first_term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary check blocked", blocked.text)
+        self.assertIn("missing_approval", blocked.text)
+
+        reapproved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(reapproved.status_code, 303)
+        current = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": first_term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary structural observation", current.text)
+        self.assertNotIn("missing_approval", current.text)
+
     def test_delete_term_is_csrf_guarded_and_invalidates_exact_approval(self) -> None:
         document_id = "delete-synthetic-document"
         glossary_url = f"/admin/workbench/glossary?document={document_id}"
