@@ -18,6 +18,9 @@ from translator_service.file_storage import (
     StoredFile,
     StoredFileKind,
 )
+from translator_service.glossary_effective_decision import (
+    effective_glossary_runtime_adapter_decision,
+)
 from translator_service.glossary_persistent_runtime_resolver import (
     build_persistent_glossary_runtime_hook_from_prepared_package,
 )
@@ -72,7 +75,6 @@ from translator_service.translation_run_logs import (
 from translator_service.translation_runner import (
     GlossaryRuntimeAdapterHookConfig,
     _clean_translated_text,
-    _effective_glossary_runtime_adapter_decision,
     _emit_glossary_adapter_metadata,
     _format_translation_request_text,
     _glossary_prompt_context_text,
@@ -1353,7 +1355,7 @@ def _persistent_work_unit_glossary_prompt_context(
         glossary_adapter_decision,
         source_texts=source_blocks,
     )
-    effective_glossary_adapter_decision = _effective_glossary_runtime_adapter_decision(
+    effective_glossary_adapter_decision = effective_glossary_runtime_adapter_decision(
         glossary_adapter_decision,
         glossary_useful_preflight,
     )
