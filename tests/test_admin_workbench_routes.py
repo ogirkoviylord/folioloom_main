@@ -74,11 +74,11 @@ class WorkbenchRoutesTest(unittest.TestCase):
         return match.group(1) if match else ""
 
     def test_workbench_entry_redirects_to_root_when_no_document(self) -> None:
-        response = self.client.get(
-            "/admin/workbench-entry", follow_redirects=False
-        )
+        response = self.client.get("/admin/workbench-entry", follow_redirects=False)
         self.assertEqual(response.status_code, 303)
-        self.assertTrue(response.headers["location"].startswith("/admin/workbench/?document="))
+        self.assertTrue(
+            response.headers["location"].startswith("/admin/workbench/?document=")
+        )
 
     def test_workbench_select_renders_empty_state(self) -> None:
         response = self.client.get("/admin/workbench/select")
@@ -91,27 +91,21 @@ class WorkbenchRoutesTest(unittest.TestCase):
 
     def test_workbench_recovery_reasons_render(self) -> None:
         for reason in ("stale", "unavailable", "not-wired", "invalid"):
-            response = self.client.get(
-                f"/admin/workbench/recovery?reason={reason}"
-            )
+            response = self.client.get(f"/admin/workbench/recovery?reason={reason}")
             self.assertEqual(response.status_code, 200, reason)
             # Recovery screen never exposes the Admin nav.
             self.assertNotIn("Admin Console", response.text)
             self.assertIn("FolioLoom Workbench", response.text)
 
     def test_workbench_recovery_defaults_to_invalid_when_reason_unknown(self) -> None:
-        response = self.client.get(
-            "/admin/workbench/recovery?reason=__bogus__"
-        )
+        response = self.client.get("/admin/workbench/recovery?reason=__bogus__")
         self.assertEqual(response.status_code, 200)
         self.assertIn(
             "This document reference is not valid. Return to Admin.", response.text
         )
 
     def test_workbench_glossary_renders_for_injected_document(self) -> None:
-        response = self.client.get(
-            "/admin/workbench/glossary?document=opaque-1"
-        )
+        response = self.client.get("/admin/workbench/glossary?document=opaque-1")
         self.assertEqual(response.status_code, 200)
         self.assertIn("FolioLoom Workbench", response.text)
         self.assertIn("Not saved", response.text)
@@ -126,8 +120,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         document_id = "proof document/&?"
         encoded_document_id = quote(document_id, safe="")
         add_form_action = (
-            "/admin/workbench/glossary/terms/add"
-            f"?document={encoded_document_id}"
+            f"/admin/workbench/glossary/terms/add?document={encoded_document_id}"
         )
         response = self.client.get(
             f"/admin/workbench/glossary?document={encoded_document_id}"
@@ -144,9 +137,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(form_page.status_code, 200)
         self.assertIn('id="wb-add-term-form"', form_page.text)
         self.assertIn(f'action="{add_form_action}"', form_page.text)
-        self.assertIn(
-            f'name="csrf_token" value="{self.csrf_token}"', form_page.text
-        )
+        self.assertIn(f'name="csrf_token" value="{self.csrf_token}"', form_page.text)
 
         successful_post = self.client.post(
             add_form_action,
@@ -156,7 +147,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(successful_post.status_code, 303)
         self.assertEqual(
             successful_post.headers["location"],
-            f"/admin/workbench/glossary?document={encoded_document_id}&not_wired=1",
+            f"/admin/workbench/glossary?document={encoded_document_id}",
         )
 
         bad_csrf = self.client.post(
@@ -177,9 +168,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
 
     def test_term_rows_expose_selection_inputs_for_check_form(self) -> None:
         document_id = "opaque-term-selection"
-        initial = self.client.get(
-            f"/admin/workbench/glossary?document={document_id}"
-        )
+        initial = self.client.get(f"/admin/workbench/glossary?document={document_id}")
         self.assertEqual(initial.status_code, 200)
         state = next(iter(WORKBENCH_SESSION_STATE.values()))
         term, reason = state.append_term(
@@ -191,9 +180,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIsNone(reason)
         assert term is not None
 
-        page = self.client.get(
-            f"/admin/workbench/glossary?document={document_id}"
-        )
+        page = self.client.get(f"/admin/workbench/glossary?document={document_id}")
         self.assertEqual(page.status_code, 200)
         self.assertIn('id="wb-check-selected-form"', page.text)
         self.assertIn(
@@ -211,9 +198,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         )
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
-        response = self.client.get(
-            "/admin/workbench/glossary?document=opaque-2"
-        )
+        response = self.client.get("/admin/workbench/glossary?document=opaque-2")
         self.assertEqual(response.status_code, 200)
         nav_match = re.search(
             r'<nav class="wb-nav" aria-label="Workbench navigation">(.*?)</nav>',
@@ -232,21 +217,85 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIn("Review", nav_html)
         self.assertIn("Export", nav_html)
 
-    def test_workbench_glossary_not_wired_notice_is_present_after_post(self) -> None:
+    def test_empty_add_remains_on_the_local_glossary_surface(self) -> None:
         response = self.client.post(
             "/admin/workbench/glossary/terms/add",
             data={"csrf_token": self.csrf_token},
             follow_redirects=False,
         )
         self.assertEqual(response.status_code, 303)
-        self.assertIn("not_wired=1", response.headers["location"])
+        self.assertEqual(
+            response.headers["location"], "/admin/workbench/glossary?document="
+        )
         page = self.client.get(response.headers["location"])
         self.assertEqual(page.status_code, 200)
-        self.assertIn(
-            "Saving is not wired in this slice. Your changes stay only "
-            "until you reload.",
-            page.text,
+        self.assertIn("No terms yet.", page.text)
+
+    def test_owner_local_manual_glossary_approval_loop_fails_closed_when_stale(
+        self,
+    ) -> None:
+        """The demo loop is local-only and requires an exact re-approval."""
+        document_id = "stable-synthetic-document"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+
+        added = self.client.post(
+            f"/admin/workbench/glossary/terms/add?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Aster",
+                "target": "Астер",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
         )
+        self.assertEqual(added.status_code, 303)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term_id = next(iter(state.terms))
+
+        blocked = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary check blocked", blocked.text)
+
+        approved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(approved.status_code, 303)
+
+        checked = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary structural observation", checked.text)
+        self.assertIn("Selected: 1;", checked.text)
+
+        edited = self.client.post(
+            f"/admin/workbench/glossary/terms/{term_id}/edit?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Aster revised",
+                "target": "Астер",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(edited.status_code, 303)
+
+        stale = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary check blocked", stale.text)
+        self.assertIn("signature_mismatch", stale.text)
 
     def test_workbench_glossary_rejects_post_without_csrf(self) -> None:
         response = self.client.post(
@@ -289,16 +338,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 303, path)
                 page = self.client.get(response.headers["location"])
                 self.assertEqual(page.status_code, 200, path)
-                self.assertIn(
-                    "Saving is not wired in this slice.",
-                    page.text,
-                )
+                if path.endswith("/check"):
+                    self.assertIn("Local glossary check blocked", page.text)
+                elif path.endswith("/edit"):
+                    self.assertIn("No terms yet.", page.text)
+                else:
+                    self.assertIn("Saving is not wired in this slice.", page.text)
 
     def test_workbench_stale_state_renders_recovery_redirect(self) -> None:
         # First hit seeds the session with one signature.
-        self.client.get(
-            "/admin/workbench/glossary?document=opaque-stale-1"
-        )
+        self.client.get("/admin/workbench/glossary?document=opaque-stale-1")
         # A different document id under the same session moves the
         # state to STALE and the controller must redirect to recovery.
         response = self.client.get(
@@ -320,9 +369,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
             ("export", "Export"),
         ):
             with self.subTest(stage=stage):
-                response = self.client.get(
-                    f"/admin/workbench/future?stage={stage}"
-                )
+                response = self.client.get(f"/admin/workbench/future?stage={stage}")
                 self.assertEqual(response.status_code, 200, stage)
                 self.assertIn(title, response.text)
                 self.assertIn("is not part of this slice.", response.text)
@@ -341,21 +388,17 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIn("Admin Console", response.text)
 
     def test_workbench_html_never_claims_authoritative_approval(self) -> None:
-        page = self.client.get(
-            "/admin/workbench/glossary?document=opaque-4"
-        )
+        page = self.client.get("/admin/workbench/glossary?document=opaque-4")
         self.assertEqual(page.status_code, 200)
         # The packet bans green-tick "Approved" wording in status pills.
         # (The functional "Approved" filter chip label is allowed by §5.4.)
         # The glossary is empty in this slice, so no status pill renders.
         self.assertEqual(page.text.count(">Approved<"), 1)
         # The Recovery screen must keep the no-claim language too.
-        recovery = self.client.get(
-            "/admin/workbench/recovery?reason=not-wired"
-        )
+        recovery = self.client.get("/admin/workbench/recovery?reason=not-wired")
         self.assertEqual(recovery.status_code, 200)
         self.assertNotIn(">Approved<", recovery.text)
-        self.assertNotIn("\"Approved\"", page.text)
+        self.assertNotIn('"Approved"', page.text)
 
 
 if __name__ == "__main__":

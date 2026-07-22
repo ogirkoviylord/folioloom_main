@@ -171,23 +171,28 @@ class WorkbenchGlossaryIntegrationTests(unittest.TestCase):
             self.assertNotIn(forbidden, response.text)
 
     def test_missing_approval_skips_all_downstream_work(self):
-        with mock.patch.object(
-            rehearsal_module,
-            "select_glossary_subset_for_work_unit",
-            wraps=rehearsal_module.select_glossary_subset_for_work_unit,
-        ) as selection, mock.patch.object(
-            rehearsal_module,
-            "format_glossary_prompt_context",
-            wraps=rehearsal_module.format_glossary_prompt_context,
-        ) as prompt_render, mock.patch.object(
-            routes,
-            "project_workbench_glossary_rehearsal",
-            wraps=project_workbench_glossary_rehearsal,
-        ) as projection, mock.patch.object(
-            workbench_views,
-            "_workbench_glossary_observation",
-            wraps=workbench_views._workbench_glossary_observation,
-        ) as view_render:
+        with (
+            mock.patch.object(
+                rehearsal_module,
+                "select_glossary_subset_for_work_unit",
+                wraps=rehearsal_module.select_glossary_subset_for_work_unit,
+            ) as selection,
+            mock.patch.object(
+                rehearsal_module,
+                "format_glossary_prompt_context",
+                wraps=rehearsal_module.format_glossary_prompt_context,
+            ) as prompt_render,
+            mock.patch.object(
+                routes,
+                "project_workbench_glossary_rehearsal",
+                wraps=project_workbench_glossary_rehearsal,
+            ) as projection,
+            mock.patch.object(
+                workbench_views,
+                "_workbench_glossary_observation",
+                wraps=workbench_views._workbench_glossary_observation,
+            ) as view_render,
+        ):
             with self.assertRaises(ManualGlossaryRehearsalBoundaryError) as caught:
                 bridge.rehearse_workbench_glossary(
                     _DOCUMENT_REF,
@@ -208,23 +213,28 @@ class WorkbenchGlossaryIntegrationTests(unittest.TestCase):
             document_ref="owner://different-document",
             glossary_signature=self.approval.glossary_signature,
         )
-        with mock.patch.object(
-            rehearsal_module,
-            "select_glossary_subset_for_work_unit",
-            wraps=rehearsal_module.select_glossary_subset_for_work_unit,
-        ) as selection, mock.patch.object(
-            rehearsal_module,
-            "format_glossary_prompt_context",
-            wraps=rehearsal_module.format_glossary_prompt_context,
-        ) as prompt_render, mock.patch.object(
-            routes,
-            "project_workbench_glossary_rehearsal",
-            wraps=project_workbench_glossary_rehearsal,
-        ) as projection, mock.patch.object(
-            workbench_views,
-            "_workbench_glossary_observation",
-            wraps=workbench_views._workbench_glossary_observation,
-        ) as view_render:
+        with (
+            mock.patch.object(
+                rehearsal_module,
+                "select_glossary_subset_for_work_unit",
+                wraps=rehearsal_module.select_glossary_subset_for_work_unit,
+            ) as selection,
+            mock.patch.object(
+                rehearsal_module,
+                "format_glossary_prompt_context",
+                wraps=rehearsal_module.format_glossary_prompt_context,
+            ) as prompt_render,
+            mock.patch.object(
+                routes,
+                "project_workbench_glossary_rehearsal",
+                wraps=project_workbench_glossary_rehearsal,
+            ) as projection,
+            mock.patch.object(
+                workbench_views,
+                "_workbench_glossary_observation",
+                wraps=workbench_views._workbench_glossary_observation,
+            ) as view_render,
+        ):
             with self.assertRaises(ManualGlossaryRehearsalBoundaryError) as caught:
                 bridge.rehearse_workbench_glossary(
                     _DOCUMENT_REF,
