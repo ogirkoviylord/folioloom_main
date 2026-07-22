@@ -33,7 +33,11 @@ from translator_service.manual_glossary_rehearsal import (
     ManualGlossaryRehearsalBoundaryError,
 )
 from translator_service.structure_optimizer import PromptTier, TextBlockKind
-from translator_service.translation_policy import GlossaryPromptPolicyAdapterStatus
+from translator_service.translation_policy import (
+    GlossaryPromptPolicyAdapterDecision,
+    GlossaryPromptPolicyAdapterStatus,
+    GlossaryPromptPolicyCacheBehavior,
+)
 
 _DOC_REF = "owner://document/approved-docx"
 
@@ -119,14 +123,20 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
 
     def test_unsupported_kind_denies_before_snapshot_or_lower_logic(self):
-        with mock.patch.object(
-            self.module, "validate_glossary_snapshot", side_effect=AssertionError
-        ), mock.patch.object(
-            self.module, "rehearse_manual_glossary_approval", side_effect=AssertionError
-        ), mock.patch.object(
-            self.module,
-            "build_glossary_prompt_policy_adapter_decision",
-            side_effect=AssertionError,
+        with (
+            mock.patch.object(
+                self.module, "validate_glossary_snapshot", side_effect=AssertionError
+            ),
+            mock.patch.object(
+                self.module,
+                "rehearse_manual_glossary_approval",
+                side_effect=AssertionError,
+            ),
+            mock.patch.object(
+                self.module,
+                "build_glossary_prompt_policy_adapter_decision",
+                side_effect=AssertionError,
+            ),
         ):
             result = self._run(document_kind="txt")
 
@@ -135,12 +145,17 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
     def test_invalid_snapshot_denies_before_approval_and_effective_decision(self):
         invalid_entry = replace(self.snapshot.entries[0], source_canonical="")
         invalid = replace(self.snapshot, entries=(invalid_entry,))
-        with mock.patch.object(
-            self.module, "rehearse_manual_glossary_approval", side_effect=AssertionError
-        ), mock.patch.object(
-            self.module,
-            "build_glossary_prompt_policy_adapter_decision",
-            side_effect=AssertionError,
+        with (
+            mock.patch.object(
+                self.module,
+                "rehearse_manual_glossary_approval",
+                side_effect=AssertionError,
+            ),
+            mock.patch.object(
+                self.module,
+                "build_glossary_prompt_policy_adapter_decision",
+                side_effect=AssertionError,
+            ),
         ):
             result = self._run(snapshot=invalid)
 
@@ -159,10 +174,13 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
             ),
         )
         for reason, overrides in cases:
-            with self.subTest(reason=reason), mock.patch.object(
-                self.module,
-                "build_glossary_prompt_policy_adapter_decision",
-                side_effect=AssertionError,
+            with (
+                self.subTest(reason=reason),
+                mock.patch.object(
+                    self.module,
+                    "build_glossary_prompt_policy_adapter_decision",
+                    side_effect=AssertionError,
+                ),
             ):
                 result = self._run(**overrides)
             self.assertEqual(result.reason, reason)
@@ -251,12 +269,15 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         self.assertTrue(preflight["metadata_only"])
         self.assertEqual(preflight["selected_entry_count"], 1)
         self.assertEqual(preflight["included_entry_count"], 1)
-        self.assertEqual(set(preflight), {
-            "status",
-            "metadata_only",
-            "selected_entry_count",
-            "included_entry_count",
-        })
+        self.assertEqual(
+            set(preflight),
+            {
+                "status",
+                "metadata_only",
+                "selected_entry_count",
+                "included_entry_count",
+            },
+        )
 
     def test_non_ready_effective_decision_is_a_typed_denial(self):
         with mock.patch.object(
@@ -266,6 +287,31 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         ):
             result = self._run()
 
+        self.assertEqual(result.reason, "effective_decision_not_ready")
+
+    def test_fallback_effective_decision_is_a_typed_denial(self):
+        fallback = GlossaryPromptPolicyAdapterDecision(
+            adapter_version="test",
+            enabled=True,
+            status=GlossaryPromptPolicyAdapterStatus.FALLBACK,
+            fallback_reason="test",
+            prompt_planning_allowed=False,
+            signature_context=None,
+            selected_entry_ids=(),
+            work_unit_sequence=0,
+            work_unit_selection_signature=None,
+            cache_behavior=GlossaryPromptPolicyCacheBehavior.DEFAULT_RUNTIME_CACHE,
+            cache_get_allowed=True,
+            cache_put_allowed=True,
+        )
+        with mock.patch.object(
+            self.module,
+            "build_glossary_prompt_policy_adapter_decision",
+            return_value=fallback,
+        ):
+            result = self._run()
+
+        self.assertIsInstance(result, self.module.DocxGlossaryPreflightDenied)
         self.assertEqual(result.reason, "effective_decision_not_ready")
 
     def test_validation_order_reaches_shared_effective_decision_last(self):
@@ -278,33 +324,38 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
 
             return wrapper
 
-        with mock.patch.object(
-            self.module,
-            "validate_glossary_snapshot",
-            side_effect=observe(
-                "snapshot",
-                self.module.validate_glossary_snapshot,
+        with (
+            mock.patch.object(
+                self.module,
+                "validate_glossary_snapshot",
+                side_effect=observe(
+                    "snapshot",
+                    self.module.validate_glossary_snapshot,
+                ),
             ),
-        ), mock.patch.object(
-            self.module,
-            "rehearse_manual_glossary_approval",
-            side_effect=observe(
-                "approval_rehearsal",
-                self.module.rehearse_manual_glossary_approval,
+            mock.patch.object(
+                self.module,
+                "rehearse_manual_glossary_approval",
+                side_effect=observe(
+                    "approval_rehearsal",
+                    self.module.rehearse_manual_glossary_approval,
+                ),
             ),
-        ), mock.patch.object(
-            self.module,
-            "build_glossary_prompt_policy_adapter_decision",
-            side_effect=observe(
-                "policy",
-                self.module.build_glossary_prompt_policy_adapter_decision,
+            mock.patch.object(
+                self.module,
+                "build_glossary_prompt_policy_adapter_decision",
+                side_effect=observe(
+                    "policy",
+                    self.module.build_glossary_prompt_policy_adapter_decision,
+                ),
             ),
-        ), mock.patch.object(
-            self.module,
-            "effective_glossary_runtime_adapter_decision",
-            side_effect=observe(
-                "effective_decision",
-                self.module.effective_glossary_runtime_adapter_decision,
+            mock.patch.object(
+                self.module,
+                "effective_glossary_runtime_adapter_decision",
+                side_effect=observe(
+                    "effective_decision",
+                    self.module.effective_glossary_runtime_adapter_decision,
+                ),
             ),
         ):
             result = self._run()

@@ -30,6 +30,7 @@ from translator_service.manual_glossary_rehearsal import (
 )
 from translator_service.translation_policy import (
     GlossaryPromptPolicyAdapterConfig,
+    GlossaryPromptPolicyAdapterStatus,
     build_glossary_prompt_policy_adapter_decision,
 )
 
@@ -133,7 +134,10 @@ def preflight_docx_manual_glossary_approval(
         decision,
         _structural_preflight(rehearsal),
     )
-    if effective is None:
+    if (
+        effective is None
+        or effective.status is not GlossaryPromptPolicyAdapterStatus.READY
+    ):
         return _deny(
             "effective_decision_not_ready",
             "Glossary effective decision was not ready.",
