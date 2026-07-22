@@ -324,10 +324,8 @@ def _workbench_css() -> str:
   border-color: var(--wb-accent);
   color: #FFFFFF;
 }
-  .workbench a.wb-button--primary {
-    color: #FFFFFF;
-    text-decoration: none;
-  }
+  .workbench a.wb-button--primary { color: #FFFFFF; }
+  .workbench a.wb-button--primary { text-decoration: none; }
 .wb-button--secondary { background: var(--wb-surface); }
 .wb-button[disabled],
 .wb-button[aria-disabled="true"] {
