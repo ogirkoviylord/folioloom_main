@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
-from typing import Iterable
-
 
 # ---------------------------------------------------------------------------
 # Enums and dataclasses
@@ -72,7 +71,7 @@ def _document_signature(
     source_language: str,
     target_language: str,
 ) -> str:
-    payload = f"{document_id}|{fmt}|{source_language}|{target_language}".encode("utf-8")
+    payload = f"{document_id}|{fmt}|{source_language}|{target_language}".encode()
     return sha256(payload).hexdigest()[:16]
 
 
@@ -84,7 +83,7 @@ def _term_signature(
     notes: str,
     status: TermStatus,
 ) -> str:
-    payload = f"{source}|{target}|{type_}|{notes}|{status.value}".encode("utf-8")
+    payload = f"{source}|{target}|{type_}|{notes}|{status.value}".encode()
     return sha256(payload).hexdigest()[:16]
 
 
@@ -119,7 +118,7 @@ class Term:
         type_: str,
         notes: str,
         status: TermStatus = TermStatus.DRAFT,
-    ) -> "Term":
+    ) -> Term:
         return cls(
             id=_new_term_id(),
             source=source,
@@ -176,7 +175,7 @@ class DocumentContext:
         fmt: str = "txt",
         source_language: str = "en",
         target_language: str = "uk",
-    ) -> "DocumentContext":
+    ) -> DocumentContext:
         return cls(
             document_id=document_id,
             filename=filename,
@@ -243,7 +242,9 @@ class WorkbenchSessionState:
         if any(term.status == TermStatus.CONFLICT for term in self.terms.values()):
             self.approval_state = ApprovalState.CONFLICT
             return
-        has_locked = any(term.status == TermStatus.LOCKED for term in self.terms.values())
+        has_locked = any(
+            term.status == TermStatus.LOCKED for term in self.terms.values()
+        )
         has_approved = any(
             term.status == TermStatus.APPROVED
             for term in self.terms.values()
@@ -387,7 +388,10 @@ class WorkbenchSessionState:
     def unlock_term(
         self, term_id: str
     ) -> tuple[Term | None, str | None]:
-        """Unlock a locked term back to approved. Allowed only from :attr:`TermStatus.LOCKED`."""
+        """Unlock a locked term back to approved.
+
+        Allowed only from :attr:`TermStatus.LOCKED`.
+        """
         existing, reason = self._mutating_precheck(term_id)
         if existing is None:
             return None, reason

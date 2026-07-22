@@ -21,14 +21,13 @@ from datetime import datetime
 from html import escape
 
 from translator_service.admin.workbench_session_state import (
-    ApprovalState,
     TERM_TYPES,
+    ApprovalState,
     Term,
     TermStatus,
     WorkbenchSessionState,
     empty_workbench_session,
 )
-
 
 # ---------------------------------------------------------------------------
 # Stage and copy table (packet §4, §5.4)
@@ -348,13 +347,41 @@ def _workbench_css() -> str:
   font-size: 0.75rem;
   border: 1px solid currentColor;
 }
-.wb-pill--approved { color: var(--wb-success); background: #ECF3EE; border-color: var(--wb-success); }
-.wb-pill--locked { color: var(--wb-accent); background: var(--wb-accent-soft); border-color: var(--wb-accent); }
-.wb-pill--pending { color: var(--wb-ink-soft); background: var(--wb-line); border-color: var(--wb-line-strong); }
-.wb-pill--rejected { color: var(--wb-conflict); background: var(--wb-conflict-soft); border-color: var(--wb-conflict); }
-.wb-pill--conflict { color: var(--wb-conflict); background: var(--wb-conflict-soft); border-color: var(--wb-conflict); }
-.wb-pill--draft { color: var(--wb-ink-soft); background: var(--wb-line); border-color: var(--wb-line-strong); }
-.wb-pill--disabled { color: var(--wb-disabled); background: var(--wb-line); border-color: var(--wb-line-strong); }
+.wb-pill--approved {
+  color: var(--wb-success);
+  background: #ECF3EE;
+  border-color: var(--wb-success);
+}
+.wb-pill--locked {
+  color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  border-color: var(--wb-accent);
+}
+.wb-pill--pending {
+  color: var(--wb-ink-soft);
+  background: var(--wb-line);
+  border-color: var(--wb-line-strong);
+}
+.wb-pill--rejected {
+  color: var(--wb-conflict);
+  background: var(--wb-conflict-soft);
+  border-color: var(--wb-conflict);
+}
+.wb-pill--conflict {
+  color: var(--wb-conflict);
+  background: var(--wb-conflict-soft);
+  border-color: var(--wb-conflict);
+}
+.wb-pill--draft {
+  color: var(--wb-ink-soft);
+  background: var(--wb-line);
+  border-color: var(--wb-line-strong);
+}
+.wb-pill--disabled {
+  color: var(--wb-disabled);
+  background: var(--wb-line);
+  border-color: var(--wb-line-strong);
+}
 .wb-term-list {
   display: grid;
   gap: 8px;
@@ -431,7 +458,12 @@ def _workbench_css() -> str:
 }
 .wb-recovery__panel h2 { margin: 0 0 8px 0; }
 .wb-recovery__panel p { margin: 0 0 16px 0; color: var(--wb-ink-soft); }
-.wb-helper-rail__title { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--wb-ink-soft); }
+.wb-helper-rail__title {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--wb-ink-soft);
+}
 .wb-helper-rail__health {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -440,7 +472,11 @@ def _workbench_css() -> str:
 .wb-helper-rail__health dt { font-size: 0.75rem; color: var(--wb-ink-soft); }
 .wb-helper-rail__health dd { margin: 0; font-size: 0.9375rem; }
 .wb-helper-rail__about summary { cursor: pointer; font-weight: 600; }
-.wb-helper-rail__about p { margin-top: 8px; font-size: 0.8125rem; color: var(--wb-ink-soft); }
+.wb-helper-rail__about p {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--wb-ink-soft);
+}
 .wb-helper-rail__dot {
   display: inline-block;
   width: 8px;
@@ -547,7 +583,9 @@ def _workbench_document_strip(state: WorkbenchSessionState) -> str:
     if not doc.document_id:
         # Nothing injected yet — no strip.
         return ""
-    src_to_tgt = f"{_safe_attr(doc.source_language)} → {_safe_attr(doc.target_language)}"
+    src_to_tgt = (
+        f"{_safe_attr(doc.source_language)} → {_safe_attr(doc.target_language)}"
+    )
     return f"""
 <section class="wb-document-strip" data-document-id="{_safe_attr(doc.document_id)}">
   <div class="wb-document-strip__pair">
@@ -871,7 +909,8 @@ def _workbench_term_row(
   <details class="wb-term__details">
     <summary>Details</summary>
     <p>Notes: {escape(term.notes) or '—'}</p>
-    <p>Last edited: <time datetime="{_safe_attr(last_edited)}">{_safe_attr(last_edited)}</time></p>
+    <p>Last edited: <time datetime="{_safe_attr(last_edited)}">
+      {_safe_attr(last_edited)}</time></p>
     <p>Signature: <code>{_safe_attr(term.signature)}</code></p>
   </details>
 </article>
@@ -917,7 +956,8 @@ def _workbench_helper_rail(
     return f"""
 <aside class="wb-rail" aria-label="Workbench helper rail">
   <section class="wb-card wb-helper-rail__health-card">
-    <h3><span class="wb-helper-rail__dot wb-helper-rail__dot--{css_key}" aria-hidden="true"></span>Glossary health</h3>
+    <h3><span class="wb-helper-rail__dot wb-helper-rail__dot--{css_key}"
+      aria-hidden="true"></span>Glossary health</h3>
     <dl class="wb-helper-rail__health">
       <dt>Total</dt><dd>{int(health.get('total', 0))}</dd>
       <dt>Approved</dt><dd>{int(health.get('approved', 0))}</dd>
@@ -956,7 +996,11 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
     if state.approval_state == ApprovalState.STALE:
         return ("Reopen latest document", "/admin/workbench-entry", "primary")
     if state.approval_state == ApprovalState.UNAVAILABLE:
-        return ("Retry", f"/admin/workbench/glossary?document={state.document.document_id}", "secondary")
+        return (
+            "Retry",
+            f"/admin/workbench/glossary?document={state.document.document_id}",
+            "secondary",
+        )
     if state.approval_state == ApprovalState.CONFLICT:
         # Deep-link to first conflict term id if any.
         first_conflict = next(
@@ -984,7 +1028,11 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
 
 def _helper_next_action_button(action: tuple[str, str, str]) -> str:
     label, href, variant = action
-    cls = "wb-button wb-button--primary" if variant == "primary" else "wb-button wb-button--secondary"
+    cls = (
+        "wb-button wb-button--primary"
+        if variant == "primary"
+        else "wb-button wb-button--secondary"
+    )
     return f'<a class="{cls}" href="{_safe_attr(href)}">{_safe_attr(label)}</a>'
 
 
@@ -1061,7 +1109,11 @@ def _workbench_page(
 
 
 def _filter_chip_from_request(filter_value: str | None) -> str:
-    return filter_value if filter_value in {"all", "approved", "locked", "pending"} else "all"
+    return (
+        filter_value
+        if filter_value in {"all", "approved", "locked", "pending"}
+        else "all"
+    )
 
 
 def render_workbench_select(
@@ -1121,7 +1173,7 @@ def render_workbench_glossary(
         )
     else:
         term_list_html = (
-            f'<div class="wb-term-list">'
+            '<div class="wb-term-list">'
             + "".join(
                 _workbench_term_row(state, t, csrf_token=csrf_token)
                 for t in rows

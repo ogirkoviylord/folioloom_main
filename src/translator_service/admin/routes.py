@@ -475,6 +475,20 @@ def create_workbench_router(
             request, session=session, document_id=document_id
         )
 
+    @router.post(
+        "/glossary/terms/lock-all-approved",
+        response_class=HTMLResponse,
+    )
+    async def workbench_lock_all_approved(request: Request) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        # Fail-closed: bulk locking is not wired in this slice.
+        document_id = request.query_params.get("document") or None
+        return await _mutating_glossary_redirect(
+            request, session=session, document_id=document_id
+        )
+
     return router
 
 

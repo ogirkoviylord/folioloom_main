@@ -6,7 +6,7 @@ specifies them. They exercise:
 
 * the new ``/admin/workbench-entry`` redirect and the four
   Workbench shell surfaces (select / recovery / glossary / future);
-* the seven mutating POSTs that all fail-closed to the honest
+* the eight mutating POSTs that all fail-closed to the honest
   ``not-wired`` notice;
 * the Admin overview gets exactly one calm ``Open Workbench`` CTA
   (no new nav entry, no nav surgery);
@@ -82,7 +82,9 @@ class WorkbenchRoutesTest(unittest.TestCase):
     def test_workbench_select_renders_empty_state(self) -> None:
         response = self.client.get("/admin/workbench/select")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Select a document in Admin to open it in Workbench.", response.text)
+        self.assertIn(
+            "Select a document in Admin to open it in Workbench.", response.text
+        )
         self.assertIn("Open Admin", response.text)
         self.assertIn("FolioLoom Workbench", response.text)
 
@@ -101,7 +103,9 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "/admin/workbench/recovery?reason=__bogus__"
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn("This document reference is not valid. Return to Admin.", response.text)
+        self.assertIn(
+            "This document reference is not valid. Return to Admin.", response.text
+        )
 
     def test_workbench_glossary_renders_for_injected_document(self) -> None:
         response = self.client.get(
@@ -180,6 +184,10 @@ class WorkbenchRoutesTest(unittest.TestCase):
             ("/admin/workbench/glossary/terms/some-id/reject", "Reject"),
             ("/admin/workbench/glossary/terms/some-id/lock", "Lock"),
             ("/admin/workbench/glossary/terms/some-id/unlock", "Unlock"),
+            (
+                "/admin/workbench/glossary/terms/lock-all-approved",
+                "Lock all approved",
+            ),
             ("/admin/workbench/glossary/check", "Check"),
         ]
         for path, _label in endpoints:

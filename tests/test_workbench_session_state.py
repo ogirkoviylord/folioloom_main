@@ -18,12 +18,12 @@ from __future__ import annotations
 import unittest
 
 from translator_service.admin.workbench_session_state import (
+    TERM_TYPES,
+    WORKBENCH_SESSION_STATE,
     ApprovalState,
     DocumentContext,
-    TERM_TYPES,
     Term,
     TermStatus,
-    WORKBENCH_SESSION_STATE,
     WorkbenchSessionState,
     empty_workbench_session,
     get_or_seed_workbench_session,
@@ -202,7 +202,9 @@ class WorkbenchSessionStateLockUnlockTests(unittest.TestCase):
         _seed_locked(self.state)
         # 1 approved+locked → READY.
         self.assertEqual(self.state.approval_state, ApprovalState.READY)
-        term = next(t for t in self.state.terms.values() if t.status == TermStatus.LOCKED)
+        term = next(
+            t for t in self.state.terms.values() if t.status == TermStatus.LOCKED
+        )
         self.state.unlock_term(term.id)
         # Still 1 approved term (now unlocked) → READY.
         self.assertEqual(self.state.approval_state, ApprovalState.READY)

@@ -1042,6 +1042,19 @@ ROUTE_COVERAGE_MAP = (
     },
     {
         "method": "POST",
+        "path": "/admin/workbench/glossary/terms/lock-all-approved",
+        "handler": "workbench_lock_all_approved",
+        "sensitivity": "workbench_glossary_mutation_not_wired",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "local_only_not_wired",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_WORKBENCH_MUTATE",
+    },
+    {
+        "method": "POST",
         "path": "/admin/workbench/glossary/check",
         "handler": "workbench_check_selected",
         "sensitivity": "workbench_glossary_read",
@@ -1076,8 +1089,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 78)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 31)
+        self.assertEqual(len(actual), 79)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 32)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1095,7 +1108,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 31)
+        self.assertEqual(len(mutating), 32)
         self.assertEqual(len(destructive), 4)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
