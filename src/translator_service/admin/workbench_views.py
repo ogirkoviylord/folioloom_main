@@ -62,8 +62,14 @@ WORKBENCH_COPY = {
     "glossary_empty": (
         "No terms yet. Add your first term to begin shaping the glossary."
     ),
-    "ready_helper": ("Glossary is ready. Lock approved terms so they cannot drift."),
-    "not_ready_helper": ("Approve at least one term to mark the glossary as ready."),
+    "ready_helper": (
+        "This exact current glossary snapshot has explicit local approval. "
+        "Changing terms requires approving the new snapshot again."
+    ),
+    "not_ready_helper": (
+        "The exact current glossary snapshot needs explicit local approval "
+        "before a local check can proceed."
+    ),
     "stale_top_strip": (
         "This document was changed since the glossary was opened. "
         "Reopen from Admin to refresh."
@@ -317,6 +323,10 @@ def _workbench_css() -> str:
   background: var(--wb-accent);
   border-color: var(--wb-accent);
   color: #FFFFFF;
+}
+.workbench a.wb-button--primary {
+  color: #FFFFFF;
+  text-decoration: none;
 }
 .wb-button--secondary { background: var(--wb-surface); }
 .wb-button[disabled],
@@ -875,6 +885,13 @@ def _workbench_term_row(
         title="Unlock this term so it can be edited or rejected",
         action="unlock",
     )
+    delete_a = _action(
+        label="Delete term",
+        endpoint=f"/admin/workbench/glossary/terms/{term.id}/delete{document_qs}",
+        disabled=row_actions_disabled,
+        title="Delete this local-only term",
+        action="delete-term",
+    )
     last_edited = _format_iso(term.last_edited_at)
     selection_disabled_attr = (
         ' disabled aria-disabled="true"' if selection_disabled else ""
@@ -910,6 +927,7 @@ def _workbench_term_row(
     {reject_a}
     {lock_a}
     {unlock_a}
+    {delete_a}
   </div>
   <details class="wb-term__details">
     <summary>Details</summary>

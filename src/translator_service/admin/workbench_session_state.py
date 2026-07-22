@@ -421,6 +421,21 @@ class WorkbenchSessionState:
         self.refresh_approval_state()
         return existing, None
 
+    def delete_term(self, term_id: str) -> tuple[Term | None, str | None]:
+        """Delete one local-only term and invalidate snapshot approval."""
+        if self.last_error == "not-wired":
+            return None, "not-wired"
+        if self.approval_state in (ApprovalState.STALE, ApprovalState.UNAVAILABLE):
+            return None, "not-wired"
+        deleted = self.terms.pop(term_id, None)
+        if deleted is None:
+            return None, "not_found"
+        self.manual_approval = None
+        self.clear_local_check_observation()
+        self.refresh_health_snapshot()
+        self.refresh_approval_state()
+        return deleted, None
+
     def accept_term(self, term_id: str) -> tuple[Term | None, str | None]:
         """Accept a candidate / draft as locally-approved.
 

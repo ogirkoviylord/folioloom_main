@@ -417,6 +417,23 @@ def create_workbench_router(
             status_code=HTTPStatus.SEE_OTHER,
         )
 
+    @router.post(
+        "/glossary/terms/{term_id}/delete",
+        response_class=HTMLResponse,
+    )
+    async def workbench_term_delete(request: Request, term_id: str) -> Response:
+        session = await csrf_guarded.verify(request)
+        if not isinstance(session, AdminSession):
+            return session
+        document_id = request.query_params.get("document") or None
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.delete_term(term_id)
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
     @router.post("/glossary/approve", response_class=HTMLResponse)
     async def workbench_approve_glossary(request: Request) -> Response:
         session = await csrf_guarded.verify(request)

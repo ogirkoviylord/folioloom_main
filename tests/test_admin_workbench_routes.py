@@ -115,6 +115,13 @@ class WorkbenchRoutesTest(unittest.TestCase):
         )
         # Helper rail is hidden when total=0.
         self.assertNotIn('aria-label="Workbench helper rail"', response.text)
+        self.assertRegex(
+            response.text,
+            r'<a class="wb-button wb-button--primary" data-action="add-term" '
+            r'href="[^"]+" aria-controls="wb-add-term-form">Add term</a>',
+        )
+        self.assertIn(".workbench a.wb-button--primary", response.text)
+        self.assertIn("color: #FFFFFF;", response.text)
 
     def test_add_term_form_preserves_encoded_document_context(self) -> None:
         document_id = "proof document/&?"
@@ -195,6 +202,20 @@ class WorkbenchRoutesTest(unittest.TestCase):
             page.text,
             rf'<label class="wb-term__selection" for="wb-term-select-{term.id}">'
             r"[\s\S]*?Select term for local check",
+        )
+        self.assertIn('data-action="delete-term">Delete term</button>', page.text)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/terms/{term.id}/delete?document={document_id}"',
+            page.text,
+        )
+        self.assertIn(
+            "The exact current glossary snapshot needs explicit local approval "
+            "before a local check can proceed.",
+            page.text,
+        )
+        self.assertRegex(
+            page.text,
+            r'<a class="wb-button wb-button--primary" href="[^"]+">Add term</a>',
         )
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
@@ -296,6 +317,120 @@ class WorkbenchRoutesTest(unittest.TestCase):
         )
         self.assertIn("Local glossary check blocked", stale.text)
         self.assertIn("signature_mismatch", stale.text)
+
+        reapproved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(reapproved.status_code, 303)
+
+        current = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary structural observation", current.text)
+        self.assertIn("Selected: 1;", current.text)
+        self.assertNotIn("signature_mismatch", current.text)
+
+    def test_delete_term_is_csrf_guarded_and_invalidates_exact_approval(self) -> None:
+        document_id = "delete-synthetic-document"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+
+        term_ids = []
+        for source, target in (("Aster", "Астер"), ("Beryl", "Берил")):
+            added = self.client.post(
+                f"/admin/workbench/glossary/terms/add?document={document_id}",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "source": source,
+                    "target": target,
+                    "type": "name",
+                    "notes": "local synthetic term",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(added.status_code, 303)
+            state = next(iter(WORKBENCH_SESSION_STATE.values()))
+            term_ids.append(
+                next(term_id for term_id in state.terms if term_id not in term_ids)
+            )
+
+        first_term_id, remaining_term_id = term_ids
+        approve = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(approve.status_code, 303)
+        approved_check = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={"csrf_token": self.csrf_token, "selected_term_ids": first_term_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary structural observation", approved_check.text)
+
+        delete_url = (
+            f"/admin/workbench/glossary/terms/{first_term_id}/delete?document={document_id}"
+        )
+        csrf_rejected = self.client.post(
+            delete_url,
+            data={"csrf_token": "wrong-token"},
+            follow_redirects=False,
+        )
+        self.assertEqual(csrf_rejected.status_code, 403)
+
+        deleted = self.client.post(
+            delete_url,
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(deleted.status_code, 303)
+        self.assertEqual(deleted.headers["location"], glossary_url)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        self.assertNotIn(first_term_id, state.terms)
+        self.assertEqual(set(state.terms), {remaining_term_id})
+        self.assertIsNone(state.manual_approval)
+        self.assertIsNone(state.local_check_result)
+
+        stale_check = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "selected_term_ids": remaining_term_id,
+            },
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary check blocked", stale_check.text)
+        self.assertIn("missing_approval", stale_check.text)
+
+        reapprove = self.client.post(
+            f"/admin/workbench/glossary/approve?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(reapprove.status_code, 303)
+        current_check = self.client.post(
+            f"/admin/workbench/glossary/check?document={document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "selected_term_ids": remaining_term_id,
+            },
+            follow_redirects=True,
+        )
+        self.assertIn("Local glossary structural observation", current_check.text)
+        self.assertIn("Selected: 1;", current_check.text)
+
+        self.client.cookies.clear()
+        anonymous = self.client.post(
+            delete_url,
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(anonymous.status_code, 303)
+        self.assertTrue(anonymous.headers["location"].endswith("/admin/login"))
 
     def test_workbench_glossary_rejects_post_without_csrf(self) -> None:
         response = self.client.post(
