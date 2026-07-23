@@ -6,10 +6,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     JobUsageSummary,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.scheduler import (
@@ -1287,10 +1290,121 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
             self.assertTrue(db_path.exists())
 
+    def test_strict_admission_binds_approved_custody_without_payload_leak(self):
+        store = self._memory_store()
+        payload = b'{"terms":["private-term"]}'
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+
+        result = store.admit_strict_docx_job(
+            StrictDocxAdmissionRequest(
+                approval_id=approval.approval_id,
+                order_id="order-strict",
+                user_id="user-42",
+                file_id="original/book.docx",
+                file_name="book.docx",
+                document_kind="docx",
+                source_object_key="original/book.docx",
+                source_language="en",
+                target_language="uk",
+                adapter_version="docx-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                translation_policy='{"mode":"strict"}',
+                work_units=[
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("docx:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key="original/book.docx",
+                    )
+                ],
+            )
+        )
+
+        self.assertTrue(result.admitted)
+        self.assertIsNotNone(result.job)
+        self.assertEqual(result.work_units[0].source_object_key, "original/book.docx")
+        binding = store._connection.execute(
+            "SELECT * FROM strict_job_glossary_bindings WHERE job_id = ?",
+            (result.job.id,),
+        ).fetchone()
+        self.assertEqual(binding["approval_id"], approval.approval_id)
+        rows = store._connection.execute(
+            "SELECT translation_policy FROM translation_jobs"
+        ).fetchall()
+        self.assertNotIn("private-term", repr(rows))
+        approved_snapshot = store.read_approved_glossary_snapshot(
+            approval_id=approval.approval_id
+        )
+        if approved_snapshot is None:
+            self.fail("approved snapshot was not readable")
+        self.assertEqual(approved_snapshot.snapshot_payload, payload)
+
+    def test_revoked_or_missing_approval_denies_without_job_state(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        request = _strict_request(approval.approval_id)
+
+        result = store.admit_strict_docx_job(request)
+
+        self.assertEqual(result.denial_code, "approval_revoked")
+        job_count = store._connection.execute(
+            "SELECT COUNT(*) FROM translation_jobs"
+        ).fetchone()[0]
+        binding_count = store._connection.execute(
+            "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+        ).fetchone()[0]
+        self.assertEqual(job_count, 0)
+        self.assertEqual(binding_count, 0)
+
     def _memory_store(self) -> SQLiteTranslationJobStore:
         store = SQLiteTranslationJobStore(":memory:")
         self.addCleanup(store.close)
         return store
+
+
+def _strict_request(approval_id: str) -> StrictDocxAdmissionRequest:
+    return StrictDocxAdmissionRequest(
+        approval_id=approval_id,
+        order_id="order-strict",
+        user_id="user-42",
+        file_id="original/book.docx",
+        file_name="book.docx",
+        document_kind="docx",
+        source_object_key="original/book.docx",
+        source_language="en",
+        target_language="uk",
+        adapter_version="docx-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        translation_policy=None,
+        work_units=[
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("docx:1",),
+                source_text_hash="hash-1",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+                source_object_key="original/book.docx",
+            )
+        ],
+    )
 
 
 def _job_with_units(
