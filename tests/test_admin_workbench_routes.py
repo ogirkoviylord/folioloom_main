@@ -21,6 +21,7 @@ import os
 import re
 import unittest
 from datetime import UTC, datetime, timedelta
+from html import unescape
 from tempfile import TemporaryDirectory
 from unittest import mock
 from urllib.parse import quote
@@ -215,9 +216,165 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "before a local check can proceed.",
             page.text,
         )
-        self.assertRegex(
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
             page.text,
-            r'<a class="wb-button wb-button--primary" href="[^"]+">Add term</a>',
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        helper_html = helper_match.group(1)
+        self.assertIn('data-workbench-not-ready-checklist="true"', helper_html)
+        self.assertIn("Next step", helper_html)
+        self.assertIn("Local approval", helper_html)
+        self.assertIn("Missing", helper_html)
+        self.assertIn(
+            '<button type="submit" class="wb-button wb-button--primary" '
+            'form="wb-check-selected-form" '
+            'formaction="/admin/workbench/glossary/approve?document=opaque-term-selection">'
+            "Approve current snapshot</button>",
+            helper_html,
+        )
+        self.assertNotIn(
+            '<a class="wb-button wb-button--primary" '
+            'href="/admin/workbench/glossary">Add term</a>',
+            helper_html,
+        )
+
+    def test_helper_approval_cta_submits_existing_approval_form(self) -> None:
+        document_id = 'helper approval /&?"<'
+        encoded_document_id = quote(document_id, safe="")
+        expected_approval_action = (
+            "/admin/workbench/glossary/approve?document="
+            f"{encoded_document_id}"
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/admin/workbench/glossary?document={encoded_document_id}"
+            ).status_code,
+            200,
+        )
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="Aster",
+            target="Астер",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        self.assertIsNotNone(term)
+
+        page = self.client.get(
+            f"/admin/workbench/glossary?document={encoded_document_id}"
+        )
+        self.assertEqual(page.status_code, 200)
+        toolbar_match = re.search(
+            r'<form id="wb-check-selected-form" class="wb-toolbar" method="post"'
+            r'[\s\S]*?</form>',
+            page.text,
+        )
+        assert toolbar_match is not None, "Workbench check form not found"
+        toolbar_html = toolbar_match.group(0)
+        self.assertIn('method="post"', toolbar_html)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/check?document={encoded_document_id}"',
+            toolbar_html,
+        )
+        self.assertIn(
+            f'name="csrf_token" value="{self.csrf_token}"',
+            toolbar_html,
+        )
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        escaped_approval_action = re.escape(expected_approval_action)
+        self.assertRegex(
+            helper_match.group(1),
+            rf'<button type="submit" class="wb-button wb-button--primary" '
+            rf'form="wb-check-selected-form" formaction="{escaped_approval_action}">'
+            r'Approve current snapshot</button>',
+        )
+
+    def test_ready_helper_add_term_link_opens_document_scoped_form(self) -> None:
+        document_id = 'ready helper /&?"<'
+        encoded_document_id = quote(document_id, safe="")
+        glossary_url = f"/admin/workbench/glossary?document={encoded_document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+
+        added = self.client.post(
+            f"/admin/workbench/glossary/terms/add?document={encoded_document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Aster",
+                "target": "Астер",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(added.status_code, 303)
+        approved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={encoded_document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(approved.status_code, 303)
+
+        ready_page = self.client.get(glossary_url)
+        self.assertEqual(ready_page.status_code, 200)
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            ready_page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        add_link = re.search(
+            r'<a class="wb-button wb-button--primary" href="([^"]+)">Add term</a>',
+            helper_match.group(1),
+        )
+        assert add_link is not None, "Ready helper Add term link not found"
+
+        form_page = self.client.get(unescape(add_link.group(1)))
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn('id="wb-add-term-form"', form_page.text)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/terms/add?document={encoded_document_id}"',
+            form_page.text,
+        )
+
+    def test_ready_helper_lock_all_submits_existing_toolbar_form(self) -> None:
+        document_id = "ready helper lock"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="Aster",
+            target="Астер",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert term is not None
+        accepted, reason = state.accept_term(term.id)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(accepted)
+
+        ready_page = self.client.get(glossary_url)
+        self.assertEqual(ready_page.status_code, 200)
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            ready_page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        self.assertIn(
+            '<button type="submit" class="wb-button wb-button--primary" '
+            'form="wb-check-selected-form" '
+            'formaction="/admin/workbench/glossary/terms/lock-all-approved'
+            '?document=ready%20helper%20lock">Lock all approved</button>',
+            helper_match.group(1),
         )
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
@@ -367,6 +524,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "This exact current glossary snapshot has explicit local approval.",
             approved_page.text,
         )
+        self.assertNotIn(
+            'data-workbench-not-ready-checklist="true"', approved_page.text
+        )
+        approved_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            approved_page.text,
+            re.DOTALL,
+        )
+        assert approved_helper is not None, "Workbench helper rail not found"
+        self.assertNotIn("Approve current snapshot", approved_helper.group(1))
 
         edited = self.client.post(
             f"/admin/workbench/glossary/terms/{term_id}/edit?document={document_id}",
@@ -390,6 +557,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "The exact current glossary snapshot needs explicit local approval ",
             edited_page.text,
         )
+        self.assertIn(
+            'data-workbench-not-ready-checklist="true"', edited_page.text
+        )
+        edited_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            edited_page.text,
+            re.DOTALL,
+        )
+        assert edited_helper is not None, "Workbench helper rail not found"
+        self.assertIn("Approve current snapshot", edited_helper.group(1))
 
     def test_add_after_approval_invalidates_helper_and_local_check(self) -> None:
         document_id = "add-invalidation-synthetic-document"
@@ -421,6 +598,17 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "This exact current glossary snapshot has explicit local approval.",
             self.client.get(glossary_url).text,
         )
+        approved_page = self.client.get(glossary_url)
+        self.assertNotIn(
+            'data-workbench-not-ready-checklist="true"', approved_page.text
+        )
+        approved_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            approved_page.text,
+            re.DOTALL,
+        )
+        assert approved_helper is not None, "Workbench helper rail not found"
+        self.assertNotIn("Approve current snapshot", approved_helper.group(1))
 
         added_after_approval = self.client.post(
             f"/admin/workbench/glossary/terms/add?document={document_id}",
@@ -444,6 +632,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "The exact current glossary snapshot needs explicit local approval ",
             stale_page.text,
         )
+        self.assertIn(
+            'data-workbench-not-ready-checklist="true"', stale_page.text
+        )
+        stale_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            stale_page.text,
+            re.DOTALL,
+        )
+        assert stale_helper is not None, "Workbench helper rail not found"
+        self.assertIn("Approve current snapshot", stale_helper.group(1))
 
         blocked = self.client.post(
             f"/admin/workbench/glossary/check?document={document_id}",
@@ -638,6 +836,65 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertNotIn("Reopen latest document", second.text)
         self.assertIn("No terms yet.", second.text)
+
+    def test_workbench_entry_reseeds_local_demo_after_external_document_stales_it(
+        self,
+    ) -> None:
+        first_entry = self.client.get("/admin/workbench-entry")
+        self.assertEqual(first_entry.status_code, 200)
+        canonical_document_id = re.search(
+            r'data-document-id="([^"]+)"', first_entry.text
+        )
+        assert canonical_document_id is not None
+        seeded_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        added_term, reason = seeded_state.append_term(
+            source="Local only",
+            target="Локально",
+            type_="term",
+            notes="discard on Admin re-entry",
+        )
+        self.assertIsNone(reason)
+        self.assertIsNotNone(added_term)
+
+        stale = self.client.get(
+            "/admin/workbench/glossary?document=external-opaque-document"
+        )
+        self.assertEqual(stale.status_code, 200)
+        self.assertIn("Reopen latest document", stale.text)
+        stale_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        self.assertEqual(stale_state.approval_state.value, "stale")
+        self.assertEqual(
+            stale_state.document.document_id, "external-opaque-document"
+        )
+
+        reentered = self.client.get("/admin/workbench-entry")
+        self.assertEqual(reentered.status_code, 200)
+        self.assertNotIn("Reopen latest document", reentered.text)
+        self.assertIn("No terms yet.", reentered.text)
+        self.assertIn(
+            f'data-document-id="{canonical_document_id.group(1)}"',
+            reentered.text,
+        )
+        reentered_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        self.assertEqual(
+            reentered_state.document.document_id,
+            canonical_document_id.group(1),
+        )
+        self.assertEqual(reentered_state.approval_state.value, "ready")
+        self.assertEqual(reentered_state.terms, {})
+        self.assertIsNone(reentered_state.manual_approval)
+
+    def test_workbench_entry_generated_add_term_url_renders_form(self) -> None:
+        entry = self.client.get("/admin/workbench-entry")
+        self.assertEqual(entry.status_code, 200)
+        add_term_url = re.search(
+            r'data-action="add-term" href="([^"]+)"', entry.text
+        )
+        assert add_term_url is not None
+
+        form_page = self.client.get(unescape(add_term_url.group(1)))
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn('id="wb-add-term-form"', form_page.text)
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")

@@ -305,6 +305,7 @@ def _workbench_css() -> str:
   background: var(--wb-surface);
   border: 1px solid var(--wb-line);
   border-radius: var(--wb-radius-md);
+  scroll-margin-top: 24px;
 }
 .wb-toolbar__buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .wb-toolbar__filters { display: flex; gap: 4px; margin-left: auto; }
@@ -467,6 +468,31 @@ def _workbench_css() -> str:
   letter-spacing: 0.04em;
   color: var(--wb-ink-soft);
 }
+.wb-helper-rail__next-step {
+  margin: 0 0 10px 0;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--wb-ink-soft);
+}
+.wb-helper-rail__checklist {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px 0;
+  padding: 0;
+}
+.wb-helper-rail__checklist li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-ink-soft);
+  font-size: 0.8125rem;
+}
+.wb-helper-rail__checklist li:last-child { border-bottom: 0; }
+.wb-helper-rail__checklist strong { color: var(--wb-warn); font-weight: 600; }
 .wb-helper-rail__health {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1000,6 +1026,17 @@ def _workbench_helper_rail(
         )
         helper_copy = _state_helper_copy(state.approval_state)
     next_action = _helper_next_action(state)
+    not_ready_checklist = ""
+    if (
+        state.approval_state == ApprovalState.NOT_READY
+        and not state.has_current_manual_approval()
+    ):
+        not_ready_checklist = """
+    <p class="wb-helper-rail__next-step">Next step</p>
+    <ul class="wb-helper-rail__checklist" data-workbench-not-ready-checklist="true">
+      <li><span>Terms</span><strong>Set</strong></li>
+      <li><span>Local approval</span><strong>Missing</strong></li>
+    </ul>"""
     return f"""
 <aside class="wb-rail" aria-label="Workbench helper rail">
   <section class="wb-card wb-helper-rail__health-card">
@@ -1018,6 +1055,7 @@ def _workbench_helper_rail(
   <section class="wb-card">
     <h3>{_safe_attr(helper_label)}</h3>
     <p>{_safe_attr(helper_copy)}</p>
+    {not_ready_checklist}
     {_helper_next_action_button(next_action)}
   </section>
   <details class="wb-card wb-helper-rail__about">
@@ -1040,6 +1078,8 @@ def _state_helper_copy(state: ApprovalState) -> str:
 
 def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
     """Return (label, href, variant) for the helper-rail primary CTA."""
+    document_qs = f"?document={quote(state.document.document_id, safe='')}"
+    add_term_href = f"/admin/workbench/glossary{document_qs}&add=1"
     if state.approval_state == ApprovalState.STALE:
         return ("Reopen latest document", "/admin/workbench-entry", "primary")
     if state.approval_state == ApprovalState.UNAVAILABLE:
@@ -1060,13 +1100,28 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
                 f"/admin/workbench/glossary?document={state.document.document_id}#wb-term-{first_conflict.id}",
                 "primary",
             )
-        return ("Add term", "/admin/workbench/glossary", "primary")
+        return ("Add term", add_term_href, "primary")
+    if (
+        state.approval_state == ApprovalState.NOT_READY
+        and not state.has_current_manual_approval()
+    ):
+        return (
+            "Approve current snapshot",
+            "/admin/workbench/glossary/approve"
+            f"?document={quote(state.document.document_id, safe='')}",
+            "primary",
+        )
     if state.approval_state == ApprovalState.READY:
         has_approved = state.health_snapshot.get("approved", 0) > 0
         if has_approved:
-            return ("Lock all approved", "/admin/workbench/glossary", "primary")
-        return ("Add term", "/admin/workbench/glossary", "primary")
-    return ("Add term", "/admin/workbench/glossary", "primary")
+            return (
+                "Lock all approved",
+                "/admin/workbench/glossary/terms/lock-all-approved"
+                f"{document_qs}",
+                "primary",
+            )
+        return ("Add term", add_term_href, "primary")
+    return ("Add term", add_term_href, "primary")
 
 
 def _helper_next_action_button(action: tuple[str, str, str]) -> str:
@@ -1076,6 +1131,12 @@ def _helper_next_action_button(action: tuple[str, str, str]) -> str:
         if variant == "primary"
         else "wb-button wb-button--secondary"
     )
+    if label in {"Approve current snapshot", "Lock all approved"}:
+        return (
+            f'<button type="submit" class="{cls}" '
+            f'form="wb-check-selected-form" formaction="{_safe_attr(href)}">'
+            f"{_safe_attr(label)}</button>"
+        )
     return f'<a class="{cls}" href="{_safe_attr(href)}">{_safe_attr(label)}</a>'
 
 
