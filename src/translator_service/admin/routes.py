@@ -3162,6 +3162,9 @@ def _apply_admin_job_action(
             message = "Translation cancelled by admin."
         elif action == "delete":
             updated = job
+            if _is_strict_sqlite_job(store, job_id):
+                return HTTPStatus.CONFLICT
+            object_keys = _job_object_keys(store, job)
             delete_result = store.delete_job(job_id)
             if isinstance(delete_result, bool):
                 deleted = delete_result
@@ -3173,7 +3176,6 @@ def _apply_admin_job_action(
                 return HTTPStatus.CONFLICT
             if not deleted:
                 return HTTPStatus.NOT_FOUND
-            object_keys = _job_object_keys(store, job)
             status = "deleted"
             message = "Translation deleted by admin."
         else:
@@ -3217,6 +3219,19 @@ def _job_object_keys(store, job) -> set[str]:
         if unit.source_object_key
     )
     return object_keys
+
+
+def _is_strict_sqlite_job(store, job_id: str) -> bool:
+    connection = getattr(store, "_connection", None)
+    if connection is None:
+        return False
+    return (
+        connection.execute(
+            "SELECT 1 FROM strict_job_glossary_bindings WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        is not None
+    )
 
 
 def _delete_job_objects(settings: Settings, object_keys: set[str]) -> None:

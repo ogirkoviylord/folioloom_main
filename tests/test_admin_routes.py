@@ -2727,6 +2727,14 @@ class AdminRoutesTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "jobs.sqlite3"
             admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            storage_root = Path(temp_dir) / "storage"
+            storage = LocalObjectStorage(storage_root)
+            deleted_unit_source = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="delete-unit.txt",
+                content_type="text/plain",
+                content=b"delete this legacy work-unit source",
+            )
             store = SQLiteTranslationJobStore(db_path)
             paused_job = _persistent_job(store, order_id="order-pause")
             cancelled_job = _persistent_job(store, order_id="order-cancel")
@@ -2734,6 +2742,10 @@ class AdminRoutesTest(unittest.TestCase):
             _add_units(store, paused_job.id)
             _add_units(store, cancelled_job.id)
             _add_units(store, deleted_job.id)
+            store._connection.execute(
+                "UPDATE work_units SET source_object_key = ? WHERE job_id = ?",
+                (deleted_unit_source.object_key, deleted_job.id),
+            )
             store.claim_next_work_unit(paused_job.id, worker_id="worker-pause")
             store.claim_next_work_unit(cancelled_job.id, worker_id="worker-cancel")
             store.claim_next_work_unit(deleted_job.id, worker_id="worker-delete")
@@ -2743,6 +2755,7 @@ class AdminRoutesTest(unittest.TestCase):
                     settings=Settings(
                         persistent_jobs_db_path=str(db_path),
                         admin_db_path=str(admin_db_path),
+                        object_storage_root=str(storage_root),
                         admin_owner_password="owner-pass",
                         admin_session_secret="session-secret",
                     )
@@ -2779,12 +2792,95 @@ class AdminRoutesTest(unittest.TestCase):
                 "cancelled",
             )
             self.assertIsNone(reopened.get_job(deleted_job.id))
+            self.assertFalse(storage.exists(deleted_unit_source.object_key))
             with SQLiteUserActivityStore(admin_db_path) as activity:
                 events = activity.list_events(channel_user_id="42")
             event_types = {event.event_type for event in events}
             self.assertIn("translation.admin_paused", event_types)
             self.assertIn("translation.admin_cancelled", event_types)
             self.assertIn("translation.admin_deleted", event_types)
+
+    def test_admin_delete_legacy_job_removes_unit_only_intermediate_object(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            storage_root = Path(temp_dir) / "storage"
+            storage = LocalObjectStorage(storage_root)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.txt",
+                content_type="text/plain",
+                content=b"source",
+            )
+            final = storage.put_bytes(
+                kind=StoredFileKind.FINAL,
+                file_name="book.uk.txt",
+                content_type="text/plain",
+                content=b"final",
+            )
+            intermediate = storage.put_bytes(
+                kind=StoredFileKind.INTERMEDIATE,
+                file_name="unit-1.txt",
+                content_type="text/plain",
+                content=b"unit",
+            )
+            store = SQLiteTranslationJobStore(db_path)
+            job = store.create_job(
+                order_id="order-legacy-delete",
+                user_id="telegram:42",
+                file_id=source.object_key,
+                source_object_key=source.object_key,
+                file_name="book.txt",
+                document_kind="txt",
+                source_language="en",
+                target_language="uk",
+                adapter_version="txt-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+            )
+            store.add_work_units(
+                job.id,
+                [
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("txt:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key=intermediate.object_key,
+                    )
+                ],
+            )
+            store.attach_job_output(job.id, final_object_key=final.object_key)
+            store.close()
+            client = TestClient(
+                create_app(
+                    settings=Settings(
+                        persistent_jobs_db_path=str(db_path),
+                        admin_db_path=str(admin_db_path),
+                        object_storage_root=str(storage_root),
+                        admin_owner_password="owner-pass",
+                        admin_session_secret="session-secret",
+                    )
+                )
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            csrf = _csrf_token(client.get("/admin/operations/jobs").text)
+
+            response = client.post(
+                f"/admin/operations/jobs/{job.id}/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+            self.assertEqual(response.status_code, 303)
+            for object_key in (
+                source.object_key,
+                final.object_key,
+                intermediate.object_key,
+            ):
+                self.assertFalse(storage.exists(object_key))
 
     def test_admin_delete_strict_job_returns_conflict_without_side_effects(self):
         with TemporaryDirectory() as temp_dir:

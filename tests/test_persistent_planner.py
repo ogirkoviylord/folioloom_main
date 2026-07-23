@@ -14,14 +14,18 @@ from translator_service.format_adapters import (
     TXT_ADAPTER_VERSION,
 )
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
 )
 from translator_service.persistent_planner import (
     BOOK_MANUSCRIPT_TRANSLATION_MODE_PROFILE,
+    StrictAdmissionDenied,
     create_persistent_docx_job_plan,
     create_persistent_epub_job_plan,
+    create_persistent_strict_docx_job_plan,
     create_persistent_txt_job_plan,
 )
 
@@ -357,6 +361,149 @@ class PersistentPlannerTest(unittest.TestCase):
                 "allow natural prose flow",
                 translation_policy["translation_context_memory"]["style_summary"],
             )
+
+    def test_strict_docx_plan_admits_approved_source_without_storage_writes(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body><w:p><w:r><w:t>Strict source.</w:t></w:r></w:p></w:body>
+                    </w:document>
+                    """
+                ),
+            )
+            payload = b"approved-snapshot"
+            approval = store.create_glossary_approval(
+                snapshot_payload=payload,
+                snapshot_digest=sha256(payload).hexdigest(),
+                snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            )
+            object_files_before = sorted(
+                path
+                for path in (Path(temp_dir) / "objects").rglob("*")
+                if path.is_file()
+            )
+
+            plan = create_persistent_strict_docx_job_plan(
+                store=store,
+                storage=storage,
+                approval_id=approval.approval_id,
+                source_object_key=source.object_key,
+                order_id="order-strict",
+                user_id="user-42",
+                file_name="book.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+
+            if isinstance(plan, StrictAdmissionDenied):
+                self.fail(f"strict job admission unexpectedly denied: {plan.code}")
+            self.assertTrue(storage.exists(source.object_key))
+            self.assertTrue(plan.work_units)
+            self.assertTrue(
+                all(
+                    unit.source_object_key == source.object_key
+                    for unit in plan.work_units
+                )
+            )
+            self.assertEqual(
+                sorted(
+                    path
+                    for path in (Path(temp_dir) / "objects").rglob("*")
+                    if path.is_file()
+                ),
+                object_files_before,
+            )
+
+    def test_strict_docx_plan_denials_preserve_source_and_state(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            docx_source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body><w:p><w:r><w:t>Denied source.</w:t></w:r></w:p></w:body>
+                    </w:document>
+                    """
+                ),
+            )
+            txt_source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="notes.txt",
+                content_type="text/plain",
+                content=b"not docx",
+            )
+            payload = b"revoked-snapshot"
+            approval = store.create_glossary_approval(
+                snapshot_payload=payload,
+                snapshot_digest=sha256(payload).hexdigest(),
+                snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            )
+            store.revoke_glossary_approval(approval_id=approval.approval_id)
+
+            denied_approval = create_persistent_strict_docx_job_plan(
+                store=store,
+                storage=storage,
+                approval_id=approval.approval_id,
+                source_object_key=docx_source.object_key,
+                order_id="order-denied",
+                user_id="user-42",
+                file_name="book.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+            denied_kind = create_persistent_strict_docx_job_plan(
+                store=store,
+                storage=storage,
+                approval_id="missing-approval",
+                source_object_key=txt_source.object_key,
+                order_id="order-not-docx",
+                user_id="user-42",
+                file_name="notes.txt",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+
+            self.assertEqual(
+                denied_approval,
+                StrictAdmissionDenied(code="approval_revoked"),
+            )
+            self.assertEqual(
+                denied_kind,
+                StrictAdmissionDenied(code="document_kind_not_docx"),
+            )
+            self.assertTrue(storage.exists(docx_source.object_key))
+            self.assertTrue(storage.exists(txt_source.object_key))
+            for table in (
+                "translation_jobs",
+                "work_units",
+                "strict_job_glossary_bindings",
+                "work_unit_attempts",
+                "scheduler_events",
+            ):
+                count = store._connection.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+                self.assertEqual(
+                    count, 0
+                )
 
     def test_creates_epub_job_and_stored_work_units_from_adapter_plan(self):
         with TemporaryDirectory() as temp_dir:
