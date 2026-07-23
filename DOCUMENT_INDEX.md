@@ -19,6 +19,7 @@ Use this index to find the right document without loading archives into the firs
 - `docs/PROJECT_BRIEF.md` - product scope, audience, value, components and non-goals.
 - `docs/ROADMAP.md` - current milestone, immediate/next/later work.
 - `docs/DECISIONS.md` - active decisions and short rationale.
+- `docs/FUTURE_GAME_LOCALIZATION_MODE.md` - deferred product hypothesis for a future game/modpack localization track; no implementation approval.
 
 ## Risk / Release
 

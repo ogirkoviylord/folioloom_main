@@ -75,6 +75,7 @@ Old #88 was closed as superseded by #813. Future final readiness reporting shoul
 - Self-serve paid beta only after paid pilot plus payment ledger/idempotency/refund/support/reconciliation.
 - Public production.
 - Future formats beyond TXT/DOCX/EPUB.
+- Future game/modpack localization track (including Minecraft): see `docs/FUTURE_GAME_LOCALIZATION_MODE.md`; deferred idea only, not current scope or implementation approval.
 - Public website/customer portal.
 - WhatsApp/Discord/public API channels.
 - User-facing provider/model picker.
