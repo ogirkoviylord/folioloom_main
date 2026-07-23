@@ -766,6 +766,15 @@ class WorkbenchRoutesTest(unittest.TestCase):
             r'data-document-id="([^"]+)"', first_entry.text
         )
         assert canonical_document_id is not None
+        seeded_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        added_term, reason = seeded_state.append_term(
+            source="Local only",
+            target="Локально",
+            type_="term",
+            notes="discard on Admin re-entry",
+        )
+        self.assertIsNone(reason)
+        self.assertIsNotNone(added_term)
 
         stale = self.client.get(
             "/admin/workbench/glossary?document=external-opaque-document"
@@ -792,6 +801,8 @@ class WorkbenchRoutesTest(unittest.TestCase):
             canonical_document_id.group(1),
         )
         self.assertEqual(reentered_state.approval_state.value, "ready")
+        self.assertEqual(reentered_state.terms, {})
+        self.assertIsNone(reentered_state.manual_approval)
 
     def test_workbench_entry_generated_add_term_url_renders_form(self) -> None:
         entry = self.client.get("/admin/workbench-entry")
