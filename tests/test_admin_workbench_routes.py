@@ -21,6 +21,7 @@ import os
 import re
 import unittest
 from datetime import UTC, datetime, timedelta
+from html import unescape
 from tempfile import TemporaryDirectory
 from unittest import mock
 from urllib.parse import quote
@@ -755,6 +756,54 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertNotIn("Reopen latest document", second.text)
         self.assertIn("No terms yet.", second.text)
+
+    def test_workbench_entry_reseeds_local_demo_after_external_document_stales_it(
+        self,
+    ) -> None:
+        first_entry = self.client.get("/admin/workbench-entry")
+        self.assertEqual(first_entry.status_code, 200)
+        canonical_document_id = re.search(
+            r'data-document-id="([^"]+)"', first_entry.text
+        )
+        assert canonical_document_id is not None
+
+        stale = self.client.get(
+            "/admin/workbench/glossary?document=external-opaque-document"
+        )
+        self.assertEqual(stale.status_code, 200)
+        self.assertIn("Reopen latest document", stale.text)
+        stale_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        self.assertEqual(stale_state.approval_state.value, "stale")
+        self.assertEqual(
+            stale_state.document.document_id, "external-opaque-document"
+        )
+
+        reentered = self.client.get("/admin/workbench-entry")
+        self.assertEqual(reentered.status_code, 200)
+        self.assertNotIn("Reopen latest document", reentered.text)
+        self.assertIn("No terms yet.", reentered.text)
+        self.assertIn(
+            f'data-document-id="{canonical_document_id.group(1)}"',
+            reentered.text,
+        )
+        reentered_state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        self.assertEqual(
+            reentered_state.document.document_id,
+            canonical_document_id.group(1),
+        )
+        self.assertEqual(reentered_state.approval_state.value, "ready")
+
+    def test_workbench_entry_generated_add_term_url_renders_form(self) -> None:
+        entry = self.client.get("/admin/workbench-entry")
+        self.assertEqual(entry.status_code, 200)
+        add_term_url = re.search(
+            r'data-action="add-term" href="([^"]+)"', entry.text
+        )
+        assert add_term_url is not None
+
+        form_page = self.client.get(unescape(add_term_url.group(1)))
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn('id="wb-add-term-form"', form_page.text)
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
