@@ -405,15 +405,18 @@ class SQLiteTranslationJobStore:
                 """
                 INSERT INTO translation_jobs (
                     id, order_id, user_id, file_id, file_name, document_kind,
-                    source_object_key, source_language, target_language, adapter_version,
+                    source_object_key, source_language, target_language,
+                    adapter_version,
                     prompt_version, pricing_snapshot_id, translation_policy,
                     partial_object_key, final_object_key, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'docx', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 'docx', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?,
+                    ?)
                 """,
                 (
                     job_id, request.order_id, request.user_id, request.file_id,
-                    request.file_name, request.source_object_key, request.source_language,
-                    request.target_language, request.adapter_version, request.prompt_version,
+                    request.file_name, request.source_object_key,
+                    request.source_language, request.target_language,
+                    request.adapter_version, request.prompt_version,
                     request.pricing_snapshot_id, request.translation_policy,
                     PersistentTranslationJobStatus.QUEUED.value,
                     _to_db_time(now), _to_db_time(now),
@@ -1931,7 +1934,8 @@ class SQLiteTranslationJobStore:
                 """
                 CREATE TABLE IF NOT EXISTS glossary_approvals (
                     approval_id TEXT PRIMARY KEY,
-                    custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+                    custody_id TEXT NOT NULL REFERENCES
+                        glossary_snapshot_custody(custody_id),
                     snapshot_digest TEXT NOT NULL,
                     approval_schema_version INTEGER NOT NULL,
                     approval_status TEXT NOT NULL
@@ -1946,8 +1950,10 @@ class SQLiteTranslationJobStore:
                 """
                 CREATE TABLE IF NOT EXISTS strict_job_glossary_bindings (
                     job_id TEXT PRIMARY KEY REFERENCES translation_jobs(id),
-                    approval_id TEXT NOT NULL REFERENCES glossary_approvals(approval_id),
-                    custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+                    approval_id TEXT NOT NULL REFERENCES
+                        glossary_approvals(approval_id),
+                    custody_id TEXT NOT NULL REFERENCES
+                        glossary_snapshot_custody(custody_id),
                     snapshot_digest TEXT NOT NULL,
                     binding_schema_version INTEGER NOT NULL,
                     created_at TEXT NOT NULL

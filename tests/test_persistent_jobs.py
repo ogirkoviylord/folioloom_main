@@ -1426,7 +1426,9 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             store.admit_strict_docx_job(_strict_request(approval.approval_id))
 
         self.assertEqual(
-            store._connection.execute("SELECT COUNT(*) FROM translation_jobs").fetchone()[0],
+            store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0],
             0,
         )
         self.assertEqual(
@@ -1504,7 +1506,9 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
                     snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
                     approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
                 )
-                result = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+                result = store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
                 if result.job is None:
                     self.fail("strict job admission unexpectedly denied")
 
@@ -1615,7 +1619,9 @@ class StrictConcurrentStoreTest(unittest.TestCase):
 
             def admit(store: SQLiteTranslationJobStore):
                 start.wait()
-                return store.admit_strict_docx_job(_strict_request(approval.approval_id))
+                return store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(admit, (first_store, second_store)))
@@ -1759,7 +1765,10 @@ def _delete_strict_binding_dependency(
 
 def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
     return {
-        table: [tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")]
+        table: [
+            tuple(row)
+            for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
         for table in (
             "translation_jobs",
             "work_units",
