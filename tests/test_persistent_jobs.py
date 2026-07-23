@@ -1578,6 +1578,48 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
                 self.assertIsNone(claim)
                 self.assertEqual(_guard_b_claim_snapshot(store), before)
 
+    def test_direct_claim_denies_revoked_strict_binding_without_mutation(self):
+        store = self._memory_store()
+        approval = _create_approval(store)
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        before = _guard_b_claim_snapshot(store)
+
+        claim = store.claim_next_work_unit(admitted.job.id, worker_id="worker-a")
+
+        self.assertIsNone(claim)
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
+    def test_direct_worker_does_not_load_or_translate_revoked_strict_job(self):
+        from translator_service.worker import run_next_persistent_work_unit
+
+        class UnreachableTranslator:
+            def translate(self, **kwargs):
+                raise AssertionError("revoked strict job reached translator")
+
+        store = self._memory_store()
+        approval = _create_approval(store)
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        before = _guard_b_claim_snapshot(store)
+        source_loads = []
+
+        completed = run_next_persistent_work_unit(
+            store=store,
+            job_id=admitted.job.id,
+            worker_id="worker-a",
+            source_loader=lambda unit: (source_loads.append(unit.id), "source")[1],
+            translator=UnreachableTranslator(),
+        )
+
+        self.assertIsNone(completed)
+        self.assertEqual(source_loads, [])
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
     def test_guard_b_rechecks_after_expired_lease_recovery(self):
         store = self._memory_store()
         payload = b"snapshot"
