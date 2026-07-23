@@ -57,7 +57,7 @@ that `DOCUMENT_INDEX.md` plus `rg` is not enough.
 Status: Draft / Ready / Blocked / Complete
 Created: YYYY-MM-DD
 Owner: GPT-Orchestrator
-Target model/agent: Codex / GPT-Critic / DeepSeek-Critic / MiMo-Critic / DeepSeek-Reviewer / MiMo-Reviewer / GLM-Worker / MiniMax-UX / TBD
+Target model/agent: GPT-Orchestrator / GPT-Critic / DeepSeek-Critic / MiMo-Critic / GLM-Critic / GPT-Coder / GLM-Coder / GPT-Reviewer / DeepSeek-Reviewer / MiMo-Reviewer / GLM-Reviewer / MiniMax-UX / TBD
 Hermes card / issue: <link or Unknown>
 
 ## Goal
@@ -122,6 +122,13 @@ One concrete outcome.
   regressions. Do not broaden into unrelated skills without packet evidence.
 - For implementation worker: do not expand scope; return changed files, tests,
   residual risk and any `TBD` / `Unknown`.
+- For `gpt-coder` or `glm-coder`: they are peer workers. If both are active,
+  state their separate card, branch/worktree, file ownership, interface or
+  dependency, and integration owner. Never assign both to the same files or
+  competing production implementation unless this is explicitly a disposable
+  spike.
+- For GLM-5.2: maximum native reasoning is configured at profile level. Do not
+  request `ultra` as a separate capability; for GLM it is equivalent to `max`.
 - For UX/product reviewer: focus on user journey, next best action, confusing
   states and product fit; do not invent release status.
 
