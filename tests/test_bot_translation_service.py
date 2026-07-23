@@ -70,9 +70,12 @@ from translator_service.job_runner import (
     TranslationJobStatus,
 )
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.pricing import PricingRules
@@ -6797,6 +6800,97 @@ class BotTranslationServiceTest(unittest.TestCase):
             run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
             self.assertEqual(run_snapshot["status"], "cancelled")
             self.assertEqual(run_snapshot["error_message"], "Book deleted by user.")
+
+    def test_delete_user_book_keeps_strict_job_source_and_run(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            persistent_store = SQLiteTranslationJobStore(
+                Path(temp_dir) / "jobs.sqlite3"
+            )
+            self.addCleanup(persistent_store.close)
+            run_log_root = Path(temp_dir) / "translation-runs"
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=b"strict-source",
+            )
+            approval_payload = b"strict-approval"
+            approval = persistent_store.create_glossary_approval(
+                snapshot_payload=approval_payload,
+                snapshot_digest=hashlib.sha256(approval_payload).hexdigest(),
+                snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            )
+            admitted = persistent_store.admit_strict_docx_job(
+                StrictDocxAdmissionRequest(
+                    approval_id=approval.approval_id,
+                    order_id="order-strict-delete",
+                    user_id="telegram:42",
+                    file_id=source.object_key,
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_object_key=source.object_key,
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="docx-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                    translation_policy=None,
+                    work_units=[
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("docx:1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source.object_key,
+                        )
+                    ],
+                )
+            )
+            if admitted.job is None:
+                self.fail("strict job admission unexpectedly denied")
+            service = BotTranslationService(
+                job_repository=InMemoryTranslationJobRepository(),
+                pricing_rules=_pricing_rules(),
+                max_upload_mb=50,
+                max_fragment_chars=5,
+                file_storage=storage,
+                persistent_job_store=persistent_store,
+                translation_run_log_root=run_log_root,
+            )
+            run_logger = TranslationRunLogger.start(
+                root=run_log_root,
+                metadata=TranslationRunMetadata(
+                    job_id=admitted.job.id,
+                    order_id="order-strict-delete",
+                    user_id="telegram:42",
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_language="en",
+                    target_language="uk",
+                ),
+            )
+
+            self.assertFalse(
+                service.delete_user_book(
+                    user_telegram_id=42,
+                    job_id=admitted.job.id,
+                )
+            )
+
+            self.assertIsNotNone(persistent_store.get_job(admitted.job.id))
+            self.assertEqual(len(persistent_store.list_work_units(admitted.job.id)), 1)
+            self.assertTrue(storage.exists(source.object_key))
+            self.assertIsNotNone(
+                persistent_store.read_approved_glossary_snapshot(
+                    approval_id=approval.approval_id
+                )
+            )
+            run_snapshot = json.loads((run_logger.run_dir / "run.json").read_text())
+            self.assertEqual(run_snapshot["status"], "running")
 
     def test_concurrent_confirm_claims_pending_translation_once(self):
         repository = InMemoryTranslationJobRepository()
