@@ -149,6 +149,15 @@ This file contains active project decisions in summary-first form. Full historic
 - Boundary: Future scanner-v2 work needs fresh metadata-only evidence of persistent scanner-level misses after #689/#690 gates. This does not approve scanner-v2 implementation, scanner v1 rewrite, runtime rollout, cache reuse, live provider work, provider config changes, durable state/storage/admin/retention changes or release/privacy/legal/support claims.
 - Unknown: Real provider behavior, real-book translation quality and broader fixture coverage.
 
+### Glossary engine → Workbench authority boundary
+
+- Status: Active planning decision; implementation contract TBD by owner.
+- Summary: Retain the existing glossary contracts, scanner/candidate-quality paths, selection, context rendering and diagnostics as reusable engine foundations. Automatic candidates are suggestions; a prepared package or runtime observation is not author authority or quality proof.
+- Authority: A future author-approved glossary must use an explicit approval/lock lifecycle bound to a precise snapshot and document context. Existing entry statuses (`owner_pinned` / `locked`) and signatures do not by themselves establish that lifecycle.
+- Runtime: Persistent resolver/runtime code is durable but deferred infrastructure, not the Workbench product authority. Telegram remains a harness, not the authority model.
+- Next decision: approve or reject the bounded in-memory DOCX local-snapshot-lock contract recorded in `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md` before a new coder card is created.
+- Boundary: This does not approve durable custody, upload/parser work, provider calls, real translation/runtime integration, cache changes, DB/storage, Telegram/server operations, export, release or quality claims.
+
 ## Active Release / Safety Decisions
 
 ### CAT-like author workflow reframe
@@ -186,6 +195,7 @@ This file contains active project decisions in summary-first form. Full historic
 
 - Gate 0 ICP and first representative evidence corpus for CAT-like workflow.
 - Minimum manual glossary control surface for Gate 1.
+- Whether to approve the local-only DOCX snapshot-lock contract in `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 - CAT workflow thin-slice scope and acceptance criteria.
 - Design-partner free alpha timing and cohort.
 - Final TTL/delete/retention policy for CAT project data.

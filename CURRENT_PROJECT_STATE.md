@@ -1,6 +1,6 @@
 # FolioLoom Current Project State
 
-Date: 2026-06-29
+Date: 2026-07-24
 
 ## Summary
 
@@ -66,6 +66,7 @@ These foundations remain useful for testing and delivery, but Telegram is no lon
 - Candidate-quality gates exist.
 - Owner-only diagnostics boundaries exist for glossary runtime sidecars.
 - Scanner v2 is deferred unless fresh evidence warrants it.
+- Local approval/rehearsal, bounded Workbench controls, pure DOCX preflight and truthful local-observation behavior are merged local-prototype foundations. They do not establish durable document authority, runtime activation or a Gate 2 workflow.
 
 Blocking caveat:
 
@@ -103,7 +104,7 @@ Blocking caveat:
 
 ### Product / quality gaps before design-partner alpha
 
-- Manual/author-approved glossary import/editor/control path.
+- Owner approval of the local-only snapshot-lock contract, then source-pinned engine contract discovery before further local glossary UX work; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 - Glossary preflight status and post-run compliance report.
 - CAT-like source-target/segment review workflow.
 - Representative before/after quality evidence with glossary controls.

@@ -31,7 +31,8 @@ Goal: prove that FolioLoom can help an author/rightsholder produce a terminology
 
 ### Gate 1 — Glossary / terminology control prototype
 
-- Define manual/author-approved glossary controls.
+- Use the Council sequence in `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`: owner decision on the local-only snapshot-lock contract, then engine contract discovery, then local UX/prototype work.
+- Treat the currently merged local approval/rehearsal and Workbench code as local-prototype evidence only; do not infer durable authority or runtime activation from it.
 - Treat automatic candidates as suggestions only until stronger evidence exists.
 - Require visible glossary preflight status and post-run metadata-only compliance report.
 - Run representative before/after evidence for glossary-controlled quality.

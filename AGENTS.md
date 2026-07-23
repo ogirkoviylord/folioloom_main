@@ -211,6 +211,12 @@ re-review and final PR gate instead.
 - GPT-Critic is an internal planning red-team for GPT-Orchestrator output. It
   does not code, does not make final decisions and does not replace DeepSeek or
   MiMo peer critique.
+- GLM participates only through `glm-council` as an optional independent
+  critic/reviewer. It never receives implementation/coder work, does not review
+  its own work and is not a synthesis, implementation, review or merge gate.
+  Record a failed/absent GLM response as `Unavailable` and continue with the
+  available Council evidence. A specific owner request may require GLM to be
+  attempted for one Council, without changing these role boundaries.
 - For multi-model or council work, GPT-Orchestrator should prepare a bounded
   task packet using `docs/agent-task-packet-template.md`, `DOCUMENT_INDEX.md`
   and targeted `rg` searches before handing work to another model.
