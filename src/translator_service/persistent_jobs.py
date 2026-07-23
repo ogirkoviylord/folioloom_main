@@ -773,9 +773,10 @@ class SQLiteTranslationJobStore:
             return None
 
         row = self._connection.execute(
-            """
+            f"""
             SELECT * FROM work_units
             WHERE job_id = ? AND status = ?
+            {_strict_docx_claim_guard(job_id_reference="work_units.job_id")}
             ORDER BY sequence
             LIMIT 1
             """,
@@ -787,11 +788,12 @@ class SQLiteTranslationJobStore:
         now = _now()
         unit_id = row["id"]
         with self._connection:
-            self._connection.execute(
-                """
+            updated = self._connection.execute(
+                f"""
                 UPDATE work_units
                 SET status = ?, worker_id = ?, started_at = ?, updated_at = ?
                 WHERE id = ?
+                {_strict_docx_claim_guard(job_id_reference="work_units.job_id")}
                 """,
                 (
                     PersistentWorkUnitStatus.TRANSLATING.value,
@@ -801,6 +803,8 @@ class SQLiteTranslationJobStore:
                     unit_id,
                 ),
             )
+            if updated.rowcount != 1:
+                return None
             self._update_job_status(
                 job_id,
                 PersistentTranslationJobStatus.TRANSLATING,
@@ -878,7 +882,7 @@ class SQLiteTranslationJobStore:
             return None
 
         row = self._connection.execute(
-            """
+            f"""
             SELECT
               wu.*,
               (
@@ -934,27 +938,7 @@ class SQLiteTranslationJobStore:
                     AND earlier.sequence < wu.sequence
                     AND earlier.status IN (?, ?, ?)
               )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM strict_job_glossary_bindings binding
-                  LEFT JOIN glossary_approvals approval
-                    ON approval.approval_id = binding.approval_id
-                  LEFT JOIN glossary_snapshot_custody custody
-                    ON custody.custody_id = binding.custody_id
-                  WHERE binding.job_id = wu.job_id
-                    AND (
-                        approval.approval_id IS NULL
-                        OR custody.custody_id IS NULL
-                        OR approval.approval_status IS NOT 'approved'
-                        OR approval.custody_id IS NOT binding.custody_id
-                        OR approval.snapshot_digest IS NOT binding.snapshot_digest
-                        OR custody.snapshot_digest IS NOT binding.snapshot_digest
-                        OR approval.approval_schema_version IS NOT ?
-                        OR binding.binding_schema_version IS NOT ?
-                        OR custody.snapshot_schema_version IS NOT ?
-                        OR custody.retention_mode IS NOT 'retain'
-                    )
-              )
+              {_strict_docx_claim_guard(job_id_reference="wu.job_id")}
             ORDER BY
               (
                   SELECT COUNT(*)
@@ -1010,9 +994,6 @@ class SQLiteTranslationJobStore:
                 PersistentWorkUnitStatus.PENDING.value,
                 PersistentWorkUnitStatus.FAILED.value,
                 PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
-                GLOSSARY_APPROVAL_SCHEMA_VERSION,
-                GLOSSARY_BINDING_SCHEMA_VERSION,
-                GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
                 PersistentWorkUnitStatus.TRANSLATING.value,
                 PersistentWorkUnitStatus.TRANSLATING.value,
                 PersistentWorkUnitStatus.TRANSLATING.value,
@@ -1029,7 +1010,7 @@ class SQLiteTranslationJobStore:
         now_text = _to_db_time(now)
         with self._connection:
             updated = self._connection.execute(
-                """
+                f"""
                 UPDATE work_units
                 SET status = ?, worker_id = ?, claim_token = ?,
                     lease_until = ?, attempt_count = attempt_count + 1,
@@ -1085,27 +1066,7 @@ class SQLiteTranslationJobStore:
                         AND earlier.sequence < work_units.sequence
                         AND earlier.status IN (?, ?, ?)
                   )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM strict_job_glossary_bindings binding
-                      LEFT JOIN glossary_approvals approval
-                        ON approval.approval_id = binding.approval_id
-                      LEFT JOIN glossary_snapshot_custody custody
-                        ON custody.custody_id = binding.custody_id
-                      WHERE binding.job_id = work_units.job_id
-                        AND (
-                            approval.approval_id IS NULL
-                            OR custody.custody_id IS NULL
-                            OR approval.approval_status IS NOT 'approved'
-                            OR approval.custody_id IS NOT binding.custody_id
-                            OR approval.snapshot_digest IS NOT binding.snapshot_digest
-                            OR custody.snapshot_digest IS NOT binding.snapshot_digest
-                            OR approval.approval_schema_version IS NOT ?
-                            OR binding.binding_schema_version IS NOT ?
-                            OR custody.snapshot_schema_version IS NOT ?
-                            OR custody.retention_mode IS NOT 'retain'
-                        )
-                  )
+                  {_strict_docx_claim_guard(job_id_reference="work_units.job_id")}
                 """,
                 (
                     PersistentWorkUnitStatus.TRANSLATING.value,
@@ -1133,9 +1094,6 @@ class SQLiteTranslationJobStore:
                     PersistentWorkUnitStatus.PENDING.value,
                     PersistentWorkUnitStatus.FAILED.value,
                     PersistentWorkUnitStatus.FAILED_RETRYABLE.value,
-                    GLOSSARY_APPROVAL_SCHEMA_VERSION,
-                    GLOSSARY_BINDING_SCHEMA_VERSION,
-                    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
                 ),
             )
             if updated.rowcount != 1:
@@ -2274,6 +2232,35 @@ def _strict_admission_validation_error(
     ):
         return "invalid_request"
     return None
+
+
+def _strict_docx_claim_guard(*, job_id_reference: str) -> str:
+    approval_schema = GLOSSARY_APPROVAL_SCHEMA_VERSION
+    binding_schema = GLOSSARY_BINDING_SCHEMA_VERSION
+    snapshot_schema = GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+    return f"""
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM strict_job_glossary_bindings binding
+                  LEFT JOIN glossary_approvals approval
+                    ON approval.approval_id = binding.approval_id
+                  LEFT JOIN glossary_snapshot_custody custody
+                    ON custody.custody_id = binding.custody_id
+                  WHERE binding.job_id = {job_id_reference}
+                    AND (
+                        approval.approval_id IS NULL
+                        OR custody.custody_id IS NULL
+                        OR approval.approval_status IS NOT 'approved'
+                        OR approval.custody_id IS NOT binding.custody_id
+                        OR approval.snapshot_digest IS NOT binding.snapshot_digest
+                        OR custody.snapshot_digest IS NOT binding.snapshot_digest
+                        OR approval.approval_schema_version IS NOT {approval_schema}
+                        OR binding.binding_schema_version IS NOT {binding_schema}
+                        OR custody.snapshot_schema_version IS NOT {snapshot_schema}
+                        OR custody.retention_mode IS NOT 'retain'
+                    )
+              )
+    """
 
 
 def _strict_approval_denial_code(
