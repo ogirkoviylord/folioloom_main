@@ -6,10 +6,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+    DeleteJobResult,
     JobUsageSummary,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.scheduler import (
@@ -1287,10 +1291,590 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
             self.assertTrue(db_path.exists())
 
+    def test_strict_admission_binds_approved_custody_without_payload_leak(self):
+        store = self._memory_store()
+        payload = b'{"terms":["private-term"]}'
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+
+        result = store.admit_strict_docx_job(
+            StrictDocxAdmissionRequest(
+                approval_id=approval.approval_id,
+                order_id="order-strict",
+                user_id="user-42",
+                file_id="original/book.docx",
+                file_name="book.docx",
+                document_kind="docx",
+                source_object_key="original/book.docx",
+                source_language="en",
+                target_language="uk",
+                adapter_version="docx-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                translation_policy='{"mode":"strict"}',
+                work_units=[
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("docx:1",),
+                        source_text_hash="hash-1",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key="original/book.docx",
+                    )
+                ],
+            )
+        )
+
+        self.assertTrue(result.admitted)
+        self.assertIsNotNone(result.job)
+        self.assertEqual(result.work_units[0].source_object_key, "original/book.docx")
+        binding = store._connection.execute(
+            "SELECT * FROM strict_job_glossary_bindings WHERE job_id = ?",
+            (result.job.id,),
+        ).fetchone()
+        self.assertEqual(binding["approval_id"], approval.approval_id)
+        rows = store._connection.execute(
+            "SELECT translation_policy FROM translation_jobs"
+        ).fetchall()
+        self.assertNotIn("private-term", repr(rows))
+        approved_snapshot = store.read_approved_glossary_snapshot(
+            approval_id=approval.approval_id
+        )
+        if approved_snapshot is None:
+            self.fail("approved snapshot was not readable")
+        self.assertEqual(approved_snapshot.snapshot_payload, payload)
+
+    def test_delete_strict_job_denies_without_database_mutation(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        before = _strict_delete_snapshot(store)
+
+        result = store.delete_job(admitted.job.id)
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertFalse(result.deleted)
+        self.assertEqual(result.denial_code, "strict_job_non_deletable")
+        self.assertEqual(_strict_delete_snapshot(store), before)
+
+    def test_delete_legacy_job_returns_typed_success_and_removes_job(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        result = store.delete_job(job.id)
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertTrue(result.deleted)
+        self.assertIsNone(result.denial_code)
+        self.assertIsNone(store.get_job(job.id))
+
+    def test_revoked_or_missing_approval_denies_without_job_state(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        request = _strict_request(approval.approval_id)
+
+        result = store.admit_strict_docx_job(request)
+
+        self.assertEqual(result.denial_code, "approval_revoked")
+        job_count = store._connection.execute(
+            "SELECT COUNT(*) FROM translation_jobs"
+        ).fetchone()[0]
+        binding_count = store._connection.execute(
+            "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+        ).fetchone()[0]
+        self.assertEqual(job_count, 0)
+        self.assertEqual(binding_count, 0)
+
+    def test_strict_admission_rolls_back_when_binding_insert_fails(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        store._connection.execute(
+            """
+            CREATE TRIGGER reject_strict_binding
+            BEFORE INSERT ON strict_job_glossary_bindings
+            BEGIN SELECT RAISE(ABORT, 'injected'); END
+            """
+        )
+
+        with self.assertRaisesRegex(Exception, "injected"):
+            store.admit_strict_docx_job(_strict_request(approval.approval_id))
+
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            store._connection.execute("SELECT COUNT(*) FROM work_units").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_strict_admission_rolls_back_after_each_post_write_boundary(self):
+        for table_name in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+        ):
+            with self.subTest(table_name=table_name):
+                store = self._memory_store()
+                approval = _create_approval(store)
+                before = _strict_admission_rollback_snapshot(store)
+                store._connection.execute(
+                    f"""
+                    CREATE TRIGGER abort_after_{table_name}_insert
+                    AFTER INSERT ON {table_name}
+                    BEGIN SELECT RAISE(ABORT, 'injected {table_name}'); END
+                    """
+                )
+
+                with self.assertRaisesRegex(Exception, f"injected {table_name}"):
+                    store.admit_strict_docx_job(_strict_request(approval.approval_id))
+
+                self.assertEqual(_strict_admission_rollback_snapshot(store), before)
+
+    def test_raw_glossary_payload_never_leaks_into_metadata_tables(self):
+        store = self._memory_store()
+        payload = b'{"SECRET_MARKER":"xyzzy"}'
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+
+        claimed = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        if claimed is None:
+            self.fail("strict work unit unexpectedly not claimed")
+        store.fail_claimed_work_unit(
+            work_unit_id=claimed.work_unit_id,
+            claim_token=claimed.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="synthetic provider failure",
+            retry_base_delay_seconds=60,
+            retry_max_delay_seconds=60,
+        )
+        translation_policy_rows = store._connection.execute(
+            "SELECT translation_policy FROM translation_jobs"
+        ).fetchall()
+        scheduler_payload_rows = store._connection.execute(
+            "SELECT payload_json FROM scheduler_events"
+        ).fetchall()
+        attempt_error_rows = store._connection.execute(
+            "SELECT error_message FROM work_unit_attempts"
+        ).fetchall()
+
+        self.assertTrue(translation_policy_rows)
+        self.assertTrue(scheduler_payload_rows)
+        self.assertTrue(attempt_error_rows)
+        metadata_rows = (
+            translation_policy_rows + scheduler_payload_rows + attempt_error_rows
+        )
+        self.assertNotIn("SECRET_MARKER", repr(metadata_rows))
+
+    def test_guard_b_denies_invalid_strict_bindings_without_claim_mutation(self):
+        for invalid_binding in (
+            "revoked_approval",
+            "missing_approval",
+            "missing_custody",
+            "digest_mismatch",
+            "unsupported_binding_schema",
+        ):
+            with self.subTest(invalid_binding=invalid_binding):
+                store = self._memory_store()
+                payload = b"snapshot"
+                approval = store.create_glossary_approval(
+                    snapshot_payload=payload,
+                    snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+                    snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                    approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+                )
+                result = store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
+                if result.job is None:
+                    self.fail("strict job admission unexpectedly denied")
+
+                if invalid_binding == "revoked_approval":
+                    store.revoke_glossary_approval(approval_id=approval.approval_id)
+                elif invalid_binding == "missing_approval":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_approvals WHERE approval_id = ?",
+                        (approval.approval_id,),
+                    )
+                elif invalid_binding == "missing_custody":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_snapshot_custody WHERE custody_id = ?",
+                        (approval.custody_id,),
+                    )
+                elif invalid_binding == "digest_mismatch":
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET snapshot_digest = 'corrupt-digest'
+                        WHERE job_id = ?
+                        """,
+                        (result.job.id,),
+                    )
+                else:
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET binding_schema_version = 999
+                        WHERE job_id = ?
+                        """,
+                        (result.job.id,),
+                    )
+
+                before = _guard_b_claim_snapshot(store)
+                claim = store.claim_next_scheduled_work_unit(
+                    worker_id="worker-a",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(),
+                )
+
+                self.assertIsNone(claim)
+                self.assertEqual(_guard_b_claim_snapshot(store), before)
+
+    def test_direct_claim_denies_revoked_strict_binding_without_mutation(self):
+        store = self._memory_store()
+        approval = _create_approval(store)
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        before = _guard_b_claim_snapshot(store)
+
+        claim = store.claim_next_work_unit(admitted.job.id, worker_id="worker-a")
+
+        self.assertIsNone(claim)
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
+    def test_direct_worker_does_not_load_or_translate_revoked_strict_job(self):
+        from translator_service.worker import run_next_persistent_work_unit
+
+        class UnreachableTranslator:
+            def translate(self, **kwargs):
+                raise AssertionError("revoked strict job reached translator")
+
+        store = self._memory_store()
+        approval = _create_approval(store)
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+        before = _guard_b_claim_snapshot(store)
+        source_loads = []
+
+        completed = run_next_persistent_work_unit(
+            store=store,
+            job_id=admitted.job.id,
+            worker_id="worker-a",
+            source_loader=lambda unit: (source_loads.append(unit.id), "source")[1],
+            translator=UnreachableTranslator(),
+        )
+
+        self.assertIsNone(completed)
+        self.assertEqual(source_loads, [])
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
+    def test_guard_b_rechecks_after_expired_lease_recovery(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        result = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if result.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        first_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=1,
+            limits=SchedulerLimits(),
+        )
+        if first_claim is None:
+            self.fail("strict job was not initially claimable")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+
+        recovered = store.recover_expired_leases(
+            now=first_claim.lease_until + timedelta(seconds=1),
+            retry_base_delay_seconds=0,
+            retry_max_delay_seconds=0,
+        )
+        store._connection.execute(
+            """
+            UPDATE work_units SET available_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (first_claim.work_unit_id,),
+        )
+        before = _guard_b_claim_snapshot(store)
+
+        second_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertEqual(recovered, 1)
+        self.assertIsNone(second_claim)
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
     def _memory_store(self) -> SQLiteTranslationJobStore:
         store = SQLiteTranslationJobStore(":memory:")
         self.addCleanup(store.close)
         return store
+
+
+class StrictConcurrentStoreTest(unittest.TestCase):
+    def test_one_approval_allows_only_one_concurrent_admission(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            first_store = SQLiteTranslationJobStore(db_path)
+            second_store = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(first_store.close)
+            self.addCleanup(second_store.close)
+            approval = _create_approval(first_store)
+            start = __import__("threading").Barrier(2)
+
+            def admit(store: SQLiteTranslationJobStore):
+                start.wait()
+                return store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(admit, (first_store, second_store)))
+
+            self.assertEqual(
+                sorted(result.denial_code for result in results if result.denial_code),
+                ["approval_already_bound"],
+            )
+            self.assertEqual(sum(result.job is not None for result in results), 1)
+            self.assertEqual(
+                first_store._connection.execute(
+                    "SELECT COUNT(*) FROM translation_jobs"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                first_store._connection.execute(
+                    "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+                ).fetchone()[0],
+                1,
+            )
+
+    def test_revoke_race_leaves_no_partial_admission_state(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            admission_store = SQLiteTranslationJobStore(db_path)
+            revoke_store = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(admission_store.close)
+            self.addCleanup(revoke_store.close)
+            approval = _create_approval(admission_store)
+            start = __import__("threading").Barrier(2)
+
+            def admit():
+                start.wait()
+                return admission_store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
+
+            def revoke():
+                start.wait()
+                return revoke_store.revoke_glossary_approval(
+                    approval_id=approval.approval_id
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                admission = executor.submit(admit)
+                revocation = executor.submit(revoke)
+                admission_result = admission.result()
+                revoked = revocation.result()
+
+            self.assertEqual(revoked.approval_status, "revoked")
+            job_count = admission_store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0]
+            binding_count = admission_store._connection.execute(
+                "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+            ).fetchone()[0]
+            self.assertIn(admission_result.denial_code, (None, "approval_revoked"))
+            self.assertEqual(job_count, binding_count)
+            self.assertIn(job_count, (0, 1))
+
+    def test_claim_is_denied_after_revoke_from_another_connection(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            admission_store = SQLiteTranslationJobStore(db_path)
+            revoke_store = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(admission_store.close)
+            self.addCleanup(revoke_store.close)
+            approval = _create_approval(admission_store)
+            admitted = admission_store.admit_strict_docx_job(
+                _strict_request(approval.approval_id)
+            )
+            if admitted.job is None:
+                self.fail("strict job admission unexpectedly denied")
+
+            revoke_store.revoke_glossary_approval(approval_id=approval.approval_id)
+            claim = admission_store.claim_next_scheduled_work_unit(
+                worker_id="worker-a",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+
+            self.assertIsNone(claim)
+            self.assertEqual(
+                admission_store.list_work_units(admitted.job.id)[0].status,
+                PersistentWorkUnitStatus.PENDING,
+            )
+
+
+def _strict_request(approval_id: str) -> StrictDocxAdmissionRequest:
+    return StrictDocxAdmissionRequest(
+        approval_id=approval_id,
+        order_id="order-strict",
+        user_id="user-42",
+        file_id="original/book.docx",
+        file_name="book.docx",
+        document_kind="docx",
+        source_object_key="original/book.docx",
+        source_language="en",
+        target_language="uk",
+        adapter_version="docx-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        translation_policy=None,
+        work_units=[
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("docx:1",),
+                source_text_hash="hash-1",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+                source_object_key="original/book.docx",
+            )
+        ],
+    )
+
+
+def _create_approval(store: SQLiteTranslationJobStore):
+    payload = b"snapshot"
+    return store.create_glossary_approval(
+        snapshot_payload=payload,
+        snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+        snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+        approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    )
+
+
+def _delete_strict_binding_dependency(
+    store: SQLiteTranslationJobStore,
+    sql: str,
+    parameters: tuple[str],
+) -> None:
+    store._connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        store._connection.execute(sql, parameters)
+        store._connection.commit()
+    finally:
+        store._connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
+    return {
+        table: [
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
+        for table in (
+            "translation_jobs",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+        )
+    }
+
+
+def _strict_delete_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
+    return {
+        table: [
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
+        for table in (
+            "translation_jobs",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+            "strict_job_glossary_bindings",
+            "glossary_approvals",
+            "glossary_snapshot_custody",
+        )
+    }
+
+
+def _strict_admission_rollback_snapshot(
+    store: SQLiteTranslationJobStore,
+) -> dict[str, list[tuple]]:
+    return {
+        table: [
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
+        for table in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+            "worker_heartbeats",
+        )
+    }
 
 
 def _job_with_units(

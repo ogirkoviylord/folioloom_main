@@ -19,6 +19,7 @@ from translator_service.persistent_jobs import (
     PersistentTranslationJob,
     PersistentWorkUnit,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.translation_context import (
@@ -45,6 +46,102 @@ class PersistentJobPlan:
     job: PersistentTranslationJob
     work_units: list[PersistentWorkUnit]
     estimated_input_tokens: int
+
+
+@dataclass(frozen=True)
+class StrictPersistentJobPlan:
+    job: PersistentTranslationJob
+    work_units: list[PersistentWorkUnit]
+    estimated_input_tokens: int
+
+
+@dataclass(frozen=True)
+class StrictAdmissionDenied:
+    code: str
+
+
+def create_persistent_strict_docx_job_plan(
+    *,
+    store: SQLiteTranslationJobStore,
+    storage: LocalObjectStorage,
+    approval_id: str,
+    source_object_key: str,
+    order_id: str,
+    user_id: str,
+    file_name: str,
+    source_language: str,
+    target_language: str,
+    max_fragment_chars: int,
+    adapter_version: str = DOCX_ADAPTER_VERSION,
+    prompt_version: str = "plain-v1",
+    pricing_snapshot_id: str = "prototype-pricing-v1",
+    rights_confirmation: dict | None = None,
+    translation_mode: str | None = None,
+    upload_safety_id: str | None = None,
+) -> StrictPersistentJobPlan | StrictAdmissionDenied:
+    source_metadata = storage.get_metadata(source_object_key)
+    if not source_metadata.file_name.lower().endswith(".docx"):
+        return StrictAdmissionDenied(code="document_kind_not_docx")
+
+    content = storage.get_bytes(source_object_key)
+    adapter_plan = plan_docx_translation(
+        content=content,
+        max_fragment_chars=max_fragment_chars,
+        adapter_version=adapter_version,
+        translation_mode=translation_mode,
+    )
+    if not adapter_plan.units:
+        return StrictAdmissionDenied(code="invalid_request")
+
+    work_units = [
+        WorkUnitPlan(
+            sequence=unit.sequence,
+            source_block_ids=unit.source_block_ids,
+            source_text_hash=sha256(unit.source_text.encode("utf-8")).hexdigest(),
+            prompt_tier=unit.prompt_tier.value,
+            source_language=source_language,
+            target_language=target_language,
+            source_object_key=source_object_key,
+        )
+        for unit in adapter_plan.units
+    ]
+    admission = store.admit_strict_docx_job(
+        StrictDocxAdmissionRequest(
+            approval_id=approval_id,
+            order_id=order_id,
+            user_id=user_id,
+            file_id=source_object_key,
+            file_name=file_name,
+            document_kind="docx",
+            source_object_key=source_object_key,
+            source_language=source_language,
+            target_language=target_language,
+            adapter_version=adapter_version,
+            prompt_version=prompt_version,
+            pricing_snapshot_id=pricing_snapshot_id,
+            translation_policy=_translation_policy_snapshot(
+                units=list(adapter_plan.units),
+                source_language=source_language,
+                target_language=target_language,
+                rights_confirmation=rights_confirmation,
+                translation_mode=translation_mode,
+                translation_mode_profile=_translation_mode_profile_for_document_kind(
+                    translation_mode,
+                    document_kind="docx",
+                ),
+                upload_safety_id=upload_safety_id,
+                accepted_source_object_key=source_object_key,
+            ),
+            work_units=work_units,
+        )
+    )
+    if admission.job is None:
+        return StrictAdmissionDenied(code=admission.denial_code or "invalid_request")
+    return StrictPersistentJobPlan(
+        job=admission.job,
+        work_units=admission.work_units,
+        estimated_input_tokens=adapter_plan.estimated_input_tokens,
+    )
 
 
 def create_persistent_txt_job_plan(

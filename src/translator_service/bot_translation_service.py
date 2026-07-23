@@ -2357,7 +2357,12 @@ class BotTranslationService:
             if unit.source_object_key
         )
 
-        deleted = self._persistent_job_store.delete_job(job_id)
+        delete_result = self._persistent_job_store.delete_job(job_id)
+        deleted = (
+            delete_result
+            if isinstance(delete_result, bool)
+            else delete_result.deleted
+        )
         if not deleted:
             return False
 

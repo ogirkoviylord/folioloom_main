@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Protocol
 
 from translator_service.persistent_jobs import (
+    DeleteJobResult,
     JobUsageSummary,
     PersistentTranslationJob,
     PersistentTranslationJobStatus,
@@ -57,7 +58,7 @@ class PersistentJobStore(Protocol):
 
     def resume_job(self, job_id: str) -> PersistentTranslationJob: ...
 
-    def delete_job(self, job_id: str) -> bool: ...
+    def delete_job(self, job_id: str) -> DeleteJobResult | bool: ...
 
     def mark_job_interrupted(self, job_id: str) -> PersistentTranslationJob: ...
 
