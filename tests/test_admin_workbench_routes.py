@@ -227,14 +227,48 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIn("Local approval", helper_html)
         self.assertIn("Missing", helper_html)
         self.assertIn(
-            '<a class="wb-button wb-button--primary" '
-            'href="#wb-check-selected-form">Approve current snapshot</a>',
+            '<button type="submit" class="wb-button wb-button--primary" '
+            'form="wb-check-selected-form" '
+            'formaction="/admin/workbench/glossary/approve?document=opaque-term-selection">'
+            "Approve current snapshot</button>",
             helper_html,
         )
         self.assertNotIn(
             '<a class="wb-button wb-button--primary" '
             'href="/admin/workbench/glossary">Add term</a>',
             helper_html,
+        )
+
+    def test_helper_approval_cta_submits_existing_approval_form(self) -> None:
+        document_id = "helper-approval-submit"
+        self.assertEqual(
+            self.client.get(f"/admin/workbench/glossary?document={document_id}").status_code,
+            200,
+        )
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="Aster",
+            target="Астер",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        self.assertIsNotNone(term)
+
+        page = self.client.get(f"/admin/workbench/glossary?document={document_id}")
+        self.assertEqual(page.status_code, 200)
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        self.assertRegex(
+            helper_match.group(1),
+            rf'<button type="submit" class="wb-button wb-button--primary" '
+            rf'form="wb-check-selected-form" '
+            rf'formaction="/admin/workbench/glossary/approve\?document={document_id}">'
+            r'Approve current snapshot</button>',
         )
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:

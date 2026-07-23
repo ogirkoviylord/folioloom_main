@@ -1103,7 +1103,12 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
         state.approval_state == ApprovalState.NOT_READY
         and not state.has_current_manual_approval()
     ):
-        return ("Approve current snapshot", "#wb-check-selected-form", "primary")
+        return (
+            "Approve current snapshot",
+            "/admin/workbench/glossary/approve"
+            f"?document={quote(state.document.document_id, safe='')}",
+            "primary",
+        )
     if state.approval_state == ApprovalState.READY:
         has_approved = state.health_snapshot.get("approved", 0) > 0
         if has_approved:
@@ -1119,6 +1124,12 @@ def _helper_next_action_button(action: tuple[str, str, str]) -> str:
         if variant == "primary"
         else "wb-button wb-button--secondary"
     )
+    if label == "Approve current snapshot":
+        return (
+            f'<button type="submit" class="{cls}" '
+            f'form="wb-check-selected-form" formaction="{_safe_attr(href)}">'
+            f"{_safe_attr(label)}</button>"
+        )
     return f'<a class="{cls}" href="{_safe_attr(href)}">{_safe_attr(label)}</a>'
 
 
