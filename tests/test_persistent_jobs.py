@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from translator_service.persistent_jobs import (
     GLOSSARY_APPROVAL_SCHEMA_VERSION,
     GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+    DeleteJobResult,
     JobUsageSummary,
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
@@ -1348,6 +1349,38 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             self.fail("approved snapshot was not readable")
         self.assertEqual(approved_snapshot.snapshot_payload, payload)
 
+    def test_delete_strict_job_denies_without_database_mutation(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        before = _strict_delete_snapshot(store)
+
+        result = store.delete_job(admitted.job.id)
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertFalse(result.deleted)
+        self.assertEqual(result.denial_code, "strict_job_non_deletable")
+        self.assertEqual(_strict_delete_snapshot(store), before)
+
+    def test_delete_legacy_job_returns_typed_success_and_removes_job(self):
+        store = self._memory_store()
+        job = _job_with_units(store)
+
+        result = store.delete_job(job.id)
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertTrue(result.deleted)
+        self.assertIsNone(result.denial_code)
+        self.assertIsNone(store.get_job(job.id))
+
     def test_revoked_or_missing_approval_denies_without_job_state(self):
         store = self._memory_store()
         payload = b"snapshot"
@@ -1562,6 +1595,24 @@ def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[
             "work_units",
             "work_unit_attempts",
             "scheduler_events",
+        )
+    }
+
+
+def _strict_delete_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
+    return {
+        table: [
+            tuple(row)
+            for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
+        for table in (
+            "translation_jobs",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+            "strict_job_glossary_bindings",
+            "glossary_approvals",
+            "glossary_snapshot_custody",
         )
     }
 

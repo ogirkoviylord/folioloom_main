@@ -45,7 +45,10 @@ from translator_service.config import Settings
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.provider_failure_diagnostics import (
@@ -2782,6 +2785,107 @@ class AdminRoutesTest(unittest.TestCase):
             self.assertIn("translation.admin_paused", event_types)
             self.assertIn("translation.admin_cancelled", event_types)
             self.assertIn("translation.admin_deleted", event_types)
+
+    def test_admin_delete_strict_job_returns_conflict_without_side_effects(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "jobs.sqlite3"
+            admin_db_path = Path(temp_dir) / "admin.sqlite3"
+            storage_root = Path(temp_dir) / "storage"
+            storage = LocalObjectStorage(storage_root)
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=b"strict-source",
+            )
+            store = SQLiteTranslationJobStore(db_path)
+            approval_payload = b"strict-approval"
+            approval = store.create_glossary_approval(
+                snapshot_payload=approval_payload,
+                snapshot_digest=__import__("hashlib").sha256(approval_payload).hexdigest(),
+                snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            )
+            admitted = store.admit_strict_docx_job(
+                StrictDocxAdmissionRequest(
+                    approval_id=approval.approval_id,
+                    order_id="order-strict-delete",
+                    user_id="telegram:42",
+                    file_id=source.object_key,
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_object_key=source.object_key,
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="docx-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                    translation_policy=None,
+                    work_units=[
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("docx:1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key=source.object_key,
+                        )
+                    ],
+                )
+            )
+            if admitted.job is None:
+                self.fail("strict job admission unexpectedly denied")
+            store.close()
+            settings = Settings(
+                persistent_jobs_db_path=str(db_path),
+                admin_db_path=str(admin_db_path),
+                object_storage_root=str(storage_root),
+                admin_owner_password="owner-pass",
+                admin_session_secret="session-secret",
+            )
+            client = TestClient(create_app(settings=settings))
+            client.post("/admin/login", data={"password": "owner-pass"})
+            csrf = _csrf_token(client.get("/admin/operations/jobs").text)
+
+            with (
+                patch(
+                    "translator_service.admin.routes._job_object_keys"
+                ) as object_keys,
+                patch(
+                    "translator_service.admin.routes.finish_running_translation_runs_for_job"
+                ) as finish_run,
+                patch(
+                    "translator_service.admin.routes._record_admin_translation_action"
+                ) as record_action,
+                patch(
+                    "translator_service.admin.routes._delete_job_objects"
+                ) as delete_objects,
+            ):
+                response = client.post(
+                    f"/admin/operations/jobs/{admitted.job.id}/delete",
+                    data={"csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.text, "Unable to update job")
+            object_keys.assert_not_called()
+            finish_run.assert_not_called()
+            record_action.assert_not_called()
+            delete_objects.assert_not_called()
+            self.assertTrue(storage.exists(source.object_key))
+            reopened = SQLiteTranslationJobStore(db_path)
+            self.addCleanup(reopened.close)
+            self.assertIsNotNone(reopened.get_job(admitted.job.id))
+            self.assertEqual(
+                reopened._connection.execute(
+                    "SELECT COUNT(*) FROM strict_job_glossary_bindings "
+                    "WHERE job_id = ?",
+                    (admitted.job.id,),
+                ).fetchone()[0],
+                1,
+            )
 
     def test_translation_logs_page_and_api_filter_runs(self):
         with TemporaryDirectory() as temp_dir:

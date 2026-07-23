@@ -3162,9 +3162,18 @@ def _apply_admin_job_action(
             message = "Translation cancelled by admin."
         elif action == "delete":
             updated = job
-            object_keys = _job_object_keys(store, job)
-            if not store.delete_job(job_id):
+            delete_result = store.delete_job(job_id)
+            if isinstance(delete_result, bool):
+                deleted = delete_result
+                denial_code = None
+            else:
+                deleted = delete_result.deleted
+                denial_code = delete_result.denial_code
+            if denial_code == "strict_job_non_deletable":
+                return HTTPStatus.CONFLICT
+            if not deleted:
                 return HTTPStatus.NOT_FOUND
+            object_keys = _job_object_keys(store, job)
             status = "deleted"
             message = "Translation deleted by admin."
         else:
