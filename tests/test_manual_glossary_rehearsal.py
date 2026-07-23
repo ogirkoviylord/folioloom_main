@@ -281,6 +281,30 @@ class RehearsalBoundaryTests(unittest.TestCase):
         self.assertEqual(sel_spy.call_count, 0)
         self.assertEqual(render_spy.call_count, 0)
 
+    def test_blank_document_ref_fails_closed_before_selection_and_render(self):
+        approval = ManualGlossaryApproval(
+            document_ref=_DOC_REF,
+            glossary_signature=self.signature,
+        )
+        for document_ref in ("", " \t\n"):
+            with self.subTest(document_ref=repr(document_ref)):
+                with _Spy(
+                    rehearsal_module, "select_glossary_subset_for_work_unit"
+                ) as sel_spy, _Spy(
+                    rehearsal_module, "format_glossary_prompt_context"
+                ) as render_spy:
+                    with self.assertRaises(ManualGlossaryRehearsalBoundaryError) as ctx:
+                        rehearse_manual_glossary_approval(
+                            document_ref,
+                            approval,
+                            self.glossary,
+                            self.unit,
+                            selection_budget=self.budget,
+                        )
+                self.assertEqual(ctx.exception.reason, "blank_document_ref")
+                self.assertEqual(sel_spy.call_count, 0)
+                self.assertEqual(render_spy.call_count, 0)
+
     def test_document_ref_mismatch_fails_closed_before_selection_and_render(self):
         approval = ManualGlossaryApproval(
             document_ref="owner://book-12345/different-batch",

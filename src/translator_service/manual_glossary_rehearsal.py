@@ -168,6 +168,7 @@ class ManualGlossaryRehearsalResult:
     renderer_observation: dict[str, Any] = field(default_factory=dict)
 
 
+_BOUNDARY_REASON_BLANK_DOCUMENT_REF = "blank_document_ref"
 _BOUNDARY_REASON_MISSING_APPROVAL = "missing_approval"
 _BOUNDARY_REASON_DOCUMENT_REF_MISMATCH = "document_ref_mismatch"
 _BOUNDARY_REASON_SIGNATURE_MISMATCH = "signature_mismatch"
@@ -187,6 +188,12 @@ def _validate_boundary(
     content mutation that changes ``glossary_snapshot_signature`` (e.g. adding
     or rewording a hard entry) will invalidate the approval here.
     """
+    if not document_ref.strip():
+        raise ManualGlossaryRehearsalBoundaryError(
+            _BOUNDARY_REASON_BLANK_DOCUMENT_REF,
+            "Document reference is blank; cannot proceed to selection or "
+            "prompt-context rendering.",
+        )
     if approval is None:
         raise ManualGlossaryRehearsalBoundaryError(
             _BOUNDARY_REASON_MISSING_APPROVAL,

@@ -465,12 +465,14 @@ class WorkbenchSessionState:
         return self._apply_term_status(existing, target=TermStatus.APPROVED)
 
     def reject_term(self, term_id: str) -> tuple[Term | None, str | None]:
-        """Reject a term. Allowed from any non-locked status."""
+        """Reject a term. Allowed from any non-locked, non-rejected status."""
         existing, reason = self._mutating_precheck(term_id)
         if existing is None:
             return None, reason
         if existing.status == TermStatus.LOCKED:
             return None, "locked"
+        if existing.status == TermStatus.REJECTED:
+            return None, "already_rejected"
         return self._apply_term_status(existing, target=TermStatus.REJECTED)
 
     def lock_term(self, term_id: str) -> tuple[Term | None, str | None]:
@@ -526,6 +528,8 @@ class WorkbenchSessionState:
         existing.locked = target == TermStatus.LOCKED
         existing.last_edited_at = _utcnow()
         existing.recompute_signature()
+        self.manual_approval = None
+        self.clear_local_check_observation()
         if target == TermStatus.REJECTED:
             # Reject clears the "approved+locked AND 0 conflict" gate.
             if self.approval_state == ApprovalState.READY and not any(
