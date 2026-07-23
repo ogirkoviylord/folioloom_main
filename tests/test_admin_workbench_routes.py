@@ -240,9 +240,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
         )
 
     def test_helper_approval_cta_submits_existing_approval_form(self) -> None:
-        document_id = "helper-approval-submit"
+        document_id = 'helper approval /&?"<'
+        encoded_document_id = quote(document_id, safe="")
+        expected_approval_action = (
+            "/admin/workbench/glossary/approve?document="
+            f"{encoded_document_id}"
+        )
         self.assertEqual(
-            self.client.get(f"/admin/workbench/glossary?document={document_id}").status_code,
+            self.client.get(
+                f"/admin/workbench/glossary?document={encoded_document_id}"
+            ).status_code,
             200,
         )
         state = next(iter(WORKBENCH_SESSION_STATE.values()))
@@ -255,19 +262,37 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertIsNotNone(term)
 
-        page = self.client.get(f"/admin/workbench/glossary?document={document_id}")
+        page = self.client.get(
+            f"/admin/workbench/glossary?document={encoded_document_id}"
+        )
         self.assertEqual(page.status_code, 200)
+        toolbar_match = re.search(
+            r'<form id="wb-check-selected-form" class="wb-toolbar" method="post"'
+            r'[\s\S]*?</form>',
+            page.text,
+        )
+        assert toolbar_match is not None, "Workbench check form not found"
+        toolbar_html = toolbar_match.group(0)
+        self.assertIn('method="post"', toolbar_html)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/check?document={encoded_document_id}"',
+            toolbar_html,
+        )
+        self.assertIn(
+            f'name="csrf_token" value="{self.csrf_token}"',
+            toolbar_html,
+        )
         helper_match = re.search(
             r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
             page.text,
             re.DOTALL,
         )
         assert helper_match is not None, "Workbench helper rail not found"
+        escaped_approval_action = re.escape(expected_approval_action)
         self.assertRegex(
             helper_match.group(1),
             rf'<button type="submit" class="wb-button wb-button--primary" '
-            rf'form="wb-check-selected-form" '
-            rf'formaction="/admin/workbench/glossary/approve\?document={document_id}">'
+            rf'form="wb-check-selected-form" formaction="{escaped_approval_action}">'
             r'Approve current snapshot</button>',
         )
 
