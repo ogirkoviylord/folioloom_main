@@ -1442,6 +1442,29 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             0,
         )
 
+    def test_strict_admission_rolls_back_after_each_post_write_boundary(self):
+        for table_name in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+        ):
+            with self.subTest(table_name=table_name):
+                store = self._memory_store()
+                approval = _create_approval(store)
+                before = _strict_admission_rollback_snapshot(store)
+                store._connection.execute(
+                    f"""
+                    CREATE TRIGGER abort_after_{table_name}_insert
+                    AFTER INSERT ON {table_name}
+                    BEGIN SELECT RAISE(ABORT, 'injected {table_name}'); END
+                    """
+                )
+
+                with self.assertRaisesRegex(Exception, f"injected {table_name}"):
+                    store.admit_strict_docx_job(_strict_request(approval.approval_id))
+
+                self.assertEqual(_strict_admission_rollback_snapshot(store), before)
+
     def test_raw_glossary_payload_never_leaks_into_metadata_tables(self):
         store = self._memory_store()
         payload = b'{"SECRET_MARKER":"xyzzy"}'
@@ -1792,6 +1815,25 @@ def _strict_delete_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[
             "strict_job_glossary_bindings",
             "glossary_approvals",
             "glossary_snapshot_custody",
+        )
+    }
+
+
+def _strict_admission_rollback_snapshot(
+    store: SQLiteTranslationJobStore,
+) -> dict[str, list[tuple]]:
+    return {
+        table: [
+            tuple(row)
+            for row in store._connection.execute(f"SELECT * FROM {table}")
+        ]
+        for table in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+            "worker_heartbeats",
         )
     }
 
