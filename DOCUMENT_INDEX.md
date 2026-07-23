@@ -12,6 +12,7 @@
 - `README.project.md` - project overview.
 - `docs/CAT_WORKFLOW_GATES.md` - canonical CAT-like author workflow gate model; start here for strategy/release questions.
 - `docs/GATE1_GLOSSARY_SOURCE_SEAM_AUDIT.md` - source-backed source seam audit and conditional next technical rehearsal for manual glossary control.
+- `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md` - current multi-model synthesis: reusable glossary core, authority boundary, deferred runtime and owner decision required before next coding.
 - `docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md` - design/readiness packet for a possible future strict DOCX durable-authorization slice; not implementation approval.
 - `docs/PROJECT_BRIEF.md` - product scope, audience, value, components and non-goals.
 - `docs/ROADMAP.md` - current milestone, immediate/next/later work.
