@@ -3,6 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -78,6 +79,63 @@ class WorkUnitPlan:
     source_language: str
     target_language: str
     source_object_key: str | None = None
+
+
+STRICT_DOCX_SCHEMA_VERSION = 1
+GLOSSARY_APPROVAL_SCHEMA_VERSION = 1
+GLOSSARY_BINDING_SCHEMA_VERSION = 1
+GLOSSARY_SNAPSHOT_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class GlossaryApproval:
+    approval_id: str
+    custody_id: str
+    snapshot_digest: str
+    snapshot_schema_version: int
+    approval_schema_version: int
+    approval_status: str
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ApprovedGlossarySnapshot:
+    approval: GlossaryApproval
+    snapshot_payload: bytes
+
+
+@dataclass(frozen=True)
+class StrictDocxAdmissionRequest:
+    approval_id: str
+    order_id: str
+    user_id: str
+    file_id: str
+    file_name: str
+    document_kind: str
+    source_object_key: str
+    source_language: str
+    target_language: str
+    adapter_version: str
+    prompt_version: str
+    pricing_snapshot_id: str
+    translation_policy: str | None
+    work_units: list[WorkUnitPlan]
+    strict_schema_version: int = STRICT_DOCX_SCHEMA_VERSION
+    approval_schema_version: int = GLOSSARY_APPROVAL_SCHEMA_VERSION
+    binding_schema_version: int = GLOSSARY_BINDING_SCHEMA_VERSION
+    snapshot_schema_version: int = GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class StrictAdmissionResult:
+    job: PersistentTranslationJob | None
+    work_units: list["PersistentWorkUnit"]
+    denial_code: str | None
+
+    @property
+    def admitted(self) -> bool:
+        return self.job is not None
 
 
 @dataclass(frozen=True)
@@ -175,6 +233,210 @@ class SQLiteTranslationJobStore:
 
     def close(self) -> None:
         self._connection.close()
+
+    def create_glossary_approval(
+        self,
+        *,
+        snapshot_payload: bytes,
+        snapshot_digest: str,
+        snapshot_schema_version: int,
+        approval_schema_version: int,
+    ) -> GlossaryApproval:
+        if (
+            not snapshot_payload
+            or sha256(snapshot_payload).hexdigest() != snapshot_digest
+        ):
+            raise ValueError("Invalid glossary snapshot payload")
+        if (
+            snapshot_schema_version != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+            or approval_schema_version != GLOSSARY_APPROVAL_SCHEMA_VERSION
+        ):
+            raise ValueError("Unsupported glossary schema version")
+
+        now = _now()
+        custody_id = f"custody-{uuid4().hex}"
+        approval_id = f"approval-{uuid4().hex}"
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            existing = self._connection.execute(
+                """
+                SELECT custody_id FROM glossary_snapshot_custody
+                WHERE snapshot_digest = ?
+                """,
+                (snapshot_digest,),
+            ).fetchone()
+            if existing is not None:
+                custody_id = existing["custody_id"]
+            else:
+                self._connection.execute(
+                    """
+                    INSERT INTO glossary_snapshot_custody (
+                        custody_id, snapshot_payload, snapshot_digest,
+                        snapshot_schema_version, created_at, retention_mode
+                    ) VALUES (?, ?, ?, ?, ?, 'retain')
+                    """,
+                    (
+                        custody_id,
+                        snapshot_payload,
+                        snapshot_digest,
+                        snapshot_schema_version,
+                        _to_db_time(now),
+                    ),
+                )
+            self._connection.execute(
+                """
+                INSERT INTO glossary_approvals (
+                    approval_id, custody_id, snapshot_digest,
+                    approval_schema_version, approval_status, created_at, revoked_at
+                ) VALUES (?, ?, ?, ?, 'approved', ?, NULL)
+                """,
+                (
+                    approval_id,
+                    custody_id,
+                    snapshot_digest,
+                    approval_schema_version,
+                    _to_db_time(now),
+                ),
+            )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return self._require_glossary_approval(approval_id)
+
+    def revoke_glossary_approval(self, *, approval_id: str) -> GlossaryApproval:
+        approval = self._require_glossary_approval(approval_id)
+        if approval.approval_status == "revoked":
+            return approval
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE glossary_approvals
+                SET approval_status = 'revoked', revoked_at = ?
+                WHERE approval_id = ?
+                """,
+                (_to_db_time(_now()), approval_id),
+            )
+        return self._require_glossary_approval(approval_id)
+
+    def read_approved_glossary_snapshot(
+        self,
+        *,
+        approval_id: str,
+    ) -> ApprovedGlossarySnapshot | None:
+        row = self._connection.execute(
+            """
+            SELECT ga.*, gsc.snapshot_payload, gsc.snapshot_schema_version,
+                   gsc.retention_mode, gsc.snapshot_digest AS custody_snapshot_digest
+            FROM glossary_approvals ga
+            JOIN glossary_snapshot_custody gsc ON gsc.custody_id = ga.custody_id
+            WHERE ga.approval_id = ?
+            """,
+            (approval_id,),
+        ).fetchone()
+        if (
+            row is None
+            or row["approval_status"] != "approved"
+            or row["retention_mode"] != "retain"
+            or row["snapshot_digest"] != row["custody_snapshot_digest"]
+            or row["approval_schema_version"] != GLOSSARY_APPROVAL_SCHEMA_VERSION
+            or row["snapshot_schema_version"] != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+        ):
+            return None
+        return ApprovedGlossarySnapshot(
+            approval=_glossary_approval_from_row(row),
+            snapshot_payload=bytes(row["snapshot_payload"]),
+        )
+
+    def admit_strict_docx_job(
+        self,
+        request: StrictDocxAdmissionRequest,
+    ) -> StrictAdmissionResult:
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            denial_code = _strict_admission_validation_error(request)
+            if denial_code is not None:
+                self._connection.rollback()
+                return StrictAdmissionResult(None, [], denial_code)
+            approval_row = self._connection.execute(
+                """
+                SELECT ga.*, gsc.snapshot_schema_version,
+                       gsc.snapshot_digest AS custody_snapshot_digest,
+                       gsc.retention_mode
+                FROM glossary_approvals ga
+                LEFT JOIN glossary_snapshot_custody gsc
+                    ON gsc.custody_id = ga.custody_id
+                WHERE ga.approval_id = ?
+                """,
+                (request.approval_id,),
+            ).fetchone()
+            denial_code = _strict_approval_denial_code(approval_row, request)
+            if denial_code is not None:
+                self._connection.rollback()
+                return StrictAdmissionResult(None, [], denial_code)
+
+            now = _now()
+            job_id = self._next_job_id()
+            self._connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language, adapter_version,
+                    prompt_version, pricing_snapshot_id, translation_policy,
+                    partial_object_key, final_object_key, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'docx', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+                """,
+                (
+                    job_id, request.order_id, request.user_id, request.file_id,
+                    request.file_name, request.source_object_key, request.source_language,
+                    request.target_language, request.adapter_version, request.prompt_version,
+                    request.pricing_snapshot_id, request.translation_policy,
+                    PersistentTranslationJobStatus.QUEUED.value,
+                    _to_db_time(now), _to_db_time(now),
+                ),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO strict_job_glossary_bindings (
+                    job_id, approval_id, custody_id, snapshot_digest,
+                    binding_schema_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id, request.approval_id, approval_row["custody_id"],
+                    approval_row["snapshot_digest"], request.binding_schema_version,
+                    _to_db_time(now),
+                ),
+            )
+            self._connection.executemany(
+                """
+                INSERT INTO work_units (
+                    id, job_id, sequence, source_block_ids_json, source_object_key,
+                    source_text_hash, prompt_tier, source_language, target_language,
+                    status, prompt_tokens, completion_tokens, cache_hit_tokens,
+                    cache_miss_tokens, retry_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)
+                """,
+                [
+                    (
+                        _work_unit_id(job_id, unit.sequence), job_id, unit.sequence,
+                        json.dumps(list(unit.source_block_ids)), unit.source_object_key,
+                        unit.source_text_hash, unit.prompt_tier, unit.source_language,
+                        unit.target_language, PersistentWorkUnitStatus.PENDING.value,
+                        _to_db_time(now), _to_db_time(now),
+                    )
+                    for unit in request.work_units
+                ],
+            )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return StrictAdmissionResult(
+            job=self._require_job(job_id),
+            work_units=self.list_work_units(job_id),
+            denial_code=None,
+        )
 
     def create_job(
         self,
@@ -1571,6 +1833,46 @@ class SQLiteTranslationJobStore:
                 )
                 """
             )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS glossary_snapshot_custody (
+                    custody_id TEXT PRIMARY KEY,
+                    snapshot_payload BLOB NOT NULL,
+                    snapshot_digest TEXT NOT NULL UNIQUE,
+                    snapshot_schema_version INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    retention_mode TEXT NOT NULL DEFAULT 'retain'
+                        CHECK (retention_mode = 'retain')
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS glossary_approvals (
+                    approval_id TEXT PRIMARY KEY,
+                    custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+                    snapshot_digest TEXT NOT NULL,
+                    approval_schema_version INTEGER NOT NULL,
+                    approval_status TEXT NOT NULL
+                        CHECK (approval_status IN ('approved', 'revoked')),
+                    created_at TEXT NOT NULL,
+                    revoked_at TEXT NULL,
+                    UNIQUE(custody_id, snapshot_digest, approval_schema_version)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strict_job_glossary_bindings (
+                    job_id TEXT PRIMARY KEY REFERENCES translation_jobs(id),
+                    approval_id TEXT NOT NULL REFERENCES glossary_approvals(approval_id),
+                    custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+                    snapshot_digest TEXT NOT NULL,
+                    binding_schema_version INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
 
     def _next_job_id(self) -> str:
         row = self._connection.execute(
@@ -1583,6 +1885,20 @@ class SQLiteTranslationJobStore:
         if job is None:
             raise ValueError(f"Translation job does not exist: {job_id}")
         return job
+
+    def _require_glossary_approval(self, approval_id: str) -> GlossaryApproval:
+        row = self._connection.execute(
+            """
+            SELECT ga.*, gsc.snapshot_schema_version
+            FROM glossary_approvals ga
+            JOIN glossary_snapshot_custody gsc ON gsc.custody_id = ga.custody_id
+            WHERE ga.approval_id = ?
+            """,
+            (approval_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Glossary approval does not exist")
+        return _glossary_approval_from_row(row)
 
     def _get_work_unit(self, work_unit_id: str) -> PersistentWorkUnit | None:
         row = self._connection.execute(
@@ -1806,6 +2122,74 @@ def _job_from_mapping(row) -> PersistentTranslationJob:
 
 def _job_from_row(row: sqlite3.Row) -> PersistentTranslationJob:
     return _job_from_mapping(row)
+
+
+def _glossary_approval_from_row(row) -> GlossaryApproval:
+    return GlossaryApproval(
+        approval_id=row["approval_id"],
+        custody_id=row["custody_id"],
+        snapshot_digest=row["snapshot_digest"],
+        snapshot_schema_version=row["snapshot_schema_version"],
+        approval_schema_version=row["approval_schema_version"],
+        approval_status=row["approval_status"],
+        created_at=_from_db_time(row["created_at"]),
+        revoked_at=_optional_db_time(row["revoked_at"]),
+    )
+
+
+def _strict_admission_validation_error(
+    request: StrictDocxAdmissionRequest,
+) -> str | None:
+    if request.document_kind != "docx":
+        return "document_kind_not_docx"
+    if (
+        request.strict_schema_version != STRICT_DOCX_SCHEMA_VERSION
+        or request.approval_schema_version != GLOSSARY_APPROVAL_SCHEMA_VERSION
+        or request.binding_schema_version != GLOSSARY_BINDING_SCHEMA_VERSION
+        or request.snapshot_schema_version != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+    ):
+        return "unsupported_schema"
+    required_values = (
+        request.approval_id, request.order_id, request.user_id, request.file_id,
+        request.file_name, request.source_object_key, request.source_language,
+        request.target_language, request.adapter_version, request.prompt_version,
+        request.pricing_snapshot_id,
+    )
+    if not all(value.strip() for value in required_values):
+        return "invalid_request"
+    if not request.work_units:
+        return "invalid_request"
+    if [unit.sequence for unit in request.work_units] != list(
+        range(1, len(request.work_units) + 1)
+    ):
+        return "invalid_request"
+    if any(
+        not unit.source_block_ids
+        or not unit.source_text_hash
+        or unit.source_object_key != request.source_object_key
+        for unit in request.work_units
+    ):
+        return "invalid_request"
+    return None
+
+
+def _strict_approval_denial_code(
+    row,
+    request: StrictDocxAdmissionRequest,
+) -> str | None:
+    if row is None:
+        return "approval_missing"
+    if row["approval_status"] == "revoked":
+        return "approval_revoked"
+    if (
+        row["approval_status"] != "approved"
+        or row["retention_mode"] != "retain"
+        or row["snapshot_digest"] != row["custody_snapshot_digest"]
+        or row["approval_schema_version"] != request.approval_schema_version
+        or row["snapshot_schema_version"] != request.snapshot_schema_version
+    ):
+        return "approval_binding_mismatch"
+    return None
 
 
 def _work_unit_from_mapping(row) -> PersistentWorkUnit:
