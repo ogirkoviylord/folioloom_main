@@ -1027,7 +1027,10 @@ def _workbench_helper_rail(
         helper_copy = _state_helper_copy(state.approval_state)
     next_action = _helper_next_action(state)
     not_ready_checklist = ""
-    if state.approval_state == ApprovalState.NOT_READY:
+    if (
+        state.approval_state == ApprovalState.NOT_READY
+        and not state.has_current_manual_approval()
+    ):
         not_ready_checklist = """
     <p class="wb-helper-rail__next-step">Next step</p>
     <ul class="wb-helper-rail__checklist" data-workbench-not-ready-checklist="true">
@@ -1096,7 +1099,10 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
                 "primary",
             )
         return ("Add term", "/admin/workbench/glossary", "primary")
-    if state.approval_state == ApprovalState.NOT_READY:
+    if (
+        state.approval_state == ApprovalState.NOT_READY
+        and not state.has_current_manual_approval()
+    ):
         return ("Approve current snapshot", "#wb-check-selected-form", "primary")
     if state.approval_state == ApprovalState.READY:
         has_approved = state.health_snapshot.get("approved", 0) > 0

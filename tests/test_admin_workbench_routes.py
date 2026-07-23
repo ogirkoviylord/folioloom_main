@@ -384,6 +384,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "This exact current glossary snapshot has explicit local approval.",
             approved_page.text,
         )
+        self.assertNotIn(
+            'data-workbench-not-ready-checklist="true"', approved_page.text
+        )
+        approved_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            approved_page.text,
+            re.DOTALL,
+        )
+        assert approved_helper is not None, "Workbench helper rail not found"
+        self.assertNotIn("Approve current snapshot", approved_helper.group(1))
 
         edited = self.client.post(
             f"/admin/workbench/glossary/terms/{term_id}/edit?document={document_id}",
@@ -407,6 +417,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "The exact current glossary snapshot needs explicit local approval ",
             edited_page.text,
         )
+        self.assertIn(
+            'data-workbench-not-ready-checklist="true"', edited_page.text
+        )
+        edited_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            edited_page.text,
+            re.DOTALL,
+        )
+        assert edited_helper is not None, "Workbench helper rail not found"
+        self.assertIn("Approve current snapshot", edited_helper.group(1))
 
     def test_add_after_approval_invalidates_helper_and_local_check(self) -> None:
         document_id = "add-invalidation-synthetic-document"
@@ -438,6 +458,17 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "This exact current glossary snapshot has explicit local approval.",
             self.client.get(glossary_url).text,
         )
+        approved_page = self.client.get(glossary_url)
+        self.assertNotIn(
+            'data-workbench-not-ready-checklist="true"', approved_page.text
+        )
+        approved_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            approved_page.text,
+            re.DOTALL,
+        )
+        assert approved_helper is not None, "Workbench helper rail not found"
+        self.assertNotIn("Approve current snapshot", approved_helper.group(1))
 
         added_after_approval = self.client.post(
             f"/admin/workbench/glossary/terms/add?document={document_id}",
@@ -461,6 +492,16 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "The exact current glossary snapshot needs explicit local approval ",
             stale_page.text,
         )
+        self.assertIn(
+            'data-workbench-not-ready-checklist="true"', stale_page.text
+        )
+        stale_helper = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            stale_page.text,
+            re.DOTALL,
+        )
+        assert stale_helper is not None, "Workbench helper rail not found"
+        self.assertIn("Approve current snapshot", stale_helper.group(1))
 
         blocked = self.client.post(
             f"/admin/workbench/glossary/check?document={document_id}",
