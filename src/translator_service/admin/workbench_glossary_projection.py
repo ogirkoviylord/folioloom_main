@@ -23,7 +23,7 @@ class WorkbenchGlossaryProjectionState(StrEnum):
     """Local observation states, deliberately distinct from runtime approval."""
 
     FAIL_CLOSED = "fail_closed"
-    LOCAL_STRUCTURAL_READY = "local_structural_ready"
+    LOCAL_STRUCTURAL_OBSERVATION = "local_structural_observation"
 
 
 @dataclass(frozen=True)
@@ -141,7 +141,7 @@ def project_workbench_glossary_rehearsal(
 
     return WorkbenchGlossaryProjection(
         document_ref=document_ref,
-        state=WorkbenchGlossaryProjectionState.LOCAL_STRUCTURAL_READY,
+        state=WorkbenchGlossaryProjectionState.LOCAL_STRUCTURAL_OBSERVATION,
         reason_code=None,
         glossary_signature=glossary_signature,
         snapshot_id=snapshot_id,

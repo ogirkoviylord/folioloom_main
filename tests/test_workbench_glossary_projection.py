@@ -30,13 +30,19 @@ class WorkbenchGlossaryProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             projection.state,
-            WorkbenchGlossaryProjectionState.LOCAL_STRUCTURAL_READY,
+            WorkbenchGlossaryProjectionState.LOCAL_STRUCTURAL_OBSERVATION,
         )
         self.assertEqual(projection.document_ref, "owner://opaque-document-ref")
         self.assertEqual(projection.selected_entry_count, 2)
         self.assertEqual(projection.rendered_entry_count, 1)
         self.assertEqual(projection.omitted_entry_count, 1)
         self.assertEqual(projection.rendered_entry_ids, ("entry:one",))
+        self.assertFalse(projection.runtime_authorized)
+
+    def test_projection_state_name_does_not_imply_readiness(self):
+        state = WorkbenchGlossaryProjectionState.LOCAL_STRUCTURAL_OBSERVATION
+        self.assertNotIn("READY", state.name)
+        self.assertNotIn("ready", state.value)
 
     def test_known_stage1_failure_is_fail_closed_not_runtime_authorized(self):
         rehearsal = SimpleNamespace(

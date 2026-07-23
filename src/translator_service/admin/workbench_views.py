@@ -987,8 +987,17 @@ def _workbench_glossary_observation(
   <p>State: fail closed. Reason: <code>{reason}</code>.</p>
 </section>
 """
+    observation_state = "local-structural-observation"
+    if projection.selected_entry_count == 0:
+        return f"""
+<section class="wb-card" data-workbench-glossary-observation="{observation_state}">
+  <h3>Local glossary observation</h3>
+  <p>No local glossary terms were included. You can add local terms. This local
+    observation is not used in translation.</p>
+</section>
+"""
     return f"""
-<section class="wb-card" data-workbench-glossary-observation="local-structural-ready">
+<section class="wb-card" data-workbench-glossary-observation="{observation_state}">
   <h3>Local glossary structural observation</h3>
   <p>Selected: {projection.selected_entry_count};
     rendered: {projection.rendered_entry_count};

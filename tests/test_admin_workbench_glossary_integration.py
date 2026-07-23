@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import unittest
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -153,7 +154,7 @@ class WorkbenchGlossaryIntegrationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
-            'data-workbench-glossary-observation="local-structural-ready"',
+            'data-workbench-glossary-observation="local-structural-observation"',
             response.text,
         )
         self.assertIn("Selected: 1;", response.text)
@@ -169,6 +170,40 @@ class WorkbenchGlossaryIntegrationTests(unittest.TestCase):
             "provider_request",
         ):
             self.assertNotIn(forbidden, response.text)
+
+    def test_zero_entry_projection_renders_local_informational_message(self):
+        rehearsal = SimpleNamespace(
+            document_ref="owner://opaque-document-ref",
+            glossary_signature="glossary-snapshot:v1:opaque-signature",
+            snapshot_id="snapshot:opaque-id",
+            selection_signature="glossary-selection:v1:opaque-signature",
+            selected_entry_ids=(),
+            included_entry_ids=(),
+            omitted_entry_ids=(),
+        )
+
+        rendered = workbench_views._workbench_glossary_observation(
+            project_workbench_glossary_rehearsal(rehearsal)
+        )
+
+        self.assertIn(
+            'data-workbench-glossary-observation="local-structural-observation"',
+            rendered,
+        )
+        self.assertIn("No local glossary terms were included", rendered)
+        self.assertIn("You can add local terms", rendered)
+        self.assertIn("not used in translation", rendered)
+        for forbidden in (
+            "Ready",
+            "preflight",
+            "runtime-ready",
+            "approved",
+            "authorized document",
+            "rights verified",
+            "active in translation",
+            "export",
+        ):
+            self.assertNotIn(forbidden, rendered)
 
     def test_missing_approval_skips_all_downstream_work(self):
         with (
