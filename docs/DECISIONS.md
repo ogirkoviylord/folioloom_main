@@ -23,6 +23,15 @@ This file contains active project decisions in summary-first form. Full historic
 - Deferred future ideas: (1) a distraction-free editor/focus mode that can hide surrounding chrome while retaining editor capability; (2) a warm, low-strain comfort-reading mode for an author rereading work; (3) selectable curated visual skins and later, potentially constrained palette choice. These belong in later UI/settings exploration, not the current primary screens. The comfort-reading control should not be placed on the main Workbench surface by default; palette customization must preserve readable contrast and semantic status colors rather than become arbitrary per-element color editing.
 - Boundary: This does not approve code, a production UI, role/auth changes, reader/editor implementation, settings implementation, release claims, or a decision to expose raw manuscript text outside the authorized project context.
 
+### Contextual terminology review and revision flow
+
+- Status: Deferred / accepted product direction.
+- Summary: Future source-target review should make glossary knowledge available in context wherever authorized document text is reviewed, rather than confining it to a standalone glossary page. A reader may softly mark glossary terms and open a compact term card with the approved source/target form, relevant grammatical data, literal/base meaning and a short description when present.
+- Review interaction: The future reader may support bidirectional source-target alignment: selecting a word or phrase on either side can highlight the related **target/source span**. Alignment is probabilistic and may be many-to-one, one-to-many or ambiguous; the UI must not present an uncertain mapping as a certain one-word equivalence.
+- Inline change path: From a term card, the author may propose a terminology change without leaving review. The flow must create a new glossary snapshot, show scope and impact, selectively regenerate affected fragment(s) with sufficient context when required, and present a reviewable diff for explicit approval.
+- Integrity rule: An approved translation and its bound glossary snapshot remain immutable. A terminology change never silently edits the approved result; it produces a separately approved, snapshot-bound revision that preserves the prior revision and its evidence.
+- Boundary: This is not approval to implement reader UI, automatic alignment, runtime glossary behavior, persistent revision storage, cache reuse, provider calls or global search-and-replace. Exact confidence policy, scope semantics, regeneration context and revision/custody implementation need a separately scoped design and evidence.
+
 ### CAT-like author workflow before paid/public launch
 
 - Status: Active.

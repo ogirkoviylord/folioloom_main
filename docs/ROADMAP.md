@@ -88,9 +88,9 @@ Keep candidates small and promote only when owner accepts priority.
 
 - Manual glossary import/export/editor.
 - Glossary compliance report.
-- CAT source-target review surface.
+- Contextual glossary/source-target review: term cards, confidence-aware bidirectional span alignment and a calm author-reader interaction.
 - Segment/chapter navigation.
-- Selective retranslation after glossary edits.
+- Snapshot-bound selective retranslation after glossary edits, with impact preview, revision diff and explicit re-approval.
 - Owner-only reader/QA cockpit (#483/#494 candidate lanes).
 - Service-level real-book QA harness (#775 candidate lane).
 - Future scanner v2 shadow extractor only if fresh evidence warrants it.
