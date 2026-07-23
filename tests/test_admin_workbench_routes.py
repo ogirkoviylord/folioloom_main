@@ -215,9 +215,26 @@ class WorkbenchRoutesTest(unittest.TestCase):
             "before a local check can proceed.",
             page.text,
         )
-        self.assertRegex(
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
             page.text,
-            r'<a class="wb-button wb-button--primary" href="[^"]+">Add term</a>',
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        helper_html = helper_match.group(1)
+        self.assertIn('data-workbench-not-ready-checklist="true"', helper_html)
+        self.assertIn("Next step", helper_html)
+        self.assertIn("Local approval", helper_html)
+        self.assertIn("Missing", helper_html)
+        self.assertIn(
+            '<a class="wb-button wb-button--primary" '
+            'href="#wb-check-selected-form">Approve current snapshot</a>',
+            helper_html,
+        )
+        self.assertNotIn(
+            '<a class="wb-button wb-button--primary" '
+            'href="/admin/workbench/glossary">Add term</a>',
+            helper_html,
         )
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
