@@ -1372,6 +1372,31 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
         self.assertEqual(job_count, 0)
         self.assertEqual(binding_count, 0)
 
+    def test_strict_admission_rolls_back_when_binding_insert_fails(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        store._connection.execute(
+            """
+            CREATE TRIGGER reject_strict_binding
+            BEFORE INSERT ON strict_job_glossary_bindings
+            BEGIN SELECT RAISE(ABORT, 'injected'); END
+            """
+        )
+
+        with self.assertRaisesRegex(Exception, "injected"):
+            store.admit_strict_docx_job(_strict_request(approval.approval_id))
+
+        self.assertEqual(
+            store._connection.execute("SELECT COUNT(*) FROM translation_jobs").fetchone()[0],
+            0,
+        )
+
     def _memory_store(self) -> SQLiteTranslationJobStore:
         store = SQLiteTranslationJobStore(":memory:")
         self.addCleanup(store.close)
