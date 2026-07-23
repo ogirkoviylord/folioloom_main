@@ -139,6 +139,12 @@ class StrictAdmissionResult:
 
 
 @dataclass(frozen=True)
+class DeleteJobResult:
+    deleted: bool
+    denial_code: str | None
+
+
+@dataclass(frozen=True)
 class PersistentWorkUnit:
     id: str
     job_id: str
@@ -565,9 +571,18 @@ class SQLiteTranslationJobStore:
             return None
         return _job_from_row(row)
 
-    def delete_job(self, job_id: str) -> bool:
+    def delete_job(self, job_id: str) -> DeleteJobResult:
         if self.get_job(job_id) is None:
-            return False
+            return DeleteJobResult(deleted=False, denial_code=None)
+        is_strict = self._connection.execute(
+            "SELECT 1 FROM strict_job_glossary_bindings WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        if is_strict is not None:
+            return DeleteJobResult(
+                deleted=False,
+                denial_code="strict_job_non_deletable",
+            )
 
         with self._connection:
             self._connection.execute(
@@ -586,7 +601,7 @@ class SQLiteTranslationJobStore:
                 "DELETE FROM translation_jobs WHERE id = ?",
                 (job_id,),
             )
-        return True
+        return DeleteJobResult(deleted=True, denial_code=None)
 
     def list_jobs_by_status(
         self,
