@@ -714,10 +714,16 @@ def create_admin_router(settings: Settings) -> APIRouter:
             return RedirectResponse(
                 "/admin/login", status_code=HTTPStatus.SEE_OTHER
             )
-        # No real caller contract yet. Keep the owner-local placeholder stable
-        # within the Admin actor so reopening this demo does not masquerade as
-        # a changed document and falsely enter the stale recovery state.
-        opaque_id = quote(f"opaque-{session.actor_id}-local-workbench", safe="")
+        # No real caller contract yet. Re-seed this explicitly ephemeral demo
+        # before entering it so Admin re-entry never retains a stale external
+        # context, local terms, or manual approval under the actor key.
+        from translator_service.admin.workbench_session_state import (
+            seed_workbench_session,
+        )
+
+        document_id = f"opaque-{session.actor_id}-local-workbench"
+        seed_workbench_session(document_id=document_id, session_id=session.actor_id)
+        opaque_id = quote(document_id, safe="")
         return RedirectResponse(
             f"/admin/workbench/?document={opaque_id}",
             status_code=HTTPStatus.SEE_OTHER,
