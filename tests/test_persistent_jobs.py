@@ -1789,8 +1789,7 @@ def _delete_strict_binding_dependency(
 def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
     return {
         table: [
-            tuple(row)
-            for row in store._connection.execute(f"SELECT * FROM {table}")
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
         ]
         for table in (
             "translation_jobs",
@@ -1804,8 +1803,7 @@ def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[
 def _strict_delete_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
     return {
         table: [
-            tuple(row)
-            for row in store._connection.execute(f"SELECT * FROM {table}")
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
         ]
         for table in (
             "translation_jobs",
@@ -1824,8 +1822,7 @@ def _strict_admission_rollback_snapshot(
 ) -> dict[str, list[tuple]]:
     return {
         table: [
-            tuple(row)
-            for row in store._connection.execute(f"SELECT * FROM {table}")
+            tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")
         ]
         for table in (
             "translation_jobs",

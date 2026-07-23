@@ -413,13 +413,21 @@ class SQLiteTranslationJobStore:
                     ?)
                 """,
                 (
-                    job_id, request.order_id, request.user_id, request.file_id,
-                    request.file_name, request.source_object_key,
-                    request.source_language, request.target_language,
-                    request.adapter_version, request.prompt_version,
-                    request.pricing_snapshot_id, request.translation_policy,
+                    job_id,
+                    request.order_id,
+                    request.user_id,
+                    request.file_id,
+                    request.file_name,
+                    request.source_object_key,
+                    request.source_language,
+                    request.target_language,
+                    request.adapter_version,
+                    request.prompt_version,
+                    request.pricing_snapshot_id,
+                    request.translation_policy,
                     PersistentTranslationJobStatus.QUEUED.value,
-                    _to_db_time(now), _to_db_time(now),
+                    _to_db_time(now),
+                    _to_db_time(now),
                 ),
             )
             self._connection.execute(
@@ -430,8 +438,11 @@ class SQLiteTranslationJobStore:
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job_id, request.approval_id, approval_row["custody_id"],
-                    approval_row["snapshot_digest"], request.binding_schema_version,
+                    job_id,
+                    request.approval_id,
+                    approval_row["custody_id"],
+                    approval_row["snapshot_digest"],
+                    request.binding_schema_version,
                     _to_db_time(now),
                 ),
             )
@@ -446,11 +457,18 @@ class SQLiteTranslationJobStore:
                 """,
                 [
                     (
-                        _work_unit_id(job_id, unit.sequence), job_id, unit.sequence,
-                        json.dumps(list(unit.source_block_ids)), unit.source_object_key,
-                        unit.source_text_hash, unit.prompt_tier, unit.source_language,
-                        unit.target_language, PersistentWorkUnitStatus.PENDING.value,
-                        _to_db_time(now), _to_db_time(now),
+                        _work_unit_id(job_id, unit.sequence),
+                        job_id,
+                        unit.sequence,
+                        json.dumps(list(unit.source_block_ids)),
+                        unit.source_object_key,
+                        unit.source_text_hash,
+                        unit.prompt_tier,
+                        unit.source_language,
+                        unit.target_language,
+                        PersistentWorkUnitStatus.PENDING.value,
+                        _to_db_time(now),
+                        _to_db_time(now),
                     )
                     for unit in request.work_units
                 ],
@@ -825,13 +843,10 @@ class SQLiteTranslationJobStore:
                     work_unit_id,
                 ),
             )
-            if (
-                not self._finalize_cancel_requested_job_if_idle(
-                    work_unit.job_id,
-                    now=now,
-                )
-                and self._job_has_no_unfinished_work(work_unit.job_id)
-            ):
+            if not self._finalize_cancel_requested_job_if_idle(
+                work_unit.job_id,
+                now=now,
+            ) and self._job_has_no_unfinished_work(work_unit.job_id):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -1213,13 +1228,10 @@ class SQLiteTranslationJobStore:
             if updated.rowcount != 1:
                 raise ValueError(f"Stale work-unit claim: {work_unit_id}")
             completed = self._require_work_unit(work_unit_id)
-            if (
-                not self._finalize_cancel_requested_job_if_idle(
-                    work_unit.job_id,
-                    now=now,
-                )
-                and self._job_has_no_unfinished_work(work_unit.job_id)
-            ):
+            if not self._finalize_cancel_requested_job_if_idle(
+                work_unit.job_id,
+                now=now,
+            ) and self._job_has_no_unfinished_work(work_unit.job_id):
                 self._update_job_status(
                     work_unit.job_id,
                     PersistentTranslationJobStatus.READY,
@@ -2141,10 +2153,7 @@ def _attempt_error_message(
     provider_failure_diagnostic: ProviderFailureDiagnostic | None,
 ) -> str:
     if provider_failure_diagnostic is not None:
-        return (
-            "provider failure: "
-            f"{provider_failure_diagnostic.failure_category.value}"
-        )
+        return f"provider failure: {provider_failure_diagnostic.failure_category.value}"
     return error_message
 
 
@@ -2237,9 +2246,16 @@ def _strict_admission_validation_error(
     ):
         return "unsupported_schema"
     required_values = (
-        request.approval_id, request.order_id, request.user_id, request.file_id,
-        request.file_name, request.source_object_key, request.source_language,
-        request.target_language, request.adapter_version, request.prompt_version,
+        request.approval_id,
+        request.order_id,
+        request.user_id,
+        request.file_id,
+        request.file_name,
+        request.source_object_key,
+        request.source_language,
+        request.target_language,
+        request.adapter_version,
+        request.prompt_version,
         request.pricing_snapshot_id,
     )
     if not all(value.strip() for value in required_values):
@@ -2307,9 +2323,7 @@ def _work_unit_from_mapping(row) -> PersistentWorkUnit:
             if row["available_at"]
             else _from_db_time(row["created_at"])
         ),
-        lease_until=(
-            _from_db_time(row["lease_until"]) if row["lease_until"] else None
-        ),
+        lease_until=(_from_db_time(row["lease_until"]) if row["lease_until"] else None),
         created_at=_from_db_time(row["created_at"]),
         updated_at=_from_db_time(row["updated_at"]),
         started_at=_optional_db_time(row["started_at"]),
