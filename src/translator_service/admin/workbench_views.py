@@ -1078,6 +1078,8 @@ def _state_helper_copy(state: ApprovalState) -> str:
 
 def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
     """Return (label, href, variant) for the helper-rail primary CTA."""
+    document_qs = f"?document={quote(state.document.document_id, safe='')}"
+    add_term_href = f"/admin/workbench/glossary{document_qs}&add=1"
     if state.approval_state == ApprovalState.STALE:
         return ("Reopen latest document", "/admin/workbench-entry", "primary")
     if state.approval_state == ApprovalState.UNAVAILABLE:
@@ -1098,7 +1100,7 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
                 f"/admin/workbench/glossary?document={state.document.document_id}#wb-term-{first_conflict.id}",
                 "primary",
             )
-        return ("Add term", "/admin/workbench/glossary", "primary")
+        return ("Add term", add_term_href, "primary")
     if (
         state.approval_state == ApprovalState.NOT_READY
         and not state.has_current_manual_approval()
@@ -1112,9 +1114,14 @@ def _helper_next_action(state: WorkbenchSessionState) -> tuple[str, str, str]:
     if state.approval_state == ApprovalState.READY:
         has_approved = state.health_snapshot.get("approved", 0) > 0
         if has_approved:
-            return ("Lock all approved", "/admin/workbench/glossary", "primary")
-        return ("Add term", "/admin/workbench/glossary", "primary")
-    return ("Add term", "/admin/workbench/glossary", "primary")
+            return (
+                "Lock all approved",
+                "/admin/workbench/glossary/terms/lock-all-approved"
+                f"{document_qs}",
+                "primary",
+            )
+        return ("Add term", add_term_href, "primary")
+    return ("Add term", add_term_href, "primary")
 
 
 def _helper_next_action_button(action: tuple[str, str, str]) -> str:
@@ -1124,7 +1131,7 @@ def _helper_next_action_button(action: tuple[str, str, str]) -> str:
         if variant == "primary"
         else "wb-button wb-button--secondary"
     )
-    if label == "Approve current snapshot":
+    if label in {"Approve current snapshot", "Lock all approved"}:
         return (
             f'<button type="submit" class="{cls}" '
             f'form="wb-check-selected-form" formaction="{_safe_attr(href)}">'
