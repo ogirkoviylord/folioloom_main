@@ -28,10 +28,13 @@ from translator_service.glossary_target_metadata_overlay import (
 )
 from translator_service.output_contracts import format_translation_batch_contract
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
     PersistentTranslationJobStatus,
     PersistentWorkUnit,
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.persistent_planner import (
@@ -958,6 +961,73 @@ class WorkerTest(unittest.TestCase):
             self.assertIsNone(completed.claim_token)
             self.assertIsNone(completed.lease_until)
             self.assertEqual(completed.translated_text, "[uk] First paragraph")
+
+    def test_scheduled_worker_does_not_fallback_for_revoked_strict_job(self):
+        from translator_service.scheduler import SchedulerLimits
+
+        with TemporaryDirectory() as temp_dir:
+            store = self._store()
+            payload = b"snapshot"
+            approval = store.create_glossary_approval(
+                snapshot_payload=payload,
+                snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+                snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            )
+            admitted = store.admit_strict_docx_job(
+                StrictDocxAdmissionRequest(
+                    approval_id=approval.approval_id,
+                    order_id="order-strict",
+                    user_id="user-42",
+                    file_id="original/book.docx",
+                    file_name="book.docx",
+                    document_kind="docx",
+                    source_object_key="original/book.docx",
+                    source_language="en",
+                    target_language="uk",
+                    adapter_version="docx-v1",
+                    prompt_version="plain-v1",
+                    pricing_snapshot_id="pricing-1",
+                    translation_policy=None,
+                    work_units=[
+                        WorkUnitPlan(
+                            sequence=1,
+                            source_block_ids=("docx:1",),
+                            source_text_hash="hash-1",
+                            prompt_tier="plain",
+                            source_language="en",
+                            target_language="uk",
+                            source_object_key="original/book.docx",
+                        )
+                    ],
+                )
+            )
+            if admitted.job is None:
+                self.fail("strict job admission unexpectedly denied")
+            store.revoke_glossary_approval(approval_id=approval.approval_id)
+            translator = RecordingTranslator()
+
+            with patch(
+                "translator_service.worker.load_scheduled_work_unit_text"
+            ) as load_source, patch(
+                "translator_service.worker._acquire_provider_slot_lease_for_claim"
+            ) as acquire_capacity, patch(
+                "translator_service.worker._scheduled_glossary_runtime_hook"
+            ) as resolve_glossary:
+                completed = run_next_scheduled_stored_text_work_unit(
+                    store=store,
+                    storage=LocalObjectStorage(Path(temp_dir) / "objects"),
+                    worker_id="worker-a",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(),
+                    translator=translator,
+                )
+
+            self.assertIsNone(completed)
+            load_source.assert_not_called()
+            acquire_capacity.assert_not_called()
+            resolve_glossary.assert_not_called()
+            self.assertEqual(translator.calls, [])
 
     def test_scheduled_worker_records_provider_io_diagnostics_in_run_log(self):
         from translator_service.scheduler import SchedulerLimits

@@ -1397,6 +1397,115 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             0,
         )
 
+    def test_guard_b_denies_invalid_strict_bindings_without_claim_mutation(self):
+        for invalid_binding in (
+            "revoked_approval",
+            "missing_approval",
+            "missing_custody",
+            "digest_mismatch",
+            "unsupported_binding_schema",
+        ):
+            with self.subTest(invalid_binding=invalid_binding):
+                store = self._memory_store()
+                payload = b"snapshot"
+                approval = store.create_glossary_approval(
+                    snapshot_payload=payload,
+                    snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+                    snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                    approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+                )
+                result = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+                if result.job is None:
+                    self.fail("strict job admission unexpectedly denied")
+
+                if invalid_binding == "revoked_approval":
+                    store.revoke_glossary_approval(approval_id=approval.approval_id)
+                elif invalid_binding == "missing_approval":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_approvals WHERE approval_id = ?",
+                        (approval.approval_id,),
+                    )
+                elif invalid_binding == "missing_custody":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_snapshot_custody WHERE custody_id = ?",
+                        (approval.custody_id,),
+                    )
+                elif invalid_binding == "digest_mismatch":
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET snapshot_digest = 'corrupt-digest'
+                        WHERE job_id = ?
+                        """,
+                        (result.job.id,),
+                    )
+                else:
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET binding_schema_version = 999
+                        WHERE job_id = ?
+                        """,
+                        (result.job.id,),
+                    )
+
+                before = _guard_b_claim_snapshot(store)
+                claim = store.claim_next_scheduled_work_unit(
+                    worker_id="worker-a",
+                    lease_seconds=300,
+                    limits=SchedulerLimits(),
+                )
+
+                self.assertIsNone(claim)
+                self.assertEqual(_guard_b_claim_snapshot(store), before)
+
+    def test_guard_b_rechecks_after_expired_lease_recovery(self):
+        store = self._memory_store()
+        payload = b"snapshot"
+        approval = store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=__import__("hashlib").sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        result = store.admit_strict_docx_job(_strict_request(approval.approval_id))
+        if result.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        first_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=1,
+            limits=SchedulerLimits(),
+        )
+        if first_claim is None:
+            self.fail("strict job was not initially claimable")
+        store.revoke_glossary_approval(approval_id=approval.approval_id)
+
+        recovered = store.recover_expired_leases(
+            now=first_claim.lease_until + timedelta(seconds=1),
+            retry_base_delay_seconds=0,
+            retry_max_delay_seconds=0,
+        )
+        store._connection.execute(
+            """
+            UPDATE work_units SET available_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (first_claim.work_unit_id,),
+        )
+        before = _guard_b_claim_snapshot(store)
+
+        second_claim = store.claim_next_scheduled_work_unit(
+            worker_id="worker-b",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertEqual(recovered, 1)
+        self.assertIsNone(second_claim)
+        self.assertEqual(_guard_b_claim_snapshot(store), before)
+
     def _memory_store(self) -> SQLiteTranslationJobStore:
         store = SQLiteTranslationJobStore(":memory:")
         self.addCleanup(store.close)
@@ -1430,6 +1539,31 @@ def _strict_request(approval_id: str) -> StrictDocxAdmissionRequest:
             )
         ],
     )
+
+
+def _delete_strict_binding_dependency(
+    store: SQLiteTranslationJobStore,
+    sql: str,
+    parameters: tuple[str],
+) -> None:
+    store._connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        store._connection.execute(sql, parameters)
+        store._connection.commit()
+    finally:
+        store._connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _guard_b_claim_snapshot(store: SQLiteTranslationJobStore) -> dict[str, list[tuple]]:
+    return {
+        table: [tuple(row) for row in store._connection.execute(f"SELECT * FROM {table}")]
+        for table in (
+            "translation_jobs",
+            "work_units",
+            "work_unit_attempts",
+            "scheduler_events",
+        )
+    }
 
 
 def _job_with_units(
