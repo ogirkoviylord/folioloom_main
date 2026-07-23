@@ -311,10 +311,12 @@ class SQLiteTranslationJobStore:
         return self._require_glossary_approval(approval_id)
 
     def revoke_glossary_approval(self, *, approval_id: str) -> GlossaryApproval:
-        approval = self._require_glossary_approval(approval_id)
-        if approval.approval_status == "revoked":
-            return approval
-        with self._connection:
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            approval = self._require_glossary_approval(approval_id)
+            if approval.approval_status == "revoked":
+                self._connection.commit()
+                return approval
             self._connection.execute(
                 """
                 UPDATE glossary_approvals
@@ -323,6 +325,10 @@ class SQLiteTranslationJobStore:
                 """,
                 (_to_db_time(_now()), approval_id),
             )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
         return self._require_glossary_approval(approval_id)
 
     def read_approved_glossary_snapshot(
@@ -380,6 +386,18 @@ class SQLiteTranslationJobStore:
             if denial_code is not None:
                 self._connection.rollback()
                 return StrictAdmissionResult(None, [], denial_code)
+            approval_is_bound = self._connection.execute(
+                """
+                SELECT 1
+                FROM strict_job_glossary_bindings
+                WHERE approval_id = ?
+                LIMIT 1
+                """,
+                (request.approval_id,),
+            ).fetchone()
+            if approval_is_bound is not None:
+                self._connection.rollback()
+                return StrictAdmissionResult(None, [], "approval_already_bound")
 
             now = _now()
             job_id = self._next_job_id()
