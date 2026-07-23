@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-06-29
+Last updated: 2026-07-24
 
 ## Current State
 
@@ -33,7 +33,7 @@ Not current state:
 Immediate focus areas:
 
 - Gate 0: product reframe / scope lock around #813.
-- Gate 1: manual/author-approved glossary controls and before/after evidence.
+- Gate 1: owner decision on the bounded local snapshot-lock contract, then engine-contract discovery before local UX/prototype work; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 - Gate 2: CAT-like author workflow thin slice.
 - Gate 3: representative quality evidence.
 - Keep old Gate B operational work as carry-forward safety infrastructure, not as the product roadmap.
@@ -67,6 +67,7 @@ Immediate focus areas:
 - Candidate-quality gates exist.
 - Owner-only diagnostics boundaries exist.
 - Scanner v2 is deferred unless fresh evidence warrants it.
+- Local approval/rehearsal, a bounded Workbench shell, pure DOCX preflight and truthful local-observation fixes are merged local-prototype foundations, not durable approval/custody or runtime authority.
 
 Blocking caveat:
 
@@ -133,6 +134,10 @@ Bounded live smoke after local/provider wiring failed readiness:
 - UK rendered glossary context and used cache bypass, but runtime structural validation failed with block-count mismatch.
 
 Treat as useful evidence, not successful live quality evidence.
+
+### 2026-07-24 — Glossary Engine → Workbench Council synthesis
+
+All GPT, DeepSeek, MiMo and owner-required GLM Council lanes completed. The synthesis retained the glossary core as reusable, separated it from Telegram/persistent runtime authority and requested an owner decision before a new coder card: a local-only in-memory snapshot lock for a bounded DOCX fixture must bind an opaque local reference and exact snapshot signature, invalidate on change and fail closed before selection/rendering/preflight. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 
 ## Open Owner Questions
 
