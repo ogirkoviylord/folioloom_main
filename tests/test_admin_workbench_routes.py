@@ -297,6 +297,86 @@ class WorkbenchRoutesTest(unittest.TestCase):
             r'Approve current snapshot</button>',
         )
 
+    def test_ready_helper_add_term_link_opens_document_scoped_form(self) -> None:
+        document_id = 'ready helper /&?"<'
+        encoded_document_id = quote(document_id, safe="")
+        glossary_url = f"/admin/workbench/glossary?document={encoded_document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+
+        added = self.client.post(
+            f"/admin/workbench/glossary/terms/add?document={encoded_document_id}",
+            data={
+                "csrf_token": self.csrf_token,
+                "source": "Aster",
+                "target": "Астер",
+                "type": "name",
+                "notes": "local synthetic term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(added.status_code, 303)
+        approved = self.client.post(
+            f"/admin/workbench/glossary/approve?document={encoded_document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(approved.status_code, 303)
+
+        ready_page = self.client.get(glossary_url)
+        self.assertEqual(ready_page.status_code, 200)
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            ready_page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        add_link = re.search(
+            r'<a class="wb-button wb-button--primary" href="([^"]+)">Add term</a>',
+            helper_match.group(1),
+        )
+        assert add_link is not None, "Ready helper Add term link not found"
+
+        form_page = self.client.get(unescape(add_link.group(1)))
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn('id="wb-add-term-form"', form_page.text)
+        self.assertIn(
+            f'action="/admin/workbench/glossary/terms/add?document={encoded_document_id}"',
+            form_page.text,
+        )
+
+    def test_ready_helper_lock_all_submits_existing_toolbar_form(self) -> None:
+        document_id = "ready helper lock"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="Aster",
+            target="Астер",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert term is not None
+        accepted, reason = state.accept_term(term.id)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(accepted)
+
+        ready_page = self.client.get(glossary_url)
+        self.assertEqual(ready_page.status_code, 200)
+        helper_match = re.search(
+            r'<aside class="wb-rail" aria-label="Workbench helper rail">(.*?)</aside>',
+            ready_page.text,
+            re.DOTALL,
+        )
+        assert helper_match is not None, "Workbench helper rail not found"
+        self.assertIn(
+            '<button type="submit" class="wb-button wb-button--primary" '
+            'form="wb-check-selected-form" '
+            'formaction="/admin/workbench/glossary/terms/lock-all-approved'
+            '?document=ready%20helper%20lock">Lock all approved</button>',
+            helper_match.group(1),
+        )
+
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
         response = self.client.get("/admin/workbench/glossary?document=opaque-2")
         self.assertEqual(response.status_code, 200)
