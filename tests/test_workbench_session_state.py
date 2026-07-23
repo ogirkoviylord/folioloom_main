@@ -529,6 +529,29 @@ class WorkbenchSessionStateTransitionEnvelopeTests(unittest.TestCase):
         assert out is not None
         self.assertEqual(out.status, TermStatus.REJECTED)
 
+    def test_reject_already_rejected_preserves_local_state(self) -> None:
+        term = self._add_draft()
+        self.state.reject_term(term.id)
+        self.state.approve_current_glossary()
+        approval = self.state.manual_approval
+        observation = object()
+        self.state.local_check_result = observation
+        self.state.local_check_block_reason = "local-check-blocked"
+        rejected = self.state.terms[term.id]
+        last_edited_at = rejected.last_edited_at
+        signature = rejected.signature
+
+        updated, reason = self.state.reject_term(term.id)
+
+        self.assertIsNone(updated)
+        self.assertEqual(reason, "already_rejected")
+        self.assertEqual(rejected.status, TermStatus.REJECTED)
+        self.assertEqual(rejected.last_edited_at, last_edited_at)
+        self.assertEqual(rejected.signature, signature)
+        self.assertIs(self.state.manual_approval, approval)
+        self.assertIs(self.state.local_check_result, observation)
+        self.assertEqual(self.state.local_check_block_reason, "local-check-blocked")
+
     def test_reject_from_ready_with_no_locked_moves_to_not_ready(self) -> None:
         # Seed an approved-only term (no locked) so we are in READY but
         # the post-reject rule applies.
@@ -558,6 +581,71 @@ class WorkbenchSessionStateTransitionEnvelopeTests(unittest.TestCase):
         term = self._add_draft()
         out, reason = self.state.unlock_term(term.id)
         self.assertEqual(reason, "not_locked")
+
+    def test_successful_status_transition_invalidates_local_approval_and_check(
+        self,
+    ) -> None:
+        cases = (
+            ("accept", lambda term: self.state.accept_term(term.id)),
+            ("reject", lambda term: self.state.reject_term(term.id)),
+            ("lock", lambda term: self.state.lock_term(term.id)),
+            ("unlock", lambda term: self.state.unlock_term(term.id)),
+        )
+        for label, transition in cases:
+            with self.subTest(label=label):
+                self.state = _fresh_state()
+                term = self._add_draft()
+                if label in {"lock", "unlock"}:
+                    self.state.accept_term(term.id)
+                if label == "unlock":
+                    self.state.lock_term(term.id)
+                self.state.approve_current_glossary()
+                self.state.local_check_result = object()
+                self.state.local_check_block_reason = "local-check-blocked"
+
+                updated, reason = transition(term)
+
+                self.assertIsNotNone(updated)
+                self.assertIsNone(reason)
+                self.assertIsNone(self.state.manual_approval)
+                self.assertIsNone(self.state.local_check_result)
+                self.assertIsNone(self.state.local_check_block_reason)
+
+    def test_bulk_lock_invalidates_local_approval_and_check(self) -> None:
+        first = self._add_draft()
+        second, reason = self.state.append_term(
+            source="C", target="D", type_="term", notes=""
+        )
+        assert second is not None
+        self.assertIsNone(reason)
+        self.state.accept_term(first.id)
+        self.state.accept_term(second.id)
+        self.state.approve_current_glossary()
+        self.state.local_check_result = object()
+        self.state.local_check_block_reason = "local-check-blocked"
+
+        locked_ids = self.state.lock_all_approved()
+
+        self.assertEqual(set(locked_ids), {first.id, second.id})
+        self.assertIsNone(self.state.manual_approval)
+        self.assertIsNone(self.state.local_check_result)
+        self.assertIsNone(self.state.local_check_block_reason)
+
+    def test_failed_status_transition_preserves_local_approval_and_check(self) -> None:
+        term = self._add_draft()
+        self.state.accept_term(term.id)
+        self.state.approve_current_glossary()
+        observation = object()
+        self.state.local_check_result = observation
+        self.state.local_check_block_reason = "local-check-blocked"
+
+        updated, reason = self.state.accept_term(term.id)
+
+        self.assertIsNone(updated)
+        self.assertEqual(reason, "already_approved")
+        self.assertIsNotNone(self.state.manual_approval)
+        self.assertIs(self.state.local_check_result, observation)
+        self.assertEqual(self.state.local_check_block_reason, "local-check-blocked")
 
 
 class WorkbenchSessionStateCheckSelectedBranchesTests(unittest.TestCase):
