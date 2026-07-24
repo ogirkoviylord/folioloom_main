@@ -386,19 +386,6 @@ class SQLiteTranslationJobStore:
             if denial_code is not None:
                 self._connection.rollback()
                 return StrictAdmissionResult(None, [], denial_code)
-            approval_is_bound = self._connection.execute(
-                """
-                SELECT 1
-                FROM strict_job_glossary_bindings
-                WHERE approval_id = ?
-                LIMIT 1
-                """,
-                (request.approval_id,),
-            ).fetchone()
-            if approval_is_bound is not None:
-                self._connection.rollback()
-                return StrictAdmissionResult(None, [], "approval_already_bound")
-
             now = _now()
             job_id = self._next_job_id()
             self._connection.execute(

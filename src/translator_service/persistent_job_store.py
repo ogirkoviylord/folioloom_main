@@ -72,7 +72,7 @@ class PersistentJobStore(Protocol):
 
 
 @runtime_checkable
-class SQLiteStrictDocxJobStore(PersistentJobStore, Protocol):
+class StrictDocxJobStore(PersistentJobStore, Protocol):
     def create_glossary_approval(
         self,
         *,
@@ -94,6 +94,19 @@ class SQLiteStrictDocxJobStore(PersistentJobStore, Protocol):
         self,
         request: StrictDocxAdmissionRequest,
     ) -> StrictAdmissionResult: ...
+
+
+def admit_strict_docx_job(
+    store: PersistentJobStore,
+    request: StrictDocxAdmissionRequest,
+) -> StrictAdmissionResult:
+    if not isinstance(store, StrictDocxJobStore):
+        return StrictAdmissionResult(
+            job=None,
+            work_units=[],
+            denial_code="strict_docx_unsupported_backend",
+        )
+    return store.admit_strict_docx_job(request)
 
 
 class PersistentJobStoreSettings(Protocol):
