@@ -232,12 +232,48 @@ CREATE TABLE IF NOT EXISTS strict_docx_v3_job_authorizations (
 );
 """
 
+_V4_DOCUMENT_GLOSSARY_PROVENANCE_SQL = """
+CREATE TABLE IF NOT EXISTS document_glossary_revisions (
+    revision_id TEXT PRIMARY KEY,
+    document_custody_id TEXT NOT NULL REFERENCES
+        strict_docx_v3_document_custody(document_custody_id),
+    revision_sequence INTEGER NOT NULL CHECK (revision_sequence >= 1),
+    parent_revision_id TEXT REFERENCES document_glossary_revisions(revision_id),
+    approval_id TEXT NOT NULL UNIQUE REFERENCES glossary_approvals(approval_id),
+    snapshot_custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+    snapshot_payload_sha256 TEXT NOT NULL,
+    glossary_content_signature TEXT NOT NULL,
+    snapshot_schema_version INTEGER NOT NULL,
+    serialization_schema_version TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+    authn_schema_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(document_custody_id, revision_sequence),
+    UNIQUE(document_custody_id, snapshot_payload_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS document_glossary_revision_events (
+    event_id TEXT PRIMARY KEY,
+    revision_id TEXT NOT NULL REFERENCES document_glossary_revisions(revision_id),
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('created', 'superseded', 'revoked')
+    ),
+    successor_revision_id TEXT REFERENCES document_glossary_revisions(revision_id),
+    actor_id TEXT NOT NULL,
+    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+    authn_schema_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 MIGRATIONS = (
     PostgresMigration(version=1, sql_payload=_V1_SCHEDULER_SQL),
     PostgresMigration(version=2, sql_payload=_V2_STRICT_DOCX_SQL),
     PostgresMigration(
         version=3, sql_payload=_V3_STRICT_DOCX_DOCUMENT_AUTHORIZATION_SQL
     ),
+    PostgresMigration(version=4, sql_payload=_V4_DOCUMENT_GLOSSARY_PROVENANCE_SQL),
 )
 
 # This is intentionally an enumerated catalog query rather than a one-table probe.

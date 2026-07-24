@@ -496,6 +496,7 @@ def create_postgres_scheduler_claim_performance_indexes(
 
 class PostgresSchedulerStore:
     strict_docx_migration_ready = False
+    document_glossary_authoring_migration_ready = False
 
     def __init__(self, dsn: str) -> None:
         if psycopg is None:
