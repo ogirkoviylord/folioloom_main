@@ -23,6 +23,7 @@ from translator_service.persistent_jobs import (
     PersistentTranslationJobStatus,
     PersistentWorkUnitStatus,
     StrictDocxAdmissionRequest,
+    StrictDocxV3AdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.postgres_migrations import MIGRATIONS, run_postgres_migrations
@@ -217,6 +218,47 @@ class PostgresSchedulerContractTest(unittest.TestCase):
         self.assertIn(
             "UNIQUE(custody_id, snapshot_digest, approval_schema_version)",
             strict_migration_sql,
+        )
+
+    def test_store_exposes_v3_document_bound_authorization_contract(self):
+        expected_methods = [
+            "create_strict_docx_v3_authorization",
+            "revoke_strict_docx_v3_authorization",
+            "admit_strict_docx_v3_job",
+        ]
+
+        for method_name in expected_methods:
+            self.assertTrue(
+                callable(getattr(PostgresSchedulerStore, method_name, None)),
+                method_name,
+            )
+
+        v3_migration_sql = MIGRATIONS[2].sql_payload
+        self.assertIn("strict_docx_v3_document_custody", v3_migration_sql)
+        self.assertIn("strict_docx_v3_authorizations", v3_migration_sql)
+        self.assertIn("strict_docx_v3_job_authorizations", v3_migration_sql)
+
+    def test_v3_admission_rejects_generic_v2_approval_without_inserting(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(rows=[None])
+
+        result = store.admit_strict_docx_v3_job(_strict_docx_v3_request())
+
+        self.assertFalse(result.admitted)
+        self.assertEqual(result.denial_code, "strict_docx_v3_authorization_missing")
+        self.assertIn(
+            "FROM strict_docx_v3_authorizations authorization",
+            store.connection.statements[0],
+        )
+        self.assertEqual(
+            store.connection.params,
+            [{"authorization_id": "approval-1"}],
+        )
+        self.assertFalse(
+            any(
+                statement.lstrip().upper().startswith("INSERT")
+                for statement in store.connection.statements
+            )
         )
 
     def test_delete_job_checks_locked_job_and_strict_binding_inside_transaction(
@@ -577,6 +619,39 @@ def _strict_docx_request(
     )
 
 
+def _strict_docx_v3_request(
+    authorization_id: str = "approval-1",
+) -> StrictDocxV3AdmissionRequest:
+    return StrictDocxV3AdmissionRequest(
+        authorization_id=authorization_id,
+        order_id="strict-order",
+        user_id="strict-user",
+        file_id="strict.docx",
+        file_name="strict.docx",
+        document_kind="docx",
+        source_object_key="original/strict.docx",
+        source_sha256="a" * 64,
+        source_size_bytes=123,
+        source_language="en",
+        target_language="uk",
+        adapter_version="docx-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        translation_policy=None,
+        work_units=[
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("docx:1",),
+                source_text_hash="hash-1",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+                source_object_key="original/strict.docx",
+            )
+        ],
+    )
+
+
 def _strict_approval_row(
     *,
     approval_status: str = "approved",
@@ -702,6 +777,50 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
         work_unit = self.store.list_work_units(first.job.id)[0]
         self.assertEqual(work_unit.status, PersistentWorkUnitStatus.PENDING)
         self.assertIsNone(work_unit.claim_token)
+
+    def test_v3_authorization_revocation_blocks_direct_and_scheduled_claims(self):
+        for claim_path in ("direct", "scheduled"):
+            with self.subTest(claim_path=claim_path):
+                payload = f"postgres-v3-{claim_path}".encode()
+                approval = self.store.create_glossary_approval(
+                    snapshot_payload=payload,
+                    snapshot_digest=sha256(payload).hexdigest(),
+                    snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                    approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+                )
+                authorization = self.store.create_strict_docx_v3_authorization(
+                    approval_id=approval.approval_id,
+                    source_object_key="original/strict.docx",
+                    source_sha256="a" * 64,
+                    source_size_bytes=123,
+                    document_kind="docx",
+                )
+                admitted = self.store.admit_strict_docx_v3_job(
+                    _strict_docx_v3_request(authorization.authorization_id)
+                )
+                self.assertTrue(admitted.admitted)
+                if admitted.job is None:
+                    raise AssertionError("v3 job admission unexpectedly denied")
+                self.store.revoke_strict_docx_v3_authorization(
+                    authorization_id=authorization.authorization_id
+                )
+
+                if claim_path == "direct":
+                    claim = self.store.claim_next_work_unit(
+                        admitted.job.id,
+                        worker_id="worker-a",
+                    )
+                else:
+                    claim = self.store.claim_next_scheduled_work_unit(
+                        worker_id="worker-a",
+                        lease_seconds=60,
+                        limits=SchedulerLimits(),
+                    )
+
+                self.assertIsNone(claim)
+                work_unit = self.store.list_work_units(admitted.job.id)[0]
+                self.assertEqual(work_unit.status, PersistentWorkUnitStatus.PENDING)
+                self.assertIsNone(work_unit.claim_token)
 
     def test_real_postgres_reuses_exact_snapshot_approval(self):
         payload = b"postgres-exact-approval-reuse"

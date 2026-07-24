@@ -1,4 +1,5 @@
 import hashlib
+import sqlite3
 import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnitStatus,
     SQLiteTranslationJobStore,
     StrictDocxAdmissionRequest,
+    StrictDocxV3AdmissionRequest,
     WorkUnitPlan,
 )
 from translator_service.scheduler import SchedulerLimits
@@ -41,6 +43,194 @@ class StrictDocxJobStoreContractTest(unittest.TestCase):
         self.assertEqual(result.denial_code, "strict_docx_unsupported_backend")
         self.assertEqual(store.create_job_calls, 0)
 
+    def test_v3_rejects_generic_v2_approval_without_writing_or_backfilling(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        approval = _approval(store)
+
+        result = store.admit_strict_docx_v3_job(_v3_request(approval.approval_id))
+
+        self.assertFalse(result.admitted)
+        self.assertEqual(result.denial_code, "strict_docx_v3_authorization_missing")
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM strict_docx_v3_authorizations"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_v3_admits_only_an_explicit_document_bound_authorization(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        approval = _approval(store)
+        authorization = store.create_strict_docx_v3_authorization(
+            approval_id=approval.approval_id,
+            source_object_key="original/strict.docx",
+            source_sha256="a" * 64,
+            source_size_bytes=123,
+            document_kind="docx",
+        )
+
+        result = store.admit_strict_docx_v3_job(
+            _v3_request(authorization.authorization_id)
+        )
+
+        self.assertTrue(result.admitted)
+        self.assertEqual(result.denial_code, None)
+        self.assertEqual(
+            tuple(
+                store._connection.execute(
+                    "SELECT approval_id, source_object_key, source_sha256, "
+                    "source_size_bytes FROM strict_docx_v3_job_authorizations"
+                ).fetchone()
+            ),
+            (
+                approval.approval_id,
+                "original/strict.docx",
+                "a" * 64,
+                123,
+            ),
+        )
+
+    def test_v3_binding_write_failure_rolls_back_entire_admission(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        approval = _approval(store)
+        authorization = store.create_strict_docx_v3_authorization(
+            approval_id=approval.approval_id,
+            source_object_key="original/strict.docx",
+            source_sha256="a" * 64,
+            source_size_bytes=123,
+            document_kind="docx",
+        )
+        store._connection.execute(
+            """
+            CREATE TRIGGER fail_v3_job_authorization_insert
+            BEFORE INSERT ON strict_docx_v3_job_authorizations
+            BEGIN
+                SELECT RAISE(ABORT, 'injected v3 authorization binding failure');
+            END
+            """
+        )
+
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, "injected v3 authorization binding failure"
+        ):
+            store.admit_strict_docx_v3_job(_v3_request(authorization.authorization_id))
+
+        for relation_name in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+            "strict_docx_v3_job_authorizations",
+        ):
+            with self.subTest(relation_name=relation_name):
+                self.assertEqual(
+                    store._connection.execute(
+                        f"SELECT COUNT(*) FROM {relation_name}"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_v3_revocation_before_admission_transaction_denies_without_writes(self):
+        class _RevokingAdmissionStore(SQLiteTranslationJobStore):
+            authorization_id: str
+
+            def _admit_strict_docx_job(self, *args, **kwargs):
+                self.revoke_strict_docx_v3_authorization(
+                    authorization_id=self.authorization_id
+                )
+                return super()._admit_strict_docx_job(*args, **kwargs)
+
+        store = _RevokingAdmissionStore(":memory:")
+        self.addCleanup(store.close)
+        approval = _approval(store)
+        authorization = store.create_strict_docx_v3_authorization(
+            approval_id=approval.approval_id,
+            source_object_key="original/strict.docx",
+            source_sha256="a" * 64,
+            source_size_bytes=123,
+            document_kind="docx",
+        )
+        store.authorization_id = authorization.authorization_id
+
+        denied = store.admit_strict_docx_v3_job(
+            _v3_request(authorization.authorization_id)
+        )
+
+        self.assertFalse(denied.admitted)
+        self.assertEqual(
+            denied.denial_code,
+            "strict_docx_v3_authorization_revoked",
+        )
+        for relation_name in (
+            "translation_jobs",
+            "strict_job_glossary_bindings",
+            "work_units",
+            "strict_docx_v3_job_authorizations",
+        ):
+            with self.subTest(relation_name=relation_name):
+                self.assertEqual(
+                    store._connection.execute(
+                        f"SELECT COUNT(*) FROM {relation_name}"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_v3_denies_same_bytes_under_another_key_and_revoked_authorization(self):
+        store = SQLiteTranslationJobStore(":memory:")
+        self.addCleanup(store.close)
+        approval = _approval(store)
+        authorization = store.create_strict_docx_v3_authorization(
+            approval_id=approval.approval_id,
+            source_object_key="original/strict.docx",
+            source_sha256="a" * 64,
+            source_size_bytes=123,
+            document_kind="docx",
+        )
+
+        mismatched = store.admit_strict_docx_v3_job(
+            _v3_request(
+                authorization.authorization_id,
+                source_object_key="original/reuploaded.docx",
+            )
+        )
+
+        self.assertEqual(
+            mismatched.denial_code,
+            "strict_docx_v3_source_custody_mismatch",
+        )
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0],
+            0,
+        )
+        store.revoke_strict_docx_v3_authorization(
+            authorization_id=authorization.authorization_id
+        )
+
+        revoked = store.admit_strict_docx_v3_job(
+            _v3_request(authorization.authorization_id)
+        )
+
+        self.assertEqual(
+            revoked.denial_code,
+            "strict_docx_v3_authorization_revoked",
+        )
+        self.assertEqual(
+            store._connection.execute(
+                "SELECT COUNT(*) FROM translation_jobs"
+            ).fetchone()[0],
+            0,
+        )
+
     def test_sqlite_selected_contract_cases(self):
         factory = StrictDocxStoreFactory(
             name="sqlite",
@@ -50,9 +240,7 @@ class StrictDocxJobStoreContractTest(unittest.TestCase):
             StrictDocxContractCase(
                 "valid_ordered_immutable_binding", _assert_valid_admission
             ),
-            StrictDocxContractCase(
-                "exact_match_reuse_after_completion", _assert_reuse
-            ),
+            StrictDocxContractCase("exact_match_reuse_after_completion", _assert_reuse),
             StrictDocxContractCase(
                 "revocation_denies_future_claims", _assert_revoked_claims
             ),
@@ -68,6 +256,44 @@ class StrictDocxJobStoreContractTest(unittest.TestCase):
                 store = factory.create()
                 self.addCleanup(store.close)
                 case.run(self, store)
+
+    def test_v3_revocation_blocks_direct_and_scheduled_claims_without_effects(self):
+        for claim_path in ("direct", "scheduled"):
+            with self.subTest(claim_path=claim_path):
+                store = SQLiteTranslationJobStore(":memory:")
+                self.addCleanup(store.close)
+                approval = _approval(store, payload=claim_path.encode())
+                authorization = store.create_strict_docx_v3_authorization(
+                    approval_id=approval.approval_id,
+                    source_object_key="original/strict.docx",
+                    source_sha256="a" * 64,
+                    source_size_bytes=123,
+                    document_kind="docx",
+                )
+                admitted = store.admit_strict_docx_v3_job(
+                    _v3_request(authorization.authorization_id)
+                )
+                self.assertIsNotNone(admitted.job)
+                if admitted.job is None:
+                    raise AssertionError("v3 admission unexpectedly denied")
+                store.revoke_strict_docx_v3_authorization(
+                    authorization_id=authorization.authorization_id
+                )
+                before = _claim_snapshot(store, admitted.job.id)
+
+                if claim_path == "direct":
+                    claimed = store.claim_next_work_unit(
+                        admitted.job.id, worker_id="worker-a"
+                    )
+                else:
+                    claimed = store.claim_next_scheduled_work_unit(
+                        worker_id="worker-a",
+                        lease_seconds=60,
+                        limits=SchedulerLimits(),
+                    )
+
+                self.assertIsNone(claimed)
+                self.assertEqual(_claim_snapshot(store, admitted.job.id), before)
 
     def test_strict_binding_reader_returns_only_revalidated_bound_snapshot(self):
         store = SQLiteTranslationJobStore(":memory:")
@@ -396,6 +622,31 @@ def _request(approval_id: str, *, unit_count: int = 1) -> StrictDocxAdmissionReq
         pricing_snapshot_id="pricing-1",
         translation_policy=None,
         work_units=_work_units("original/strict.docx", unit_count),
+    )
+
+
+def _v3_request(
+    authorization_id: str,
+    *,
+    source_object_key: str = "original/strict.docx",
+) -> StrictDocxV3AdmissionRequest:
+    return StrictDocxV3AdmissionRequest(
+        authorization_id=authorization_id,
+        order_id="strict-order",
+        user_id="strict-user",
+        file_id="strict.docx",
+        file_name="strict.docx",
+        document_kind="docx",
+        source_object_key=source_object_key,
+        source_sha256="a" * 64,
+        source_size_bytes=123,
+        source_language="en",
+        target_language="uk",
+        adapter_version="docx-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        translation_policy=None,
+        work_units=_work_units(source_object_key, 1),
     )
 
 

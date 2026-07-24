@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from translator_service.file_storage import LocalObjectStorage
 from translator_service.persistent_jobs import (
     ApprovedGlossarySnapshot,
     DeleteJobResult,
@@ -14,6 +15,8 @@ from translator_service.persistent_jobs import (
     SQLiteTranslationJobStore,
     StrictAdmissionResult,
     StrictDocxAdmissionRequest,
+    StrictDocxV3AdmissionRequest,
+    StrictDocxV3Authorization,
     WorkUnitPlan,
 )
 
@@ -104,6 +107,36 @@ class StrictDocxJobStore(PersistentJobStore, Protocol):
     ) -> StrictAdmissionResult: ...
 
 
+@runtime_checkable
+class StrictDocxV3JobStore(StrictDocxJobStore, Protocol):
+    def create_strict_docx_v3_authorization(
+        self,
+        *,
+        approval_id: str,
+        source_object_key: str,
+        source_sha256: str,
+        source_size_bytes: int,
+        document_kind: str,
+    ) -> StrictDocxV3Authorization: ...
+
+    def revoke_strict_docx_v3_authorization(
+        self,
+        *,
+        authorization_id: str,
+    ) -> StrictDocxV3Authorization: ...
+
+    def read_strict_docx_v3_authorization(
+        self,
+        *,
+        authorization_id: str,
+    ) -> StrictDocxV3Authorization | None: ...
+
+    def admit_strict_docx_v3_job(
+        self,
+        request: StrictDocxV3AdmissionRequest,
+    ) -> StrictAdmissionResult: ...
+
+
 def admit_strict_docx_job(
     store: PersistentJobStore,
     request: StrictDocxAdmissionRequest,
@@ -116,6 +149,27 @@ def admit_strict_docx_job(
             denial_code=denial_code,
         )
     return store.admit_strict_docx_job(request)
+
+
+def admit_strict_docx_v3_job(
+    store: PersistentJobStore,
+    request: StrictDocxV3AdmissionRequest,
+    *,
+    storage: LocalObjectStorage,
+) -> StrictAdmissionResult:
+    """Admit v3 jobs only after server-side source byte re-verification."""
+    from translator_service.strict_docx_v3_authorization_service import (
+        StrictDocxV3AdmissionServiceRequest,
+        admit_verified_strict_docx_v3_job,
+    )
+
+    return admit_verified_strict_docx_v3_job(
+        StrictDocxV3AdmissionServiceRequest(
+            store=store,
+            storage=storage,
+            request=request,
+        )
+    )
 
 
 def read_strict_docx_glossary_snapshot(
