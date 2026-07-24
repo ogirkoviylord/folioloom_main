@@ -483,8 +483,12 @@ def create_workbench_router(
         if not isinstance(session, AdminSession):
             return session
         document_id = request.query_params.get("document") or None
-        return await _mutating_glossary_redirect(
-            request, session=session, document_id=document_id
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.lock_term(term_id)
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.post(
@@ -567,10 +571,13 @@ def create_workbench_router(
         session = await csrf_guarded.verify(request)
         if not isinstance(session, AdminSession):
             return session
-        # Fail-closed: bulk locking is not wired in this slice.
         document_id = request.query_params.get("document") or None
-        return await _mutating_glossary_redirect(
-            request, session=session, document_id=document_id
+        state = _resolve_state(document_id, session=session)
+        _maybe_apply_stale_drift(state, document_id=document_id)
+        state.lock_all_approved()
+        return RedirectResponse(
+            f"/admin/workbench/glossary?document={quote(state.document.document_id, safe='')}",  # noqa: E501
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     return router

@@ -10,6 +10,11 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
 
+from translator_service import manual_glossary_rehearsal as rehearsal_module
+from translator_service.admin.workbench_session_state import (
+    DocumentContext,
+    WorkbenchSessionState,
+)
 from translator_service.format_adapters.contracts import (
     FormatTextBlock,
     FormatTranslationUnit,
@@ -121,6 +126,114 @@ class DocxGlossaryPreflightTests(unittest.TestCase):
         serialized = repr(result)
         for forbidden in ("Darcy", "Дарси", "prompt_body", "provider", "cache", "raw_"):
             self.assertNotIn(forbidden, serialized)
+
+    def test_local_docx_lock_stale_mutation_and_explicit_relock_recovers(self):
+        """The local state flow remains fail-closed until explicitly relocked."""
+        document = DocumentContext.from_query(
+            document_id="local-docx-lock-flow",
+            fmt="docx",
+            source_language="en",
+            target_language="ru",
+        )
+        state = WorkbenchSessionState(
+            session_id="local-docx-lock-flow",
+            document=document,
+            initial_document_signature=document.signature,
+        )
+        original, reason = state.append_term(
+            source="Mara",
+            target="Мара",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert original is not None
+        self.assertIsNotNone(state.accept_term(original.id)[0])
+        self.assertIsNotNone(state.lock_term(original.id)[0])
+        state.approve_current_glossary()
+        initial_approval = state.manual_approval
+        assert isinstance(initial_approval, ManualGlossaryApproval)
+
+        work_unit = FormatTranslationUnit(
+            sequence=0,
+            blocks=(
+                FormatTextBlock(
+                    index=0,
+                    source_block_id="local-docx-lock-flow:block:0",
+                    text="Mara meets Iven.",
+                    kind=TextBlockKind.PLAIN,
+                ),
+            ),
+            prompt_tier=PromptTier.PLAIN,
+        )
+        budget = GlossarySelectionBudget(max_prompt_tokens=120)
+        approved = self.module.preflight_docx_manual_glossary_approval(
+            document_kind="docx",
+            document_ref=document.document_id,
+            snapshot=state.glossary_snapshot(),
+            approval=initial_approval,
+            work_unit=work_unit,
+            selection_budget=budget,
+        )
+        assert isinstance(approved, self.module.DocxGlossaryPreflightApproved)
+
+        added, reason = state.append_term(
+            source="Iven",
+            target="Івен",
+            type_="name",
+            notes="selected local mutation",
+        )
+        self.assertIsNone(reason)
+        assert added is not None
+        self.assertIsNone(state.manual_approval)
+
+        with (
+            mock.patch.object(
+                rehearsal_module,
+                "select_glossary_subset_for_work_unit",
+                wraps=rehearsal_module.select_glossary_subset_for_work_unit,
+            ) as selection,
+            mock.patch.object(
+                rehearsal_module,
+                "format_glossary_prompt_context",
+                wraps=rehearsal_module.format_glossary_prompt_context,
+            ) as render,
+            mock.patch.object(
+                self.module,
+                "build_glossary_prompt_policy_adapter_decision",
+                side_effect=AssertionError("lower policy logic must not run"),
+            ),
+        ):
+            stale = self.module.preflight_docx_manual_glossary_approval(
+                document_kind="docx",
+                document_ref=document.document_id,
+                snapshot=state.glossary_snapshot(),
+                approval=initial_approval,
+                work_unit=work_unit,
+                selection_budget=budget,
+            )
+
+        assert isinstance(stale, self.module.DocxGlossaryPreflightDenied)
+        self.assertEqual(stale.reason, "signature_mismatch")
+        selection.assert_not_called()
+        render.assert_not_called()
+
+        self.assertIsNotNone(state.accept_term(added.id)[0])
+        self.assertIsNotNone(state.lock_term(added.id)[0])
+        state.approve_current_glossary()
+        recovered_approval = state.manual_approval
+        assert isinstance(recovered_approval, ManualGlossaryApproval)
+        recovered = self.module.preflight_docx_manual_glossary_approval(
+            document_kind="docx",
+            document_ref=document.document_id,
+            snapshot=state.glossary_snapshot(),
+            approval=recovered_approval,
+            work_unit=work_unit,
+            selection_budget=budget,
+        )
+
+        assert isinstance(recovered, self.module.DocxGlossaryPreflightApproved)
+        self.assertNotEqual(recovered.glossary_signature, approved.glossary_signature)
 
     def test_unsupported_kind_denies_before_snapshot_or_lower_logic(self):
         with (
