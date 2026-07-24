@@ -137,6 +137,13 @@ class StrictDocxV3JobStore(StrictDocxJobStore, Protocol):
     ) -> StrictAdmissionResult: ...
 
 
+@runtime_checkable
+class DocumentGlossaryAuthoringStore(PersistentJobStore, Protocol):
+    """Explicit capability marker for the additive A1 provenance lifecycle."""
+
+    document_glossary_authoring_migration_ready: bool
+
+
 def admit_strict_docx_job(
     store: PersistentJobStore,
     request: StrictDocxAdmissionRequest,
@@ -189,6 +196,16 @@ def strict_docx_capability_denial_code(store: PersistentJobStore) -> str | None:
     return None
 
 
+def document_glossary_authoring_capability_denial_code(
+    store: object,
+) -> str | None:
+    if not isinstance(store, DocumentGlossaryAuthoringStore):
+        return "glossary_authoring_unsupported_backend"
+    if not store.document_glossary_authoring_migration_ready:
+        return "glossary_authoring_migration_not_ready"
+    return None
+
+
 class PersistentJobStoreSettings(Protocol):
     scheduler_backend: str
     persistent_jobs_db_path: str
@@ -208,6 +225,7 @@ def open_persistent_job_store(
         try:
             run_postgres_migrations(store.connection)
             store.strict_docx_migration_ready = True
+            store.document_glossary_authoring_migration_ready = True
         except Exception as migration_error:
             try:
                 store.close()
