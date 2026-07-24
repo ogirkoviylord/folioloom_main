@@ -895,10 +895,7 @@ class BotRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "translator_service.postgres_scheduler.PostgresSchedulerStore",
                 return_value=fake_store,
             ),
-            patch(
-                "translator_service.postgres_scheduler."
-                "initialize_postgres_scheduler_schema"
-            ),
+            patch("translator_service.postgres_migrations.run_postgres_migrations"),
         ):
             service = build_translation_service(
                 BotRuntimeConfig(

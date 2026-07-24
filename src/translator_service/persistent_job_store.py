@@ -72,7 +72,9 @@ class PersistentJobStore(Protocol):
 
 
 @runtime_checkable
-class SQLiteStrictDocxJobStore(PersistentJobStore, Protocol):
+class StrictDocxJobStore(PersistentJobStore, Protocol):
+    strict_docx_migration_ready: bool
+
     def create_glossary_approval(
         self,
         *,
@@ -90,10 +92,47 @@ class SQLiteStrictDocxJobStore(PersistentJobStore, Protocol):
         approval_id: str,
     ) -> ApprovedGlossarySnapshot | None: ...
 
+    def read_strict_job_glossary_snapshot(
+        self,
+        *,
+        job_id: str,
+    ) -> ApprovedGlossarySnapshot | None: ...
+
     def admit_strict_docx_job(
         self,
         request: StrictDocxAdmissionRequest,
     ) -> StrictAdmissionResult: ...
+
+
+def admit_strict_docx_job(
+    store: PersistentJobStore,
+    request: StrictDocxAdmissionRequest,
+) -> StrictAdmissionResult:
+    denial_code = strict_docx_capability_denial_code(store)
+    if denial_code is not None:
+        return StrictAdmissionResult(
+            job=None,
+            work_units=[],
+            denial_code=denial_code,
+        )
+    return store.admit_strict_docx_job(request)
+
+
+def read_strict_docx_glossary_snapshot(
+    store: PersistentJobStore,
+    job_id: str,
+) -> ApprovedGlossarySnapshot | None:
+    if strict_docx_capability_denial_code(store) is not None:
+        return None
+    return store.read_strict_job_glossary_snapshot(job_id=job_id)
+
+
+def strict_docx_capability_denial_code(store: PersistentJobStore) -> str | None:
+    if not isinstance(store, StrictDocxJobStore):
+        return "strict_docx_unsupported_backend"
+    if not store.strict_docx_migration_ready:
+        return "strict_docx_migration_not_ready"
+    return None
 
 
 class PersistentJobStoreSettings(Protocol):
@@ -108,16 +147,18 @@ def open_persistent_job_store(
     if settings.scheduler_backend == "sqlite":
         return SQLiteTranslationJobStore(settings.persistent_jobs_db_path)
     if settings.scheduler_backend == "postgres":
-        from translator_service.postgres_scheduler import (
-            PostgresSchedulerStore,
-            initialize_postgres_scheduler_schema,
-        )
+        from translator_service.postgres_migrations import run_postgres_migrations
+        from translator_service.postgres_scheduler import PostgresSchedulerStore
 
         store = PostgresSchedulerStore(settings.postgres_dsn)
         try:
-            initialize_postgres_scheduler_schema(store.connection)
-        except Exception:
-            store.close()
+            run_postgres_migrations(store.connection)
+            store.strict_docx_migration_ready = True
+        except Exception as migration_error:
+            try:
+                store.close()
+            except Exception as close_error:
+                raise migration_error from close_error
             raise
         return store
     raise ValueError(f"Unsupported scheduler backend: {settings.scheduler_backend}")

@@ -2,23 +2,35 @@ import json
 import os
 import threading
 import unittest
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 from types import SimpleNamespace
+
+from psycopg.errors import CheckViolation, UniqueViolation
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.format_adapters import TXT_ADAPTER_VERSION
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_BINDING_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+    DeleteJobResult,
     PersistentTranslationJobStatus,
+    PersistentWorkUnitStatus,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
 )
+from translator_service.postgres_migrations import MIGRATIONS, run_postgres_migrations
 from translator_service.postgres_scheduler import (
     _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL,
     SCHEMA_SQL,
     PostgresSchedulerStore,
     create_postgres_scheduler_claim_performance_indexes,
-    initialize_postgres_scheduler_schema,
     postgres_scheduler_claim_performance_index_statements,
 )
 from translator_service.provider_failure_diagnostics import (
@@ -41,6 +53,292 @@ POSTGRES_DSN = os.getenv("TEST_POSTGRES_DSN")
 
 
 class PostgresSchedulerContractTest(unittest.TestCase):
+    def test_strict_snapshot_reader_revalidates_all_binding_predicates(self):
+        payload = b"postgres-reader-snapshot"
+        valid_row = _strict_snapshot_reader_row(payload=payload)
+        invalidations = (
+            ("approval_not_approved", {"approval_status": "revoked"}),
+            ("approval_unrecognized_status", {"approval_status": "pending"}),
+            ("approval_custody_mismatch", {"custody_id": "other-custody"}),
+            ("binding_approval_mismatch", {"binding_approval_id": "other-approval"}),
+            ("binding_custody_mismatch", {"binding_custody_id": "other-custody"}),
+            ("binding_digest_mismatch", {"binding_snapshot_digest": "other-digest"}),
+            ("approval_digest_mismatch", {"snapshot_digest": "other-digest"}),
+            ("custody_digest_mismatch", {"custody_snapshot_digest": "other-digest"}),
+            (
+                "unsupported_binding_schema",
+                {"binding_schema_version": GLOSSARY_BINDING_SCHEMA_VERSION + 1},
+            ),
+            (
+                "unsupported_approval_schema",
+                {"approval_schema_version": GLOSSARY_APPROVAL_SCHEMA_VERSION + 1},
+            ),
+            (
+                "unsupported_snapshot_schema",
+                {"snapshot_schema_version": GLOSSARY_SNAPSHOT_SCHEMA_VERSION + 1},
+            ),
+            ("non_retain_custody", {"retention_mode": "discard"}),
+            ("non_docx_job", {"document_kind": "txt"}),
+            ("payload_digest_mismatch", {"snapshot_payload": b"tampered"}),
+        )
+
+        for name, overrides in invalidations:
+            with self.subTest(invalidation=name):
+                store = object.__new__(PostgresSchedulerStore)
+                store.connection = _RecordingPostgresConnection(
+                    rows=[{**valid_row, **overrides}]
+                )
+
+                snapshot = store.read_strict_job_glossary_snapshot(job_id="job-1")
+
+                self.assertIsNone(snapshot)
+                self.assertEqual(len(store.connection.statements), 1)
+                self.assertEqual(store.connection.params, [{"job_id": "job-1"}])
+
+    def test_strict_snapshot_reader_returns_exact_valid_approval_and_payload(self):
+        payload = b"postgres-reader-snapshot"
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(
+            rows=[_strict_snapshot_reader_row(payload=payload)]
+        )
+
+        snapshot = store.read_strict_job_glossary_snapshot(job_id="job-1")
+
+        self.assertIsNotNone(snapshot)
+        if snapshot is None:
+            self.fail("valid strict snapshot unexpectedly unavailable")
+        self.assertEqual(snapshot.snapshot_payload, payload)
+        self.assertEqual(snapshot.approval.approval_id, "approval-1")
+        self.assertEqual(snapshot.approval.custody_id, "custody-1")
+        self.assertEqual(snapshot.approval.snapshot_digest, sha256(payload).hexdigest())
+        self.assertEqual(snapshot.approval.approval_status, "approved")
+
+    def test_approved_snapshot_reader_rejects_rehashed_tampered_payload(self):
+        tampered_payload = b"postgres-tampered-snapshot"
+        synchronized_digest = sha256(b"claimed-snapshot").hexdigest()
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(
+            rows=[
+                {
+                    **_strict_snapshot_reader_row(payload=b"original-snapshot"),
+                    "snapshot_payload": tampered_payload,
+                    "snapshot_digest": synchronized_digest,
+                    "custody_snapshot_digest": synchronized_digest,
+                }
+            ]
+        )
+
+        snapshot = store.read_approved_glossary_snapshot(approval_id="approval-1")
+
+        self.assertIsNone(snapshot)
+        self.assertEqual(len(store.connection.statements), 1)
+        self.assertEqual(store.connection.params, [{"approval_id": "approval-1"}])
+
+    def test_strict_docx_admission_denials_are_typed_and_do_not_insert(self):
+        cases = (
+            (
+                "document_kind_not_docx",
+                _strict_docx_request(document_kind="txt"),
+                [],
+            ),
+            (
+                "approval_missing",
+                _strict_docx_request(),
+                [None],
+            ),
+            (
+                "approval_revoked",
+                _strict_docx_request(),
+                [_strict_approval_row(approval_status="revoked")],
+            ),
+            (
+                "approval_binding_mismatch",
+                _strict_docx_request(),
+                [_strict_approval_row(custody_snapshot_digest="other-digest")],
+            ),
+        )
+
+        for expected_denial, request, rows in cases:
+            with self.subTest(denial_code=expected_denial):
+                store = object.__new__(PostgresSchedulerStore)
+                store.connection = _RecordingPostgresConnection(rows=rows)
+
+                result = store.admit_strict_docx_job(request)
+
+                self.assertFalse(result.admitted)
+                self.assertEqual(result.denial_code, expected_denial)
+                self.assertEqual(result.work_units, [])
+                self.assertFalse(
+                    any(
+                        statement.lstrip().upper().startswith("INSERT")
+                        for statement in store.connection.statements
+                    )
+                )
+                if expected_denial in {"document_kind_not_docx", "invalid_request"}:
+                    self.assertEqual(store.connection.statements, [])
+                else:
+                    self.assertEqual(len(store.connection.statements), 1)
+
+    def test_store_exposes_strict_docx_methods_and_baseline_schema_excludes_v2(self):
+        expected_methods = [
+            "create_glossary_approval",
+            "revoke_glossary_approval",
+            "read_approved_glossary_snapshot",
+            "read_strict_job_glossary_snapshot",
+            "admit_strict_docx_job",
+            "claim_next_work_unit",
+        ]
+
+        for method_name in expected_methods:
+            self.assertTrue(
+                callable(getattr(PostgresSchedulerStore, method_name, None)),
+                method_name,
+            )
+
+        self.assertNotIn("glossary_snapshot_custody", SCHEMA_SQL)
+        self.assertNotIn("glossary_approvals", SCHEMA_SQL)
+        self.assertNotIn("strict_job_glossary_bindings", SCHEMA_SQL)
+        strict_migration_sql = MIGRATIONS[1].sql_payload
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS glossary_snapshot_custody",
+            strict_migration_sql,
+        )
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS glossary_approvals", strict_migration_sql
+        )
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS strict_job_glossary_bindings",
+            strict_migration_sql,
+        )
+        self.assertIn("CHECK (retention_mode = 'retain')", strict_migration_sql)
+        self.assertIn(
+            "CHECK (approval_status IN ('approved', 'revoked'))", strict_migration_sql
+        )
+        self.assertIn(
+            "UNIQUE(custody_id, snapshot_digest, approval_schema_version)",
+            strict_migration_sql,
+        )
+
+    def test_delete_job_checks_locked_job_and_strict_binding_inside_transaction(
+        self,
+    ):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(
+            rows=[{"id": "job-1"}, {"exists": 1}]
+        )
+
+        result = store.delete_job("job-1")
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertFalse(result.deleted)
+        self.assertEqual(result.denial_code, "strict_job_non_deletable")
+        self.assertEqual(len(store.connection.statements), 2)
+        self.assertIn("FROM translation_jobs", store.connection.statements[0])
+        self.assertIn("FOR UPDATE", store.connection.statements[0])
+        self.assertIn(
+            "FROM strict_job_glossary_bindings",
+            store.connection.statements[1],
+        )
+        self.assertEqual(store.connection.transaction_depths, [1, 1])
+        self.assertFalse(
+            any(
+                statement.lstrip().upper().startswith("DELETE")
+                for statement in store.connection.statements
+            )
+        )
+
+    def test_delete_job_returns_typed_result_for_missing_and_regular_jobs(self):
+        missing_store = object.__new__(PostgresSchedulerStore)
+        missing_store.connection = _RecordingPostgresConnection(rows=[None])
+
+        missing_result = missing_store.delete_job("missing-job")
+
+        self.assertIsInstance(missing_result, DeleteJobResult)
+        self.assertFalse(missing_result.deleted)
+        self.assertIsNone(missing_result.denial_code)
+        self.assertEqual(len(missing_store.connection.statements), 1)
+        self.assertIn("FOR UPDATE", missing_store.connection.statements[0])
+        self.assertEqual(missing_store.connection.transaction_depths, [1])
+
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(rows=[{"id": "job-1"}, None])
+
+        result = store.delete_job("job-1")
+
+        self.assertIsInstance(result, DeleteJobResult)
+        self.assertTrue(result.deleted)
+        self.assertIsNone(result.denial_code)
+        self.assertEqual(len(store.connection.statements), 7)
+        self.assertIn("FOR UPDATE", store.connection.statements[0])
+        self.assertIn(
+            "FROM strict_job_glossary_bindings", store.connection.statements[1]
+        )
+        delete_indexes = [
+            index
+            for index, statement in enumerate(store.connection.statements)
+            if statement.lstrip().upper().startswith("DELETE")
+        ]
+        self.assertEqual(delete_indexes, [2, 3, 4, 5, 6])
+        self.assertEqual(store.connection.transaction_depths, [1] * 7)
+        self.assertIn("DELETE FROM translation_jobs", store.connection.statements[-1])
+
+    def test_scheduled_claim_guards_strict_docx_binding_with_null_safe_predicates(self):
+        claim_sql = _CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL
+        self.assertIn("strict_job_glossary_bindings binding", claim_sql)
+        self.assertEqual(claim_sql.count("strict_job_glossary_bindings binding"), 2)
+        self.assertIn("approval.approval_status IS DISTINCT FROM 'approved'", claim_sql)
+        self.assertIn(
+            "approval.custody_id IS DISTINCT FROM binding.custody_id", claim_sql
+        )
+        self.assertIn(
+            "custody.snapshot_digest IS DISTINCT FROM binding.snapshot_digest",
+            claim_sql,
+        )
+
+    def test_direct_claim_and_revoke_use_the_scheduler_serialization_lock(self):
+        store = object.__new__(PostgresSchedulerStore)
+        store.connection = _RecordingPostgresConnection(
+            rows=[None, None, None, _strict_approval_row()]
+        )
+
+        self.assertIsNone(store.claim_next_work_unit("job-1", worker_id="worker-a"))
+        store.revoke_glossary_approval(approval_id="approval-1")
+
+        lock_params = [
+            params
+            for statement, params in zip(
+                store.connection.statements, store.connection.params, strict=True
+            )
+            if "pg_advisory_xact_lock" in statement
+        ]
+        self.assertEqual(
+            lock_params,
+            [
+                {"claim_lock_key": "translator_service.postgres_scheduler.claim"},
+                {"claim_lock_key": "translator_service.postgres_scheduler.claim"},
+            ],
+        )
+
+    def test_exact_approval_reuse_is_conflict_safe(self):
+        store = object.__new__(PostgresSchedulerStore)
+        approval = _strict_approval_row()
+        store.connection = _RecordingPostgresConnection(
+            rows=[{"custody_id": "custody-1"}, approval]
+        )
+
+        stored = store.create_glossary_approval(
+            snapshot_payload=b"snapshot",
+            snapshot_digest=sha256(b"snapshot").hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+
+        self.assertEqual(stored.approval_id, "approval-1")
+        self.assertIn(
+            "ON CONFLICT (custody_id, snapshot_digest, approval_schema_version)",
+            store.connection.statements[1],
+        )
+
     def test_store_exposes_scheduler_runtime_methods(self):
         expected_methods = [
             "complete_claimed_work_unit",
@@ -215,23 +513,28 @@ class PostgresSchedulerContractTest(unittest.TestCase):
 
 
 class _RecordingPostgresConnection:
-    def __init__(self, *, rows: list[dict] | None = None) -> None:
+    def __init__(self, *, rows: Sequence[object] | None = None) -> None:
         self.statements: list[str] = []
         self.params: list[object] = []
+        self.transaction_depths: list[int] = []
+        self._transaction_depth = 0
         self.rows = list(rows or [])
 
     def transaction(self):
         return self
 
     def __enter__(self):
+        self._transaction_depth += 1
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        self._transaction_depth -= 1
         return None
 
     def execute(self, statement: str, params=None):
         self.statements.append(statement)
         self.params.append(params)
+        self.transaction_depths.append(self._transaction_depth)
         return _FakeCursor(self.rows.pop(0) if self.rows else None)
 
 
@@ -243,15 +546,251 @@ class _FakeCursor:
         return self.row
 
 
+def _strict_docx_request(
+    *, approval_id: str = "approval-1", document_kind: str = "docx"
+) -> StrictDocxAdmissionRequest:
+    return StrictDocxAdmissionRequest(
+        approval_id=approval_id,
+        order_id="strict-order",
+        user_id="strict-user",
+        file_id="strict.docx",
+        file_name="strict.docx",
+        document_kind=document_kind,
+        source_object_key="original/strict.docx",
+        source_language="en",
+        target_language="uk",
+        adapter_version="docx-v1",
+        prompt_version="plain-v1",
+        pricing_snapshot_id="pricing-1",
+        translation_policy=None,
+        work_units=[
+            WorkUnitPlan(
+                sequence=1,
+                source_block_ids=("docx:1",),
+                source_text_hash="hash-1",
+                prompt_tier="plain",
+                source_language="en",
+                target_language="uk",
+                source_object_key="original/strict.docx",
+            )
+        ],
+    )
+
+
+def _strict_approval_row(
+    *,
+    approval_status: str = "approved",
+    custody_snapshot_digest: str = "snapshot-digest",
+) -> dict[str, object]:
+    return {
+        "approval_id": "approval-1",
+        "custody_id": "custody-1",
+        "snapshot_digest": "snapshot-digest",
+        "snapshot_schema_version": GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+        "approval_schema_version": GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        "approval_status": approval_status,
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "revoked_at": None,
+        "custody_snapshot_digest": custody_snapshot_digest,
+        "retention_mode": "retain",
+    }
+
+
+def _strict_snapshot_reader_row(*, payload: bytes) -> dict[str, object]:
+    digest = sha256(payload).hexdigest()
+    return {
+        "binding_approval_id": "approval-1",
+        "binding_custody_id": "custody-1",
+        "binding_snapshot_digest": digest,
+        "binding_schema_version": GLOSSARY_BINDING_SCHEMA_VERSION,
+        "approval_id": "approval-1",
+        "custody_id": "custody-1",
+        "snapshot_digest": digest,
+        "approval_schema_version": GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        "approval_status": "approved",
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "revoked_at": None,
+        "snapshot_payload": payload,
+        "snapshot_schema_version": GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+        "retention_mode": "retain",
+        "custody_snapshot_digest": digest,
+        "document_kind": "docx",
+    }
+
+
 @unittest.skipUnless(POSTGRES_DSN, "TEST_POSTGRES_DSN is not set")
 class PostgresSchedulerStoreTest(unittest.TestCase):
     def setUp(self):
         self.store = PostgresSchedulerStore(POSTGRES_DSN)
-        initialize_postgres_scheduler_schema(self.store.connection)
+        run_postgres_migrations(self.store.connection)
         self.store.clear_for_tests()
 
     def tearDown(self):
         self.store.close()
+
+    def test_strict_docx_admission_reuses_exact_approval_and_revocation_blocks_claim(
+        self,
+    ):
+        payload = b"postgres-strict-snapshot"
+        approval = self.store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        request = StrictDocxAdmissionRequest(
+            approval_id=approval.approval_id,
+            order_id="strict-order",
+            user_id="strict-user",
+            file_id="strict.docx",
+            file_name="strict.docx",
+            document_kind="docx",
+            source_object_key="original/strict.docx",
+            source_language="en",
+            target_language="uk",
+            adapter_version="docx-v1",
+            prompt_version="plain-v1",
+            pricing_snapshot_id="pricing-1",
+            translation_policy=None,
+            work_units=[
+                WorkUnitPlan(
+                    sequence=1,
+                    source_block_ids=("docx:1",),
+                    source_text_hash="hash-1",
+                    prompt_tier="plain",
+                    source_language="en",
+                    target_language="uk",
+                    source_object_key="original/strict.docx",
+                )
+            ],
+        )
+
+        first = self.store.admit_strict_docx_job(request)
+        second = self.store.admit_strict_docx_job(request)
+        self.assertTrue(first.admitted)
+        self.assertTrue(second.admitted)
+        if first.job is None:
+            self.fail("first strict admission unexpectedly denied")
+        snapshot = self.store.read_strict_job_glossary_snapshot(job_id=first.job.id)
+        self.assertIsNotNone(snapshot)
+        if snapshot is None:
+            self.fail("strict snapshot unexpectedly unavailable")
+        self.assertEqual(snapshot.snapshot_payload, payload)
+        self.assertEqual(
+            self.store.connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM strict_job_glossary_bindings
+                WHERE approval_id = %(approval_id)s
+                """,
+                {"approval_id": approval.approval_id},
+            ).fetchone()["count"],
+            2,
+        )
+
+        self.store.revoke_glossary_approval(approval_id=approval.approval_id)
+        claim = self.store.claim_next_scheduled_work_unit(
+            worker_id="worker-a",
+            lease_seconds=60,
+            limits=SchedulerLimits(),
+        )
+
+        self.assertIsNone(claim)
+        self.assertIsNone(
+            self.store.read_strict_job_glossary_snapshot(job_id=first.job.id)
+        )
+        work_unit = self.store.list_work_units(first.job.id)[0]
+        self.assertEqual(work_unit.status, PersistentWorkUnitStatus.PENDING)
+        self.assertIsNone(work_unit.claim_token)
+
+    def test_real_postgres_reuses_exact_snapshot_approval(self):
+        payload = b"postgres-exact-approval-reuse"
+        first = self.store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        second = self.store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+
+        self.assertEqual(second.approval_id, first.approval_id)
+        self.assertEqual(second.custody_id, first.custody_id)
+        self.assertEqual(second.snapshot_digest, first.snapshot_digest)
+
+    def test_two_connections_serialize_revoke_against_both_strict_claim_paths(self):
+        assert POSTGRES_DSN is not None
+        for claim_path in ("direct", "scheduled"):
+            with self.subTest(claim_path=claim_path):
+                payload = f"postgres-strict-race-{claim_path}".encode()
+                approval = self.store.create_glossary_approval(
+                    snapshot_payload=payload,
+                    snapshot_digest=sha256(payload).hexdigest(),
+                    snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                    approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+                )
+                admitted = self.store.admit_strict_docx_job(
+                    _strict_docx_request(approval_id=approval.approval_id)
+                )
+                self.assertTrue(admitted.admitted)
+                if admitted.job is None:
+                    raise AssertionError("strict job admission unexpectedly denied")
+                job_id = admitted.job.id
+                other_store = PostgresSchedulerStore(POSTGRES_DSN)
+                self.addCleanup(other_store.close)
+                barrier = threading.Barrier(2)
+
+                def revoke(
+                    *,
+                    release_barrier=barrier,
+                    release_approval_id=approval.approval_id,
+                ):
+                    release_barrier.wait(timeout=5)
+                    return (
+                        self.store.revoke_glossary_approval(
+                            approval_id=release_approval_id
+                        ),
+                        monotonic(),
+                    )
+
+                def claim(
+                    *,
+                    claim_barrier=barrier,
+                    path=claim_path,
+                    store=other_store,
+                    strict_job_id=job_id,
+                ):
+                    claim_barrier.wait(timeout=5)
+                    if path == "direct":
+                        result = store.claim_next_work_unit(
+                            strict_job_id,
+                            worker_id="worker-race",
+                        )
+                    else:
+                        result = store.claim_next_scheduled_work_unit(
+                            worker_id="worker-race",
+                            lease_seconds=60,
+                            limits=SchedulerLimits(),
+                        )
+                    return result, monotonic()
+
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    revoke_future = executor.submit(revoke)
+                    claim_future = executor.submit(claim)
+                    _, revoke_finished = revoke_future.result(timeout=10)
+                    claimed, claim_finished = claim_future.result(timeout=10)
+
+                if revoke_finished < claim_finished:
+                    self.assertIsNone(claimed)
+                elif claimed is not None:
+                    self.assertLess(claim_finished, revoke_finished)
+                self.assertIsNone(
+                    self.store.read_strict_job_glossary_snapshot(job_id=job_id)
+                )
 
     def _create_txt_job_with_unit(
         self,
@@ -288,6 +827,200 @@ class PostgresSchedulerStoreTest(unittest.TestCase):
             ],
         )
         return job
+
+    def _admit_strict_docx_job(self):
+        payload = b"postgres-delete-guard-snapshot"
+        approval = self.store.create_glossary_approval(
+            snapshot_payload=payload,
+            snapshot_digest=sha256(payload).hexdigest(),
+            snapshot_schema_version=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            approval_schema_version=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+        )
+        admitted = self.store.admit_strict_docx_job(
+            StrictDocxAdmissionRequest(
+                approval_id=approval.approval_id,
+                order_id="strict-delete-order",
+                user_id="strict-delete-user",
+                file_id="strict-delete.docx",
+                file_name="strict-delete.docx",
+                document_kind="docx",
+                source_object_key="original/strict-delete.docx",
+                source_language="en",
+                target_language="uk",
+                adapter_version="docx-v1",
+                prompt_version="plain-v1",
+                pricing_snapshot_id="pricing-1",
+                translation_policy=None,
+                work_units=[
+                    WorkUnitPlan(
+                        sequence=1,
+                        source_block_ids=("docx:1",),
+                        source_text_hash="strict-delete-hash",
+                        prompt_tier="plain",
+                        source_language="en",
+                        target_language="uk",
+                        source_object_key="original/strict-delete.docx",
+                    )
+                ],
+            )
+        )
+        self.assertTrue(admitted.admitted)
+        if admitted.job is None:
+            self.fail("strict job admission unexpectedly denied")
+        return admitted.job
+
+    def test_delete_job_real_postgres_preserves_strict_dependents_and_removes_regular(
+        self,
+    ):
+        missing = self.store.delete_job("missing-job")
+        self.assertIsInstance(missing, DeleteJobResult)
+        self.assertFalse(missing.deleted)
+
+        strict_job = self._admit_strict_docx_job()
+        strict_claim = self.store.claim_next_scheduled_work_unit(
+            worker_id="strict-delete-worker",
+            lease_seconds=300,
+            limits=SchedulerLimits(),
+        )
+        self.assertIsNotNone(strict_claim)
+        if strict_claim is None:
+            self.fail("strict job was not claimable")
+        self.store.upsert_provider_slot_inventory(
+            provider_id="deepseek",
+            channel_id="chan_strictdelete1",
+            max_parallel_requests=1,
+            capacity_source="test",
+        )
+        self.store.acquire_provider_slot_lease(
+            provider_id="deepseek",
+            channel_id="chan_strictdelete1",
+            job_id=strict_claim.job_id,
+            work_unit_id=strict_claim.work_unit_id,
+            worker_id=strict_claim.worker_id,
+            work_unit_claim_token=strict_claim.claim_token,
+            lease_seconds=300,
+        )
+        self.store.fail_claimed_work_unit(
+            work_unit_id=strict_claim.work_unit_id,
+            claim_token=strict_claim.claim_token,
+            failure_kind=WorkUnitFailureKind.RETRYABLE_PROVIDER,
+            error_message="synthetic strict deletion guard failure",
+            retry_base_delay_seconds=30,
+            retry_max_delay_seconds=600,
+        )
+        strict_counts_before = self._job_dependent_counts(strict_job.id)
+
+        strict = self.store.delete_job(strict_job.id)
+
+        self.assertIsInstance(strict, DeleteJobResult)
+        self.assertFalse(strict.deleted)
+        self.assertEqual(strict.denial_code, "strict_job_non_deletable")
+        self.assertIsNotNone(self.store.get_job(strict_job.id))
+        self.assertEqual(
+            strict_counts_before,
+            self._job_dependent_counts(strict_job.id),
+        )
+
+        regular_job = self._create_txt_job_with_unit(
+            order_id="regular-delete-order",
+            file_id="regular-delete-file",
+            user_id="regular-delete-user",
+        )
+        regular = self.store.delete_job(regular_job.id)
+
+        self.assertIsInstance(regular, DeleteJobResult)
+        self.assertTrue(regular.deleted)
+        self.assertIsNone(self.store.get_job(regular_job.id))
+        self.assertEqual(
+            self._job_dependent_counts(regular_job.id),
+            {"attempts": 0, "events": 0, "leases": 0, "units": 0},
+        )
+
+    def test_schema_rejects_invalid_strict_docx_retention_approval_and_duplicate(self):
+        digest = sha256(b"postgres-ddl-synthetic-snapshot").hexdigest()
+        with self.assertRaises(CheckViolation):
+            self.store.connection.execute(
+                """
+                INSERT INTO glossary_snapshot_custody (
+                    custody_id, snapshot_payload, snapshot_digest,
+                    snapshot_schema_version, retention_mode
+                ) VALUES (
+                    'invalid-retention', %(payload)s, %(digest)s,
+                    %(schema)s, 'discard'
+                )
+                """,
+                {
+                    "payload": b"postgres-ddl-synthetic-snapshot",
+                    "digest": digest,
+                    "schema": GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+                },
+            )
+        self.store.connection.execute(
+            """
+            INSERT INTO glossary_snapshot_custody (
+                custody_id, snapshot_payload, snapshot_digest,
+                snapshot_schema_version, retention_mode
+            ) VALUES (
+                'valid-custody', %(payload)s, %(digest)s, %(schema)s, 'retain'
+            )
+            """,
+            {
+                "payload": b"postgres-ddl-synthetic-snapshot",
+                "digest": digest,
+                "schema": GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            },
+        )
+        with self.assertRaises(CheckViolation):
+            self.store.connection.execute(
+                """
+                INSERT INTO glossary_approvals (
+                    approval_id, custody_id, snapshot_digest,
+                    approval_schema_version, approval_status
+                ) VALUES (
+                    'invalid-approval', 'valid-custody', %(digest)s,
+                    %(schema)s, 'pending'
+                )
+                """,
+                {"digest": digest, "schema": GLOSSARY_APPROVAL_SCHEMA_VERSION},
+            )
+        self.store.connection.execute(
+            """
+            INSERT INTO glossary_approvals (
+                approval_id, custody_id, snapshot_digest,
+                approval_schema_version, approval_status
+            ) VALUES (
+                'first-approval', 'valid-custody', %(digest)s, %(schema)s, 'approved'
+            )
+            """,
+            {"digest": digest, "schema": GLOSSARY_APPROVAL_SCHEMA_VERSION},
+        )
+        with self.assertRaises(UniqueViolation):
+            self.store.connection.execute(
+                """
+                INSERT INTO glossary_approvals (
+                    approval_id, custody_id, snapshot_digest,
+                    approval_schema_version, approval_status
+                ) VALUES (
+                    'duplicate-approval', 'valid-custody', %(digest)s,
+                    %(schema)s, 'revoked'
+                )
+                """,
+                {"digest": digest, "schema": GLOSSARY_APPROVAL_SCHEMA_VERSION},
+            )
+
+    def _job_dependent_counts(self, job_id: str) -> dict[str, int]:
+        return {
+            name: self.store.connection.execute(
+                f"SELECT COUNT(*) AS count FROM {table} WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            ).fetchone()["count"]
+            for name, table in {
+                "attempts": "work_unit_attempts",
+                "events": "scheduler_events",
+                "leases": "provider_slot_leases",
+                "units": "work_units",
+            }.items()
+        }
 
     def _claim_txt_job(
         self,

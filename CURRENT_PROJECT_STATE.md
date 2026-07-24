@@ -104,7 +104,7 @@ Blocking caveat:
 
 ### Product / quality gaps before design-partner alpha
 
-- The owner-approved local-only snapshot-lock sequence is merged through #836; next reconcile current strict-DOCX durable binding seams before proposing any durable implementation. This remains local-prototype evidence only; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+- The owner-approved local-only snapshot-lock sequence is merged through #836, and the source-pinned strict-DOCX reconciliation is merged through #837. The approved next route is a backend-neutral strict-DOCX contract with PostgreSQL as the durable/runtime target and SQLite as local/reference implementation; PostgreSQL parity, runtime activation, migration and Gate 1 closure remain unimplemented/not claimed. See `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`.
 - Glossary preflight status and post-run compliance report.
 - CAT-like source-target/segment review workflow.
 - Representative before/after quality evidence with glossary controls.
