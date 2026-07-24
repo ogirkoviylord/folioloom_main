@@ -125,10 +125,7 @@ class AdminOperationsTest(unittest.TestCase):
                 "translator_service.postgres_scheduler.PostgresSchedulerStore",
                 return_value=fake_store,
             ),
-            patch(
-                "translator_service.postgres_scheduler."
-                "initialize_postgres_scheduler_schema"
-            ),
+            patch("translator_service.postgres_migrations.run_postgres_migrations"),
         ):
             overview = build_persistent_operations_overview(
                 Path(temp_dir) / "missing.sqlite3",
