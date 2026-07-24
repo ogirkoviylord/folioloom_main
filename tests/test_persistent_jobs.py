@@ -1728,7 +1728,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
 
 class StrictConcurrentStoreTest(unittest.TestCase):
-    def test_one_approval_allows_only_one_concurrent_admission(self):
+    def test_one_approval_allows_two_concurrent_exact_match_admissions(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "jobs.sqlite3"
             first_store = SQLiteTranslationJobStore(db_path)
@@ -1747,22 +1747,19 @@ class StrictConcurrentStoreTest(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(admit, (first_store, second_store)))
 
-            self.assertEqual(
-                sorted(result.denial_code for result in results if result.denial_code),
-                ["approval_already_bound"],
-            )
-            self.assertEqual(sum(result.job is not None for result in results), 1)
+            self.assertEqual([result.denial_code for result in results], [None, None])
+            self.assertEqual(sum(result.job is not None for result in results), 2)
             self.assertEqual(
                 first_store._connection.execute(
                     "SELECT COUNT(*) FROM translation_jobs"
                 ).fetchone()[0],
-                1,
+                2,
             )
             self.assertEqual(
                 first_store._connection.execute(
                     "SELECT COUNT(*) FROM strict_job_glossary_bindings"
                 ).fetchone()[0],
-                1,
+                2,
             )
 
     def test_revoke_race_leaves_no_partial_admission_state(self):

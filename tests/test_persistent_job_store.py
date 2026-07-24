@@ -8,7 +8,7 @@ from unittest.mock import patch
 from translator_service.config import Settings
 from translator_service.persistent_job_store import (
     PersistentJobStore,
-    SQLiteStrictDocxJobStore,
+    StrictDocxJobStore,
     open_persistent_job_store,
 )
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
@@ -25,7 +25,7 @@ class PersistentJobStoreFactoryTest(unittest.TestCase):
             )
             try:
                 self.assertIsInstance(store, SQLiteTranslationJobStore)
-                self.assertIsInstance(store, SQLiteStrictDocxJobStore)
+                self.assertIsInstance(store, StrictDocxJobStore)
             finally:
                 store.close()
 
@@ -48,7 +48,7 @@ class PersistentJobStoreFactoryTest(unittest.TestCase):
         self.assertIs(store, fake_store)
         store_cls.assert_called_once_with("postgresql://translator")
         initialize_schema.assert_called_once_with(fake_store.connection)
-        self.assertNotIsInstance(store, SQLiteStrictDocxJobStore)
+        self.assertNotIsInstance(store, StrictDocxJobStore)
 
     def test_closes_postgres_store_when_schema_initialization_fails(self):
         settings = Settings(
@@ -79,7 +79,7 @@ class PersistentJobStoreProtocolTest(unittest.TestCase):
         )
         self.assertNotIn("admit_strict_docx_job", PersistentJobStore.__dict__)
 
-    def test_declares_sqlite_strict_docx_api_signatures(self):
+    def test_declares_backend_neutral_strict_docx_api_signatures(self):
         strict_docx_methods = (
             "create_glossary_approval",
             "revoke_glossary_approval",
@@ -90,10 +90,10 @@ class PersistentJobStoreProtocolTest(unittest.TestCase):
         for method_name in strict_docx_methods:
             with self.subTest(method_name=method_name):
                 self.assertNotIn(method_name, PersistentJobStore.__dict__)
-                self.assertIn(method_name, SQLiteStrictDocxJobStore.__dict__)
+                self.assertIn(method_name, StrictDocxJobStore.__dict__)
                 self.assertEqual(
                     inspect.signature(
-                        getattr(SQLiteStrictDocxJobStore, method_name),
+                        getattr(StrictDocxJobStore, method_name),
                         eval_str=True,
                     ),
                     inspect.signature(

@@ -493,6 +493,48 @@ class PersistentPlannerTest(unittest.TestCase):
                 object_files_before,
             )
 
+    def test_strict_docx_plan_denies_unsupported_backend_without_legacy_writes(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = _UnsupportedPersistentJobStore()
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body><w:p><w:r><w:t>Strict source.</w:t></w:r></w:p></w:body>
+                    </w:document>
+                    """
+                ),
+            )
+
+            result = create_persistent_strict_docx_job_plan(
+                store=store,
+                storage=storage,
+                approval_id="approval-unsupported",
+                source_object_key=source.object_key,
+                order_id="order-strict",
+                user_id="user-42",
+                file_name="book.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=1_000,
+            )
+
+            self.assertEqual(
+                result,
+                StrictAdmissionDenied(code="strict_docx_unsupported_backend"),
+            )
+            self.assertEqual(store.create_job_calls, 0)
+            self.assertEqual(store.add_work_units_calls, 0)
+
     def test_strict_docx_plan_denials_preserve_source_and_state(self):
         with TemporaryDirectory() as temp_dir:
             storage = LocalObjectStorage(Path(temp_dir) / "objects")
@@ -756,6 +798,62 @@ class PersistentPlannerTest(unittest.TestCase):
                 "narrator, speaker, and character continuity",
                 translation_policy["translation_context_memory"]["style_summary"],
             )
+
+
+class _UnsupportedPersistentJobStore:
+    def __init__(self) -> None:
+        self.create_job_calls = 0
+        self.add_work_units_calls = 0
+
+    def close(self) -> None:
+        pass
+
+    def create_job(self, **kwargs):
+        self.create_job_calls += 1
+        raise AssertionError("strict admission must not use legacy create_job")
+
+    def get_job(self, job_id: str):
+        raise AssertionError("strict admission must not read legacy jobs")
+
+    def add_work_units(self, job_id: str, work_units):
+        self.add_work_units_calls += 1
+        raise AssertionError("strict admission must not add legacy work units")
+
+    def list_work_units(self, job_id: str):
+        raise AssertionError("strict admission must not list legacy work units")
+
+    def list_recent_work_units(self, job_id: str, *, limit: int):
+        raise AssertionError("strict admission must not list legacy work units")
+
+    def list_jobs_by_status(self, status, *, limit: int = 50):
+        raise AssertionError("strict admission must not list legacy jobs")
+
+    def list_jobs_for_user(self, user_id: str, *, limit: int = 10):
+        raise AssertionError("strict admission must not list legacy jobs")
+
+    def cancel_job(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def request_cancel_job(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def pause_job(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def resume_job(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def delete_job(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def mark_job_interrupted(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def mark_job_failed(self, job_id: str):
+        raise AssertionError("strict admission must not modify legacy jobs")
+
+    def get_usage_summary(self, job_id: str):
+        raise AssertionError("strict admission must not read legacy usage")
 
 
 if __name__ == "__main__":
