@@ -214,6 +214,12 @@ _BASELINE_RELATIONS = (
     "provider_slots",
     "provider_slot_leases",
 )
+_STRICT_DOCX_RELATIONS = (
+    "glossary_snapshot_custody",
+    "glossary_approvals",
+    "strict_job_glossary_bindings",
+)
+_PRE_LEDGER_RELATIONS = _BASELINE_RELATIONS + _STRICT_DOCX_RELATIONS
 _BASELINE_RELATIONS_SQL = """
 SELECT relation.relname
 FROM pg_catalog.pg_class relation
@@ -357,6 +363,10 @@ def run_postgres_migrations(connection) -> None:
         applied = _read_and_validate_ledger(connection)
         if not applied:
             relation_names = _existing_baseline_relations(connection)
+            if relation_names.intersection(_STRICT_DOCX_RELATIONS):
+                raise PostgresMigrationBootstrapError(
+                    "unversioned strict DOCX relation exists without migration ledger"
+                )
             if relation_names:
                 _validate_legacy_v1_baseline(connection, relation_names)
                 _record_migration(connection, MIGRATIONS[0])
@@ -403,7 +413,7 @@ def _read_and_validate_ledger(connection) -> dict[int, str]:
 
 def _existing_baseline_relations(connection) -> set[str]:
     rows = connection.execute(
-        _BASELINE_RELATIONS_SQL, {"relation_names": list(_BASELINE_RELATIONS)}
+        _BASELINE_RELATIONS_SQL, {"relation_names": list(_PRE_LEDGER_RELATIONS)}
     ).fetchall()
     return {row["relname"] for row in rows}
 

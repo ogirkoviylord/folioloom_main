@@ -151,6 +151,48 @@ class PostgresMigrationsTest(unittest.TestCase):
             connection.transaction_ids[v2_ledger_index],
         )
 
+    def test_complete_legacy_v1_catalog_with_strict_relation_rejects_without_migrations(
+        self,
+    ):
+        for strict_relation in postgres_migrations._STRICT_DOCX_RELATIONS:
+            with self.subTest(strict_relation=strict_relation):
+                catalog = _legacy_v1_catalog()
+                connection = _RecordingConnection(
+                    ledger_rows=[],
+                    baseline_relations=[
+                        *catalog["relations"], {"relname": strict_relation}
+                    ],
+                    column_rows=catalog["columns"],
+                    constraint_rows=catalog["constraints"],
+                    index_rows=catalog["indexes"],
+                )
+
+                with self.assertRaisesRegex(
+                    PostgresMigrationBootstrapError, "strict DOCX"
+                ):
+                    run_postgres_migrations(connection)
+
+                self.assertFalse(connection.contains(MigrationSql.v1_payload))
+                self.assertFalse(connection.contains(MigrationSql.v2_payload()))
+                self.assertFalse(_ledger_inserts(connection))
+
+    def test_v2_only_relation_without_ledger_rejects_without_migrations(self):
+        for strict_relation in postgres_migrations._STRICT_DOCX_RELATIONS:
+            with self.subTest(strict_relation=strict_relation):
+                connection = _RecordingConnection(
+                    ledger_rows=[],
+                    baseline_relations=[{"relname": strict_relation}],
+                )
+
+                with self.assertRaisesRegex(
+                    PostgresMigrationBootstrapError, "strict DOCX"
+                ):
+                    run_postgres_migrations(connection)
+
+                self.assertFalse(connection.contains(MigrationSql.v1_payload))
+                self.assertFalse(connection.contains(MigrationSql.v2_payload()))
+                self.assertFalse(_ledger_inserts(connection))
+
     def test_partial_legacy_v1_catalog_rejects_without_running_or_stamping_migrations(
         self,
     ):
