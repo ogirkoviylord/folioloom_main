@@ -33,7 +33,7 @@ Not current state:
 Immediate focus areas:
 
 - Gate 0: product reframe / scope lock around #813.
-- Gate 1: the owner-approved bounded local snapshot-lock sequence is merged through #836; next reconcile current strict-DOCX durable binding seams before proposing durable implementation. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+- Gate 1: the owner-approved bounded local snapshot-lock sequence is merged through #836 and the source-pinned strict-DOCX reconciliation through #837. Follow the approved PostgreSQL-target strict-DOCX contract; do not claim PostgreSQL parity, runtime activation, migration, Gate 1 closure or release readiness. See `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`.
 - Gate 2: CAT-like author workflow thin slice.
 - Gate 3: representative quality evidence.
 - Keep old Gate B operational work as carry-forward safety infrastructure, not as the product roadmap.
@@ -138,6 +138,10 @@ Treat as useful evidence, not successful live quality evidence.
 ### 2026-07-24 — Glossary Engine → Workbench Council synthesis and completed local snapshot-lock sequence
 
 All GPT, DeepSeek, MiMo and owner-required GLM Council lanes completed. The owner approved the bounded local-only in-memory snapshot-lock contract; its local approval/rehearsal, preflight, observation and Workbench wiring sequence is merged through #836. It binds an opaque local reference to the exact snapshot signature, invalidates on selected-content or signature change and fails closed before selection/rendering/preflight. This remains local-prototype evidence only, not durable custody/authority, runtime activation, Gate 1 closure or a Gate 2 workflow claim. The next technical route is strict-DOCX durable-binding reconciliation. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+
+### 2026-07-24 — Strict-DOCX reconciliation and approved PostgreSQL target route
+
+The strict-DOCX durable-authorization reconciliation is merged through #837 at source-pinned baseline `19dc0455e4c9a05af564c0191fac977b40bf11df`. It confirms a SQLite-only strict admission/claim prototype and no PostgreSQL strict capability. The approved next route is a backend-neutral contract with PostgreSQL as the durable/runtime target and SQLite as the local/reference implementation; it does not itself implement PostgreSQL, activate runtime glossary context, authorize a migration, or close Gate 1. See `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`.
 
 ## Open Owner Questions
 

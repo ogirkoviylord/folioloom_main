@@ -1,10 +1,10 @@
-# Gate 1B strict DOCX durable authorization: current-main reconciliation
+# Gate 1B strict DOCX durable authorization: source-pinned baseline
 
 **Date:** 2026-07-24
-**Baseline verified:** `HEAD` is `b9b79e21415f40866a3c25de2815c031558c1667` and `git merge-base --is-ancestor b9b79e21415f40866a3c25de2815c031558c1667 HEAD` returned success.
+**Source-pinned baseline verified:** `19dc0455e4c9a05af564c0191fac977b40bf11df` (`test(gate1b): verify durable binding boundaries (#837)`).
 **Task type:** spike/discovery and docs-only.
 **Risk level:** high for any follow-on: persistent database state, scheduler claim semantics, worker/provider admission, and backend parity.
-**Approval status:** this reconciliation changes no production code, state, provider configuration, PR, or merge. The current attached Gate 1B implementation plan approves the bounded strict-DOCX implementation and task graph. The earlier readiness spike correctly records that it was a design packet and was not, by itself, approval to change database/state or runtime behavior (`docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md:21,27,301`); it does not create a current approval conflict or require duplicate owner approval for work within the newer bounded packet. That packet does not approve or prove a broader PostgreSQL, production/runtime, migration, rollout, Gate 1 closure, beta, release, or quality outcome.
+**Approval status:** this reconciliation changes no production code, state, provider configuration, PR, or merge. The approved bounded implementation route is recorded in `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`. The earlier readiness spike remains a design packet and was not, by itself, approval to change database/state or runtime behavior (`docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md:21,27,301`). The approved route does not prove or independently approve PostgreSQL implementation, a migration, runtime activation, rollout, Gate 1 closure, beta, release, or quality outcome.
 
 ## Scope and non-goals
 
@@ -14,7 +14,9 @@
 
 ## Confirmed facts
 
-### 1. SQLite approval, custody, and binding exist now
+All confirmed facts in this reconciliation are scoped to source-pinned baseline `19dc045`, not current HEAD.
+
+### 1. SQLite approval, custody, and binding at the baseline
 
 - `GlossaryApproval` stores `approval_id`, `custody_id`, digest, snapshot/approval schema versions, status, and revocation time in `src/translator_service/persistent_jobs.py:90-100`.
 - SQLite `create_glossary_approval()` verifies the payload SHA-256 and supported schema versions, then begins `BEGIN IMMEDIATE`, creates/reuses a custody row, and inserts an `approved` approval row atomically (`persistent_jobs.py:243-311`).
@@ -23,7 +25,7 @@
 - The SQLite schema creates `glossary_approvals` and immutable-per-job `strict_job_glossary_bindings` tables. The binding records `approval_id`, `custody_id`, digest, and binding schema version; `job_id` is its primary key (`persistent_jobs.py:1905-1932`).
 - `delete_job()` declines deletion when a strict binding exists (`persistent_jobs.py:613-643`). No retention/cleanup API was found in the opened strict seam.
 
-### 2. Strict admission is implemented for SQLite only
+### 2. Strict admission at the baseline is implemented for SQLite only
 
 - `StrictDocxAdmissionRequest` contains an approval id, document/job metadata, ordered work-unit plans, and strict/approval/binding/snapshot schema values (`persistent_jobs.py:109-128`). It does **not** accept a caller-supplied custody id or expected snapshot digest; the store derives binding values from the selected approval row.
 - `SQLiteTranslationJobStore.admit_strict_docx_job()` begins `BEGIN IMMEDIATE`, validates the request, reads approval plus custody, fails before writes for invalid/missing/revoked/mismatched approval, rejects an approval already bound to any strict job, then inserts job, binding, and all work units before one commit (`persistent_jobs.py:363-484`).
@@ -48,7 +50,7 @@
 
 ### 5. PostgreSQL and interface parity are absent
 
-- `PersistentJobStore` now declares the four SQLite strict-DOCX APIs added by the `t_03fcbb95` protocol extension: glossary-approval creation/revocation, custody read, and strict admission (`persistent_job_store.py:21-93`). `PostgresSchedulerStore` does not implement those APIs, so backend parity remains absent.
+- `PersistentJobStore` remains the common API. The four SQLite strict-DOCX APIs—glossary-approval creation/revocation, custody read, and strict admission—are declared on `StrictDocxJobStore` (`persistent_job_store.py:75-105`). `PostgresSchedulerStore` does not implement that strict capability, so backend parity remains absent.
 - `PostgresSchedulerStore` and `SCHEMA_SQL` contain only ordinary job/work-unit/scheduler/provider-slot structures in the opened source; no Gate 1B custody, approval, or strict-binding tables, methods, or claim predicate were found (`postgres_scheduler.py:61-196,219-369,431-623`).
 - PostgreSQL's claim CTE and final update contain no strict binding eligibility check (`postgres_scheduler.py:249-369`).
 - `read_approved_glossary_snapshot()` returns payload only when SQLite approval/custody consistency is valid (`persistent_jobs.py:334-361`), but no opened worker/scheduler call consumes it. A strict SQLite job is therefore admission/claim guarded, but the current runtime glossary hook is not demonstrably sourced from its durable approval/custody record.
@@ -61,41 +63,15 @@
 - **Unknown:** comprehensive failure-injection, concurrent-connection, no-side-effect-denial, requeue/recovery, runtime-custody, and PostgreSQL parity coverage. The focused modules currently pass, but their 61 tests are not evidence for these unobserved cases.
 - **Not claimed:** source-byte immutability, object-store conditional versioning, durable runtime glossary activation, provider safety, translation quality, Gate 1 closure, beta/release readiness, or production deployment state.
 
-## Minimal-delta packet for Planning Council
+## Supersession and approved target route
 
-### Goal
+This reconciliation is the source-pinned baseline merged through #837. Its former Planning Council options are superseded by the approved bounded route in `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`:
 
-Decide whether the smallest safe Gate 1B delta is to complete and wire the existing SQLite-only strict contract, to first run a parity/custody spike, or to defer because the documented technical gaps make the bounded implementation unsuitable. Do not broaden the generic DOCX/`with_glossary` path.
+- PostgreSQL is the target durable/runtime backend; SQLite is local/test/reference implementation.
+- The new strict DOCX path must use one backend-neutral capability and typed pre-write denial when a selected backend lacks that capability. It must never fall back to legacy `create_job()`.
+- Ordinary DOCX, existing `with_glossary`, TXT, EPUB, Telegram dispatch, cache policy, deployment and generic migration remain out of scope.
+- A strict binding reader must revalidate approval/custody/snapshot before any runtime glossary context is called approved. This baseline does not prove that reader or runtime activation exists.
+- The target permits one approval to bind multiple strict jobs only when custody and snapshot digest exactly match; every job binding remains immutable. The present SQLite one-approval-per-job behavior in the confirmed facts above is not target parity evidence.
+- The later unversioned PostgreSQL strict-DOCX working-tree variant is superseded before merge. Slice M0 pins `19dc045` as migration v1, assigns exactly the three strict DDL table definitions to migration v2, and separates them from later strict behavior/review hunks. See `docs/GATE1B_POSTGRES_MIGRATION_RECONCILIATION.md`.
 
-### Options
-
-1. **SQLite-only bounded implementation:** expose/wire `create_persistent_strict_docx_job_plan()` through one explicitly selected new strict-DOCX admission route; add targeted tests; keep ordinary DOCX and `with_glossary` legacy behavior unchanged.
-2. **Backend-parity/custody spike first (recommended):** resolve intended custody representation, approval-reuse semantics, PostgreSQL support/migration ownership, and the runtime reader before a product-facing strict route is wired.
-3. **Generic-path conversion:** make ordinary DOCX or `with_glossary` strict. Reject for this slice: it expands legacy behavior and violates the plan's new-strict-DOCX-only boundary.
-
-### Recommendation
-
-Council may choose option 1 under the current bounded implementation packet, or choose option 2 when the documented technical gaps make further discovery safer. The present source contains a substantive SQLite prototype, but it is not backend-parity, not wired from the ordinary DOCX dispatcher, and does not show runtime use of the approved custody record.
-
-If Council selects the SQLite-only bounded implementation, the minimal packet is limited to:
-
-- One new explicit strict-DOCX entrypoint/caller that supplies an existing approved `approval_id` to `create_persistent_strict_docx_job_plan()`; never alter ordinary DOCX/TXT/EPUB or automatic `with_glossary` routing.
-- A bounded interface decision: either make strict APIs available on a narrowed SQLite-only contract or reject unsupported backends with a typed pre-write denial. Do not silently fall back to `create_job()`.
-- A post-claim custody-reader/runtime binding only if the owner/Council resolves its required semantics; otherwise do not claim that the durable snapshot controls provider glossary context.
-- Targeted tests for admission denial/no writes, revocation and digest/schema mismatch claim denial/no mutation, valid claim, regular-path non-conversion, and unsupported-backend behavior. PostgreSQL remains `Unknown`, not passed.
-
-### Council acceptance criteria
-
-1. Explicitly accept/reject each source-pinned technical gap above and each critic objection.
-2. Select exactly one outcome: bounded implementation task, further spike, or defer/reject. Request an owner decision only if an unresolved gap requires scope beyond the current bounded packet.
-3. Preserve new-strict-DOCX-only scope and no legacy/TXT/EPUB conversion.
-4. State SQLite versus PostgreSQL scope, custody payload/reference policy, approval-reuse rule, runtime-reader requirement, and any broader migration/production rollout boundary as confirmed, `TBD`, or `Unknown`.
-5. No coding task may claim backend parity, runtime activation, or Gate 1 closure without corresponding evidence.
-
-### Verification for any follow-on
-
-- Run focused unit tests for `persistent_jobs`, `persistent_planner`, worker/scheduler runner, and any selected entrypoint; add tests before behavior changes.
-- For any SQLite claim test, snapshot job/unit/attempt/event records before a denied claim and prove no relevant mutation; spy storage, glossary hooks, and provider lease/translator calls.
-- Test valid strict claim, revoked approval, custody/digest/schema mismatch, retryable/requeue state, and ordinary DOCX/`with_glossary` non-conversion.
-- If PostgreSQL scope is selected, add schema/API/claim parity tests and run integration tests only when `TEST_POSTGRES_DSN` is available; otherwise record PostgreSQL integration as `Unknown`.
-- Run `PYTHONPATH=src python3 -m compileall -q src` and focused test commands. No provider calls are required for this reconciliation or core store verification.
+The approved route is not PostgreSQL implementation, migration execution, runtime activation, quality evidence, Gate 1 closure, beta/release readiness, or deployment evidence. Follow-on implementation must use targeted contract tests and report PostgreSQL integration as `Unknown` unless the existing `TEST_POSTGRES_DSN` integration path actually runs.

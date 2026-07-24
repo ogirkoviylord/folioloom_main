@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import uuid4
 
 try:
@@ -10,6 +11,12 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without optiona
     dict_row = None
 
 from translator_service.persistent_jobs import (
+    GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    GLOSSARY_BINDING_SCHEMA_VERSION,
+    GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+    ApprovedGlossarySnapshot,
+    DeleteJobResult,
+    GlossaryApproval,
     JobUsageSummary,
     PersistentSchedulerEvent,
     PersistentTranslationJob,
@@ -18,12 +25,18 @@ from translator_service.persistent_jobs import (
     PersistentWorkUnit,
     PersistentWorkUnitAttempt,
     PersistentWorkUnitStatus,
+    StrictAdmissionResult,
+    StrictDocxAdmissionRequest,
     WorkUnitPlan,
     _attempt_error_code,
     _attempt_error_message,
+    _glossary_approval_from_row,
     _job_from_mapping,
     _provider_failure_event_payload,
     _scheduler_event_from_row,
+    _strict_admission_validation_error,
+    _strict_approval_denial_code,
+    _strict_bound_glossary_snapshot_from_row,
     _terminal_reason,
     _to_db_time,
     _work_unit_attempt_from_row,
@@ -197,6 +210,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS provider_slot_leases_active_work_unit_idx
 
 _CLAIM_ADVISORY_LOCK_KEY = "translator_service.postgres_scheduler.claim"
 
+_STRICT_DOCX_CLAIM_GUARD_SQL = """
+      AND NOT EXISTS (
+          SELECT 1
+          FROM strict_job_glossary_bindings binding
+          LEFT JOIN glossary_approvals approval
+            ON approval.approval_id = binding.approval_id
+          LEFT JOIN glossary_snapshot_custody custody
+            ON custody.custody_id = binding.custody_id
+          WHERE binding.job_id = {job_id_reference}
+            AND (
+                approval.approval_id IS NULL
+                OR custody.custody_id IS NULL
+                OR approval.approval_status IS DISTINCT FROM 'approved'
+                OR approval.custody_id IS DISTINCT FROM binding.custody_id
+                OR approval.snapshot_digest IS DISTINCT FROM binding.snapshot_digest
+                OR custody.snapshot_digest IS DISTINCT FROM binding.snapshot_digest
+                OR approval.approval_schema_version IS DISTINCT FROM {approval_schema}
+                OR binding.binding_schema_version IS DISTINCT FROM {binding_schema}
+                OR custody.snapshot_schema_version IS DISTINCT FROM {snapshot_schema}
+                OR custody.retention_mode IS DISTINCT FROM 'retain'
+            )
+      )
+"""
+
+_STRICT_DOCX_CANDIDATE_CLAIM_GUARD_SQL = _STRICT_DOCX_CLAIM_GUARD_SQL.format(
+    job_id_reference="wu.job_id",
+    approval_schema=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    binding_schema=GLOSSARY_BINDING_SCHEMA_VERSION,
+    snapshot_schema=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+)
+
+_STRICT_DOCX_UPDATE_CLAIM_GUARD_SQL = _STRICT_DOCX_CLAIM_GUARD_SQL.format(
+    job_id_reference="work_units.job_id",
+    approval_schema=GLOSSARY_APPROVAL_SCHEMA_VERSION,
+    binding_schema=GLOSSARY_BINDING_SCHEMA_VERSION,
+    snapshot_schema=GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+)
+
 _CLAIM_PERFORMANCE_INDEX_STATEMENT_TEMPLATES = (
     """
     {create_index} IF NOT EXISTS translation_jobs_scheduler_claim_idx
@@ -216,7 +267,7 @@ _CLAIM_PERFORMANCE_INDEX_STATEMENT_TEMPLATES = (
     """,
 )
 
-_CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL = """
+_CLAIM_NEXT_SCHEDULED_WORK_UNIT_SQL = f"""
 WITH claim_lock AS (
     SELECT pg_advisory_xact_lock(
           hashtext(%(claim_lock_key)s)
@@ -298,6 +349,7 @@ candidate AS (
     WHERE wu.status IN ('pending', 'failed', 'failed_retryable')
       AND wu.available_at <= now()
       AND (wu.lease_until IS NULL OR wu.lease_until <= now())
+{_STRICT_DOCX_CANDIDATE_CLAIM_GUARD_SQL}
       AND active_global.active_units < %(max_active_units_global)s
       AND COALESCE(aw.active_job_units, 0) < %(max_active_units_per_job)s
       AND COALESCE(abu.active_user_units, 0) < %(max_active_units_per_user)s
@@ -344,6 +396,7 @@ WHERE work_units.id = candidate.id
       work_units.lease_until IS NULL
       OR work_units.lease_until <= now()
   )
+{_STRICT_DOCX_UPDATE_CLAIM_GUARD_SQL}
   AND candidate.queue_policy_active_global_units < %(max_active_units_global)s
   AND candidate.queue_policy_active_job_units < %(max_active_units_per_job)s
   AND candidate.queue_policy_active_user_units < %(max_active_units_per_user)s
@@ -406,6 +459,8 @@ def create_postgres_scheduler_claim_performance_indexes(
 
 
 class PostgresSchedulerStore:
+    strict_docx_migration_ready = False
+
     def __init__(self, dsn: str) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg is required to use PostgresSchedulerStore")
@@ -418,6 +473,261 @@ class PostgresSchedulerStore:
     def close(self) -> None:
         self.connection.close()
 
+    def create_glossary_approval(
+        self,
+        *,
+        snapshot_payload: bytes,
+        snapshot_digest: str,
+        snapshot_schema_version: int,
+        approval_schema_version: int,
+    ) -> GlossaryApproval:
+        if (
+            not snapshot_payload
+            or sha256(snapshot_payload).hexdigest() != snapshot_digest
+        ):
+            raise ValueError("Invalid glossary snapshot payload")
+        if (
+            snapshot_schema_version != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+            or approval_schema_version != GLOSSARY_APPROVAL_SCHEMA_VERSION
+        ):
+            raise ValueError("Unsupported glossary schema version")
+
+        custody_id = f"custody-{uuid4().hex}"
+        approval_id = f"approval-{uuid4().hex}"
+        with self.connection.transaction():
+            custody = self.connection.execute(
+                """
+                INSERT INTO glossary_snapshot_custody (
+                    custody_id, snapshot_payload, snapshot_digest,
+                    snapshot_schema_version, retention_mode
+                ) VALUES (
+                    %(custody_id)s, %(snapshot_payload)s, %(snapshot_digest)s,
+                    %(snapshot_schema_version)s, 'retain'
+                )
+                ON CONFLICT (snapshot_digest) DO UPDATE
+                SET snapshot_digest = EXCLUDED.snapshot_digest
+                RETURNING custody_id
+                """,
+                {
+                    "custody_id": custody_id,
+                    "snapshot_payload": snapshot_payload,
+                    "snapshot_digest": snapshot_digest,
+                    "snapshot_schema_version": snapshot_schema_version,
+                },
+            ).fetchone()
+            custody_id = custody["custody_id"]
+            row = self.connection.execute(
+                """
+                INSERT INTO glossary_approvals (
+                    approval_id, custody_id, snapshot_digest,
+                    approval_schema_version, approval_status
+                ) VALUES (
+                    %(approval_id)s, %(custody_id)s, %(snapshot_digest)s,
+                    %(approval_schema_version)s, 'approved'
+                )
+                ON CONFLICT (custody_id, snapshot_digest, approval_schema_version)
+                DO UPDATE SET custody_id = EXCLUDED.custody_id
+                RETURNING *
+                """,
+                {
+                    "approval_id": approval_id,
+                    "custody_id": custody_id,
+                    "snapshot_digest": snapshot_digest,
+                    "approval_schema_version": approval_schema_version,
+                },
+            ).fetchone()
+        return _glossary_approval_from_row(
+            {**row, "snapshot_schema_version": snapshot_schema_version}
+        )
+
+    def revoke_glossary_approval(self, *, approval_id: str) -> GlossaryApproval:
+        with self.connection.transaction():
+            self._acquire_claim_serialization_lock()
+            row = self.connection.execute(
+                """
+                UPDATE glossary_approvals
+                SET approval_status = 'revoked', revoked_at = now()
+                WHERE approval_id = %(approval_id)s
+                RETURNING *
+                """,
+                {"approval_id": approval_id},
+            ).fetchone()
+        if row is None:
+            raise ValueError("Glossary approval does not exist")
+        return _glossary_approval_from_row(
+            {
+                **row,
+                "snapshot_schema_version": GLOSSARY_SNAPSHOT_SCHEMA_VERSION,
+            }
+        )
+
+    def read_approved_glossary_snapshot(
+        self,
+        *,
+        approval_id: str,
+    ) -> ApprovedGlossarySnapshot | None:
+        row = self.connection.execute(
+            """
+            SELECT ga.*, gsc.snapshot_payload, gsc.snapshot_schema_version,
+                   gsc.retention_mode,
+                   gsc.snapshot_digest AS custody_snapshot_digest
+            FROM glossary_approvals ga
+            JOIN glossary_snapshot_custody gsc ON gsc.custody_id = ga.custody_id
+            WHERE ga.approval_id = %(approval_id)s
+            """,
+            {"approval_id": approval_id},
+        ).fetchone()
+        if (
+            row is None
+            or row["approval_status"] != "approved"
+            or row["retention_mode"] != "retain"
+            or row["snapshot_digest"] != row["custody_snapshot_digest"]
+            or row["approval_schema_version"] != GLOSSARY_APPROVAL_SCHEMA_VERSION
+            or row["snapshot_schema_version"] != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+        ):
+            return None
+        snapshot_payload = bytes(row["snapshot_payload"])
+        if sha256(snapshot_payload).hexdigest() != row["snapshot_digest"]:
+            return None
+        return ApprovedGlossarySnapshot(
+            approval=_glossary_approval_from_row(row),
+            snapshot_payload=snapshot_payload,
+        )
+
+    def read_strict_job_glossary_snapshot(
+        self,
+        *,
+        job_id: str,
+    ) -> ApprovedGlossarySnapshot | None:
+        row = self.connection.execute(
+            """
+            SELECT binding.approval_id AS binding_approval_id,
+                   binding.custody_id AS binding_custody_id,
+                   binding.snapshot_digest AS binding_snapshot_digest,
+                   binding.binding_schema_version,
+                   approval.*, custody.snapshot_payload,
+                   custody.snapshot_schema_version, custody.retention_mode,
+                   custody.snapshot_digest AS custody_snapshot_digest,
+                   job.document_kind
+            FROM strict_job_glossary_bindings binding
+            JOIN translation_jobs job ON job.id = binding.job_id
+            JOIN glossary_approvals approval
+              ON approval.approval_id = binding.approval_id
+            JOIN glossary_snapshot_custody custody
+              ON custody.custody_id = binding.custody_id
+            WHERE binding.job_id = %(job_id)s
+            """,
+            {"job_id": job_id},
+        ).fetchone()
+        return _strict_bound_glossary_snapshot_from_row(row)
+
+    def admit_strict_docx_job(
+        self,
+        request: StrictDocxAdmissionRequest,
+    ) -> StrictAdmissionResult:
+        denial_code = _strict_admission_validation_error(request)
+        if denial_code is not None:
+            return StrictAdmissionResult(None, [], denial_code)
+        with self.connection.transaction():
+            approval = self.connection.execute(
+                """
+                SELECT ga.*, gsc.snapshot_schema_version,
+                       gsc.snapshot_digest AS custody_snapshot_digest,
+                       gsc.retention_mode
+                FROM glossary_approvals ga
+                LEFT JOIN glossary_snapshot_custody gsc
+                  ON gsc.custody_id = ga.custody_id
+                WHERE ga.approval_id = %(approval_id)s
+                FOR UPDATE
+                """,
+                {"approval_id": request.approval_id},
+            ).fetchone()
+            denial_code = _strict_approval_denial_code(approval, request)
+            if denial_code is not None:
+                return StrictAdmissionResult(None, [], denial_code)
+            job_id = f"job-{uuid4().hex}"
+            job_row = self.connection.execute(
+                """
+                INSERT INTO translation_jobs (
+                    id, order_id, user_id, file_id, file_name, document_kind,
+                    source_object_key, source_language, target_language,
+                    adapter_version, prompt_version, pricing_snapshot_id,
+                    translation_policy, status
+                ) VALUES (
+                    %(id)s, %(order_id)s, %(user_id)s, %(file_id)s, %(file_name)s,
+                    'docx', %(source_object_key)s, %(source_language)s,
+                    %(target_language)s, %(adapter_version)s, %(prompt_version)s,
+                    %(pricing_snapshot_id)s, %(translation_policy)s, 'queued'
+                )
+                RETURNING *
+                """,
+                {
+                    "id": job_id,
+                    "order_id": request.order_id,
+                    "user_id": request.user_id,
+                    "file_id": request.file_id,
+                    "file_name": request.file_name,
+                    "source_object_key": request.source_object_key,
+                    "source_language": request.source_language,
+                    "target_language": request.target_language,
+                    "adapter_version": request.adapter_version,
+                    "prompt_version": request.prompt_version,
+                    "pricing_snapshot_id": request.pricing_snapshot_id,
+                    "translation_policy": request.translation_policy,
+                },
+            ).fetchone()
+            self.connection.execute(
+                """
+                INSERT INTO strict_job_glossary_bindings (
+                    job_id, approval_id, custody_id, snapshot_digest,
+                    binding_schema_version
+                ) VALUES (
+                    %(job_id)s, %(approval_id)s, %(custody_id)s,
+                    %(snapshot_digest)s, %(binding_schema_version)s
+                )
+                """,
+                {
+                    "job_id": job_id,
+                    "approval_id": request.approval_id,
+                    "custody_id": approval["custody_id"],
+                    "snapshot_digest": approval["snapshot_digest"],
+                    "binding_schema_version": request.binding_schema_version,
+                },
+            )
+            for work_unit in request.work_units:
+                self.connection.execute(
+                    """
+                    INSERT INTO work_units (
+                        id, job_id, sequence, source_block_ids_json,
+                        source_object_key, source_text_hash, prompt_tier,
+                        source_language, target_language, status
+                    ) VALUES (
+                        %(id)s, %(job_id)s, %(sequence)s,
+                        %(source_block_ids_json)s, %(source_object_key)s,
+                        %(source_text_hash)s, %(prompt_tier)s,
+                        %(source_language)s, %(target_language)s, 'pending'
+                    )
+                    """,
+                    {
+                        "id": f"{job_id}:unit-{work_unit.sequence}",
+                        "job_id": job_id,
+                        "sequence": work_unit.sequence,
+                        "source_block_ids_json": json.dumps(
+                            list(work_unit.source_block_ids)
+                        ),
+                        "source_object_key": work_unit.source_object_key,
+                        "source_text_hash": work_unit.source_text_hash,
+                        "prompt_tier": work_unit.prompt_tier,
+                        "source_language": work_unit.source_language,
+                        "target_language": work_unit.target_language,
+                    },
+                )
+        return StrictAdmissionResult(
+            job=_job_from_mapping(job_row),
+            work_units=self.list_work_units(job_id),
+            denial_code=None,
+        )
+
     def clear_for_tests(self) -> None:
         with self.connection.transaction():
             self.connection.execute("DELETE FROM provider_slot_leases")
@@ -425,8 +735,11 @@ class PostgresSchedulerStore:
             self.connection.execute("DELETE FROM scheduler_events")
             self.connection.execute("DELETE FROM work_unit_attempts")
             self.connection.execute("DELETE FROM worker_heartbeats")
+            self.connection.execute("DELETE FROM strict_job_glossary_bindings")
             self.connection.execute("DELETE FROM work_units")
             self.connection.execute("DELETE FROM translation_jobs")
+            self.connection.execute("DELETE FROM glossary_approvals")
+            self.connection.execute("DELETE FROM glossary_snapshot_custody")
 
     def create_job(self, **kwargs) -> PersistentTranslationJob:
         with self.connection.transaction():
@@ -542,6 +855,85 @@ class PostgresSchedulerStore:
         if row is None:
             return None
         return _work_unit_from_mapping(row)
+
+    def claim_next_work_unit(
+        self,
+        job_id: str,
+        *,
+        worker_id: str,
+        max_active_units_per_job: int = 1,
+    ) -> PersistentWorkUnit | None:
+        with self.connection.transaction():
+            self._acquire_claim_serialization_lock()
+            job = self.connection.execute(
+                """
+                SELECT id
+                FROM translation_jobs
+                WHERE id = %(job_id)s
+                  AND status IN ('queued', 'translating')
+                  AND cancel_requested_at IS NULL
+                FOR UPDATE
+                """,
+                {"job_id": job_id},
+            ).fetchone()
+            if job is None:
+                return None
+            active = self.connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM work_units
+                WHERE job_id = %(job_id)s
+                  AND status = 'translating'
+                """,
+                {"job_id": job_id},
+            ).fetchone()
+            if active["count"] >= max(1, max_active_units_per_job):
+                return None
+            candidate = self.connection.execute(
+                f"""
+                SELECT id
+                FROM work_units
+                WHERE job_id = %(job_id)s
+                  AND status = 'pending'
+                {_STRICT_DOCX_UPDATE_CLAIM_GUARD_SQL}
+                ORDER BY sequence, id
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+                """,
+                {"job_id": job_id},
+            ).fetchone()
+            if candidate is None:
+                return None
+            updated = self.connection.execute(
+                f"""
+                UPDATE work_units
+                SET status = 'translating',
+                    worker_id = %(worker_id)s,
+                    started_at = COALESCE(started_at, now()),
+                    updated_at = now()
+                WHERE id = %(work_unit_id)s
+                  AND status = 'pending'
+                {_STRICT_DOCX_UPDATE_CLAIM_GUARD_SQL}
+                RETURNING *
+                """,
+                {
+                    "work_unit_id": candidate["id"],
+                    "worker_id": worker_id,
+                },
+            ).fetchone()
+            if updated is None:
+                return None
+            self.connection.execute(
+                """
+                UPDATE translation_jobs
+                SET status = 'translating', updated_at = now()
+                WHERE id = %(job_id)s
+                  AND status IN ('queued', 'translating')
+                  AND cancel_requested_at IS NULL
+                """,
+                {"job_id": job_id},
+            )
+        return _work_unit_from_mapping(updated)
 
     def claim_next_scheduled_work_unit(
         self,
@@ -939,10 +1331,28 @@ class PostgresSchedulerStore:
         ).fetchall()
         return [_job_from_mapping(row) for row in rows]
 
-    def delete_job(self, job_id: str) -> bool:
-        if self.get_job(job_id) is None:
-            return False
+    def delete_job(self, job_id: str) -> DeleteJobResult:
         with self.connection.transaction():
+            job = self.connection.execute(
+                """
+                SELECT 1
+                FROM translation_jobs
+                WHERE id = %(job_id)s
+                FOR UPDATE
+                """,
+                {"job_id": job_id},
+            ).fetchone()
+            if job is None:
+                return DeleteJobResult(deleted=False, denial_code=None)
+            binding = self.connection.execute(
+                "SELECT 1 FROM strict_job_glossary_bindings WHERE job_id = %(job_id)s",
+                {"job_id": job_id},
+            ).fetchone()
+            if binding is not None:
+                return DeleteJobResult(
+                    deleted=False,
+                    denial_code="strict_job_non_deletable",
+                )
             self.connection.execute(
                 "DELETE FROM provider_slot_leases WHERE job_id = %(job_id)s",
                 {"job_id": job_id},
@@ -963,7 +1373,7 @@ class PostgresSchedulerStore:
                 "DELETE FROM translation_jobs WHERE id = %(job_id)s",
                 {"job_id": job_id},
             )
-        return True
+        return DeleteJobResult(deleted=True, denial_code=None)
 
     def cancel_job(self, job_id: str) -> PersistentTranslationJob:
         self._require_job(job_id)
@@ -1729,6 +2139,12 @@ class PostgresSchedulerStore:
         if job is None:
             raise ValueError(f"Translation job does not exist: {job_id}")
         return job
+
+    def _acquire_claim_serialization_lock(self) -> None:
+        self.connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%(claim_lock_key)s))",
+            {"claim_lock_key": _CLAIM_ADVISORY_LOCK_KEY},
+        )
 
     def _require_work_unit(self, work_unit_id: str) -> PersistentWorkUnit:
         work_unit = self.get_work_unit(work_unit_id)
