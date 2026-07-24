@@ -15,6 +15,10 @@ from translator_service.format_adapters import (
     plan_epub_translation,
     plan_txt_translation,
 )
+from translator_service.persistent_job_store import (
+    PersistentJobStore,
+    admit_strict_docx_job,
+)
 from translator_service.persistent_jobs import (
     PersistentTranslationJob,
     PersistentWorkUnit,
@@ -62,7 +66,7 @@ class StrictAdmissionDenied:
 
 def create_persistent_strict_docx_job_plan(
     *,
-    store: SQLiteTranslationJobStore,
+    store: PersistentJobStore,
     storage: LocalObjectStorage,
     approval_id: str,
     source_object_key: str,
@@ -105,7 +109,8 @@ def create_persistent_strict_docx_job_plan(
         )
         for unit in adapter_plan.units
     ]
-    admission = store.admit_strict_docx_job(
+    admission = admit_strict_docx_job(
+        store,
         StrictDocxAdmissionRequest(
             approval_id=approval_id,
             order_id=order_id,

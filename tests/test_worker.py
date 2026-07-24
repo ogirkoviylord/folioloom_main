@@ -219,7 +219,7 @@ class WorkerTest(unittest.TestCase):
 
         self.assertIsInstance(store, SQLiteTranslationJobStore)
 
-    def test_open_scheduler_store_uses_postgres_backend_and_initializes_schema(self):
+    def test_open_scheduler_store_uses_postgres_backend_and_runs_migrations(self):
         settings = _SchedulerSettings(
             scheduler_backend="postgres",
             persistent_jobs_db_path="ignored.sqlite3",
@@ -231,16 +231,15 @@ class WorkerTest(unittest.TestCase):
             "translator_service.postgres_scheduler.PostgresSchedulerStore",
             return_value=fake_store,
         ) as store_cls, patch(
-            "translator_service.postgres_scheduler."
-            "initialize_postgres_scheduler_schema"
-        ) as initialize_schema:
+            "translator_service.postgres_migrations.run_postgres_migrations"
+        ) as run_migrations:
             store = open_scheduler_store(settings)
 
         self.assertIs(store, fake_store)
         store_cls.assert_called_once_with("postgresql://translator")
-        initialize_schema.assert_called_once_with(fake_store.connection)
+        run_migrations.assert_called_once_with(fake_store.connection)
 
-    def test_open_scheduler_store_closes_postgres_store_when_schema_init_fails(self):
+    def test_open_scheduler_store_closes_postgres_store_when_migration_fails(self):
         settings = _SchedulerSettings(
             scheduler_backend="postgres",
             persistent_jobs_db_path="ignored.sqlite3",
@@ -252,11 +251,10 @@ class WorkerTest(unittest.TestCase):
             "translator_service.postgres_scheduler.PostgresSchedulerStore",
             return_value=fake_store,
         ), patch(
-            "translator_service.postgres_scheduler."
-            "initialize_postgres_scheduler_schema",
-            side_effect=RuntimeError("schema init failed"),
+            "translator_service.postgres_migrations.run_postgres_migrations",
+            side_effect=RuntimeError("migration failed"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "schema init failed"):
+            with self.assertRaisesRegex(RuntimeError, "migration failed"):
                 open_scheduler_store(settings)
 
         self.assertTrue(fake_store.closed)

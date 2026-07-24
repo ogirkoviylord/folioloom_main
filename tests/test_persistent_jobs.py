@@ -1349,6 +1349,31 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
             self.fail("approved snapshot was not readable")
         self.assertEqual(approved_snapshot.snapshot_payload, payload)
 
+        tampered_payload = b'{"terms":["tampered-term"]}'
+        synchronized_digest = __import__("hashlib").sha256(
+            b"claimed-snapshot"
+        ).hexdigest()
+        store._connection.execute(
+            """
+            UPDATE glossary_snapshot_custody
+            SET snapshot_payload = ?, snapshot_digest = ?
+            WHERE custody_id = ?
+            """,
+            (tampered_payload, synchronized_digest, approval.custody_id),
+        )
+        store._connection.execute(
+            """
+            UPDATE glossary_approvals
+            SET snapshot_digest = ?
+            WHERE approval_id = ?
+            """,
+            (synchronized_digest, approval.approval_id),
+        )
+
+        self.assertIsNone(
+            store.read_approved_glossary_snapshot(approval_id=approval.approval_id)
+        )
+
     def test_delete_strict_job_denies_without_database_mutation(self):
         store = self._memory_store()
         payload = b"snapshot"
@@ -1728,7 +1753,7 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
 
 
 class StrictConcurrentStoreTest(unittest.TestCase):
-    def test_one_approval_allows_only_one_concurrent_admission(self):
+    def test_one_approval_allows_two_concurrent_exact_match_admissions(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "jobs.sqlite3"
             first_store = SQLiteTranslationJobStore(db_path)
@@ -1747,22 +1772,19 @@ class StrictConcurrentStoreTest(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(admit, (first_store, second_store)))
 
-            self.assertEqual(
-                sorted(result.denial_code for result in results if result.denial_code),
-                ["approval_already_bound"],
-            )
-            self.assertEqual(sum(result.job is not None for result in results), 1)
+            self.assertEqual([result.denial_code for result in results], [None, None])
+            self.assertEqual(sum(result.job is not None for result in results), 2)
             self.assertEqual(
                 first_store._connection.execute(
                     "SELECT COUNT(*) FROM translation_jobs"
                 ).fetchone()[0],
-                1,
+                2,
             )
             self.assertEqual(
                 first_store._connection.execute(
                     "SELECT COUNT(*) FROM strict_job_glossary_bindings"
                 ).fetchone()[0],
-                1,
+                2,
             )
 
     def test_revoke_race_leaves_no_partial_admission_state(self):

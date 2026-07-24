@@ -228,6 +228,8 @@ class PersistentWorkerHeartbeat:
 
 
 class SQLiteTranslationJobStore:
+    strict_docx_migration_ready = True
+
     def __init__(self, db_path: str | Path) -> None:
         if str(db_path) != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -355,10 +357,40 @@ class SQLiteTranslationJobStore:
             or row["snapshot_schema_version"] != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
         ):
             return None
+        snapshot_payload = bytes(row["snapshot_payload"])
+        if sha256(snapshot_payload).hexdigest() != row["snapshot_digest"]:
+            return None
         return ApprovedGlossarySnapshot(
             approval=_glossary_approval_from_row(row),
-            snapshot_payload=bytes(row["snapshot_payload"]),
+            snapshot_payload=snapshot_payload,
         )
+
+    def read_strict_job_glossary_snapshot(
+        self,
+        *,
+        job_id: str,
+    ) -> ApprovedGlossarySnapshot | None:
+        row = self._connection.execute(
+            """
+            SELECT binding.approval_id AS binding_approval_id,
+                   binding.custody_id AS binding_custody_id,
+                   binding.snapshot_digest AS binding_snapshot_digest,
+                   binding.binding_schema_version,
+                   approval.*, custody.snapshot_payload,
+                   custody.snapshot_schema_version, custody.retention_mode,
+                   custody.snapshot_digest AS custody_snapshot_digest,
+                   job.document_kind
+            FROM strict_job_glossary_bindings binding
+            JOIN translation_jobs job ON job.id = binding.job_id
+            JOIN glossary_approvals approval
+              ON approval.approval_id = binding.approval_id
+            JOIN glossary_snapshot_custody custody
+              ON custody.custody_id = binding.custody_id
+            WHERE binding.job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        return _strict_bound_glossary_snapshot_from_row(row)
 
     def admit_strict_docx_job(
         self,
@@ -386,19 +418,6 @@ class SQLiteTranslationJobStore:
             if denial_code is not None:
                 self._connection.rollback()
                 return StrictAdmissionResult(None, [], denial_code)
-            approval_is_bound = self._connection.execute(
-                """
-                SELECT 1
-                FROM strict_job_glossary_bindings
-                WHERE approval_id = ?
-                LIMIT 1
-                """,
-                (request.approval_id,),
-            ).fetchone()
-            if approval_is_bound is not None:
-                self._connection.rollback()
-                return StrictAdmissionResult(None, [], "approval_already_bound")
-
             now = _now()
             job_id = self._next_job_id()
             self._connection.execute(
@@ -2280,6 +2299,30 @@ def _strict_approval_denial_code(
     ):
         return "approval_binding_mismatch"
     return None
+
+
+def _strict_bound_glossary_snapshot_from_row(row) -> ApprovedGlossarySnapshot | None:
+    if (
+        row is None
+        or row["document_kind"] != "docx"
+        or row["binding_approval_id"] != row["approval_id"]
+        or row["binding_custody_id"] != row["custody_id"]
+        or row["approval_status"] != "approved"
+        or row["retention_mode"] != "retain"
+        or row["binding_snapshot_digest"] != row["snapshot_digest"]
+        or row["binding_snapshot_digest"] != row["custody_snapshot_digest"]
+        or row["binding_schema_version"] != GLOSSARY_BINDING_SCHEMA_VERSION
+        or row["approval_schema_version"] != GLOSSARY_APPROVAL_SCHEMA_VERSION
+        or row["snapshot_schema_version"] != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+    ):
+        return None
+    snapshot_payload = bytes(row["snapshot_payload"])
+    if sha256(snapshot_payload).hexdigest() != row["binding_snapshot_digest"]:
+        return None
+    return ApprovedGlossarySnapshot(
+        approval=_glossary_approval_from_row(row),
+        snapshot_payload=snapshot_payload,
+    )
 
 
 def _work_unit_from_mapping(row) -> PersistentWorkUnit:

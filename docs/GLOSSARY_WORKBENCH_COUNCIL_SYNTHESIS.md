@@ -39,12 +39,12 @@ The completed owner approval covered this exact **local-only** contract:
 
 The owner approved this local-only contract and the bounded sequence is merged through #836. “Local” means Python in-memory objects in a test process only. It excludes browser/admin persistence, file I/O, document upload/parser execution, provider/network calls, DB/storage, logs/telemetry/artifacts, resolver/job/worker/cache paths, Telegram and server operations. Process restart loses the local state.
 
-## Completed local planning sequence and next technical route
+## Completed local planning sequence and approved strict-DOCX route
 
 1. **Engine contract discovery:** source-pinned fields, validation, signature and invalidation invariants for the local lock; no runtime bridge.
 2. **Shared vocabulary:** use `local snapshot lock` and `local structural preflight`; do not claim authorization, runtime readiness, glossary active in translation, job creation or export readiness.
 3. **Local UX/prototype:** completed within the bounded local contract through #836.
-4. **Next technical route:** reconcile the current strict-DOCX durable binding seams before proposing any durable implementation delta.
+4. **Strict-DOCX route:** the source-pinned reconciliation is merged through #837. Follow the approved PostgreSQL-target contract in `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`; it is not PostgreSQL parity, migration, runtime activation or Gate 1 closure evidence.
 5. **Representative quality evidence later:** before any automatic-runtime, beta or release claim.
 
 ## Explicit non-goals for the conditional first slice

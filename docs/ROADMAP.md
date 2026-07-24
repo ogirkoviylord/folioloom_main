@@ -32,7 +32,7 @@ Goal: prove that FolioLoom can help an author/rightsholder produce a terminology
 ### Gate 1 — Glossary / terminology control prototype
 
 - The owner-approved local-only snapshot-lock sequence is merged through #836; use its local approval/rehearsal, preflight, observation and Workbench wiring only as local-prototype evidence.
-- Reconcile current strict-DOCX durable binding seams before proposing any durable implementation delta; do not infer durable authority or runtime activation from the merged local sequence.
+- The source-pinned strict-DOCX reconciliation is merged through #837. Use the approved backend-neutral contract with PostgreSQL as durable/runtime target and SQLite as local/reference implementation; do not infer PostgreSQL parity, migration approval, durable runtime activation or Gate 1 closure from the contract. See `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`.
 - Treat automatic candidates as suggestions only until stronger evidence exists.
 - Require visible glossary preflight status and post-run metadata-only compliance report.
 - Run representative before/after evidence for glossary-controlled quality.
