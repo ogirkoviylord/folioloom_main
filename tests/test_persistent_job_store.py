@@ -48,6 +48,7 @@ class PersistentJobStoreFactoryTest(unittest.TestCase):
         store_cls.assert_called_once_with("postgresql://translator")
         run_migrations.assert_called_once_with(fake_store.connection)
         self.assertTrue(fake_store.strict_docx_migration_ready)
+        self.assertTrue(fake_store.document_glossary_authoring_migration_ready)
         self.assertNotIsInstance(store, StrictDocxJobStore)
 
     def test_closes_postgres_store_when_versioned_migrations_fail(self):
@@ -126,6 +127,7 @@ class PersistentJobStoreProtocolTest(unittest.TestCase):
 class _FakePostgresStore:
     connection = object()
     strict_docx_migration_ready = False
+    document_glossary_authoring_migration_ready = False
 
     def __init__(self, close_error: Exception | None = None) -> None:
         self.closed = False
