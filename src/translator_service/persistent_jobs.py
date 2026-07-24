@@ -355,9 +355,12 @@ class SQLiteTranslationJobStore:
             or row["snapshot_schema_version"] != GLOSSARY_SNAPSHOT_SCHEMA_VERSION
         ):
             return None
+        snapshot_payload = bytes(row["snapshot_payload"])
+        if sha256(snapshot_payload).hexdigest() != row["snapshot_digest"]:
+            return None
         return ApprovedGlossarySnapshot(
             approval=_glossary_approval_from_row(row),
-            snapshot_payload=bytes(row["snapshot_payload"]),
+            snapshot_payload=snapshot_payload,
         )
 
     def admit_strict_docx_job(
