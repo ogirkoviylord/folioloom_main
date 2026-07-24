@@ -63,6 +63,7 @@ class PostgresMigrationsTest(unittest.TestCase):
             [
                 {"version": 1, "checksum": MIGRATIONS[0].checksum},
                 {"version": 2, "checksum": MIGRATIONS[1].checksum},
+                {"version": 3, "checksum": MIGRATIONS[2].checksum},
             ],
         )
 
@@ -86,15 +87,18 @@ class PostgresMigrationsTest(unittest.TestCase):
         )
         self.assertFalse(_ledger_inserts(connection))
 
-    def test_fresh_database_applies_strict_docx_v2_after_scheduler_baseline(self):
+    def test_fresh_database_applies_strict_docx_v2_then_v3_after_scheduler_baseline(
+        self,
+    ):
         connection = _RecordingConnection(ledger_rows=[], baseline_relations=[])
 
         run_postgres_migrations(connection)
 
-        if [migration.version for migration in MIGRATIONS] != [1, 2]:
-            self.fail("strict DOCX migration v2 is missing")
+        if [migration.version for migration in MIGRATIONS] != [1, 2, 3]:
+            self.fail("strict DOCX migrations v2 and v3 are missing")
         self.assertTrue(connection.contains(MigrationSql.v1_payload))
         self.assertTrue(connection.contains(MigrationSql.v2_payload()))
+        self.assertTrue(connection.contains(MigrationSql.v3_payload()))
         ledger_inserts = [
             params
             for statement, params in zip(
@@ -107,10 +111,11 @@ class PostgresMigrationsTest(unittest.TestCase):
             [
                 {"version": 1, "checksum": MIGRATIONS[0].checksum},
                 {"version": 2, "checksum": MIGRATIONS[1].checksum},
+                {"version": 3, "checksum": MIGRATIONS[2].checksum},
             ],
         )
 
-    def test_complete_legacy_v1_catalog_stamps_then_applies_v2(self):
+    def test_complete_legacy_v1_catalog_stamps_then_applies_v2_then_v3(self):
         connection = _RecordingConnection(
             ledger_rows=[],
             baseline_relations=_legacy_v1_catalog()["relations"],
@@ -123,6 +128,7 @@ class PostgresMigrationsTest(unittest.TestCase):
 
         self.assertFalse(connection.contains(MigrationSql.v1_payload))
         self.assertTrue(connection.contains(MigrationSql.v2_payload()))
+        self.assertTrue(connection.contains(MigrationSql.v3_payload()))
         ledger_inserts = [
             params
             for statement, params in zip(
@@ -135,6 +141,7 @@ class PostgresMigrationsTest(unittest.TestCase):
             [
                 {"version": 1, "checksum": MIGRATIONS[0].checksum},
                 {"version": 2, "checksum": MIGRATIONS[1].checksum},
+                {"version": 3, "checksum": MIGRATIONS[2].checksum},
             ],
         )
         v2_sql_index = connection.statements.index(MigrationSql.v2_payload())
@@ -143,13 +150,27 @@ class PostgresMigrationsTest(unittest.TestCase):
             for index, (statement, params) in enumerate(
                 zip(connection.statements, connection.params, strict=True)
             )
-            if "INSERT INTO schema_migrations" in statement
-            and params["version"] == 2
+            if "INSERT INTO schema_migrations" in statement and params["version"] == 2
         )
         self.assertEqual(
             connection.transaction_ids[v2_sql_index],
             connection.transaction_ids[v2_ledger_index],
         )
+
+    def test_v3_migration_failure_does_not_stamp_its_ledger_row(self):
+        connection = _RecordingConnection(
+            ledger_rows=[
+                {"version": 1, "checksum": MIGRATIONS[0].checksum},
+                {"version": 2, "checksum": MIGRATIONS[1].checksum},
+            ],
+            baseline_relations=[],
+            fail_on=MigrationSql.v3_payload(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "migration failed"):
+            run_postgres_migrations(connection)
+
+        self.assertEqual(_ledger_inserts(connection), [])
 
     def test_complete_legacy_v1_catalog_with_strict_relation_rejects_without_migrations(
         self,
@@ -160,7 +181,8 @@ class PostgresMigrationsTest(unittest.TestCase):
                 connection = _RecordingConnection(
                     ledger_rows=[],
                     baseline_relations=[
-                        *catalog["relations"], {"relname": strict_relation}
+                        *catalog["relations"],
+                        {"relname": strict_relation},
                     ],
                     column_rows=catalog["columns"],
                     constraint_rows=catalog["constraints"],
@@ -191,6 +213,24 @@ class PostgresMigrationsTest(unittest.TestCase):
 
                 self.assertFalse(connection.contains(MigrationSql.v1_payload))
                 self.assertFalse(connection.contains(MigrationSql.v2_payload()))
+                self.assertFalse(_ledger_inserts(connection))
+
+    def test_v3_only_relation_without_ledger_rejects_without_migrations(self):
+        for strict_relation in postgres_migrations._V3_STRICT_DOCX_RELATIONS:
+            with self.subTest(strict_relation=strict_relation):
+                connection = _RecordingConnection(
+                    ledger_rows=[],
+                    baseline_relations=[{"relname": strict_relation}],
+                )
+
+                with self.assertRaisesRegex(
+                    PostgresMigrationBootstrapError, "strict DOCX"
+                ):
+                    run_postgres_migrations(connection)
+
+                self.assertFalse(connection.contains(MigrationSql.v1_payload))
+                self.assertFalse(connection.contains(MigrationSql.v2_payload()))
+                self.assertFalse(connection.contains(MigrationSql.v3_payload()))
                 self.assertFalse(_ledger_inserts(connection))
 
     def test_partial_legacy_v1_catalog_rejects_without_running_or_stamping_migrations(
@@ -264,7 +304,7 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertEqual(postgres_migrations._V1_SCHEDULER_SQL, SCHEMA_SQL)
 
     def test_v2_owns_exact_strict_docx_tables_without_extra_index(self):
-        if len(MIGRATIONS) != 2:
+        if len(MIGRATIONS) < 3:
             self.fail("strict DOCX migration v2 is missing")
         v2_sql = MigrationSql.v2_payload()
 
@@ -276,6 +316,28 @@ class PostgresMigrationsTest(unittest.TestCase):
             v2_sql,
         )
         self.assertNotIn("CREATE INDEX", v2_sql)
+
+    def test_v3_owns_document_bound_authorization_relations_without_mutating_v2(self):
+        v2_sql = MigrationSql.v2_payload()
+        v3_sql = MigrationSql.v3_payload()
+
+        self.assertNotIn("strict_docx_v3_", v2_sql)
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS strict_docx_v3_document_custody",
+            v3_sql,
+        )
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS strict_docx_v3_authorizations",
+            v3_sql,
+        )
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS strict_docx_v3_job_authorizations",
+            v3_sql,
+        )
+        self.assertIn(
+            "UNIQUE(approval_id, document_custody_id, snapshot_digest)",
+            v3_sql,
+        )
 
     def test_migration_sql_failure_does_not_record_ledger_row(self):
         connection = _RecordingConnection(
@@ -299,6 +361,10 @@ class MigrationSql:
     @staticmethod
     def v2_payload() -> str:
         return MIGRATIONS[1].sql_payload
+
+    @staticmethod
+    def v3_payload() -> str:
+        return MIGRATIONS[2].sql_payload
 
 
 class _RecordingConnection:

@@ -199,9 +199,45 @@ CREATE TABLE IF NOT EXISTS strict_job_glossary_bindings (
 );
 """
 
+_V3_STRICT_DOCX_DOCUMENT_AUTHORIZATION_SQL = """
+CREATE TABLE IF NOT EXISTS strict_docx_v3_document_custody (
+    document_custody_id TEXT PRIMARY KEY,
+    source_object_key TEXT NOT NULL UNIQUE,
+    source_sha256 TEXT NOT NULL,
+    source_size_bytes BIGINT NOT NULL CHECK (source_size_bytes > 0),
+    document_kind TEXT NOT NULL CHECK (document_kind = 'docx'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS strict_docx_v3_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    approval_id TEXT NOT NULL REFERENCES glossary_approvals(approval_id),
+    document_custody_id TEXT NOT NULL REFERENCES strict_docx_v3_document_custody(document_custody_id),
+    snapshot_digest TEXT NOT NULL,
+    authorization_status TEXT NOT NULL CHECK (authorization_status IN ('approved', 'revoked')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ,
+    UNIQUE(approval_id, document_custody_id, snapshot_digest)
+);
+
+CREATE TABLE IF NOT EXISTS strict_docx_v3_job_authorizations (
+    job_id TEXT PRIMARY KEY REFERENCES translation_jobs(id),
+    authorization_id TEXT NOT NULL REFERENCES strict_docx_v3_authorizations(authorization_id),
+    approval_id TEXT NOT NULL REFERENCES glossary_approvals(approval_id),
+    document_custody_id TEXT NOT NULL REFERENCES strict_docx_v3_document_custody(document_custody_id),
+    snapshot_digest TEXT NOT NULL,
+    source_object_key TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    source_size_bytes BIGINT NOT NULL CHECK (source_size_bytes > 0)
+);
+"""
+
 MIGRATIONS = (
     PostgresMigration(version=1, sql_payload=_V1_SCHEDULER_SQL),
     PostgresMigration(version=2, sql_payload=_V2_STRICT_DOCX_SQL),
+    PostgresMigration(
+        version=3, sql_payload=_V3_STRICT_DOCX_DOCUMENT_AUTHORIZATION_SQL
+    ),
 )
 
 # This is intentionally an enumerated catalog query rather than a one-table probe.
@@ -219,7 +255,14 @@ _STRICT_DOCX_RELATIONS = (
     "glossary_approvals",
     "strict_job_glossary_bindings",
 )
-_PRE_LEDGER_RELATIONS = _BASELINE_RELATIONS + _STRICT_DOCX_RELATIONS
+_V3_STRICT_DOCX_RELATIONS = (
+    "strict_docx_v3_document_custody",
+    "strict_docx_v3_authorizations",
+    "strict_docx_v3_job_authorizations",
+)
+_PRE_LEDGER_RELATIONS = (
+    _BASELINE_RELATIONS + _STRICT_DOCX_RELATIONS + _V3_STRICT_DOCX_RELATIONS
+)
 _BASELINE_RELATIONS_SQL = """
 SELECT relation.relname
 FROM pg_catalog.pg_class relation
@@ -234,35 +277,119 @@ ORDER BY relation.relname
 # strings are PostgreSQL's format_type()/pg_get_expr() representation.
 _COLUMN_MANIFEST = {
     "translation_jobs": (
-        ("id", "text", True, None), ("order_id", "text", True, None), ("user_id", "text", True, None),
-        ("file_id", "text", True, None), ("source_object_key", "text", True, None), ("file_name", "text", True, None),
-        ("document_kind", "text", True, None), ("source_language", "text", True, None), ("target_language", "text", True, None),
-        ("adapter_version", "text", True, None), ("prompt_version", "text", True, None), ("pricing_snapshot_id", "text", True, None),
-        ("translation_policy", "text", False, None), ("partial_object_key", "text", False, None), ("final_object_key", "text", False, None),
-        ("status", "text", True, None), ("priority", "integer", True, "0"), ("cancel_requested_at", "timestamp with time zone", False, None),
-        ("resume_blocked_reason", "text", False, None), ("created_at", "timestamp with time zone", True, "now()"), ("updated_at", "timestamp with time zone", True, "now()"),
+        ("id", "text", True, None),
+        ("order_id", "text", True, None),
+        ("user_id", "text", True, None),
+        ("file_id", "text", True, None),
+        ("source_object_key", "text", True, None),
+        ("file_name", "text", True, None),
+        ("document_kind", "text", True, None),
+        ("source_language", "text", True, None),
+        ("target_language", "text", True, None),
+        ("adapter_version", "text", True, None),
+        ("prompt_version", "text", True, None),
+        ("pricing_snapshot_id", "text", True, None),
+        ("translation_policy", "text", False, None),
+        ("partial_object_key", "text", False, None),
+        ("final_object_key", "text", False, None),
+        ("status", "text", True, None),
+        ("priority", "integer", True, "0"),
+        ("cancel_requested_at", "timestamp with time zone", False, None),
+        ("resume_blocked_reason", "text", False, None),
+        ("created_at", "timestamp with time zone", True, "now()"),
+        ("updated_at", "timestamp with time zone", True, "now()"),
     ),
     "work_units": (
-        ("id", "text", True, None), ("job_id", "text", True, None), ("sequence", "integer", True, None), ("source_block_ids_json", "text", True, None),
-        ("source_object_key", "text", False, None), ("source_text_hash", "text", True, None), ("prompt_tier", "text", True, None), ("source_language", "text", True, None),
-        ("target_language", "text", True, None), ("status", "text", True, None), ("translated_text", "text", False, None), ("worker_id", "text", False, None),
-        ("claim_token", "text", False, None), ("attempt_count", "integer", True, "0"), ("max_attempts", "integer", True, "3"), ("available_at", "timestamp with time zone", True, "now()"),
-        ("lease_until", "timestamp with time zone", False, None), ("prompt_tokens", "integer", True, "0"), ("completion_tokens", "integer", True, "0"),
-        ("cache_hit_tokens", "integer", True, "0"), ("cache_miss_tokens", "integer", True, "0"), ("retry_count", "integer", True, "0"),
-        ("last_error", "text", False, None), ("created_at", "timestamp with time zone", True, "now()"), ("updated_at", "timestamp with time zone", True, "now()"),
-        ("started_at", "timestamp with time zone", False, None), ("completed_at", "timestamp with time zone", False, None),
+        ("id", "text", True, None),
+        ("job_id", "text", True, None),
+        ("sequence", "integer", True, None),
+        ("source_block_ids_json", "text", True, None),
+        ("source_object_key", "text", False, None),
+        ("source_text_hash", "text", True, None),
+        ("prompt_tier", "text", True, None),
+        ("source_language", "text", True, None),
+        ("target_language", "text", True, None),
+        ("status", "text", True, None),
+        ("translated_text", "text", False, None),
+        ("worker_id", "text", False, None),
+        ("claim_token", "text", False, None),
+        ("attempt_count", "integer", True, "0"),
+        ("max_attempts", "integer", True, "3"),
+        ("available_at", "timestamp with time zone", True, "now()"),
+        ("lease_until", "timestamp with time zone", False, None),
+        ("prompt_tokens", "integer", True, "0"),
+        ("completion_tokens", "integer", True, "0"),
+        ("cache_hit_tokens", "integer", True, "0"),
+        ("cache_miss_tokens", "integer", True, "0"),
+        ("retry_count", "integer", True, "0"),
+        ("last_error", "text", False, None),
+        ("created_at", "timestamp with time zone", True, "now()"),
+        ("updated_at", "timestamp with time zone", True, "now()"),
+        ("started_at", "timestamp with time zone", False, None),
+        ("completed_at", "timestamp with time zone", False, None),
     ),
     "work_unit_attempts": (
-        ("id", "text", True, None), ("work_unit_id", "text", True, None), ("job_id", "text", True, None), ("attempt_number", "integer", True, None),
-        ("worker_id", "text", False, None), ("claim_token", "text", False, None), ("status", "text", True, None), ("error_code", "text", False, None),
-        ("error_message", "text", False, None), ("retry_after_seconds", "integer", True, "0"), ("prompt_tokens", "integer", True, "0"),
-        ("completion_tokens", "integer", True, "0"), ("cache_hit_tokens", "integer", True, "0"), ("cache_miss_tokens", "integer", True, "0"),
-        ("started_at", "timestamp with time zone", True, "now()"), ("finished_at", "timestamp with time zone", True, "now()"),
+        ("id", "text", True, None),
+        ("work_unit_id", "text", True, None),
+        ("job_id", "text", True, None),
+        ("attempt_number", "integer", True, None),
+        ("worker_id", "text", False, None),
+        ("claim_token", "text", False, None),
+        ("status", "text", True, None),
+        ("error_code", "text", False, None),
+        ("error_message", "text", False, None),
+        ("retry_after_seconds", "integer", True, "0"),
+        ("prompt_tokens", "integer", True, "0"),
+        ("completion_tokens", "integer", True, "0"),
+        ("cache_hit_tokens", "integer", True, "0"),
+        ("cache_miss_tokens", "integer", True, "0"),
+        ("started_at", "timestamp with time zone", True, "now()"),
+        ("finished_at", "timestamp with time zone", True, "now()"),
     ),
-    "scheduler_events": (("id", "text", True, None), ("job_id", "text", True, None), ("work_unit_id", "text", False, None), ("event_type", "text", True, None), ("payload_json", "text", True, None), ("created_at", "timestamp with time zone", True, "now()")),
-    "worker_heartbeats": (("worker_id", "text", True, None), ("worker_kind", "text", True, None), ("status", "text", True, None), ("active_job_id", "text", False, None), ("active_work_unit_id", "text", False, None), ("started_at", "timestamp with time zone", True, "now()"), ("last_seen_at", "timestamp with time zone", True, "now()")),
-    "provider_slots": (("provider_id", "text", True, None), ("channel_id", "text", True, None), ("slot_index", "integer", True, None), ("capacity_source", "text", False, None), ("enabled", "boolean", True, "true"), ("created_at", "timestamp with time zone", True, "now()"), ("updated_at", "timestamp with time zone", True, "now()")),
-    "provider_slot_leases": (("id", "text", True, None), ("lease_token", "text", True, None), ("provider_id", "text", True, None), ("channel_id", "text", True, None), ("slot_index", "integer", True, None), ("job_id", "text", True, None), ("work_unit_id", "text", True, None), ("worker_id", "text", True, None), ("work_unit_claim_token", "text", True, None), ("status", "text", True, None), ("acquired_at", "timestamp with time zone", True, "now()"), ("lease_until", "timestamp with time zone", True, None), ("released_at", "timestamp with time zone", False, None), ("release_reason", "text", False, None), ("created_at", "timestamp with time zone", True, "now()"), ("updated_at", "timestamp with time zone", True, "now()")),
+    "scheduler_events": (
+        ("id", "text", True, None),
+        ("job_id", "text", True, None),
+        ("work_unit_id", "text", False, None),
+        ("event_type", "text", True, None),
+        ("payload_json", "text", True, None),
+        ("created_at", "timestamp with time zone", True, "now()"),
+    ),
+    "worker_heartbeats": (
+        ("worker_id", "text", True, None),
+        ("worker_kind", "text", True, None),
+        ("status", "text", True, None),
+        ("active_job_id", "text", False, None),
+        ("active_work_unit_id", "text", False, None),
+        ("started_at", "timestamp with time zone", True, "now()"),
+        ("last_seen_at", "timestamp with time zone", True, "now()"),
+    ),
+    "provider_slots": (
+        ("provider_id", "text", True, None),
+        ("channel_id", "text", True, None),
+        ("slot_index", "integer", True, None),
+        ("capacity_source", "text", False, None),
+        ("enabled", "boolean", True, "true"),
+        ("created_at", "timestamp with time zone", True, "now()"),
+        ("updated_at", "timestamp with time zone", True, "now()"),
+    ),
+    "provider_slot_leases": (
+        ("id", "text", True, None),
+        ("lease_token", "text", True, None),
+        ("provider_id", "text", True, None),
+        ("channel_id", "text", True, None),
+        ("slot_index", "integer", True, None),
+        ("job_id", "text", True, None),
+        ("work_unit_id", "text", True, None),
+        ("worker_id", "text", True, None),
+        ("work_unit_claim_token", "text", True, None),
+        ("status", "text", True, None),
+        ("acquired_at", "timestamp with time zone", True, "now()"),
+        ("lease_until", "timestamp with time zone", True, None),
+        ("released_at", "timestamp with time zone", False, None),
+        ("release_reason", "text", False, None),
+        ("created_at", "timestamp with time zone", True, "now()"),
+        ("updated_at", "timestamp with time zone", True, "now()"),
+    ),
 }
 
 _COLUMN_CATALOG_SQL = """
@@ -363,7 +490,9 @@ def run_postgres_migrations(connection) -> None:
         applied = _read_and_validate_ledger(connection)
         if not applied:
             relation_names = _existing_baseline_relations(connection)
-            if relation_names.intersection(_STRICT_DOCX_RELATIONS):
+            if relation_names.intersection(
+                _STRICT_DOCX_RELATIONS + _V3_STRICT_DOCX_RELATIONS
+            ):
                 raise PostgresMigrationBootstrapError(
                     "unversioned strict DOCX relation exists without migration ledger"
                 )
@@ -376,7 +505,9 @@ def run_postgres_migrations(connection) -> None:
             _acquire_lock(connection)
             _ensure_ledger(connection)
             applied = _read_and_validate_ledger(connection)
-            pending = next((item for item in MIGRATIONS if item.version not in applied), None)
+            pending = next(
+                (item for item in MIGRATIONS if item.version not in applied), None
+            )
             if pending is None:
                 return
             connection.execute(pending.sql_payload)
@@ -401,12 +532,19 @@ def _read_and_validate_ledger(connection) -> dict[int, str]:
     applied = {row["version"]: row["checksum"] for row in rows}
     known_versions = {migration.version for migration in MIGRATIONS}
     if not set(applied).issubset(known_versions):
-        raise PostgresMigrationBootstrapError("schema_migrations has an unknown version")
+        raise PostgresMigrationBootstrapError(
+            "schema_migrations has an unknown version"
+        )
     for expected_version, actual_version in enumerate(sorted(applied), start=1):
         if actual_version != expected_version:
-            raise PostgresMigrationBootstrapError("schema_migrations history is non-contiguous")
+            raise PostgresMigrationBootstrapError(
+                "schema_migrations history is non-contiguous"
+            )
     for migration in MIGRATIONS:
-        if migration.version in applied and applied[migration.version] != migration.checksum:
+        if (
+            migration.version in applied
+            and applied[migration.version] != migration.checksum
+        ):
             raise PostgresMigrationBootstrapError("schema_migrations checksum mismatch")
     return applied
 
@@ -420,15 +558,20 @@ def _existing_baseline_relations(connection) -> set[str]:
 
 def _validate_legacy_v1_baseline(connection, relation_names: set[str]) -> None:
     if relation_names != set(_BASELINE_RELATIONS):
-        raise PostgresMigrationBootstrapError("legacy scheduler baseline is partial or unknown")
+        raise PostgresMigrationBootstrapError(
+            "legacy scheduler baseline is partial or unknown"
+        )
     parameters = {"relation_names": list(_BASELINE_RELATIONS)}
     column_rows = connection.execute(_COLUMN_CATALOG_SQL, parameters).fetchall()
-    actual_columns = {
-        table_name: [] for table_name in _BASELINE_RELATIONS
-    }
+    actual_columns = {table_name: [] for table_name in _BASELINE_RELATIONS}
     for row in column_rows:
         actual_columns[row["table_name"]].append(
-            (row["column_name"], row["type_name"], row["not_null"], _normalise_default(row["default_expr"]))
+            (
+                row["column_name"],
+                row["type_name"],
+                row["not_null"],
+                _normalise_default(row["default_expr"]),
+            )
         )
     expected_columns = {
         table_name: [
@@ -438,7 +581,9 @@ def _validate_legacy_v1_baseline(connection, relation_names: set[str]) -> None:
         for table_name, columns in _COLUMN_MANIFEST.items()
     }
     if actual_columns != expected_columns:
-        raise PostgresMigrationBootstrapError("legacy scheduler baseline column manifest mismatch")
+        raise PostgresMigrationBootstrapError(
+            "legacy scheduler baseline column manifest mismatch"
+        )
 
     constraints = connection.execute(_CONSTRAINT_CATALOG_SQL, parameters).fetchall()
     actual_constraints = tuple(
@@ -454,18 +599,29 @@ def _validate_legacy_v1_baseline(connection, relation_names: set[str]) -> None:
         )
     )
     if actual_constraints != expected_constraints:
-        raise PostgresMigrationBootstrapError("legacy scheduler baseline constraint manifest mismatch")
+        raise PostgresMigrationBootstrapError(
+            "legacy scheduler baseline constraint manifest mismatch"
+        )
 
     indexes = connection.execute(_INDEX_CATALOG_SQL).fetchall()
     expected_indexes = {
         "provider_slot_leases_active_slot_idx": "on provider_slot_leases using btree (provider_id, channel_id, slot_index) where (status = 'active'::text)",
         "provider_slot_leases_active_work_unit_idx": "on provider_slot_leases using btree (work_unit_id) where (status = 'active'::text)",
     }
-    actual_indexes = {row["index_name"]: (row["table_name"], _normalise_sql(row["definition"])) for row in indexes}
+    actual_indexes = {
+        row["index_name"]: (row["table_name"], _normalise_sql(row["definition"]))
+        for row in indexes
+    }
     for index_name, definition in expected_indexes.items():
         actual = actual_indexes.get(index_name)
-        if actual is None or actual[0] != "provider_slot_leases" or _normalise_sql(definition) not in actual[1]:
-            raise PostgresMigrationBootstrapError("legacy scheduler baseline index manifest mismatch")
+        if (
+            actual is None
+            or actual[0] != "provider_slot_leases"
+            or _normalise_sql(definition) not in actual[1]
+        ):
+            raise PostgresMigrationBootstrapError(
+                "legacy scheduler baseline index manifest mismatch"
+            )
 
 
 def _record_migration(connection, migration: PostgresMigration) -> None:

@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -85,6 +85,7 @@ STRICT_DOCX_SCHEMA_VERSION = 1
 GLOSSARY_APPROVAL_SCHEMA_VERSION = 1
 GLOSSARY_BINDING_SCHEMA_VERSION = 1
 GLOSSARY_SNAPSHOT_SCHEMA_VERSION = 1
+STRICT_DOCX_V3_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,42 @@ class StrictDocxAdmissionRequest:
     approval_schema_version: int = GLOSSARY_APPROVAL_SCHEMA_VERSION
     binding_schema_version: int = GLOSSARY_BINDING_SCHEMA_VERSION
     snapshot_schema_version: int = GLOSSARY_SNAPSHOT_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class StrictDocxV3AdmissionRequest:
+    authorization_id: str
+    order_id: str
+    user_id: str
+    file_id: str
+    file_name: str
+    document_kind: str
+    source_object_key: str
+    source_sha256: str
+    source_size_bytes: int
+    source_language: str
+    target_language: str
+    adapter_version: str
+    prompt_version: str
+    pricing_snapshot_id: str
+    translation_policy: str | None
+    work_units: list[WorkUnitPlan]
+    strict_schema_version: int = STRICT_DOCX_V3_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class StrictDocxV3Authorization:
+    authorization_id: str
+    approval_id: str
+    document_custody_id: str
+    snapshot_digest: str
+    source_object_key: str
+    source_sha256: str
+    source_size_bytes: int
+    document_kind: str
+    authorization_status: str
+    created_at: datetime
+    revoked_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -396,8 +433,68 @@ class SQLiteTranslationJobStore:
         self,
         request: StrictDocxAdmissionRequest,
     ) -> StrictAdmissionResult:
+        return self._admit_strict_docx_job(request)
+
+    def _admit_strict_docx_job(
+        self,
+        request: StrictDocxAdmissionRequest,
+        *,
+        v3_authorization=None,
+        v3_admission_request: StrictDocxV3AdmissionRequest | None = None,
+    ) -> StrictAdmissionResult:
         try:
             self._connection.execute("BEGIN IMMEDIATE")
+            if v3_admission_request is not None:
+                v3_authorization = self._connection.execute(
+                    """
+                    SELECT authorization.*, approval.approval_status,
+                           approval.snapshot_digest AS approval_snapshot_digest,
+                           custody.source_object_key, custody.source_sha256,
+                           custody.source_size_bytes, custody.document_kind
+                    FROM strict_docx_v3_authorizations authorization
+                    JOIN glossary_approvals approval
+                      ON approval.approval_id = authorization.approval_id
+                    JOIN strict_docx_v3_document_custody custody
+                      ON custody.document_custody_id = authorization.document_custody_id
+                    WHERE authorization.authorization_id = ?
+                    """,
+                    (v3_admission_request.authorization_id,),
+                ).fetchone()
+                if v3_authorization is None:
+                    self._connection.rollback()
+                    return StrictAdmissionResult(
+                        None, [], "strict_docx_v3_authorization_missing"
+                    )
+                if v3_authorization["authorization_status"] != "approved":
+                    self._connection.rollback()
+                    return StrictAdmissionResult(
+                        None, [], "strict_docx_v3_authorization_revoked"
+                    )
+                if v3_authorization["approval_status"] != "approved":
+                    self._connection.rollback()
+                    return StrictAdmissionResult(
+                        None, [], "strict_docx_v3_approval_revoked"
+                    )
+                if (
+                    v3_authorization["snapshot_digest"]
+                    != v3_authorization["approval_snapshot_digest"]
+                    or v3_authorization["source_object_key"]
+                    != v3_admission_request.source_object_key
+                    or v3_authorization["source_sha256"]
+                    != v3_admission_request.source_sha256
+                    or v3_authorization["source_size_bytes"]
+                    != v3_admission_request.source_size_bytes
+                    or v3_authorization["document_kind"]
+                    != v3_admission_request.document_kind
+                ):
+                    self._connection.rollback()
+                    return StrictAdmissionResult(
+                        None, [], "strict_docx_v3_source_custody_mismatch"
+                    )
+                request = replace(
+                    request,
+                    approval_id=v3_authorization["approval_id"],
+                )
             denial_code = _strict_admission_validation_error(request)
             if denial_code is not None:
                 self._connection.rollback()
@@ -465,6 +562,26 @@ class SQLiteTranslationJobStore:
                     _to_db_time(now),
                 ),
             )
+            if v3_authorization is not None:
+                self._connection.execute(
+                    """
+                    INSERT INTO strict_docx_v3_job_authorizations (
+                        job_id, authorization_id, approval_id, document_custody_id,
+                        snapshot_digest, source_object_key, source_sha256,
+                        source_size_bytes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        job_id,
+                        v3_authorization["authorization_id"],
+                        v3_authorization["approval_id"],
+                        v3_authorization["document_custody_id"],
+                        v3_authorization["snapshot_digest"],
+                        v3_authorization["source_object_key"],
+                        v3_authorization["source_sha256"],
+                        v3_authorization["source_size_bytes"],
+                    ),
+                )
             self._connection.executemany(
                 """
                 INSERT INTO work_units (
@@ -501,6 +618,163 @@ class SQLiteTranslationJobStore:
             work_units=self.list_work_units(job_id),
             denial_code=None,
         )
+
+    def admit_strict_docx_v3_job(
+        self,
+        request: StrictDocxV3AdmissionRequest,
+    ) -> StrictAdmissionResult:
+        denial_code = _strict_v3_admission_validation_error(request)
+        if denial_code is not None:
+            return StrictAdmissionResult(None, [], denial_code)
+        return self._admit_strict_docx_job(
+            StrictDocxAdmissionRequest(
+                approval_id="v3-authority",
+                order_id=request.order_id,
+                user_id=request.user_id,
+                file_id=request.file_id,
+                file_name=request.file_name,
+                document_kind=request.document_kind,
+                source_object_key=request.source_object_key,
+                source_language=request.source_language,
+                target_language=request.target_language,
+                adapter_version=request.adapter_version,
+                prompt_version=request.prompt_version,
+                pricing_snapshot_id=request.pricing_snapshot_id,
+                translation_policy=request.translation_policy,
+                work_units=request.work_units,
+            ),
+            v3_admission_request=request,
+        )
+
+    def create_strict_docx_v3_authorization(
+        self,
+        *,
+        approval_id: str,
+        source_object_key: str,
+        source_sha256: str,
+        source_size_bytes: int,
+        document_kind: str,
+    ) -> StrictDocxV3Authorization:
+        if (
+            document_kind != "docx"
+            or not source_object_key.strip()
+            or len(source_sha256) != 64
+            or source_size_bytes <= 0
+        ):
+            raise ValueError("Invalid strict DOCX v3 document custody")
+        approved_snapshot = self.read_approved_glossary_snapshot(
+            approval_id=approval_id
+        )
+        if approved_snapshot is None:
+            raise ValueError("Strict DOCX v3 requires an approved glossary snapshot")
+        now = _now()
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            custody = self._connection.execute(
+                """
+                SELECT * FROM strict_docx_v3_document_custody
+                WHERE source_object_key = ?
+                """,
+                (source_object_key,),
+            ).fetchone()
+            if custody is None:
+                custody_id = f"document-custody-{uuid4().hex}"
+                self._connection.execute(
+                    """
+                    INSERT INTO strict_docx_v3_document_custody (
+                        document_custody_id, source_object_key, source_sha256,
+                        source_size_bytes, document_kind, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        custody_id,
+                        source_object_key,
+                        source_sha256,
+                        source_size_bytes,
+                        document_kind,
+                        _to_db_time(now),
+                    ),
+                )
+            elif (
+                custody["source_sha256"] != source_sha256
+                or custody["source_size_bytes"] != source_size_bytes
+                or custody["document_kind"] != document_kind
+            ):
+                raise ValueError("Existing strict DOCX v3 custody does not match")
+            else:
+                custody_id = custody["document_custody_id"]
+            existing = self._connection.execute(
+                """
+                SELECT authorization_id FROM strict_docx_v3_authorizations
+                WHERE approval_id = ?
+                  AND document_custody_id = ?
+                  AND snapshot_digest = ?
+                """,
+                (
+                    approval_id,
+                    custody_id,
+                    approved_snapshot.approval.snapshot_digest,
+                ),
+            ).fetchone()
+            authorization_id = (
+                existing["authorization_id"]
+                if existing is not None
+                else f"v3-authorization-{uuid4().hex}"
+            )
+            if existing is None:
+                self._connection.execute(
+                    """
+                    INSERT INTO strict_docx_v3_authorizations (
+                        authorization_id, approval_id, document_custody_id,
+                        snapshot_digest, authorization_status, created_at, revoked_at
+                    ) VALUES (?, ?, ?, ?, 'approved', ?, NULL)
+                    """,
+                    (
+                        authorization_id,
+                        approval_id,
+                        custody_id,
+                        approved_snapshot.approval.snapshot_digest,
+                        _to_db_time(now),
+                    ),
+                )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return self._require_strict_docx_v3_authorization(authorization_id)
+
+    def revoke_strict_docx_v3_authorization(
+        self,
+        *,
+        authorization_id: str,
+    ) -> StrictDocxV3Authorization:
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            authorization = self._require_strict_docx_v3_authorization(authorization_id)
+            if authorization.authorization_status == "approved":
+                self._connection.execute(
+                    """
+                    UPDATE strict_docx_v3_authorizations
+                    SET authorization_status = 'revoked', revoked_at = ?
+                    WHERE authorization_id = ?
+                    """,
+                    (_to_db_time(_now()), authorization_id),
+                )
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        return self._require_strict_docx_v3_authorization(authorization_id)
+
+    def read_strict_docx_v3_authorization(
+        self,
+        *,
+        authorization_id: str,
+    ) -> StrictDocxV3Authorization | None:
+        try:
+            return self._require_strict_docx_v3_authorization(authorization_id)
+        except ValueError:
+            return None
 
     def create_job(
         self,
@@ -1949,6 +2223,52 @@ class SQLiteTranslationJobStore:
                 )
                 """
             )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strict_docx_v3_document_custody (
+                    document_custody_id TEXT PRIMARY KEY,
+                    source_object_key TEXT NOT NULL UNIQUE,
+                    source_sha256 TEXT NOT NULL,
+                    source_size_bytes INTEGER NOT NULL,
+                    document_kind TEXT NOT NULL CHECK (document_kind = 'docx'),
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strict_docx_v3_authorizations (
+                    authorization_id TEXT PRIMARY KEY,
+                    approval_id TEXT NOT NULL REFERENCES
+                        glossary_approvals(approval_id),
+                    document_custody_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_document_custody(document_custody_id),
+                    snapshot_digest TEXT NOT NULL,
+                    authorization_status TEXT NOT NULL
+                        CHECK (authorization_status IN ('approved', 'revoked')),
+                    created_at TEXT NOT NULL,
+                    revoked_at TEXT NULL,
+                    UNIQUE(approval_id, document_custody_id, snapshot_digest)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strict_docx_v3_job_authorizations (
+                    job_id TEXT PRIMARY KEY REFERENCES translation_jobs(id),
+                    authorization_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_authorizations(authorization_id),
+                    approval_id TEXT NOT NULL REFERENCES
+                        glossary_approvals(approval_id),
+                    document_custody_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_document_custody(document_custody_id),
+                    snapshot_digest TEXT NOT NULL,
+                    source_object_key TEXT NOT NULL,
+                    source_sha256 TEXT NOT NULL,
+                    source_size_bytes INTEGER NOT NULL
+                )
+                """
+            )
 
     def _next_job_id(self) -> str:
         row = self._connection.execute(
@@ -1975,6 +2295,37 @@ class SQLiteTranslationJobStore:
         if row is None:
             raise ValueError("Glossary approval does not exist")
         return _glossary_approval_from_row(row)
+
+    def _require_strict_docx_v3_authorization(
+        self,
+        authorization_id: str,
+    ) -> StrictDocxV3Authorization:
+        row = self._connection.execute(
+            """
+            SELECT authorization.*, custody.source_object_key, custody.source_sha256,
+                   custody.source_size_bytes, custody.document_kind
+            FROM strict_docx_v3_authorizations authorization
+            JOIN strict_docx_v3_document_custody custody
+              ON custody.document_custody_id = authorization.document_custody_id
+            WHERE authorization.authorization_id = ?
+            """,
+            (authorization_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Strict DOCX v3 authorization does not exist")
+        return StrictDocxV3Authorization(
+            authorization_id=row["authorization_id"],
+            approval_id=row["approval_id"],
+            document_custody_id=row["document_custody_id"],
+            snapshot_digest=row["snapshot_digest"],
+            source_object_key=row["source_object_key"],
+            source_sha256=row["source_sha256"],
+            source_size_bytes=row["source_size_bytes"],
+            document_kind=row["document_kind"],
+            authorization_status=row["authorization_status"],
+            created_at=_from_db_time(row["created_at"]),
+            revoked_at=_optional_db_time(row["revoked_at"]),
+        )
 
     def _get_work_unit(self, work_unit_id: str) -> PersistentWorkUnit | None:
         row = self._connection.execute(
@@ -2253,6 +2604,39 @@ def _strict_admission_validation_error(
     return None
 
 
+def _strict_v3_admission_validation_error(
+    request: StrictDocxV3AdmissionRequest,
+) -> str | None:
+    if request.strict_schema_version != STRICT_DOCX_V3_SCHEMA_VERSION:
+        return "strict_docx_v3_unsupported_schema"
+    if request.document_kind != "docx":
+        return "document_kind_not_docx"
+    if (
+        not request.authorization_id.strip()
+        or not request.source_object_key.strip()
+        or len(request.source_sha256) != 64
+        or request.source_size_bytes <= 0
+    ):
+        return "invalid_request"
+    v2_request = StrictDocxAdmissionRequest(
+        approval_id="v3-authority",
+        order_id=request.order_id,
+        user_id=request.user_id,
+        file_id=request.file_id,
+        file_name=request.file_name,
+        document_kind=request.document_kind,
+        source_object_key=request.source_object_key,
+        source_language=request.source_language,
+        target_language=request.target_language,
+        adapter_version=request.adapter_version,
+        prompt_version=request.prompt_version,
+        pricing_snapshot_id=request.pricing_snapshot_id,
+        translation_policy=request.translation_policy,
+        work_units=request.work_units,
+    )
+    return _strict_admission_validation_error(v2_request)
+
+
 def _strict_docx_claim_guard(*, job_id_reference: str) -> str:
     approval_schema = GLOSSARY_APPROVAL_SCHEMA_VERSION
     binding_schema = GLOSSARY_BINDING_SCHEMA_VERSION
@@ -2277,6 +2661,38 @@ def _strict_docx_claim_guard(*, job_id_reference: str) -> str:
                         OR binding.binding_schema_version IS NOT {binding_schema}
                         OR custody.snapshot_schema_version IS NOT {snapshot_schema}
                         OR custody.retention_mode IS NOT 'retain'
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM strict_docx_v3_job_authorizations binding
+                  LEFT JOIN strict_docx_v3_authorizations authorization
+                    ON authorization.authorization_id = binding.authorization_id
+                  LEFT JOIN glossary_approvals approval
+                    ON approval.approval_id = binding.approval_id
+                  LEFT JOIN strict_docx_v3_document_custody custody
+                    ON custody.document_custody_id = binding.document_custody_id
+                  LEFT JOIN translation_jobs job
+                    ON job.id = binding.job_id
+                  WHERE binding.job_id = {job_id_reference}
+                    AND (
+                        authorization.authorization_id IS NULL
+                        OR approval.approval_id IS NULL
+                        OR custody.document_custody_id IS NULL
+                        OR job.id IS NULL
+                        OR authorization.authorization_status IS NOT 'approved'
+                        OR approval.approval_status IS NOT 'approved'
+                        OR authorization.approval_id IS NOT binding.approval_id
+                        OR authorization.document_custody_id
+                            IS NOT binding.document_custody_id
+                        OR authorization.snapshot_digest IS NOT binding.snapshot_digest
+                        OR approval.snapshot_digest IS NOT binding.snapshot_digest
+                        OR custody.source_object_key IS NOT binding.source_object_key
+                        OR custody.source_sha256 IS NOT binding.source_sha256
+                        OR custody.source_size_bytes IS NOT binding.source_size_bytes
+                        OR custody.document_kind IS NOT 'docx'
+                        OR job.document_kind IS NOT 'docx'
+                        OR job.source_object_key IS NOT binding.source_object_key
                     )
               )
     """
