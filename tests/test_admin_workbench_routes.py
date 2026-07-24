@@ -6,8 +6,9 @@ specifies them. They exercise:
 
 * the new ``/admin/workbench-entry`` redirect and the four
   Workbench shell surfaces (select / recovery / glossary / future);
-* the eight mutating POSTs that all fail-closed to the honest
-  ``not-wired`` notice;
+* the remaining unwired mutating POSTs that fail-closed to the honest
+  ``not-wired`` notice, plus the two authenticated, CSRF-guarded glossary
+  lock actions that make local, in-memory-only state changes;
 * the Admin overview gets exactly one calm ``Open Workbench`` CTA
   (no new nav entry, no nav surgery);
 * the Workbench nav rail has 7 entries (Glossary + 6 placeholders);
@@ -376,6 +377,131 @@ class WorkbenchRoutesTest(unittest.TestCase):
             '?document=ready%20helper%20lock">Lock all approved</button>',
             helper_match.group(1),
         )
+
+    def test_lock_all_approved_marks_local_terms_locked(self) -> None:
+        """The visible local lock action must not claim a no-op succeeded."""
+        document_id = "local-lock-state"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        term, reason = state.append_term(
+            source="Aster",
+            target="Астер",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert term is not None
+        approved, reason = state.accept_term(term.id)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(approved)
+
+        response = self.client.post(
+            "/admin/workbench/glossary/terms/lock-all-approved"
+            f"?document={document_id}",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(state.terms[term.id].status.value, "locked")
+        self.assertIn('data-status="locked"', response.text)
+        self.assertNotIn("Saving is not wired in this slice.", response.text)
+
+    def test_lock_term_marks_only_that_local_term_locked(self) -> None:
+        document_id = "local-single-lock-state"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        selected_term, reason = state.append_term(
+            source="Beryl",
+            target="Берил",
+            type_="name",
+            notes="local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert selected_term is not None
+        untouched_term, reason = state.append_term(
+            source="Citrine",
+            target="Цитрин",
+            type_="name",
+            notes="another local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert untouched_term is not None
+        approved, reason = state.accept_term(selected_term.id)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(approved)
+        approved, reason = state.accept_term(untouched_term.id)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(approved)
+
+        response = self.client.post(
+            f"/admin/workbench/glossary/terms/{selected_term.id}/lock",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(state.terms[selected_term.id].status.value, "locked")
+        self.assertEqual(state.terms[untouched_term.id].status.value, "approved")
+        self.assertIn(f'data-term-id="{selected_term.id}"', response.text)
+        self.assertIn('data-status="locked"', response.text)
+
+    def test_lock_routes_reject_csrf_and_anonymous_requests_without_mutation(
+        self,
+    ) -> None:
+        document_id = "local-lock-guard-state"
+        glossary_url = f"/admin/workbench/glossary?document={document_id}"
+        self.assertEqual(self.client.get(glossary_url).status_code, 200)
+        state = next(iter(WORKBENCH_SESSION_STATE.values()))
+        first_term, reason = state.append_term(
+            source="Garnet",
+            target="Гранат",
+            type_="name",
+            notes="first local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert first_term is not None
+        second_term, reason = state.append_term(
+            source="Jasper",
+            target="Яшма",
+            type_="name",
+            notes="second local synthetic term",
+        )
+        self.assertIsNone(reason)
+        assert second_term is not None
+        for term in (first_term, second_term):
+            approved, reason = state.accept_term(term.id)
+            self.assertIsNone(reason)
+            self.assertIsNotNone(approved)
+
+        endpoints = (
+            f"/admin/workbench/glossary/terms/{first_term.id}/lock?document={document_id}",
+            "/admin/workbench/glossary/terms/lock-all-approved"
+            f"?document={document_id}",
+        )
+        for endpoint in endpoints:
+            rejected = self.client.post(
+                endpoint,
+                data={"csrf_token": "invalid-token"},
+                follow_redirects=False,
+            )
+            self.assertEqual(rejected.status_code, 403, endpoint)
+            self.assertEqual(state.terms[first_term.id].status.value, "approved")
+            self.assertEqual(state.terms[second_term.id].status.value, "approved")
+
+        self.client.cookies.clear()
+        for endpoint in endpoints:
+            rejected = self.client.post(
+                endpoint,
+                data={"csrf_token": self.csrf_token},
+                follow_redirects=False,
+            )
+            self.assertEqual(rejected.status_code, 303, endpoint)
+            self.assertTrue(rejected.headers["location"].endswith("/admin/login"))
+            self.assertEqual(state.terms[first_term.id].status.value, "approved")
+            self.assertEqual(state.terms[second_term.id].status.value, "approved")
 
     def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
         response = self.client.get("/admin/workbench/glossary?document=opaque-2")
@@ -781,7 +907,9 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertTrue(response.headers["location"].endswith("/admin/login"))
 
-    def test_workbench_term_edit_lock_unlock_routes_render_notice(self) -> None:
+    def test_workbench_unwired_actions_render_notice_but_local_lock_actions_do_not(
+        self,
+    ) -> None:
         endpoints = [
             ("/admin/workbench/glossary/terms/some-id/edit", "Edit"),
             ("/admin/workbench/glossary/terms/some-id/accept", "Accept"),
@@ -808,6 +936,8 @@ class WorkbenchRoutesTest(unittest.TestCase):
                     self.assertIn("Local glossary check blocked", page.text)
                 elif path.endswith("/edit"):
                     self.assertIn("No terms yet.", page.text)
+                elif path.endswith("/lock") or path.endswith("lock-all-approved"):
+                    self.assertNotIn("Saving is not wired in this slice.", page.text)
                 else:
                     self.assertIn("Saving is not wired in this slice.", page.text)
 
