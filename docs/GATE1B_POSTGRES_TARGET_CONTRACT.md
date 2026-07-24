@@ -20,11 +20,11 @@ Establish one backend-neutral strict-DOCX authorization contract. PostgreSQL is 
 | Unsupported backend | Missing strict capability returns a typed denial before writes and must not fall back to legacy `create_job()`. |
 | Runtime glossary context | It may be called approved only after a strict-binding reader loads and revalidates it. No provider call is required unless an existing bounded script directly exercises that route. |
 
-## Confirmed current baseline and M0 reconciliation
+## Confirmed source-pinned baseline and M0 reconciliation
 
-The #837 reconciliation documents a SQLite-only prototype: strict admission and claim guards exist in the SQLite store, while the source-pinned `19dc045` PostgreSQL baseline lacks strict tables, APIs and claim predicates. `PersistentJobStore` remains the shared API; `SQLiteStrictDocxJobStore` currently carries the four strict APIs (`src/translator_service/persistent_job_store.py:21-96`).
+At source-pinned baseline `19dc045`, the #837 reconciliation documents a SQLite-only prototype: strict admission and claim guards exist in the SQLite store, while PostgreSQL lacks strict tables, APIs and claim predicates. `PersistentJobStore` remains the shared API; `StrictDocxJobStore` carries the four strict APIs (`src/translator_service/persistent_job_store.py:75-105`). These are historical baseline statements, not claims about current HEAD.
 
-The current SQLite implementation rejects reuse of an approval already bound to a strict job. That is a confirmed current behavior, not evidence that SQLite already conforms to the approved target's exact-match reuse rule. The baseline also does not demonstrate runtime consumption of `read_approved_glossary_snapshot()`.
+At that baseline, the SQLite implementation rejects reuse of an approval already bound to a strict job. That is a confirmed baseline behavior, not evidence that SQLite already conforms to the approved target's exact-match reuse rule. The baseline also does not demonstrate runtime consumption of `read_approved_glossary_snapshot()`.
 
 The later dirty working-tree PostgreSQL strict-DOCX additions are not parity authority: Slice M0 quarantines their three strict table definitions for immutable migration v2 and supersedes their `SCHEMA_SQL` startup-DDL placement before merge. Migration v1 is the exact `19dc045` scheduler baseline, subject to a fail-closed legacy baseline validator. See `docs/GATE1B_POSTGRES_MIGRATION_RECONCILIATION.md`.
 

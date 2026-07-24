@@ -1,7 +1,7 @@
-# Gate 1B strict DOCX durable authorization: current-main reconciliation
+# Gate 1B strict DOCX durable authorization: source-pinned baseline
 
 **Date:** 2026-07-24
-**Baseline verified:** `HEAD` is `19dc0455e4c9a05af564c0191fac977b40bf11df` (`test(gate1b): verify durable binding boundaries (#837)`).
+**Source-pinned baseline verified:** `19dc0455e4c9a05af564c0191fac977b40bf11df` (`test(gate1b): verify durable binding boundaries (#837)`).
 **Task type:** spike/discovery and docs-only.
 **Risk level:** high for any follow-on: persistent database state, scheduler claim semantics, worker/provider admission, and backend parity.
 **Approval status:** this reconciliation changes no production code, state, provider configuration, PR, or merge. The approved bounded implementation route is recorded in `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`. The earlier readiness spike remains a design packet and was not, by itself, approval to change database/state or runtime behavior (`docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md:21,27,301`). The approved route does not prove or independently approve PostgreSQL implementation, a migration, runtime activation, rollout, Gate 1 closure, beta, release, or quality outcome.
@@ -14,7 +14,9 @@
 
 ## Confirmed facts
 
-### 1. SQLite approval, custody, and binding exist now
+All confirmed facts in this reconciliation are scoped to source-pinned baseline `19dc045`, not current HEAD.
+
+### 1. SQLite approval, custody, and binding at the baseline
 
 - `GlossaryApproval` stores `approval_id`, `custody_id`, digest, snapshot/approval schema versions, status, and revocation time in `src/translator_service/persistent_jobs.py:90-100`.
 - SQLite `create_glossary_approval()` verifies the payload SHA-256 and supported schema versions, then begins `BEGIN IMMEDIATE`, creates/reuses a custody row, and inserts an `approved` approval row atomically (`persistent_jobs.py:243-311`).
@@ -23,7 +25,7 @@
 - The SQLite schema creates `glossary_approvals` and immutable-per-job `strict_job_glossary_bindings` tables. The binding records `approval_id`, `custody_id`, digest, and binding schema version; `job_id` is its primary key (`persistent_jobs.py:1905-1932`).
 - `delete_job()` declines deletion when a strict binding exists (`persistent_jobs.py:613-643`). No retention/cleanup API was found in the opened strict seam.
 
-### 2. Strict admission is implemented for SQLite only
+### 2. Strict admission at the baseline is implemented for SQLite only
 
 - `StrictDocxAdmissionRequest` contains an approval id, document/job metadata, ordered work-unit plans, and strict/approval/binding/snapshot schema values (`persistent_jobs.py:109-128`). It does **not** accept a caller-supplied custody id or expected snapshot digest; the store derives binding values from the selected approval row.
 - `SQLiteTranslationJobStore.admit_strict_docx_job()` begins `BEGIN IMMEDIATE`, validates the request, reads approval plus custody, fails before writes for invalid/missing/revoked/mismatched approval, rejects an approval already bound to any strict job, then inserts job, binding, and all work units before one commit (`persistent_jobs.py:363-484`).
@@ -48,7 +50,7 @@
 
 ### 5. PostgreSQL and interface parity are absent
 
-- `PersistentJobStore` remains the common API. The four SQLite strict-DOCX APIs—glossary-approval creation/revocation, custody read, and strict admission—are declared on `SQLiteStrictDocxJobStore` (`persistent_job_store.py:21-96`). `PostgresSchedulerStore` does not implement that strict capability, so backend parity remains absent.
+- `PersistentJobStore` remains the common API. The four SQLite strict-DOCX APIs—glossary-approval creation/revocation, custody read, and strict admission—are declared on `StrictDocxJobStore` (`persistent_job_store.py:75-105`). `PostgresSchedulerStore` does not implement that strict capability, so backend parity remains absent.
 - `PostgresSchedulerStore` and `SCHEMA_SQL` contain only ordinary job/work-unit/scheduler/provider-slot structures in the opened source; no Gate 1B custody, approval, or strict-binding tables, methods, or claim predicate were found (`postgres_scheduler.py:61-196,219-369,431-623`).
 - PostgreSQL's claim CTE and final update contain no strict binding eligibility check (`postgres_scheduler.py:249-369`).
 - `read_approved_glossary_snapshot()` returns payload only when SQLite approval/custody consistency is valid (`persistent_jobs.py:334-361`), but no opened worker/scheduler call consumes it. A strict SQLite job is therefore admission/claim guarded, but the current runtime glossary hook is not demonstrably sourced from its durable approval/custody record.
