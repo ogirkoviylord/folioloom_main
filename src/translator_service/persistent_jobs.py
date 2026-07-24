@@ -165,6 +165,25 @@ class StrictDocxV3Authorization:
 
 
 @dataclass(frozen=True)
+class DocumentGlossaryRevision:
+    revision_id: str
+    document_custody_id: str
+    source_object_key: str
+    source_sha256: str
+    source_size_bytes: int
+    revision_sequence: int
+    parent_revision_id: str | None
+    approval_id: str
+    snapshot_custody_id: str
+    snapshot_payload_sha256: str
+    glossary_content_signature: str
+    actor_id: str
+    actor_role: str
+    authn_schema_version: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class StrictAdmissionResult:
     job: PersistentTranslationJob | None
     work_units: list["PersistentWorkUnit"]
@@ -266,6 +285,7 @@ class PersistentWorkerHeartbeat:
 
 class SQLiteTranslationJobStore:
     strict_docx_migration_ready = True
+    document_glossary_authoring_migration_ready = True
 
     def __init__(self, db_path: str | Path) -> None:
         if str(db_path) != ":memory:":
@@ -2266,6 +2286,50 @@ class SQLiteTranslationJobStore:
                     source_object_key TEXT NOT NULL,
                     source_sha256 TEXT NOT NULL,
                     source_size_bytes INTEGER NOT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_glossary_revisions (
+                    revision_id TEXT PRIMARY KEY,
+                    document_custody_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_document_custody(document_custody_id),
+                    revision_sequence INTEGER NOT NULL CHECK (revision_sequence >= 1),
+                    parent_revision_id TEXT REFERENCES
+                        document_glossary_revisions(revision_id),
+                    approval_id TEXT NOT NULL UNIQUE REFERENCES
+                        glossary_approvals(approval_id),
+                    snapshot_custody_id TEXT NOT NULL REFERENCES
+                        glossary_snapshot_custody(custody_id),
+                    snapshot_payload_sha256 TEXT NOT NULL,
+                    glossary_content_signature TEXT NOT NULL,
+                    snapshot_schema_version INTEGER NOT NULL,
+                    serialization_schema_version TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+                    authn_schema_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(document_custody_id, revision_sequence),
+                    UNIQUE(document_custody_id, snapshot_payload_sha256)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_glossary_revision_events (
+                    event_id TEXT PRIMARY KEY,
+                    revision_id TEXT NOT NULL REFERENCES
+                        document_glossary_revisions(revision_id),
+                    event_type TEXT NOT NULL CHECK (
+                        event_type IN ('created', 'superseded', 'revoked')
+                    ),
+                    successor_revision_id TEXT REFERENCES
+                        document_glossary_revisions(revision_id),
+                    actor_id TEXT NOT NULL,
+                    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+                    authn_schema_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 )
                 """
             )

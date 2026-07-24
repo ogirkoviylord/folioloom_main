@@ -61,9 +61,8 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertEqual(
             ledger_inserts,
             [
-                {"version": 1, "checksum": MIGRATIONS[0].checksum},
-                {"version": 2, "checksum": MIGRATIONS[1].checksum},
-                {"version": 3, "checksum": MIGRATIONS[2].checksum},
+                {"version": migration.version, "checksum": migration.checksum}
+                for migration in MIGRATIONS
             ],
         )
 
@@ -87,18 +86,18 @@ class PostgresMigrationsTest(unittest.TestCase):
         )
         self.assertFalse(_ledger_inserts(connection))
 
-    def test_fresh_database_applies_strict_docx_v2_then_v3_after_scheduler_baseline(
+    def test_fresh_database_applies_strict_docx_v2_to_v4_after_scheduler_baseline(
         self,
     ):
         connection = _RecordingConnection(ledger_rows=[], baseline_relations=[])
 
         run_postgres_migrations(connection)
 
-        if [migration.version for migration in MIGRATIONS] != [1, 2, 3]:
-            self.fail("strict DOCX migrations v2 and v3 are missing")
+        self.assertEqual([migration.version for migration in MIGRATIONS], [1, 2, 3, 4])
         self.assertTrue(connection.contains(MigrationSql.v1_payload))
         self.assertTrue(connection.contains(MigrationSql.v2_payload()))
         self.assertTrue(connection.contains(MigrationSql.v3_payload()))
+        self.assertTrue(connection.contains(MigrationSql.v4_payload()))
         ledger_inserts = [
             params
             for statement, params in zip(
@@ -109,9 +108,8 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertEqual(
             ledger_inserts,
             [
-                {"version": 1, "checksum": MIGRATIONS[0].checksum},
-                {"version": 2, "checksum": MIGRATIONS[1].checksum},
-                {"version": 3, "checksum": MIGRATIONS[2].checksum},
+                {"version": migration.version, "checksum": migration.checksum}
+                for migration in MIGRATIONS
             ],
         )
 
@@ -129,6 +127,7 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertFalse(connection.contains(MigrationSql.v1_payload))
         self.assertTrue(connection.contains(MigrationSql.v2_payload()))
         self.assertTrue(connection.contains(MigrationSql.v3_payload()))
+        self.assertTrue(connection.contains(MigrationSql.v4_payload()))
         ledger_inserts = [
             params
             for statement, params in zip(
@@ -139,9 +138,8 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertEqual(
             ledger_inserts,
             [
-                {"version": 1, "checksum": MIGRATIONS[0].checksum},
-                {"version": 2, "checksum": MIGRATIONS[1].checksum},
-                {"version": 3, "checksum": MIGRATIONS[2].checksum},
+                {"version": migration.version, "checksum": migration.checksum}
+                for migration in MIGRATIONS
             ],
         )
         v2_sql_index = connection.statements.index(MigrationSql.v2_payload())
@@ -339,6 +337,26 @@ class PostgresMigrationsTest(unittest.TestCase):
             v3_sql,
         )
 
+    def test_v4_appends_document_glossary_provenance_without_mutating_v1_to_v3(self):
+        self.assertEqual(
+            [migration.checksum for migration in MIGRATIONS[:3]],
+            [
+                "251575e3fc6317646b871b314ea0f45b172955b3b5cc44961b0f656e7435f54e",
+                "d6831336219ce6c057a587de47263dda099d56e2dddbf6e91562d5c1554b1b36",
+                "b778da4640f83c205f8445248c8a46c8a050c807e7828b6901fd14a69ac5fb40",
+            ],
+        )
+        v4_sql = MigrationSql.v4_payload()
+        self.assertEqual(MIGRATIONS[-1].version, 4)
+        self.assertIn("CREATE TABLE IF NOT EXISTS document_glossary_revisions", v4_sql)
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS document_glossary_revision_events", v4_sql
+        )
+        self.assertIn("UNIQUE(document_custody_id, revision_sequence)", v4_sql)
+        self.assertIn("UNIQUE(document_custody_id, snapshot_payload_sha256)", v4_sql)
+        self.assertIn("CHECK (actor_role = 'owner')", v4_sql)
+        self.assertIn("'created', 'superseded', 'revoked'", v4_sql)
+
     def test_migration_sql_failure_does_not_record_ledger_row(self):
         connection = _RecordingConnection(
             ledger_rows=[], baseline_relations=[], fail_on=MigrationSql.v1_payload
@@ -365,6 +383,10 @@ class MigrationSql:
     @staticmethod
     def v3_payload() -> str:
         return MIGRATIONS[2].sql_payload
+
+    @staticmethod
+    def v4_payload() -> str:
+        return MIGRATIONS[3].sql_payload
 
 
 class _RecordingConnection:
