@@ -135,6 +135,50 @@ class DocumentGlossaryAuthoringTest(unittest.TestCase):
             self.assertEqual(_count(store, "strict_docx_v3_authorizations"), 0)
             self.assertEqual(_count(store, "translation_jobs"), 0)
 
+    def test_active_read_reports_missing_provenance_for_custody_without_revision(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            source = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                content=b"verified document bytes",
+            )
+            custody = register_verified_docx_custody(
+                store=store, storage=storage, source_object_key=source.object_key
+            )
+            self.assertNotIsInstance(custody, GlossaryAuthoringDenied)
+            counts_before_read = {
+                table: _count(store, table)
+                for table in (
+                    "strict_docx_v3_document_custody",
+                    "document_glossary_revisions",
+                    "document_glossary_revision_events",
+                    "glossary_approvals",
+                    "glossary_snapshot_custody",
+                )
+            }
+
+            result = read_active_document_glossary_revision(
+                store=store, document_custody_id=custody.document_custody_id
+            )
+
+            self.assertEqual(
+                result,
+                GlossaryAuthoringDenied("glossary_authoring_provenance_missing"),
+            )
+            self.assertEqual(
+                {
+                    table: _count(store, table)
+                    for table in counts_before_read
+                },
+                counts_before_read,
+            )
+
     def test_supersede_then_revoke_leaves_append_only_history_and_no_active_revision(
         self,
     ):

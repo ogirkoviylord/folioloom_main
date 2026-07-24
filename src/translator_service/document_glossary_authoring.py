@@ -535,6 +535,17 @@ def read_active_document_glossary_revision(
         return GlossaryAuthoringDenied("glossary_authoring_unsupported_backend")
     row = _active_revision(store._connection, document_custody_id)
     if row is None:
+        custody_without_revision = store._connection.execute(
+            """SELECT 1 FROM strict_docx_v3_document_custody custody
+            WHERE custody.document_custody_id = ?
+            AND NOT EXISTS (
+                SELECT 1 FROM document_glossary_revisions revision
+                WHERE revision.document_custody_id = custody.document_custody_id
+            )""",
+            (document_custody_id,),
+        ).fetchone()
+        if custody_without_revision is not None:
+            return GlossaryAuthoringDenied("glossary_authoring_provenance_missing")
         return GlossaryAuthoringDenied("glossary_authoring_approval_revoked")
     if not _revision_is_consistent(store._connection, row):
         return GlossaryAuthoringDenied("glossary_authoring_provenance_inconsistent")
