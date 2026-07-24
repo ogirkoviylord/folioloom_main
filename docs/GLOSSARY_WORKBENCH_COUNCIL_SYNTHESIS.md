@@ -1,7 +1,7 @@
 # Glossary Engine → Workbench Council Synthesis
 
 **Date:** 2026-07-24
-**Status:** Active planning record; implementation requires the owner decision below
+**Status:** Active planning record; the bounded local contract was owner-approved and its local sequence is merged through #836. It is not durable authorization or Gate 1 closure.
 **Canonical strategy:** [#813](https://github.com/ogirkoviylord/folioloom_main/issues/813) and `docs/CAT_WORKFLOW_GATES.md`
 **Council graph:** proposal `t_63de6d11`; GPT-Critic `t_447a802f`; DeepSeek-Critic `t_326b3f83`; MiMo-Critic `t_db14176c`; required GLM-Council `t_c80d9020`; synthesis `t_bcd10381`.
 
@@ -26,25 +26,26 @@ Keep and adapt the existing glossary engine, but make manual author control the 
 
 ## Current integrated baseline
 
-The local approval/rehearsal, bounded Workbench shell, pure DOCX preflight and truthful local-observation follow-up are already on `main` through PRs #819, #820, #824, #825, #833 and #834. Treat their merged code as current local-prototype evidence, not as durable document custody, runtime authority or a Gate 2 workflow claim.
+The local approval/rehearsal, bounded Workbench shell, pure DOCX preflight, truthful local-observation follow-up and local snapshot-lock wiring are already on `main` through PRs #819, #820, #824, #825, #833, #834 and #836. Treat their merged code as current local-prototype evidence, not as durable document custody, runtime authority, a Gate 1 closure or a Gate 2 workflow claim.
 
-## Owner decision required before the next coder card
+## Completed owner decision and local sequence
 
-Approve or reject this exact **local-only** contract:
+The completed owner approval covered this exact **local-only** contract:
 
 1. A new in-memory `ManualGlossaryApproval` / local snapshot lock exists only for a prevalidated bounded DOCX fixture slice.
 2. It binds an opaque fixture-local reference to the exact `GlossarySnapshot` signature.
 3. A selected-content or signature change invalidates the lock.
 4. A missing or mismatched lock fails closed before glossary selection, context rendering or runner preflight.
 
-If approved, “local” means Python in-memory objects in a test process only. It excludes browser/admin persistence, file I/O, document upload/parser execution, provider/network calls, DB/storage, logs/telemetry/artifacts, resolver/job/worker/cache paths, Telegram and server operations. Process restart loses the local state.
+The owner approved this local-only contract and the bounded sequence is merged through #836. “Local” means Python in-memory objects in a test process only. It excludes browser/admin persistence, file I/O, document upload/parser execution, provider/network calls, DB/storage, logs/telemetry/artifacts, resolver/job/worker/cache paths, Telegram and server operations. Process restart loses the local state.
 
-## Approved planning sequence after that owner decision
+## Completed local planning sequence and next technical route
 
-1. **Engine contract discovery first:** source-pinned fields, validation, signature and invalidation invariants for the local lock; no runtime bridge.
+1. **Engine contract discovery:** source-pinned fields, validation, signature and invalidation invariants for the local lock; no runtime bridge.
 2. **Shared vocabulary:** use `local snapshot lock` and `local structural preflight`; do not claim authorization, runtime readiness, glossary active in translation, job creation or export readiness.
-3. **Local UX/prototype work second:** only after the contract and vocabulary are fixed.
-4. **Representative quality evidence later:** before any automatic-runtime, beta or release claim.
+3. **Local UX/prototype:** completed within the bounded local contract through #836.
+4. **Next technical route:** reconcile the current strict-DOCX durable binding seams before proposing any durable implementation delta.
+5. **Representative quality evidence later:** before any automatic-runtime, beta or release claim.
 
 ## Explicit non-goals for the conditional first slice
 

@@ -33,7 +33,7 @@ Not current state:
 Immediate focus areas:
 
 - Gate 0: product reframe / scope lock around #813.
-- Gate 1: owner decision on the bounded local snapshot-lock contract, then engine-contract discovery before local UX/prototype work; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+- Gate 1: the owner-approved bounded local snapshot-lock sequence is merged through #836; next reconcile current strict-DOCX durable binding seams before proposing durable implementation. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 - Gate 2: CAT-like author workflow thin slice.
 - Gate 3: representative quality evidence.
 - Keep old Gate B operational work as carry-forward safety infrastructure, not as the product roadmap.
@@ -135,9 +135,9 @@ Bounded live smoke after local/provider wiring failed readiness:
 
 Treat as useful evidence, not successful live quality evidence.
 
-### 2026-07-24 — Glossary Engine → Workbench Council synthesis
+### 2026-07-24 — Glossary Engine → Workbench Council synthesis and completed local snapshot-lock sequence
 
-All GPT, DeepSeek, MiMo and owner-required GLM Council lanes completed. The synthesis retained the glossary core as reusable, separated it from Telegram/persistent runtime authority and requested an owner decision before a new coder card: a local-only in-memory snapshot lock for a bounded DOCX fixture must bind an opaque local reference and exact snapshot signature, invalidate on change and fail closed before selection/rendering/preflight. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+All GPT, DeepSeek, MiMo and owner-required GLM Council lanes completed. The owner approved the bounded local-only in-memory snapshot-lock contract; its local approval/rehearsal, preflight, observation and Workbench wiring sequence is merged through #836. It binds an opaque local reference to the exact snapshot signature, invalidates on selected-content or signature change and fails closed before selection/rendering/preflight. This remains local-prototype evidence only, not durable custody/authority, runtime activation, Gate 1 closure or a Gate 2 workflow claim. The next technical route is strict-DOCX durable-binding reconciliation. See `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 
 ## Open Owner Questions
 

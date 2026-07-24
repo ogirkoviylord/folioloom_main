@@ -104,7 +104,7 @@ Blocking caveat:
 
 ### Product / quality gaps before design-partner alpha
 
-- Owner approval of the local-only snapshot-lock contract, then source-pinned engine contract discovery before further local glossary UX work; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
+- The owner-approved local-only snapshot-lock sequence is merged through #836; next reconcile current strict-DOCX durable binding seams before proposing any durable implementation. This remains local-prototype evidence only; see `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md`.
 - Glossary preflight status and post-run compliance report.
 - CAT-like source-target/segment review workflow.
 - Representative before/after quality evidence with glossary controls.

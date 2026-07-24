@@ -1578,19 +1578,75 @@ class SQLiteTranslationJobStoreTest(unittest.TestCase):
                 self.assertIsNone(claim)
                 self.assertEqual(_guard_b_claim_snapshot(store), before)
 
-    def test_direct_claim_denies_revoked_strict_binding_without_mutation(self):
-        store = self._memory_store()
-        approval = _create_approval(store)
-        admitted = store.admit_strict_docx_job(_strict_request(approval.approval_id))
-        if admitted.job is None:
-            self.fail("strict job admission unexpectedly denied")
-        store.revoke_glossary_approval(approval_id=approval.approval_id)
-        before = _guard_b_claim_snapshot(store)
+    def test_direct_claim_denies_invalid_strict_bindings_without_mutation(self):
+        for invalid_binding in (
+            "revoked_approval",
+            "missing_approval",
+            "missing_custody",
+            "digest_mismatch",
+            "custody_mismatch",
+            "unsupported_binding_schema",
+        ):
+            with self.subTest(invalid_binding=invalid_binding):
+                store = self._memory_store()
+                approval = _create_approval(store)
+                admitted = store.admit_strict_docx_job(
+                    _strict_request(approval.approval_id)
+                )
+                if admitted.job is None:
+                    self.fail("strict job admission unexpectedly denied")
 
-        claim = store.claim_next_work_unit(admitted.job.id, worker_id="worker-a")
+                if invalid_binding == "revoked_approval":
+                    store.revoke_glossary_approval(approval_id=approval.approval_id)
+                elif invalid_binding == "missing_approval":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_approvals WHERE approval_id = ?",
+                        (approval.approval_id,),
+                    )
+                elif invalid_binding == "missing_custody":
+                    _delete_strict_binding_dependency(
+                        store,
+                        "DELETE FROM glossary_snapshot_custody WHERE custody_id = ?",
+                        (approval.custody_id,),
+                    )
+                elif invalid_binding == "digest_mismatch":
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET snapshot_digest = 'corrupt-digest'
+                        WHERE job_id = ?
+                        """,
+                        (admitted.job.id,),
+                    )
+                elif invalid_binding == "custody_mismatch":
+                    _delete_strict_binding_dependency(
+                        store,
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET custody_id = 'corrupt-custody-id'
+                        WHERE job_id = ?
+                        """,
+                        (admitted.job.id,),
+                    )
+                else:
+                    store._connection.execute(
+                        """
+                        UPDATE strict_job_glossary_bindings
+                        SET binding_schema_version = 999
+                        WHERE job_id = ?
+                        """,
+                        (admitted.job.id,),
+                    )
+                before = _guard_b_claim_snapshot(store)
 
-        self.assertIsNone(claim)
-        self.assertEqual(_guard_b_claim_snapshot(store), before)
+                claim = store.claim_next_work_unit(
+                    admitted.job.id,
+                    worker_id="worker-a",
+                )
+
+                self.assertIsNone(claim)
+                self.assertEqual(_guard_b_claim_snapshot(store), before)
 
     def test_direct_worker_does_not_load_or_translate_revoked_strict_job(self):
         from translator_service.worker import run_next_persistent_work_unit

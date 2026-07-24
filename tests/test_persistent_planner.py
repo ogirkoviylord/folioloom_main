@@ -28,6 +28,7 @@ from translator_service.persistent_planner import (
     create_persistent_strict_docx_job_plan,
     create_persistent_txt_job_plan,
 )
+from translator_service.scheduler import SchedulerLimits
 
 
 class PersistentPlannerTest(unittest.TestCase):
@@ -243,6 +244,74 @@ class PersistentPlannerTest(unittest.TestCase):
                 sha256("Source\n\nTarget".encode("utf-8")).hexdigest(),
             )
             self.assertEqual(plan.work_units, persisted_units)
+
+    def test_legacy_docx_plan_with_glossary_creates_no_strict_binding_and_is_claimable(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir) / "objects")
+            store = SQLiteTranslationJobStore(Path(temp_dir) / "jobs.sqlite3")
+            self.addCleanup(store.close)
+            original = storage.put_bytes(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="legacy.docx",
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                content=_make_docx(
+                    """
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:body>
+                        <w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>
+                        <w:p><w:r><w:t>Second paragraph.</w:t></w:r></w:p>
+                      </w:body>
+                    </w:document>
+                    """
+                ),
+            )
+
+            plan = create_persistent_docx_job_plan(
+                store=store,
+                storage=storage,
+                order_id="order-legacy-glossary",
+                user_id="user-42",
+                source_object_key=original.object_key,
+                file_name="legacy.docx",
+                source_language="en",
+                target_language="uk",
+                max_fragment_chars=10,
+                glossary_mode="with_glossary",
+            )
+
+            binding_count = store._connection.execute(
+                "SELECT COUNT(*) FROM strict_job_glossary_bindings"
+            ).fetchone()[0]
+            direct_claim = store.claim_next_work_unit(plan.job.id, worker_id="worker-a")
+
+            self.assertEqual(binding_count, 0)
+            self.assertGreaterEqual(len(plan.work_units), 2)
+            self.assertIsNotNone(direct_claim)
+            if direct_claim is None:
+                self.fail("legacy DOCX job unexpectedly not directly claimable")
+            store.complete_work_unit(
+                direct_claim.id,
+                translated_text="First paragraph.",
+                prompt_tokens=0,
+                completion_tokens=0,
+                cache_hit_tokens=0,
+                cache_miss_tokens=0,
+            )
+
+            scheduled_claim = store.claim_next_scheduled_work_unit(
+                worker_id="worker-b",
+                lease_seconds=300,
+                limits=SchedulerLimits(),
+            )
+
+            self.assertIsNotNone(scheduled_claim)
+            if scheduled_claim is not None:
+                self.assertEqual(scheduled_claim.job_id, plan.job.id)
 
     def test_docx_document_form_mode_persists_strict_profile_route(self):
         with TemporaryDirectory() as temp_dir:
