@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,26 +8,40 @@ from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.source_registry_service import (
     _POSTGRES_INSERT_CUSTODY_SQL,
     _POSTGRES_INSERT_EVENT_SQL,
-    _POSTGRES_LIST_SQL,
     _POSTGRES_SELECT_BY_CUSTODY_SQL,
     _POSTGRES_SELECT_BY_KEY_SQL,
     RegisteredOriginalDocxSource,
     SourceRegistryActor,
     SourceRegistryDenied,
     _register_postgres,
-    list_registered_original_docx_sources,
-    register_known_original_docx_source,
+    register_verified_original_docx_source,
     select_registered_original_docx_source,
 )
-from translator_service.verified_original_docx import VerifiedOriginalDocxSource
+from translator_service.verified_original_docx import (
+    VerifiedOriginalDocxSource,
+    verify_original_docx_source,
+)
 
 
 class SourceRegistryServiceTest(unittest.TestCase):
-    def test_postgres_sql_shapes_keep_list_metadata_only_and_bind_actor_scope(self):
+    def test_public_registration_accepts_only_verified_source_and_has_no_list_surface(
+        self,
+    ):
+        import translator_service.source_registry_service as registry_service
+
+        parameters = inspect.signature(
+            register_verified_original_docx_source
+        ).parameters
+
+        self.assertEqual(set(parameters), {"store", "actor", "source"})
+        self.assertNotIn("source_object_key", parameters)
+        self.assertFalse(
+            hasattr(registry_service, "list_registered_original_docx_sources")
+        )
+
+    def test_postgres_sql_shapes_keep_registration_canonical_and_bind_actor_scope(self):
         self.assertIn("%(source_object_key)s", _POSTGRES_SELECT_BY_KEY_SQL)
         self.assertIn("%(document_custody_id)s", _POSTGRES_SELECT_BY_CUSTODY_SQL)
-        self.assertIn("%(registry_owner_actor_id)s", _POSTGRES_LIST_SQL)
-        self.assertNotIn("source_object_key", _POSTGRES_LIST_SQL)
         self.assertIn("registry_authn_schema_version", _POSTGRES_INSERT_CUSTODY_SQL)
         self.assertIn(
             "ON CONFLICT (source_object_key) DO NOTHING",
@@ -242,19 +257,17 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
 
     def test_register_reuses_exact_identity_and_records_actor_audit(self):
-        source = self._put_original_docx(b"verified source")
+        source = self._verified_original_docx(b"verified source")
 
-        first = register_known_original_docx_source(
+        first = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
-        second = register_known_original_docx_source(
+        second = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
 
         self.assertEqual(first, second)
@@ -274,7 +287,7 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
 
     def test_sqlite_conflict_denies_mismatched_identity_without_event(self):
-        source = self._put_original_docx(b"content-a")
+        source = self._verified_original_docx(b"content-a")
         document_custody_id = "conflicting-identity-custody"
         self.store._connection.execute(
             """INSERT INTO strict_docx_v3_document_custody (
@@ -296,11 +309,10 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
         self.store._connection.commit()
 
-        result = register_known_original_docx_source(
+        result = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
 
         self.assertEqual(
@@ -315,7 +327,7 @@ class SourceRegistryServiceTest(unittest.TestCase):
         self.assertEqual(event_count, 0)
 
     def test_sqlite_conflict_denies_foreign_provenance_without_event(self):
-        source = self._put_original_docx(b"content-c")
+        source = self._verified_original_docx(b"content-c")
         document_custody_id = "foreign-provenance-custody"
         self.store._connection.execute(
             """INSERT INTO strict_docx_v3_document_custody (
@@ -337,11 +349,10 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
         self.store._connection.commit()
 
-        result = register_known_original_docx_source(
+        result = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
 
         self.assertEqual(
@@ -355,23 +366,20 @@ class SourceRegistryServiceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(event_count, 0)
 
-    def test_list_and_select_are_actor_scoped_and_reverify_storage(self):
-        source = self._put_original_docx(b"verified source")
-        registered = register_known_original_docx_source(
+    def test_select_is_actor_scoped_and_reverifies_storage(self):
+        source = self._verified_original_docx(b"verified source")
+        registered = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
+        self.assertIsInstance(registered, RegisteredOriginalDocxSource)
         other_actor = SourceRegistryActor(
             actor_id="other-owner",
             role="owner",
             authn_schema_version="admin-session-v1",
         )
 
-        listed = list_registered_original_docx_sources(
-            store=self.store, actor=self.owner
-        )
         denied = select_registered_original_docx_source(
             store=self.store,
             storage=self.storage,
@@ -385,7 +393,6 @@ class SourceRegistryServiceTest(unittest.TestCase):
             document_custody_id=registered.document_custody_id,
         )
 
-        self.assertEqual(listed, [registered])
         self.assertEqual(
             denied,
             SourceRegistryDenied("source_registry_ownership_denied"),
@@ -393,7 +400,7 @@ class SourceRegistryServiceTest(unittest.TestCase):
         self.assertEqual(selected, registered)
 
     def test_non_owner_and_malformed_actors_are_denied_by_every_entry_point(self):
-        source = self._put_original_docx(b"verified source")
+        source = self._verified_original_docx(b"verified source")
         actors = (
             SourceRegistryActor(
                 actor_id="non-owner",
@@ -409,15 +416,10 @@ class SourceRegistryServiceTest(unittest.TestCase):
 
         for actor in actors:
             with self.subTest(actor=actor):
-                registered = register_known_original_docx_source(
-                    store=self.store,
-                    storage=self.storage,
-                    actor=actor,
-                    source_object_key=source.object_key,
-                )
-                listed = list_registered_original_docx_sources(
+                registered = register_verified_original_docx_source(
                     store=self.store,
                     actor=actor,
+                    source=source,
                 )
                 selected = select_registered_original_docx_source(
                     store=self.store,
@@ -431,27 +433,18 @@ class SourceRegistryServiceTest(unittest.TestCase):
                     SourceRegistryDenied("source_registry_actor_unauthorized"),
                 )
                 self.assertEqual(
-                    listed,
-                    SourceRegistryDenied("source_registry_actor_unauthorized"),
-                )
-                self.assertEqual(
                     selected,
                     SourceRegistryDenied("source_registry_actor_unauthorized"),
                 )
 
     def test_unsupported_backend_is_denied_by_every_entry_point(self):
-        source = self._put_original_docx(b"verified source")
+        source = self._verified_original_docx(b"verified source")
         unsupported_store = object()
 
-        registered = register_known_original_docx_source(
-            store=unsupported_store,
-            storage=self.storage,
-            actor=self.owner,
-            source_object_key=source.object_key,
-        )
-        listed = list_registered_original_docx_sources(
+        registered = register_verified_original_docx_source(
             store=unsupported_store,
             actor=self.owner,
+            source=source,
         )
         selected = select_registered_original_docx_source(
             store=unsupported_store,
@@ -465,21 +458,16 @@ class SourceRegistryServiceTest(unittest.TestCase):
             SourceRegistryDenied("source_registry_unsupported_backend"),
         )
         self.assertEqual(
-            listed,
-            SourceRegistryDenied("source_registry_unsupported_backend"),
-        )
-        self.assertEqual(
             selected,
             SourceRegistryDenied("source_registry_unsupported_backend"),
         )
 
     def test_select_denies_when_reverified_storage_identity_no_longer_matches(self):
-        source = self._put_original_docx(b"verified source")
-        registered = register_known_original_docx_source(
+        source = self._verified_original_docx(b"verified source")
+        registered = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
         self.store._connection.execute(
             "UPDATE strict_docx_v3_document_custody SET source_sha256 = 'tampered' "
@@ -501,7 +489,7 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
 
     def test_legacy_custody_without_registry_owner_is_not_adopted(self):
-        source = self._put_original_docx(b"verified source")
+        source = self._verified_original_docx(b"verified source")
         self.store._connection.execute(
             """INSERT INTO strict_docx_v3_document_custody (
             document_custody_id, source_object_key, source_sha256,
@@ -517,11 +505,10 @@ class SourceRegistryServiceTest(unittest.TestCase):
         )
         self.store._connection.commit()
 
-        result = register_known_original_docx_source(
+        result = register_verified_original_docx_source(
             store=self.store,
-            storage=self.storage,
             actor=self.owner,
-            source_object_key=source.object_key,
+            source=source,
         )
 
         self.assertEqual(
@@ -536,6 +523,13 @@ class SourceRegistryServiceTest(unittest.TestCase):
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             content=content,
         )
+
+    def _verified_original_docx(self, content: bytes) -> VerifiedOriginalDocxSource:
+        stored = self._put_original_docx(content)
+        source = verify_original_docx_source(self.storage, stored.object_key)
+        self.assertIsInstance(source, VerifiedOriginalDocxSource)
+        assert isinstance(source, VerifiedOriginalDocxSource)
+        return source
 
 
 class _FakePostgresStore:
