@@ -2255,6 +2255,24 @@ class SQLiteTranslationJobStore:
                 )
                 """
             )
+            _ensure_column(
+                self._connection,
+                table_name="strict_docx_v3_document_custody",
+                column_name="registry_owner_actor_id",
+                definition="registry_owner_actor_id TEXT NULL",
+            )
+            _ensure_column(
+                self._connection,
+                table_name="strict_docx_v3_document_custody",
+                column_name="registry_actor_role",
+                definition="registry_actor_role TEXT NULL",
+            )
+            _ensure_column(
+                self._connection,
+                table_name="strict_docx_v3_document_custody",
+                column_name="registry_authn_schema_version",
+                definition="registry_authn_schema_version TEXT NULL",
+            )
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS strict_docx_v3_authorizations (
@@ -2329,6 +2347,22 @@ class SQLiteTranslationJobStore:
                     actor_id TEXT NOT NULL,
                     actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
                     authn_schema_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_registry_events (
+                    registry_event_id TEXT PRIMARY KEY,
+                    document_custody_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_document_custody(document_custody_id),
+                    event_type TEXT NOT NULL CHECK (
+                        event_type IN ('registered', 'registration_reused')
+                    ),
+                    registry_owner_actor_id TEXT NOT NULL,
+                    registry_actor_role TEXT NOT NULL,
+                    registry_authn_schema_version TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
                 """
