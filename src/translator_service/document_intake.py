@@ -98,11 +98,11 @@ def ingest_owner_docx(
                 storage, stored.object_key, created_by_request, registered.code
             )
         return registered
-    except ObjectPublishError:
+    except (ObjectPublishError, OSError):
+        _cleanup_creator_object(storage, object_key, created_by_request)
         return DocumentIntakeDenied("document_intake_storage_unavailable")
     except Exception:
-        if created_by_request:
-            storage.delete_if_unretained(object_key)
+        _cleanup_creator_object(storage, object_key, created_by_request)
         raise
 
 
@@ -156,7 +156,7 @@ def catalog_registered_original_docx_sources(
             continue
         try:
             metadata = storage.get_metadata(row["source_object_key"])
-        except (FileNotFoundError, KeyError, ValueError):
+        except (OSError, KeyError, ValueError):
             continue
         entries.append(
             OwnerDocumentCatalogEntry(
@@ -223,9 +223,25 @@ def _compensate(
     created_by_request: bool,
     code: str,
 ) -> DocumentIntakeDenied:
-    if created_by_request:
-        storage.delete_if_unretained(object_key)
+    if not _cleanup_creator_object(storage, object_key, created_by_request):
+        return DocumentIntakeDenied("document_intake_storage_unavailable")
+    if code == "document_storage_unavailable":
+        return DocumentIntakeDenied("document_intake_storage_unavailable")
     return DocumentIntakeDenied(code)
+
+
+def _cleanup_creator_object(
+    storage: LocalObjectStorage,
+    object_key: str,
+    created_by_request: bool,
+) -> bool:
+    if not created_by_request:
+        return True
+    try:
+        storage.delete_if_unretained(object_key)
+    except (ObjectPublishError, OSError):
+        return False
+    return True
 
 
 def _original_object_key(file_name: str, content: bytes) -> str:

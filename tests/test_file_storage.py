@@ -228,6 +228,69 @@ class LocalObjectStorageTest(unittest.TestCase):
                 list(metadata_path.parent.glob(f".{metadata_path.name}.*.tmp")), []
             )
 
+    def test_put_bytes_if_absent_converts_byte_write_os_error_and_cleans_partial_object(
+        self,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            storage = LocalObjectStorage(root)
+            content = b"document"
+            object_key = f"original/{sha256(content).hexdigest()[:16]}-book.docx"
+            object_path = root / object_key
+
+            with patch(
+                "translator_service.file_storage.os.fdopen",
+                side_effect=OSError("write unavailable"),
+            ), self.assertRaises(ObjectPublishError):
+                storage.put_bytes_if_absent(
+                    kind=StoredFileKind.ORIGINAL,
+                    file_name="book.docx",
+                    content_type="application/octet-stream",
+                    content=content,
+                )
+
+            self.assertFalse(object_path.exists())
+
+    def test_put_bytes_if_absent_converts_retention_marker_os_error(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            content = b"document"
+            stored, _created = storage.put_bytes_if_absent(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/octet-stream",
+                content=content,
+            )
+
+            with patch(
+                "translator_service.file_storage.Path.touch",
+                side_effect=OSError("marker unavailable"),
+            ), self.assertRaises(ObjectPublishError):
+                storage.put_bytes_if_absent(
+                    kind=StoredFileKind.ORIGINAL,
+                    file_name="book.docx",
+                    content_type="application/octet-stream",
+                    content=content,
+                )
+
+            self.assertEqual(storage.get_bytes(stored.object_key), content)
+
+    def test_delete_if_unretained_converts_cleanup_os_error(self):
+        with TemporaryDirectory() as temp_dir:
+            storage = LocalObjectStorage(Path(temp_dir))
+            stored, _created = storage.put_bytes_if_absent(
+                kind=StoredFileKind.ORIGINAL,
+                file_name="book.docx",
+                content_type="application/octet-stream",
+                content=b"document",
+            )
+
+            with patch(
+                "translator_service.file_storage.Path.unlink",
+                side_effect=OSError("cleanup unavailable"),
+            ), self.assertRaises(ObjectPublishError):
+                storage.delete_if_unretained(stored.object_key)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,94 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         self.assertEqual(selected, registered)
         self.assertFalse(hasattr(catalog[0], "source_object_key"))
 
+    def test_selection_and_catalog_omit_source_when_verification_read_fails(
+        self,
+    ) -> None:
+        from translator_service.document_intake import (
+            DocumentIntakeDenied,
+            catalog_registered_original_docx_sources,
+            ingest_owner_docx,
+            select_owner_registered_original_docx_source,
+        )
+
+        registered = ingest_owner_docx(
+            store=self.store,
+            storage=self.storage,
+            actor=self.actor,
+            file_name="book.docx",
+            content_type="application/octet-stream",
+            content=_docx_bytes(),
+            maximum_size_bytes=1024 * 1024,
+        )
+        assert not isinstance(registered, DocumentIntakeDenied)
+
+        with patch.object(
+            self.storage,
+            "get_bytes",
+            side_effect=OSError("verification read unavailable"),
+        ):
+            selected = select_owner_registered_original_docx_source(
+                store=self.store,
+                storage=self.storage,
+                actor=self.actor,
+                document_custody_id=registered.document_custody_id,
+            )
+            catalog = catalog_registered_original_docx_sources(
+                store=self.store,
+                storage=self.storage,
+                actor=self.actor,
+            )
+
+        self.assertEqual(
+            selected,
+            DocumentIntakeDenied("source_registry_source_document_storage_unavailable"),
+        )
+        self.assertEqual(catalog, ())
+
+    def test_catalog_omits_source_when_second_metadata_read_fails(self) -> None:
+        from translator_service.document_intake import (
+            DocumentIntakeDenied,
+            catalog_registered_original_docx_sources,
+            ingest_owner_docx,
+        )
+
+        registered = ingest_owner_docx(
+            store=self.store,
+            storage=self.storage,
+            actor=self.actor,
+            file_name="book.docx",
+            content_type="application/octet-stream",
+            content=_docx_bytes(),
+            maximum_size_bytes=1024 * 1024,
+        )
+        assert not isinstance(registered, DocumentIntakeDenied)
+        original_get_metadata = LocalObjectStorage.get_metadata
+        metadata_reads = 0
+
+        def second_metadata_unavailable(
+            storage: LocalObjectStorage, object_key: str
+        ) -> object:
+            nonlocal metadata_reads
+            metadata_reads += 1
+            if metadata_reads == 2:
+                raise OSError("second metadata unavailable")
+            return original_get_metadata(storage, object_key)
+
+        with patch.object(
+            LocalObjectStorage,
+            "get_metadata",
+            new=second_metadata_unavailable,
+        ):
+            catalog = catalog_registered_original_docx_sources(
+                store=self.store,
+                storage=self.storage,
+                actor=self.actor,
+            )
+
+        self.assertEqual(metadata_reads, 2)
+        self.assertEqual(catalog, ())
+
+
     def test_ingest_denies_invalid_or_oversize_bytes_without_storage_write(
         self,
     ) -> None:
@@ -144,6 +232,67 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         )
         self.assertEqual(
             list((Path(self._temp_dir.name) / "objects").rglob("*.docx")), []
+        )
+
+    def test_ingest_denies_verification_read_os_error_and_compensates_creator(
+        self,
+    ) -> None:
+        from translator_service.document_intake import (
+            DocumentIntakeDenied,
+            ingest_owner_docx,
+        )
+
+        with patch.object(
+            self.storage,
+            "get_bytes",
+            side_effect=OSError("read unavailable"),
+        ):
+            result = ingest_owner_docx(
+                store=self.store,
+                storage=self.storage,
+                actor=self.actor,
+                file_name="book.docx",
+                content_type="application/octet-stream",
+                content=_docx_bytes(),
+                maximum_size_bytes=1024 * 1024,
+            )
+
+        self.assertEqual(
+            result, DocumentIntakeDenied("document_intake_storage_unavailable")
+        )
+        self.assertEqual(
+            list((Path(self._temp_dir.name) / "objects").rglob("*.docx")), []
+        )
+
+    def test_ingest_contains_creator_cleanup_os_error_after_verification_read_error(
+        self,
+    ) -> None:
+        from translator_service.document_intake import (
+            DocumentIntakeDenied,
+            ingest_owner_docx,
+        )
+
+        with patch.object(
+            self.storage,
+            "get_bytes",
+            side_effect=OSError("read unavailable"),
+        ), patch.object(
+            self.storage,
+            "delete_if_unretained",
+            side_effect=OSError("cleanup unavailable"),
+        ):
+            result = ingest_owner_docx(
+                store=self.store,
+                storage=self.storage,
+                actor=self.actor,
+                file_name="book.docx",
+                content_type="application/octet-stream",
+                content=_docx_bytes(),
+                maximum_size_bytes=1024 * 1024,
+            )
+
+        self.assertEqual(
+            result, DocumentIntakeDenied("document_intake_storage_unavailable")
         )
 
     def test_owner_documents_upload_and_selection_require_session_and_csrf(
@@ -373,6 +522,185 @@ class DocumentIntakeServiceTest(unittest.TestCase):
 
         self.assertEqual(failed_publish.status_code, 400)
         self.assertEqual(recovered_upload.status_code, 303)
+
+    def test_upload_denies_byte_write_os_error_without_server_error(self) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "route-jobs.sqlite3"),
+                    object_storage_root=str(root / "route-objects"),
+                )
+            ),
+            raise_server_exceptions=False,
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+        page = client.get("/admin/documents")
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert csrf_token is not None
+
+        with patch(
+            "translator_service.file_storage.os.fdopen",
+            side_effect=OSError("write unavailable"),
+        ):
+            response = client.post(
+                "/admin/documents/upload",
+                data={"csrf_token": csrf_token.group(1)},
+                files={
+                    "file": (
+                        "book.docx",
+                        _docx_bytes(),
+                        "application/octet-stream",
+                    )
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_denies_verification_read_os_error_without_storage_disclosure(
+        self,
+    ) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "route-jobs.sqlite3"),
+                    object_storage_root=str(root / "route-objects"),
+                )
+            ),
+            raise_server_exceptions=False,
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+        page = client.get("/admin/documents")
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert csrf_token is not None
+
+        with patch(
+            "translator_service.file_storage.LocalObjectStorage.get_bytes",
+            side_effect=OSError("read unavailable"),
+        ):
+            response = client.post(
+                "/admin/documents/upload",
+                data={"csrf_token": csrf_token.group(1)},
+                files={
+                    "file": (
+                        "book.docx",
+                        _docx_bytes(),
+                        "application/octet-stream",
+                    )
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("read unavailable", response.text)
+        self.assertNotIn("original/", response.text)
+
+    def test_selection_denies_verification_read_os_error_without_storage_disclosure(
+        self,
+    ) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "route-jobs.sqlite3"),
+                    object_storage_root=str(root / "route-objects"),
+                )
+            ),
+            raise_server_exceptions=False,
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+        page = client.get("/admin/documents")
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert csrf_token is not None
+        uploaded = client.post(
+            "/admin/documents/upload",
+            data={"csrf_token": csrf_token.group(1)},
+            files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")},
+            follow_redirects=False,
+        )
+        self.assertEqual(uploaded.status_code, 303)
+        catalog = client.get("/admin/documents")
+        custody = re.search(
+            r'name="document_custody_id" value="([^"]+)"', catalog.text
+        )
+        assert custody is not None
+
+        with patch(
+            "translator_service.file_storage.LocalObjectStorage.get_bytes",
+            side_effect=OSError("verification read unavailable"),
+        ):
+            response = client.post(
+                "/admin/documents/select",
+                data={
+                    "csrf_token": csrf_token.group(1),
+                    "document_custody_id": custody.group(1),
+                },
+                follow_redirects=False,
+            )
+
+        self.assertNotEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn("verification read unavailable", response.text)
+        self.assertNotIn("original/", response.text)
+
+    def test_catalog_route_omits_second_metadata_read_os_error_without_disclosure(
+        self,
+    ) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "route-jobs.sqlite3"),
+                    object_storage_root=str(root / "route-objects"),
+                )
+            ),
+            raise_server_exceptions=False,
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+        page = client.get("/admin/documents")
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert csrf_token is not None
+        uploaded = client.post(
+            "/admin/documents/upload",
+            data={"csrf_token": csrf_token.group(1)},
+            files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")},
+            follow_redirects=False,
+        )
+        self.assertEqual(uploaded.status_code, 303)
+        original_get_metadata = LocalObjectStorage.get_metadata
+        metadata_reads = 0
+
+        def second_metadata_unavailable(
+            storage: LocalObjectStorage, object_key: str
+        ) -> object:
+            nonlocal metadata_reads
+            metadata_reads += 1
+            if metadata_reads == 2:
+                raise OSError("second metadata unavailable")
+            return original_get_metadata(storage, object_key)
+
+        with patch.object(
+            LocalObjectStorage,
+            "get_metadata",
+            new=second_metadata_unavailable,
+        ):
+            response = client.get("/admin/documents")
+
+        self.assertEqual(metadata_reads, 2)
+        self.assertNotEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("second metadata unavailable", response.text)
+        self.assertNotIn("original/", response.text)
 
     def test_upload_recovers_matching_bytes_with_malformed_metadata_without_500(
         self,
