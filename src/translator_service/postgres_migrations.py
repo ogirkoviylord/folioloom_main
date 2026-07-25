@@ -267,6 +267,30 @@ CREATE TABLE IF NOT EXISTS document_glossary_revision_events (
 );
 """
 
+_V5_SOURCE_REGISTRY_SQL = """
+ALTER TABLE strict_docx_v3_document_custody
+    ADD COLUMN registry_owner_actor_id TEXT NULL;
+
+ALTER TABLE strict_docx_v3_document_custody
+    ADD COLUMN registry_actor_role TEXT NULL;
+
+ALTER TABLE strict_docx_v3_document_custody
+    ADD COLUMN registry_authn_schema_version TEXT NULL;
+
+CREATE TABLE IF NOT EXISTS source_registry_events (
+    registry_event_id TEXT PRIMARY KEY,
+    document_custody_id TEXT NOT NULL REFERENCES
+        strict_docx_v3_document_custody(document_custody_id),
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('registered', 'registration_reused')
+    ),
+    registry_owner_actor_id TEXT NOT NULL,
+    registry_actor_role TEXT NOT NULL,
+    registry_authn_schema_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 MIGRATIONS = (
     PostgresMigration(version=1, sql_payload=_V1_SCHEDULER_SQL),
     PostgresMigration(version=2, sql_payload=_V2_STRICT_DOCX_SQL),
@@ -274,6 +298,7 @@ MIGRATIONS = (
         version=3, sql_payload=_V3_STRICT_DOCX_DOCUMENT_AUTHORIZATION_SQL
     ),
     PostgresMigration(version=4, sql_payload=_V4_DOCUMENT_GLOSSARY_PROVENANCE_SQL),
+    PostgresMigration(version=5, sql_payload=_V5_SOURCE_REGISTRY_SQL),
 )
 
 # This is intentionally an enumerated catalog query rather than a one-table probe.
