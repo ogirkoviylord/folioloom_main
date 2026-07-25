@@ -121,6 +121,45 @@ ROUTE_COVERAGE_MAP = (
     },
     {
         "method": "GET",
+        "path": "/admin/documents",
+        "handler": "documents",
+        "sensitivity": "owner_document_catalog_metadata_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "VIEW_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/documents/upload",
+        "handler": "documents_upload",
+        "sensitivity": "owner_document_original_storage_and_registry_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "none_current_behavior",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/documents/select",
+        "handler": "documents_select",
+        "sensitivity": "owner_document_workbench_selection_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "none_current_behavior",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "GET",
         "path": "/admin/ai-providers",
         "handler": "ai_providers",
         "sensitivity": "provider_config_and_capacity_read",
@@ -1143,8 +1182,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 81)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 34)
+        self.assertEqual(len(actual), 84)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 36)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1162,7 +1201,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 34)
+        self.assertEqual(len(mutating), 36)
         self.assertEqual(len(destructive), 5)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
@@ -1232,6 +1271,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             ("POST", "/admin/login"),
             ("POST", "/admin/logout"),
             ("POST", "/admin/logs/{run_id}/reader/review-mark"),
+            ("POST", "/admin/documents/upload"),
+            ("POST", "/admin/documents/select"),
         }
 
         for entry in ROUTE_COVERAGE_MAP:
