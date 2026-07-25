@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from html import escape
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ from urllib.parse import parse_qs, quote
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException
+from starlette.requests import ClientDisconnect
 
 from translator_service.admin.action_center import build_action_center
 from translator_service.admin.ai_provider_keys import (
@@ -72,6 +76,7 @@ from translator_service.admin.provider_runtime import (
 from translator_service.admin.provider_validation import SQLiteAIProviderValidationStore
 from translator_service.admin.quality import build_quality_run_summary
 from translator_service.admin.quality_runner import QualityRunResult, write_quality_run
+from translator_service.admin.rbac import AdminRole
 from translator_service.admin.secret_safety import build_secret_safety_report
 from translator_service.admin.secrets import (
     SecretNotFound,
@@ -145,6 +150,13 @@ from translator_service.beta_access import (
 )
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
+from translator_service.document_intake import (
+    DocumentIntakeDenied,
+    catalog_registered_original_docx_sources,
+    ingest_owner_docx,
+    select_owner_registered_original_docx_source,
+    source_registry_actor_from_admin_session,
+)
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.internal_reader import (
     generate_docx_reader_html_from_path,
@@ -733,6 +745,124 @@ def create_admin_router(settings: Settings) -> APIRouter:
         opaque_id = quote(document_id, safe="")
         return RedirectResponse(
             f"/admin/workbench/?document={opaque_id}",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.get("/documents", response_class=HTMLResponse)
+    async def documents(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        store = open_persistent_job_store(settings)
+        try:
+            catalog = catalog_registered_original_docx_sources(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                actor=source_registry_actor_from_admin_session(session),
+            )
+        finally:
+            store.close()
+        return _html(
+            admin_page(
+                title="Documents",
+                active="",
+                session=session,
+                environment=settings.environment,
+                body=_documents_body(
+                    csrf_token=session.csrf_token,
+                    catalog=(
+                        () if isinstance(catalog, DocumentIntakeDenied) else catalog
+                    ),
+                ),
+            )
+        )
+
+    @router.post("/documents/upload", response_class=HTMLResponse)
+    async def documents_upload(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        maximum_size_bytes = settings.max_upload_mb * 1024 * 1024
+        try:
+            request_body = await _read_bounded_request_body(
+                request,
+                maximum_size_bytes + _MULTIPART_REQUEST_OVERHEAD_BYTES,
+            )
+        except ClientDisconnect:
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        if request_body is None:
+            return _html(
+                "Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+            )
+        try:
+            form = await _parse_multipart_body(request, request_body)
+        except (HTTPException, ValueError):
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        try:
+            file_parts = [
+                value
+                for _field_name, value in form.multi_items()
+                if isinstance(value, UploadFile)
+            ]
+            uploads = form.getlist("file")
+            if len(file_parts) != 1 or len(uploads) != 1:
+                return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+            upload = uploads[0]
+            if not isinstance(upload, UploadFile):
+                return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+            if not session_manager.verify_csrf(
+                session, str(form.get("csrf_token", ""))
+            ):
+                return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+            content = await _read_bounded_upload(upload, maximum_size_bytes)
+            file_name = getattr(upload, "filename", "")
+            content_type = getattr(upload, "content_type", "")
+        finally:
+            await form.close()
+        if content is None:
+            return _html(
+                "Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+            )
+        store = open_persistent_job_store(settings)
+        try:
+            result = ingest_owner_docx(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                actor=source_registry_actor_from_admin_session(session),
+                file_name=file_name,
+                content_type=content_type,
+                content=content,
+                maximum_size_bytes=maximum_size_bytes,
+            )
+        finally:
+            store.close()
+        if isinstance(result, DocumentIntakeDenied):
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        return RedirectResponse("/admin/documents", status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/documents/select", response_class=HTMLResponse)
+    async def documents_select(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        store = open_persistent_job_store(settings)
+        try:
+            selected = select_owner_registered_original_docx_source(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                actor=source_registry_actor_from_admin_session(session),
+                document_custody_id=form.get("document_custody_id", ""),
+            )
+        finally:
+            store.close()
+        if isinstance(selected, DocumentIntakeDenied):
+            return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(
+            "/admin/workbench/?document="
+            f"{quote(selected.document_custody_id, safe='')}",
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -2420,6 +2550,82 @@ def _session_or_none(
         return session_manager.load(request.cookies.get(SESSION_COOKIE))
     except AdminAuthError:
         return None
+
+
+def _owner_session_or_none(
+    request: Request,
+    session_manager: AdminSessionManager,
+) -> AdminSession | None:
+    session = _session_or_none(request, session_manager)
+    return session if session is not None and session.role is AdminRole.OWNER else None
+
+
+async def _read_bounded_upload(upload, maximum_size_bytes: int) -> bytes | None:
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await upload.read(65536):
+        size += len(chunk)
+        if size > maximum_size_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _read_bounded_request_body(
+    request: Request, maximum_size_bytes: int
+) -> bytes | None:
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > maximum_size_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _parse_multipart_body(request: Request, body: bytes):
+    if not request.headers.get("content-type", "").lower().startswith(
+        "multipart/form-data"
+    ):
+        raise ValueError("expected multipart form data")
+
+    sent = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return await Request(request.scope, receive).form()
+
+
+_MULTIPART_REQUEST_OVERHEAD_BYTES = 65536
+
+
+def _documents_body(*, csrf_token: str, catalog) -> str:
+    rows = "".join(
+        "<li>"
+        f"<strong>{escape(entry.file_name)}</strong> "
+        f"({entry.source_size_bytes} bytes)"
+        "<form method=\"post\" action=\"/admin/documents/select\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{escape(csrf_token)}\">"
+        "<input type=\"hidden\" name=\"document_custody_id\" value=\""
+        f"{escape(entry.document_custody_id)}\">"
+        "<button type=\"submit\">Select</button></form></li>"
+        for entry in catalog
+    ) or "<li>No durable DOCX documents yet.</li>"
+    return (
+        "<section><h1>Documents</h1>"
+        "<form method=\"post\" action=\"/admin/documents/upload\" "
+        "enctype=\"multipart/form-data\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{escape(csrf_token)}\">"
+        "<input type=\"file\" name=\"file\" accept=\".docx\" required>"
+        "<button type=\"submit\">Upload DOCX</button></form>"
+        f"<ul>{rows}</ul></section>"
+    )
 
 
 def _integration_summaries(settings: Settings):
