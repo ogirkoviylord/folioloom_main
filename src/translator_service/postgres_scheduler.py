@@ -497,6 +497,7 @@ def create_postgres_scheduler_claim_performance_indexes(
 class PostgresSchedulerStore:
     strict_docx_migration_ready = False
     document_glossary_authoring_migration_ready = False
+    document_glossary_lock_attestation_migration_ready = False
 
     def __init__(self, dsn: str) -> None:
         if psycopg is None:
@@ -509,6 +510,22 @@ class PostgresSchedulerStore:
 
     def close(self) -> None:
         self.connection.close()
+
+    def attest_document_glossary_lock(self, *, document_custody_id: str, actor):
+        from translator_service.document_glossary_lock_attestation import (
+            _attest_postgres_document_glossary_lock,
+        )
+
+        return _attest_postgres_document_glossary_lock(self, document_custody_id, actor)
+
+    def read_document_glossary_lock_status(self, *, document_custody_id: str, actor):
+        from translator_service.document_glossary_lock_attestation import (
+            _read_postgres_document_glossary_lock_status,
+        )
+
+        return _read_postgres_document_glossary_lock_status(
+            self, document_custody_id, actor
+        )
 
     def create_glossary_approval(
         self,
