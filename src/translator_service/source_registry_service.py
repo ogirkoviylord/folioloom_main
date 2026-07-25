@@ -50,14 +50,6 @@ SELECT document_custody_id, source_object_key, source_sha256, source_size_bytes,
 FROM strict_docx_v3_document_custody
 WHERE document_custody_id = %(document_custody_id)s
 """
-_POSTGRES_LIST_SQL = """
-SELECT document_custody_id, source_sha256, source_size_bytes
-FROM strict_docx_v3_document_custody
-WHERE registry_owner_actor_id = %(registry_owner_actor_id)s
-  AND registry_actor_role = %(registry_actor_role)s
-  AND registry_authn_schema_version = %(registry_authn_schema_version)s
-ORDER BY created_at, document_custody_id
-"""
 _POSTGRES_INSERT_CUSTODY_SQL = """
 INSERT INTO strict_docx_v3_document_custody (
     document_custody_id, source_object_key, source_sha256, source_size_bytes,
@@ -83,21 +75,17 @@ INSERT INTO source_registry_events (
 """
 
 
-def register_known_original_docx_source(
+def register_verified_original_docx_source(
     *,
     store: object,
-    storage: LocalObjectStorage,
     actor: SourceRegistryActor | SourceRegistryDenied,
-    source_object_key: str,
+    source: VerifiedOriginalDocxSource,
 ) -> RegisteredOriginalDocxSource | SourceRegistryDenied:
-    """Register only a trusted server-side key after exact byte re-verification."""
+    """Register an already verified ORIGINAL DOCX source without exposing its key."""
     denial = _actor_or_capability_denial(store, actor)
     if denial is not None:
         return denial
     assert isinstance(actor, SourceRegistryActor)
-    source = verify_original_docx_source(storage, source_object_key)
-    if isinstance(source, VerifiedOriginalDocxDenied):
-        return SourceRegistryDenied(f"source_registry_source_{source.code}")
     if isinstance(store, SQLiteTranslationJobStore):
         return _register_sqlite(store, source, actor)
     if _is_postgres_store(store):
@@ -180,39 +168,6 @@ def _register_postgres(
             },
         )
     return result
-
-
-def list_registered_original_docx_sources(
-    *,
-    store: object,
-    actor: SourceRegistryActor | SourceRegistryDenied,
-) -> list[RegisteredOriginalDocxSource] | SourceRegistryDenied:
-    """List only metadata owned by the authenticated registry actor."""
-    denial = _actor_or_capability_denial(store, actor)
-    if denial is not None:
-        return denial
-    assert isinstance(actor, SourceRegistryActor)
-    if isinstance(store, SQLiteTranslationJobStore):
-        rows = store._connection.execute(
-            """SELECT document_custody_id, source_sha256, source_size_bytes
-            FROM strict_docx_v3_document_custody
-            WHERE registry_owner_actor_id = ? AND registry_actor_role = ?
-              AND registry_authn_schema_version = ?
-            ORDER BY created_at, document_custody_id""",
-            (actor.actor_id, actor.role, actor.authn_schema_version),
-        ).fetchall()
-    elif _is_postgres_store(store):
-        rows = _postgres_connection(store).execute(
-            _POSTGRES_LIST_SQL,
-            {
-                "registry_owner_actor_id": actor.actor_id,
-                "registry_actor_role": actor.role,
-                "registry_authn_schema_version": actor.authn_schema_version,
-            },
-        ).fetchall()
-    else:
-        return SourceRegistryDenied("source_registry_unsupported_backend")
-    return [_metadata_from_row(row) for row in rows]
 
 
 def select_registered_original_docx_source(
