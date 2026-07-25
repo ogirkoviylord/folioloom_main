@@ -2,6 +2,7 @@ import inspect
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
@@ -530,6 +531,88 @@ class SourceRegistryServiceTest(unittest.TestCase):
             event_count_before,
         )
 
+    def test_registration_denies_unverified_sources_without_mutation(self):
+        import translator_service.verified_original_docx as verified_original_docx
+
+        stored = self._put_original_docx(b"verified source")
+        capability_copied_source = VerifiedOriginalDocxSource(
+            object_key=stored.object_key,
+            sha256="a" * 64,
+            size_bytes=stored.size_bytes,
+        )
+        object.__setattr__(
+            capability_copied_source,
+            "_verification_capability",
+            verified_original_docx._VERIFICATION_CAPABILITY,
+        )
+        unverified_sources = (
+            _ForgedVerifiedOriginalDocxSource(
+                object_key=stored.object_key,
+                sha256="a" * 64,
+                size_bytes=stored.size_bytes,
+            ),
+            VerifiedOriginalDocxSource(
+                object_key=stored.object_key,
+                sha256="a" * 64,
+                size_bytes=stored.size_bytes,
+            ),
+            capability_copied_source,
+        )
+
+        for unverified_source in unverified_sources:
+            with self.subTest(source_type=type(unverified_source).__name__):
+                custody_count_before = self.store._connection.execute(
+                    "SELECT COUNT(*) FROM strict_docx_v3_document_custody"
+                ).fetchone()[0]
+                event_count_before = self.store._connection.execute(
+                    "SELECT COUNT(*) FROM source_registry_events"
+                ).fetchone()[0]
+
+                result = register_verified_original_docx_source(
+                    store=self.store,
+                    actor=self.owner,
+                    source=cast(VerifiedOriginalDocxSource, unverified_source),
+                )
+
+                self.assertEqual(
+                    result,
+                    SourceRegistryDenied("source_registry_source_unverified"),
+                )
+                self.assertNotIn(stored.object_key, repr(result))
+                self.assertEqual(
+                    self.store._connection.execute(
+                        "SELECT COUNT(*) FROM strict_docx_v3_document_custody"
+                    ).fetchone()[0],
+                    custody_count_before,
+                )
+                self.assertEqual(
+                    self.store._connection.execute(
+                        "SELECT COUNT(*) FROM source_registry_events"
+                    ).fetchone()[0],
+                    event_count_before,
+                )
+
+    def test_registration_denies_unverified_source_before_backend_dispatch(self):
+        stored = self._put_original_docx(b"verified source")
+
+        result = register_verified_original_docx_source(
+            store=_DispatchFailingStore(),
+            actor=self.owner,
+            source=cast(
+                VerifiedOriginalDocxSource,
+                _ForgedVerifiedOriginalDocxSource(
+                    object_key=stored.object_key,
+                    sha256="a" * 64,
+                    size_bytes=stored.size_bytes,
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            result,
+            SourceRegistryDenied("source_registry_source_unverified"),
+        )
+
     def test_legacy_custody_without_registry_owner_is_not_adopted(self):
         source = self._verified_original_docx(b"verified source")
         self.store._connection.execute(
@@ -572,6 +655,19 @@ class SourceRegistryServiceTest(unittest.TestCase):
         self.assertIsInstance(source, VerifiedOriginalDocxSource)
         assert isinstance(source, VerifiedOriginalDocxSource)
         return source
+
+
+class _ForgedVerifiedOriginalDocxSource:
+    def __init__(self, *, object_key: str, sha256: str, size_bytes: int):
+        self.object_key = object_key
+        self.sha256 = sha256
+        self.size_bytes = size_bytes
+
+
+class _DispatchFailingStore:
+    @property
+    def connection(self):
+        raise AssertionError("invalid source must be denied before backend dispatch")
 
 
 class _FakePostgresStore:
