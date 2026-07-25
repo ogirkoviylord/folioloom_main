@@ -286,6 +286,7 @@ class PersistentWorkerHeartbeat:
 class SQLiteTranslationJobStore:
     strict_docx_migration_ready = True
     document_glossary_authoring_migration_ready = True
+    document_glossary_lock_attestation_migration_ready = True
 
     def __init__(self, db_path: str | Path) -> None:
         if str(db_path) != ":memory:":
@@ -298,6 +299,22 @@ class SQLiteTranslationJobStore:
 
     def close(self) -> None:
         self._connection.close()
+
+    def attest_document_glossary_lock(self, *, document_custody_id: str, actor):
+        from translator_service.document_glossary_lock_attestation import (
+            _attest_sqlite_document_glossary_lock,
+        )
+
+        return _attest_sqlite_document_glossary_lock(self, document_custody_id, actor)
+
+    def read_document_glossary_lock_status(self, *, document_custody_id: str, actor):
+        from translator_service.document_glossary_lock_attestation import (
+            _read_sqlite_document_glossary_lock_status,
+        )
+
+        return _read_sqlite_document_glossary_lock_status(
+            self, document_custody_id, actor
+        )
 
     def create_glossary_approval(
         self,
@@ -2364,6 +2381,38 @@ class SQLiteTranslationJobStore:
                     registry_actor_role TEXT NOT NULL,
                     registry_authn_schema_version TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                )
+                """
+            )
+
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_glossary_lock_attestations (
+                    attestation_id TEXT PRIMARY KEY,
+                    document_custody_id TEXT NOT NULL REFERENCES
+                        strict_docx_v3_document_custody(document_custody_id),
+                    revision_id TEXT NOT NULL REFERENCES
+                        document_glossary_revisions(revision_id),
+                    approval_id TEXT NOT NULL REFERENCES
+                        glossary_approvals(approval_id),
+                    snapshot_custody_id TEXT NOT NULL REFERENCES
+                        glossary_snapshot_custody(custody_id),
+                    snapshot_digest TEXT NOT NULL,
+                    snapshot_schema_version INTEGER NOT NULL,
+                    serialization_schema_version TEXT NOT NULL,
+                    approval_schema_version INTEGER NOT NULL,
+                    attestation_schema_version INTEGER NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+                    authn_schema_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(
+                        document_custody_id, revision_id, approval_id,
+                        snapshot_custody_id, snapshot_digest,
+                        snapshot_schema_version, serialization_schema_version,
+                        approval_schema_version, attestation_schema_version,
+                        actor_id, actor_role, authn_schema_version
+                    )
                 )
                 """
             )

@@ -86,7 +86,7 @@ class PostgresMigrationsTest(unittest.TestCase):
         )
         self.assertFalse(_ledger_inserts(connection))
 
-    def test_fresh_database_applies_strict_docx_v2_to_v5_after_scheduler_baseline(
+    def test_fresh_database_applies_strict_docx_v2_to_v6_after_scheduler_baseline(
         self,
     ):
         connection = _RecordingConnection(ledger_rows=[], baseline_relations=[])
@@ -94,13 +94,14 @@ class PostgresMigrationsTest(unittest.TestCase):
         run_postgres_migrations(connection)
 
         self.assertEqual(
-            [migration.version for migration in MIGRATIONS], [1, 2, 3, 4, 5]
+            [migration.version for migration in MIGRATIONS], [1, 2, 3, 4, 5, 6]
         )
         self.assertTrue(connection.contains(MigrationSql.v1_payload))
         self.assertTrue(connection.contains(MigrationSql.v2_payload()))
         self.assertTrue(connection.contains(MigrationSql.v3_payload()))
         self.assertTrue(connection.contains(MigrationSql.v4_payload()))
         self.assertTrue(connection.contains(MigrationSql.v5_payload()))
+        self.assertTrue(connection.contains(MigrationSql.v6_payload()))
         ledger_inserts = [
             params
             for statement, params in zip(
@@ -340,14 +341,15 @@ class PostgresMigrationsTest(unittest.TestCase):
             v3_sql,
         )
 
-    def test_v4_appends_document_glossary_provenance_without_mutating_v1_to_v3(self):
+    def test_v4_appends_document_glossary_provenance_without_mutating_v1_to_v4(self):
         self.assertEqual(
-            [migration.checksum for migration in MIGRATIONS[:4]],
+            [migration.checksum for migration in MIGRATIONS[:5]],
             [
                 "251575e3fc6317646b871b314ea0f45b172955b3b5cc44961b0f656e7435f54e",
                 "d6831336219ce6c057a587de47263dda099d56e2dddbf6e91562d5c1554b1b36",
                 "b778da4640f83c205f8445248c8a46c8a050c807e7828b6901fd14a69ac5fb40",
                 "73925eb88ed9ec6df2d1eb2e59162a11427cd4f3ca6fc50abd5d3f6c3b50a445",
+                "6437ef0bcbdb9eeae9f9cbccf1785a830772b8af01fb7ab9a92f0c32f991f80b",
             ],
         )
         v4_sql = MigrationSql.v4_payload()
@@ -360,6 +362,30 @@ class PostgresMigrationsTest(unittest.TestCase):
         self.assertIn("UNIQUE(document_custody_id, snapshot_payload_sha256)", v4_sql)
         self.assertIn("CHECK (actor_role = 'owner')", v4_sql)
         self.assertIn("'created', 'superseded', 'revoked'", v4_sql)
+
+    def test_v6_owns_only_immutable_glossary_lock_attestations(self):
+        v5_sql = MigrationSql.v5_payload()
+        v6_sql = MigrationSql.v6_payload()
+
+        self.assertNotIn("document_glossary_lock_attestations", v5_sql)
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS document_glossary_lock_attestations", v6_sql
+        )
+        for reference in (
+            "REFERENCES strict_docx_v3_document_custody(document_custody_id)",
+            "REFERENCES document_glossary_revisions(revision_id)",
+            "REFERENCES glossary_approvals(approval_id)",
+            "REFERENCES glossary_snapshot_custody(custody_id)",
+            "CHECK (actor_role = 'owner')",
+            "UNIQUE(document_custody_id, revision_id, approval_id, "
+            "snapshot_custody_id,",
+            "approval_schema_version, attestation_schema_version, actor_"
+            "id, actor_role,",
+            "authn_schema_version)",
+        ):
+            self.assertIn(reference, v6_sql)
+        self.assertNotIn("ALTER TABLE", v6_sql)
+        self.assertNotIn("CREATE INDEX", v6_sql)
 
     def test_migration_sql_failure_does_not_record_ledger_row(self):
         connection = _RecordingConnection(
@@ -395,6 +421,10 @@ class MigrationSql:
     @staticmethod
     def v5_payload() -> str:
         return MIGRATIONS[4].sql_payload
+
+    @staticmethod
+    def v6_payload() -> str:
+        return MIGRATIONS[5].sql_payload
 
 
 class _RecordingConnection:
