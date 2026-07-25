@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
+from weakref import WeakValueDictionary
 
 from translator_service.file_storage import LocalObjectStorage, StoredFileKind
 
@@ -11,6 +12,12 @@ class VerifiedOriginalDocxSource:
     object_key: str
     sha256: str
     size_bytes: int
+    _verification_capability: object | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -39,8 +46,25 @@ def verify_original_docx_source(
         return VerifiedOriginalDocxDenied("document_size_mismatch")
     if metadata.sha256 != sha256(content).hexdigest():
         return VerifiedOriginalDocxDenied("document_digest_mismatch")
-    return VerifiedOriginalDocxSource(
+    source = VerifiedOriginalDocxSource(
         object_key=metadata.object_key,
         sha256=metadata.sha256,
         size_bytes=metadata.size_bytes,
+    )
+    object.__setattr__(source, "_verification_capability", _VERIFICATION_CAPABILITY)
+    _VERIFIED_SOURCE_BY_ID[id(source)] = source
+    return source
+
+
+_VERIFICATION_CAPABILITY = object()
+_VERIFIED_SOURCE_BY_ID: WeakValueDictionary[int, VerifiedOriginalDocxSource] = (
+    WeakValueDictionary()
+)
+
+
+def is_verified_original_docx_source(source: object) -> bool:
+    return (
+        isinstance(source, VerifiedOriginalDocxSource)
+        and source._verification_capability is _VERIFICATION_CAPABILITY
+        and _VERIFIED_SOURCE_BY_ID.get(id(source)) is source
     )

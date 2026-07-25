@@ -12,6 +12,7 @@ from translator_service.persistent_jobs import (
 from translator_service.verified_original_docx import (
     VerifiedOriginalDocxDenied,
     VerifiedOriginalDocxSource,
+    is_verified_original_docx_source,
     verify_original_docx_source,
 )
 
@@ -82,6 +83,8 @@ def register_verified_original_docx_source(
     source: VerifiedOriginalDocxSource,
 ) -> RegisteredOriginalDocxSource | SourceRegistryDenied:
     """Register an already verified ORIGINAL DOCX source without exposing its key."""
+    if not is_verified_original_docx_source(source):
+        return SourceRegistryDenied("source_registry_source_unverified")
     denial = _actor_or_capability_denial(store, actor)
     if denial is not None:
         return denial
