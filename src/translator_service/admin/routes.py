@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# ruff: noqa: E501
 import json
 import sqlite3
 from collections.abc import Callable
@@ -150,6 +151,15 @@ from translator_service.beta_access import (
 )
 from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
+from translator_service.document_glossary_authoring_bridge import (
+    DocumentGlossaryAuthoringBridgeDenied,
+    read_current_document_glossary_revision,
+)
+from translator_service.document_glossary_lock_attestation import (
+    DocumentGlossaryLockDenied,
+    attest_document_glossary_lock,
+    read_document_glossary_lock_status,
+)
 from translator_service.document_intake import (
     DocumentIntakeDenied,
     catalog_registered_original_docx_sources,
@@ -861,8 +871,70 @@ def create_admin_router(settings: Settings) -> APIRouter:
         if isinstance(selected, DocumentIntakeDenied):
             return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
         return RedirectResponse(
-            "/admin/workbench/?document="
+            "/admin/documents/glossary?document_custody_id="
             f"{quote(selected.document_custody_id, safe='')}",
+            status_code=HTTPStatus.SEE_OTHER,
+        )
+
+    @router.get("/documents/glossary", response_class=HTMLResponse)
+    async def document_glossary(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        custody_id = request.query_params.get("document_custody_id", "")
+        store = open_persistent_job_store(settings)
+        try:
+            revision = read_current_document_glossary_revision(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                session=session,
+                document_custody_id=custody_id,
+            )
+            status = read_document_glossary_lock_status(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                session=session,
+                document_custody_id=custody_id,
+            )
+        finally:
+            store.close()
+        if isinstance(revision, DocumentGlossaryAuthoringBridgeDenied):
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+        if isinstance(status, DocumentGlossaryLockDenied):
+            return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+        return _html(
+            _document_glossary_body(
+                csrf_token=session.csrf_token,
+                document_custody_id=revision.document_custody_id,
+                revision_sequence=revision.revision_sequence,
+                lock_status=status.status,
+            )
+        )
+
+    @router.post("/documents/glossary/lock", response_class=HTMLResponse)
+    async def document_glossary_lock(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        custody_id = form.get("document_custody_id", "")
+        store = open_persistent_job_store(settings)
+        try:
+            result = attest_document_glossary_lock(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                session=session,
+                document_custody_id=custody_id,
+            )
+        finally:
+            store.close()
+        if isinstance(result, DocumentGlossaryLockDenied):
+            return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(
+            "/admin/documents/glossary?document_custody_id="
+            f"{quote(result.document_custody_id, safe='')}",
             status_code=HTTPStatus.SEE_OTHER,
         )
 
@@ -2625,6 +2697,25 @@ def _documents_body(*, csrf_token: str, catalog) -> str:
         "<input type=\"file\" name=\"file\" accept=\".docx\" required>"
         "<button type=\"submit\">Upload DOCX</button></form>"
         f"<ul>{rows}</ul></section>"
+    )
+
+
+def _document_glossary_body(
+    *,
+    csrf_token: str,
+    document_custody_id: str,
+    revision_sequence: int,
+    lock_status: str,
+) -> str:
+    """Render custody-only durable glossary metadata and explicit lock action."""
+    return (
+        "<section><h1>Durable glossary</h1>"
+        f"<p>Revision {revision_sequence}; lock status: {escape(lock_status)}</p>"
+        "<form method=\"post\" action=\"/admin/documents/glossary/lock\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{escape(csrf_token)}\">"
+        "<input type=\"hidden\" name=\"document_custody_id\" value=\""
+        f"{escape(document_custody_id)}\">"
+        "<button type=\"submit\">Lock current revision</button></form></section>"
     )
 
 

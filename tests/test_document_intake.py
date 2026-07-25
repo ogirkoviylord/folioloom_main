@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# ruff: noqa: E501
 import asyncio
 import io
 import json
@@ -18,6 +19,13 @@ from starlette.requests import Request
 
 from translator_service.api import create_app
 from translator_service.config import Settings
+from translator_service.document_glossary_authoring_bridge import (
+    DocumentGlossaryRevisionMetadata,
+)
+from translator_service.document_glossary_lock_attestation import (
+    DocumentGlossaryLockAttestation,
+    DocumentGlossaryLockStatus,
+)
 from translator_service.file_storage import LocalObjectStorage
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.source_registry_service import SourceRegistryActor
@@ -350,7 +358,71 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(selected.status_code, 303)
-        self.assertTrue(selected.headers["location"].startswith("/admin/workbench/"))
+        self.assertTrue(
+            selected.headers["location"].startswith("/admin/documents/glossary?")
+        )
+
+    def test_durable_glossary_lock_requires_csrf_and_uses_safe_prg(self) -> None:
+        root = Path(self._temp_dir.name)
+        custody_id = "document-custody-safe"
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "route-jobs.sqlite3"),
+                    object_storage_root=str(root / "route-objects"),
+                )
+            )
+        )
+        revision = DocumentGlossaryRevisionMetadata(
+            custody_id, "revision-safe", 1, None, "approval-safe", "snapshot-safe", "current"
+        )
+        with patch(
+            "translator_service.admin.routes.read_current_document_glossary_revision",
+            return_value=revision,
+        ), patch(
+            "translator_service.admin.routes.read_document_glossary_lock_status",
+            return_value=DocumentGlossaryLockStatus(custody_id, "absent"),
+        ), patch(
+            "translator_service.admin.routes.attest_document_glossary_lock",
+            return_value=DocumentGlossaryLockAttestation(
+                "attestation-safe", custody_id, "revision-safe", "created"
+            ),
+        ):
+            self.assertEqual(
+                client.get(
+                    f"/admin/documents/glossary?document_custody_id={custody_id}",
+                    follow_redirects=False,
+                ).status_code,
+                303,
+            )
+            client.post("/admin/login", data={"password": "owner-pass"})
+            page = client.get(
+                f"/admin/documents/glossary?document_custody_id={custody_id}"
+            )
+            csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+            assert csrf_token is not None
+            self.assertNotIn("original/", page.text)
+            self.assertNotIn("snapshot_payload", page.text)
+            self.assertEqual(
+                client.post(
+                    "/admin/documents/glossary/lock",
+                    data={"csrf_token": "bad", "document_custody_id": custody_id},
+                    follow_redirects=False,
+                ).status_code,
+                403,
+            )
+            locked = client.post(
+                "/admin/documents/glossary/lock",
+                data={"csrf_token": csrf_token.group(1), "document_custody_id": custody_id},
+                follow_redirects=False,
+            )
+        self.assertEqual(locked.status_code, 303)
+        self.assertEqual(
+            locked.headers["location"],
+            f"/admin/documents/glossary?document_custody_id={custody_id}",
+        )
 
     def test_bounded_request_body_rejects_chunked_oversize_before_multipart_parse(
         self,
