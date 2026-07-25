@@ -10,7 +10,6 @@ from fastapi.routing import APIRoute, APIRouter
 from translator_service.admin.routes import create_admin_router
 from translator_service.config import Settings
 
-
 """
 Admin route coverage map for GitHub #722.
 
@@ -37,7 +36,9 @@ Unknown:
   by this metadata-only route map.
 """
 
-ROUTE_LEVEL_RBAC_ABSENT = "absent: routes.py does not use AdminPermission/has_permission"
+ROUTE_LEVEL_RBAC_ABSENT = (
+    "absent: routes.py does not use AdminPermission/has_permission"
+)
 READ_ONLY_AUDIT_NOT_APPLICABLE = "not_applicable_read_only"
 
 ROUTE_COVERAGE_MAP = (
@@ -74,7 +75,9 @@ ROUTE_COVERAGE_MAP = (
         "sensitivity": "public_auth_session_issuance",
         "mutating": True,
         "destructive": False,
-        "session_guard": "none: validates owner password and issues signed owner cookie",
+        "session_guard": (
+            "none: validates owner password and issues signed owner cookie"
+        ),
         "csrf_guard": "none_current_login_behavior",
         "audit_coverage": "none_current_behavior",
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
@@ -118,6 +121,45 @@ ROUTE_COVERAGE_MAP = (
         "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "VIEW_OVERVIEW",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/documents",
+        "handler": "documents",
+        "sensitivity": "owner_document_catalog_metadata_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "VIEW_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/documents/upload",
+        "handler": "documents_upload",
+        "sensitivity": "owner_document_original_storage_and_registry_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "none_current_behavior",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/documents/select",
+        "handler": "documents_select",
+        "sensitivity": "owner_document_workbench_selection_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "none_current_behavior",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
     },
     {
         "method": "GET",
@@ -271,7 +313,9 @@ ROUTE_COVERAGE_MAP = (
         "destructive": False,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": "helper: _save_beta_allowlist_ids settings.beta_allowlist.added",
+        "audit_coverage": (
+            "helper: _save_beta_allowlist_ids settings.beta_allowlist.added"
+        ),
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "MANAGE_SERVICE_SETTINGS",
     },
@@ -284,7 +328,9 @@ ROUTE_COVERAGE_MAP = (
         "destructive": True,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": "helper: _save_beta_allowlist_ids settings.beta_allowlist.removed",
+        "audit_coverage": (
+            "helper: _save_beta_allowlist_ids settings.beta_allowlist.removed"
+        ),
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "MANAGE_SERVICE_SETTINGS",
     },
@@ -297,7 +343,9 @@ ROUTE_COVERAGE_MAP = (
         "destructive": False,
         "session_guard": "direct: _session_or_none",
         "csrf_guard": "direct: session_manager.verify_csrf",
-        "audit_coverage": "helper: _save_beta_allowlist_ids settings.beta_allowlist.updated",
+        "audit_coverage": (
+            "helper: _save_beta_allowlist_ids settings.beta_allowlist.updated"
+        ),
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "MANAGE_SERVICE_SETTINGS",
     },
@@ -803,8 +851,12 @@ ROUTE_COVERAGE_MAP = (
         "mutating": True,
         "destructive": False,
         "session_guard": "helper: _set_ai_provider_key_enabled -> _session_or_none",
-        "csrf_guard": "helper: _set_ai_provider_key_enabled -> session_manager.verify_csrf",
-        "audit_coverage": "helper: _set_ai_provider_key_enabled ai_provider.key.disabled",
+        "csrf_guard": (
+            "helper: _set_ai_provider_key_enabled -> session_manager.verify_csrf"
+        ),
+        "audit_coverage": (
+            "helper: _set_ai_provider_key_enabled ai_provider.key.disabled"
+        ),
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_PROVIDER_KEY_MANAGE",
     },
@@ -816,8 +868,12 @@ ROUTE_COVERAGE_MAP = (
         "mutating": True,
         "destructive": False,
         "session_guard": "helper: _set_ai_provider_key_enabled -> _session_or_none",
-        "csrf_guard": "helper: _set_ai_provider_key_enabled -> session_manager.verify_csrf",
-        "audit_coverage": "helper: _set_ai_provider_key_enabled ai_provider.key.enabled",
+        "csrf_guard": (
+            "helper: _set_ai_provider_key_enabled -> session_manager.verify_csrf"
+        ),
+        "audit_coverage": (
+            "helper: _set_ai_provider_key_enabled ai_provider.key.enabled"
+        ),
         "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
         "future_permission": "TBD_PROVIDER_KEY_MANAGE",
     },
@@ -1143,8 +1199,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 81)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 34)
+        self.assertEqual(len(actual), 84)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 36)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1162,7 +1218,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 34)
+        self.assertEqual(len(mutating), 36)
         self.assertEqual(len(destructive), 5)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
@@ -1232,6 +1288,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             ("POST", "/admin/login"),
             ("POST", "/admin/logout"),
             ("POST", "/admin/logs/{run_id}/reader/review-mark"),
+            ("POST", "/admin/documents/upload"),
+            ("POST", "/admin/documents/select"),
         }
 
         for entry in ROUTE_COVERAGE_MAP:
@@ -1239,7 +1297,9 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             with self.subTest(route=route_key):
                 self.assertEqual(entry["route_level_rbac"], ROUTE_LEVEL_RBAC_ABSENT)
                 if route_key not in public_or_login_paths:
-                    self.assertNotIn("none", str(entry["session_guard"]).split(":", 1)[0])
+                    self.assertNotIn(
+                        "none", str(entry["session_guard"]).split(":", 1)[0]
+                    )
                 if entry["method"] == "POST" and route_key != ("POST", "/admin/login"):
                     self.assertIn("csrf", str(entry["csrf_guard"]).lower())
                 if entry["mutating"] and route_key not in current_no_audit_mutations:
