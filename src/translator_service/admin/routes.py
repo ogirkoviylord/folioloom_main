@@ -16,6 +16,8 @@ from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException
+from starlette.requests import ClientDisconnect
 
 from translator_service.admin.action_center import build_action_center
 from translator_service.admin.ai_provider_keys import (
@@ -781,23 +783,42 @@ def create_admin_router(settings: Settings) -> APIRouter:
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         maximum_size_bytes = settings.max_upload_mb * 1024 * 1024
-        content_length = request.headers.get("content-length")
-        if content_length and content_length.isdigit() and int(content_length) > (
-            maximum_size_bytes + 65536
-        ):
+        try:
+            request_body = await _read_bounded_request_body(
+                request,
+                maximum_size_bytes + _MULTIPART_REQUEST_OVERHEAD_BYTES,
+            )
+        except ClientDisconnect:
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        if request_body is None:
             return _html(
                 "Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE
             )
-        form = await request.form()
-        if not session_manager.verify_csrf(session, str(form.get("csrf_token", ""))):
-            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
-        upload = form.get("file")
-        if not isinstance(upload, UploadFile):
+        try:
+            form = await _parse_multipart_body(request, request_body)
+        except (HTTPException, ValueError):
             return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
         try:
+            file_parts = [
+                value
+                for _field_name, value in form.multi_items()
+                if isinstance(value, UploadFile)
+            ]
+            uploads = form.getlist("file")
+            if len(file_parts) != 1 or len(uploads) != 1:
+                return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+            upload = uploads[0]
+            if not isinstance(upload, UploadFile):
+                return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+            if not session_manager.verify_csrf(
+                session, str(form.get("csrf_token", ""))
+            ):
+                return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
             content = await _read_bounded_upload(upload, maximum_size_bytes)
+            file_name = getattr(upload, "filename", "")
+            content_type = getattr(upload, "content_type", "")
         finally:
-            await upload.close()
+            await form.close()
         if content is None:
             return _html(
                 "Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE
@@ -808,8 +829,8 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 store=store,
                 storage=LocalObjectStorage(settings.object_storage_root),
                 actor=source_registry_actor_from_admin_session(session),
-                file_name=getattr(upload, "filename", ""),
-                content_type=getattr(upload, "content_type", ""),
+                file_name=file_name,
+                content_type=content_type,
                 content=content,
                 maximum_size_bytes=maximum_size_bytes,
             )
@@ -2548,6 +2569,40 @@ async def _read_bounded_upload(upload, maximum_size_bytes: int) -> bytes | None:
             return None
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+async def _read_bounded_request_body(
+    request: Request, maximum_size_bytes: int
+) -> bytes | None:
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > maximum_size_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _parse_multipart_body(request: Request, body: bytes):
+    if not request.headers.get("content-type", "").lower().startswith(
+        "multipart/form-data"
+    ):
+        raise ValueError("expected multipart form data")
+
+    sent = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return await Request(request.scope, receive).form()
+
+
+_MULTIPART_REQUEST_OVERHEAD_BYTES = 65536
 
 
 def _documents_body(*, csrf_token: str, catalog) -> str:

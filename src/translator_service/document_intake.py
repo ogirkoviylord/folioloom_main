@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-import io
 import re
-import zipfile
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePath
 
 from translator_service.admin.auth import AdminSession
 from translator_service.admin.rbac import AdminRole
-from translator_service.file_storage import LocalObjectStorage, StoredFileKind
+from translator_service.documents import (
+    DocumentContentRejectedError,
+    DocumentFormat,
+    validate_document_content,
+)
+from translator_service.file_storage import (
+    LocalObjectStorage,
+    ObjectPublishError,
+    StoredFileKind,
+)
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.source_registry_service import (
     RegisteredOriginalDocxSource,
@@ -70,9 +77,9 @@ def ingest_owner_docx(
         return validation
 
     object_key = _original_object_key(file_name, content)
-    created_by_request = not storage.exists(object_key)
+    created_by_request = False
     try:
-        stored = storage.put_bytes(
+        stored, created_by_request = storage.put_bytes_if_absent(
             kind=StoredFileKind.ORIGINAL,
             file_name=file_name,
             content_type=content_type or _DOCX_CONTENT_TYPE,
@@ -91,9 +98,11 @@ def ingest_owner_docx(
                 storage, stored.object_key, created_by_request, registered.code
             )
         return registered
+    except ObjectPublishError:
+        return DocumentIntakeDenied("document_intake_storage_unavailable")
     except Exception:
         if created_by_request:
-            storage.delete(object_key)
+            storage.delete_if_unretained(object_key)
         raise
 
 
@@ -188,11 +197,12 @@ def _validate_docx_upload(
     if not file_name.lower().endswith(".docx") or not content:
         return DocumentIntakeDenied("document_intake_file_invalid")
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            names = set(archive.namelist())
-    except (OSError, zipfile.BadZipFile):
-        return DocumentIntakeDenied("document_intake_file_invalid")
-    if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+        validate_document_content(
+            file_name=file_name,
+            content=content,
+            document_format=DocumentFormat.DOCX,
+        )
+    except DocumentContentRejectedError:
         return DocumentIntakeDenied("document_intake_file_invalid")
     return None
 
@@ -214,7 +224,7 @@ def _compensate(
     code: str,
 ) -> DocumentIntakeDenied:
     if created_by_request:
-        storage.delete(object_key)
+        storage.delete_if_unretained(object_key)
     return DocumentIntakeDenied(code)
 
 
