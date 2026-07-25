@@ -9,7 +9,9 @@ from translator_service.postgres_migrations import MIGRATIONS
 
 class SourceRegistryPersistenceContractTest(unittest.TestCase):
     def test_v5_migration_adds_nullable_registry_provenance_and_two_event_audit(self):
-        migration = MIGRATIONS[-1]
+        migration = next(
+            migration for migration in MIGRATIONS if migration.version == 5
+        )
 
         self.assertEqual(migration.version, 5)
         self.assertIn(

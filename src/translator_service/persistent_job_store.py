@@ -144,6 +144,19 @@ class DocumentGlossaryAuthoringStore(PersistentJobStore, Protocol):
     document_glossary_authoring_migration_ready: bool
 
 
+@runtime_checkable
+class DocumentGlossaryLockAttestationStore(PersistentJobStore, Protocol):
+    """Narrow capability for immutable document glossary lock attestations."""
+
+    document_glossary_lock_attestation_migration_ready: bool
+
+    def attest_document_glossary_lock(self, *, document_custody_id: str, actor): ...
+
+    def read_document_glossary_lock_status(
+        self, *, document_custody_id: str, actor
+    ): ...
+
+
 def admit_strict_docx_job(
     store: PersistentJobStore,
     request: StrictDocxAdmissionRequest,
@@ -206,6 +219,16 @@ def document_glossary_authoring_capability_denial_code(
     return None
 
 
+def document_glossary_lock_attestation_capability_denial_code(
+    store: object,
+) -> str | None:
+    if not isinstance(store, DocumentGlossaryLockAttestationStore):
+        return "glossary_lock_attestation_unsupported_backend"
+    if not store.document_glossary_lock_attestation_migration_ready:
+        return "glossary_lock_attestation_migration_not_ready"
+    return None
+
+
 class PersistentJobStoreSettings(Protocol):
     scheduler_backend: str
     persistent_jobs_db_path: str
@@ -226,6 +249,7 @@ def open_persistent_job_store(
             run_postgres_migrations(store.connection)
             store.strict_docx_migration_ready = True
             store.document_glossary_authoring_migration_ready = True
+            store.document_glossary_lock_attestation_migration_ready = True
         except Exception as migration_error:
             try:
                 store.close()

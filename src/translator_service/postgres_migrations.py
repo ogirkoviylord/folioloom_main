@@ -291,6 +291,29 @@ CREATE TABLE IF NOT EXISTS source_registry_events (
 );
 """
 
+_V6_DOCUMENT_GLOSSARY_LOCK_ATTESTATION_SQL = """
+CREATE TABLE IF NOT EXISTS document_glossary_lock_attestations (
+    attestation_id TEXT PRIMARY KEY,
+    document_custody_id TEXT NOT NULL REFERENCES strict_docx_v3_document_custody(document_custody_id),
+    revision_id TEXT NOT NULL REFERENCES document_glossary_revisions(revision_id),
+    approval_id TEXT NOT NULL REFERENCES glossary_approvals(approval_id),
+    snapshot_custody_id TEXT NOT NULL REFERENCES glossary_snapshot_custody(custody_id),
+    snapshot_digest TEXT NOT NULL,
+    snapshot_schema_version INTEGER NOT NULL,
+    serialization_schema_version TEXT NOT NULL,
+    approval_schema_version INTEGER NOT NULL,
+    attestation_schema_version INTEGER NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_role TEXT NOT NULL CHECK (actor_role = 'owner'),
+    authn_schema_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(document_custody_id, revision_id, approval_id, snapshot_custody_id,
+           snapshot_digest, snapshot_schema_version, serialization_schema_version,
+           approval_schema_version, attestation_schema_version, actor_id, actor_role,
+           authn_schema_version)
+);
+"""
+
 MIGRATIONS = (
     PostgresMigration(version=1, sql_payload=_V1_SCHEDULER_SQL),
     PostgresMigration(version=2, sql_payload=_V2_STRICT_DOCX_SQL),
@@ -299,6 +322,9 @@ MIGRATIONS = (
     ),
     PostgresMigration(version=4, sql_payload=_V4_DOCUMENT_GLOSSARY_PROVENANCE_SQL),
     PostgresMigration(version=5, sql_payload=_V5_SOURCE_REGISTRY_SQL),
+    PostgresMigration(
+        version=6, sql_payload=_V6_DOCUMENT_GLOSSARY_LOCK_ATTESTATION_SQL
+    ),
 )
 
 # This is intentionally an enumerated catalog query rather than a one-table probe.
