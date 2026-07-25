@@ -35,6 +35,8 @@ def verify_original_docx_source(
         content = storage.get_bytes(source_object_key)
     except (FileNotFoundError, KeyError, ValueError):
         return VerifiedOriginalDocxDenied("document_missing")
+    except OSError:
+        return VerifiedOriginalDocxDenied("document_storage_unavailable")
     if metadata.object_key != source_object_key:
         return VerifiedOriginalDocxDenied("document_metadata_mismatch")
     if (

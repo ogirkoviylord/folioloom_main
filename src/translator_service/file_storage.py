@@ -96,38 +96,40 @@ class LocalObjectStorage:
             created_at=created_at,
         )
 
-        with self._liveness_lock(object_key):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                descriptor = os.open(
-                    path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-                )
-            except FileExistsError:
-                # The creator publishes bytes and metadata under this lock, so
-                # a reuser cannot observe the object/metadata visibility gap.
-                self._require_matching_content(path, stored)
+        try:
+            with self._liveness_lock(object_key):
+                path.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    existing = self.get_metadata(object_key)
-                except (
-                    FileNotFoundError,
-                    OSError,
-                    json.JSONDecodeError,
-                    KeyError,
-                    TypeError,
-                    ValueError,
-                ):
-                    self._write_metadata(stored)
-                    existing = stored
-                else:
-                    if not self._metadata_matches_content(existing, stored):
+                    descriptor = os.open(
+                        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+                    )
+                except FileExistsError:
+                    # The creator publishes bytes and metadata under this lock, so
+                    # a reuser cannot observe the object/metadata visibility gap.
+                    self._require_matching_content(path, stored)
+                    try:
+                        existing = self.get_metadata(object_key)
+                    except (
+                        FileNotFoundError,
+                        OSError,
+                        json.JSONDecodeError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                    ):
                         self._write_metadata(stored)
                         existing = stored
-                self._retention_path_for_key(object_key).touch(exist_ok=True)
-                return existing, False
-            with os.fdopen(descriptor, "wb") as object_file:
-                object_file.write(content)
-            self._write_metadata(stored)
-            return stored, True
+                    else:
+                        if not self._metadata_matches_content(existing, stored):
+                            self._write_metadata(stored)
+                            existing = stored
+                    self._retention_path_for_key(object_key).touch(exist_ok=True)
+                    return existing, False
+                self._write_new_object_bytes(path, descriptor, content)
+                self._write_metadata(stored)
+                return stored, True
+        except OSError as error:
+            raise ObjectPublishError("object publication failed") from error
 
     def get_bytes(self, object_key: str) -> bytes:
         return self._path_for_existing_key(object_key).read_bytes()
@@ -166,10 +168,13 @@ class LocalObjectStorage:
 
     def delete_if_unretained(self, object_key: str) -> bool:
         """Delete a creator-owned object only when no reuser retained it."""
-        with self._liveness_lock(object_key):
-            if self._retention_path_for_key(object_key).exists():
-                return False
-            return self.delete(object_key)
+        try:
+            with self._liveness_lock(object_key):
+                if self._retention_path_for_key(object_key).exists():
+                    return False
+                return self.delete(object_key)
+        except OSError as error:
+            raise ObjectPublishError("object cleanup failed") from error
 
     def _write_metadata(self, stored: StoredFile) -> None:
         metadata_path = self._metadata_path_for_key(stored.object_key)
@@ -208,6 +213,31 @@ class LocalObjectStorage:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    @staticmethod
+    def _write_new_object_bytes(path: Path, descriptor: int, content: bytes) -> None:
+        try:
+            object_file = os.fdopen(descriptor, "wb")
+        except OSError:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            LocalObjectStorage._discard_unpublished_object(path)
+            raise
+        try:
+            with object_file:
+                object_file.write(content)
+        except OSError:
+            LocalObjectStorage._discard_unpublished_object(path)
+            raise
+
+    @staticmethod
+    def _discard_unpublished_object(path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     @staticmethod
     def _metadata_matches_content(existing: StoredFile, stored: StoredFile) -> bool:
