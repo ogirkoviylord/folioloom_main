@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 from uuid import uuid4
 
 from translator_service.admin.auth import AdminSession
 from translator_service.admin.rbac import AdminRole
 from translator_service.file_storage import (
     LocalObjectStorage,
-    StoredFile,
-    StoredFileKind,
 )
 from translator_service.glossary_contracts import (
     GlossarySnapshot,
@@ -34,6 +31,11 @@ from translator_service.persistent_jobs import (
     _from_db_time,
     _now,
     _to_db_time,
+)
+from translator_service.verified_original_docx import (
+    VerifiedOriginalDocxDenied,
+    VerifiedOriginalDocxSource,
+    verify_original_docx_source,
 )
 
 _GLOSSARY_AUTHORING_AUTHN_SCHEMA_VERSION = "admin-session-v1"
@@ -295,24 +297,11 @@ def _create_revision_in_transaction(
 
 def _verified_original_docx_source(
     storage: LocalObjectStorage, source_object_key: str
-) -> StoredFile | GlossaryAuthoringDenied:
-    try:
-        metadata = storage.get_metadata(source_object_key)
-        content = storage.get_bytes(source_object_key)
-    except (FileNotFoundError, KeyError, ValueError):
-        return GlossaryAuthoringDenied("glossary_authoring_document_missing")
-    if metadata.object_key != source_object_key:
-        return GlossaryAuthoringDenied("glossary_authoring_document_metadata_mismatch")
-    if (
-        metadata.kind is not StoredFileKind.ORIGINAL
-        or not metadata.file_name.lower().endswith(".docx")
-    ):
-        return GlossaryAuthoringDenied("glossary_authoring_document_kind_invalid")
-    if metadata.size_bytes != len(content):
-        return GlossaryAuthoringDenied("glossary_authoring_document_size_mismatch")
-    if metadata.sha256 != sha256(content).hexdigest():
-        return GlossaryAuthoringDenied("glossary_authoring_document_digest_mismatch")
-    return metadata
+) -> VerifiedOriginalDocxSource | GlossaryAuthoringDenied:
+    source = verify_original_docx_source(storage, source_object_key)
+    if isinstance(source, VerifiedOriginalDocxDenied):
+        return GlossaryAuthoringDenied(f"glossary_authoring_{source.code}")
+    return source
 
 
 def _active_revision(connection, custody_id: str):
