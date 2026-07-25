@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # ruff: noqa: E501
 import json
+import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
@@ -153,7 +154,12 @@ from translator_service.beta_safety_store import SQLiteBetaSafetyStore
 from translator_service.config import Settings
 from translator_service.document_glossary_authoring_bridge import (
     DocumentGlossaryAuthoringBridgeDenied,
+    author_document_glossary_revision,
     read_current_document_glossary_revision,
+)
+from translator_service.document_glossary_editor import (
+    OwnerGlossaryEditorInputError,
+    build_owner_pinned_glossary_snapshot,
 )
 from translator_service.document_glossary_lock_attestation import (
     DocumentGlossaryLockDenied,
@@ -209,6 +215,10 @@ _INTERNAL_READER_FORMAT_BY_SUFFIX = {
     ".docx": "docx",
     ".epub": "epub",
 }
+_DOCUMENT_GLOSSARY_NO_PARENT_TOKEN = "no-parent"
+_DOCUMENT_GLOSSARY_REVISION_ID_RE = re.compile(
+    r"document-glossary-revision-[0-9a-f]{32}"
+)
 
 
 def create_workbench_router(
@@ -890,25 +900,93 @@ def create_admin_router(settings: Settings) -> APIRouter:
                 session=session,
                 document_custody_id=custody_id,
             )
-            status = read_document_glossary_lock_status(
-                store=store,
-                storage=LocalObjectStorage(settings.object_storage_root),
-                session=session,
-                document_custody_id=custody_id,
-            )
+            if isinstance(revision, DocumentGlossaryAuthoringBridgeDenied):
+                selected = select_owner_registered_original_docx_source(
+                    store=store,
+                    storage=LocalObjectStorage(settings.object_storage_root),
+                    actor=source_registry_actor_from_admin_session(session),
+                    document_custody_id=custody_id,
+                )
+                status = None
+            else:
+                selected = None
+                status = read_document_glossary_lock_status(
+                    store=store,
+                    storage=LocalObjectStorage(settings.object_storage_root),
+                    session=session,
+                    document_custody_id=custody_id,
+                )
         finally:
             store.close()
+        if isinstance(selected, DocumentIntakeDenied):
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+        if selected is not None:
+            return _html(
+                _document_glossary_body(
+                    csrf_token=session.csrf_token,
+                    document_custody_id=selected.document_custody_id,
+                    expected_parent_revision_id=None,
+                    revision_sequence=None,
+                    lock_status="not created",
+                )
+            )
         if isinstance(revision, DocumentGlossaryAuthoringBridgeDenied):
             return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+        assert status is not None
         if isinstance(status, DocumentGlossaryLockDenied):
             return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
         return _html(
             _document_glossary_body(
                 csrf_token=session.csrf_token,
                 document_custody_id=revision.document_custody_id,
+                expected_parent_revision_id=revision.revision_id,
                 revision_sequence=revision.revision_sequence,
                 lock_status=status.status,
             )
+        )
+
+    @router.post("/documents/glossary", response_class=HTMLResponse)
+    async def document_glossary_author(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        parent_is_valid, expected_parent_revision_id = _parse_document_glossary_expected_parent(
+            form.get("expected_parent_revision_id")
+        )
+        if not parent_is_valid:
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.BAD_REQUEST)
+        try:
+            snapshot = build_owner_pinned_glossary_snapshot(
+                source_language=form.get("source_language", ""),
+                target_language=form.get("target_language", ""),
+                source_terms=form.getlist("source_term"),
+                target_terms=form.getlist("target_term"),
+                entry_types=form.getlist("entry_type"),
+            )
+        except OwnerGlossaryEditorInputError:
+            return _html("Glossary editor input invalid", status_code=HTTPStatus.BAD_REQUEST)
+        custody_id = form.get("document_custody_id", "")
+        store = open_persistent_job_store(settings)
+        try:
+            result = author_document_glossary_revision(
+                store=store,
+                storage=LocalObjectStorage(settings.object_storage_root),
+                session=session,
+                document_custody_id=custody_id,
+                snapshot=snapshot,
+                expected_parent_revision_id=expected_parent_revision_id,
+            )
+        finally:
+            store.close()
+        if isinstance(result, DocumentGlossaryAuthoringBridgeDenied):
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(
+            "/admin/documents/glossary?document_custody_id="
+            f"{quote(result.document_custody_id, safe='')}",
+            status_code=HTTPStatus.SEE_OTHER,
         )
 
     @router.post("/documents/glossary/lock", response_class=HTMLResponse)
@@ -2608,10 +2686,19 @@ def create_admin_router(settings: Settings) -> APIRouter:
     return router
 
 
-async def _urlencoded_form(request: Request) -> dict[str, str]:
+class _URLEncodedForm(dict[str, str]):
+    def __init__(self, parsed: dict[str, list[str]]) -> None:
+        super().__init__({key: values[-1] for key, values in parsed.items()})
+        self._parsed = parsed
+
+    def getlist(self, key: str) -> list[str]:
+        return self._parsed.get(key, [])
+
+
+async def _urlencoded_form(request: Request) -> _URLEncodedForm:
     body = (await request.body()).decode("utf-8")
     parsed = parse_qs(body, keep_blank_values=True)
-    return {key: values[-1] for key, values in parsed.items()}
+    return _URLEncodedForm(parsed)
 
 
 def _session_or_none(
@@ -2704,19 +2791,50 @@ def _document_glossary_body(
     *,
     csrf_token: str,
     document_custody_id: str,
-    revision_sequence: int,
+    expected_parent_revision_id: str | None,
+    revision_sequence: int | None,
     lock_status: str,
 ) -> str:
     """Render custody-only durable glossary metadata and explicit lock action."""
     return (
         "<section><h1>Durable glossary</h1>"
-        f"<p>Revision {revision_sequence}; lock status: {escape(lock_status)}</p>"
+        f"<p>Revision {revision_sequence if revision_sequence is not None else 'not created'}; "
+        f"lock status: {escape(lock_status)}</p>"
+        "<form method=\"post\" action=\"/admin/documents/glossary\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{escape(csrf_token)}\">"
+        "<input type=\"hidden\" name=\"document_custody_id\" value=\""
+        f"{escape(document_custody_id)}\">"
+        "<input type=\"hidden\" name=\"expected_parent_revision_id\" value=\""
+        f"{escape(expected_parent_revision_id or _DOCUMENT_GLOSSARY_NO_PARENT_TOKEN)}\">"
+        "<label>Source language <input name=\"source_language\" required></label>"
+        "<label>Target language <input name=\"target_language\" required></label>"
+        "<div id=\"glossary-rows\"><fieldset><legend>Glossary row</legend>"
+        "<label>Source term <input name=\"source_term\" required></label>"
+        "<label>Target term <input name=\"target_term\" required></label>"
+        "<label>Type <select name=\"entry_type\"><option value=\"term\">Term</option>"
+        "<option value=\"name\">Name</option></select></label></fieldset></div>"
+        "<button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
+        "<script>document.getElementById('add-glossary-row').addEventListener('click',()=>{"
+        "const row=document.querySelector('#glossary-rows fieldset').cloneNode(true);"
+        "row.querySelectorAll('input').forEach(input=>input.value='');"
+        "document.getElementById('glossary-rows').append(row);});</script>"
+        "<button type=\"submit\">Save glossary revision</button></form>"
         "<form method=\"post\" action=\"/admin/documents/glossary/lock\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{escape(csrf_token)}\">"
         "<input type=\"hidden\" name=\"document_custody_id\" value=\""
         f"{escape(document_custody_id)}\">"
         "<button type=\"submit\">Lock current revision</button></form></section>"
     )
+
+
+def _parse_document_glossary_expected_parent(
+    value: str | None,
+) -> tuple[bool, str | None]:
+    if value == _DOCUMENT_GLOSSARY_NO_PARENT_TOKEN:
+        return True, None
+    if value is not None and _DOCUMENT_GLOSSARY_REVISION_ID_RE.fullmatch(value):
+        return True, value
+    return False, None
 
 
 def _integration_summaries(settings: Settings):
