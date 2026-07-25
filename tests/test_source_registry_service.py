@@ -488,6 +488,48 @@ class SourceRegistryServiceTest(unittest.TestCase):
             SourceRegistryDenied("source_registry_reconciliation_denied"),
         )
 
+    def test_select_fails_closed_when_registered_storage_document_is_missing(self):
+        source = self._verified_original_docx(b"verified source")
+        registered = register_verified_original_docx_source(
+            store=self.store,
+            actor=self.owner,
+            source=source,
+        )
+        self.assertIsInstance(registered, RegisteredOriginalDocxSource)
+        assert isinstance(registered, RegisteredOriginalDocxSource)
+        custody_count_before = self.store._connection.execute(
+            "SELECT COUNT(*) FROM strict_docx_v3_document_custody"
+        ).fetchone()[0]
+        event_count_before = self.store._connection.execute(
+            "SELECT COUNT(*) FROM source_registry_events"
+        ).fetchone()[0]
+        self.assertTrue(self.storage.delete(source.object_key))
+
+        result = select_registered_original_docx_source(
+            store=self.store,
+            storage=self.storage,
+            actor=self.owner,
+            document_custody_id=registered.document_custody_id,
+        )
+
+        self.assertEqual(
+            result,
+            SourceRegistryDenied("source_registry_source_document_missing"),
+        )
+        self.assertFalse(hasattr(result, "source_object_key"))
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM strict_docx_v3_document_custody"
+            ).fetchone()[0],
+            custody_count_before,
+        )
+        self.assertEqual(
+            self.store._connection.execute(
+                "SELECT COUNT(*) FROM source_registry_events"
+            ).fetchone()[0],
+            event_count_before,
+        )
+
     def test_legacy_custody_without_registry_owner_is_not_adopted(self):
         source = self._verified_original_docx(b"verified source")
         self.store._connection.execute(
