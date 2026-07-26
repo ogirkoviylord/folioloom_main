@@ -424,6 +424,274 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             f"/admin/documents/glossary?document_custody_id={custody_id}",
         )
 
+    def test_document_glossary_editor_creates_successor_and_never_echoes_terms(self) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "editor-jobs.sqlite3"),
+                    object_storage_root=str(root / "editor-objects"),
+                )
+            )
+        )
+        client.post("/admin/login", data={"password": "owner-pass"})
+        documents = client.get("/admin/documents")
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', documents.text)
+        assert csrf_token is not None
+        client.post(
+            "/admin/documents/upload",
+            data={"csrf_token": csrf_token.group(1)},
+            files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")},
+            follow_redirects=False,
+        )
+        catalog = client.get("/admin/documents")
+        custody = re.search(r'name="document_custody_id" value="([^"]+)"', catalog.text)
+        assert custody is not None
+        initial = client.get(
+            f"/admin/documents/glossary?document_custody_id={custody.group(1)}"
+        )
+        self.assertEqual(initial.status_code, 200)
+        self.assertIn("Revision not created", initial.text)
+        self.assertIn("Add glossary row", initial.text)
+        editor_csrf = re.search(r'name="csrf_token" value="([^"]+)"', initial.text)
+        initial_parent = re.search(
+            r'name="expected_parent_revision_id" value="([^"]+)"', initial.text
+        )
+        assert editor_csrf is not None
+        assert initial_parent is not None
+        self.assertEqual(initial_parent.group(1), "no-parent")
+        raw_source = "NoLeakSource"
+        raw_target = "NoLeakTarget"
+        raw_second_source = "NoLeakSecondSource"
+        raw_second_target = "NoLeakSecondTarget"
+        invalid = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": initial_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": raw_source,
+                "target_term": raw_target,
+                "entry_type": "invalid",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertNotIn(raw_source, invalid.text)
+        self.assertNotIn(raw_target, invalid.text)
+        invalid_csrf_source = "NoLeakInvalidCsrfSource"
+        invalid_csrf_target = "NoLeakInvalidCsrfTarget"
+        invalid_csrf = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": "bad",
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": initial_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": invalid_csrf_source,
+                "target_term": invalid_csrf_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(invalid_csrf.status_code, 403)
+        self.assertNotIn(invalid_csrf_source, invalid_csrf.text)
+        self.assertNotIn(invalid_csrf_target, invalid_csrf.text)
+        created = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": initial_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": [raw_source, raw_second_source],
+                "target_term": [raw_target, raw_second_target],
+                "entry_type": ["term", "name"],
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(created.status_code, 303)
+        self.assertEqual(
+            created.headers["location"],
+            f"/admin/documents/glossary?document_custody_id={custody.group(1)}",
+        )
+        saved = client.get(created.headers["location"])
+        self.assertIn("Revision 1", saved.text)
+        self.assertNotIn(raw_source, saved.text)
+        self.assertNotIn(raw_target, saved.text)
+        self.assertNotIn(raw_second_source, saved.text)
+        self.assertNotIn(raw_second_target, saved.text)
+        first_parent = re.search(
+            r'name="expected_parent_revision_id" value="([^"]+)"', saved.text
+        )
+        assert first_parent is not None
+        replacement = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": first_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": "ReplacementSource",
+                "target_term": "ReplacementTarget",
+                "entry_type": "name",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(replacement.status_code, 303)
+        saved = client.get(replacement.headers["location"])
+        self.assertIn("Revision 2", saved.text)
+        self.assertNotIn("ReplacementSource", saved.text)
+        self.assertNotIn("ReplacementTarget", saved.text)
+        stale_source = "NoLeakStaleSource"
+        stale_target = "NoLeakStaleTarget"
+        stale = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": first_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": stale_source,
+                "target_term": stale_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(stale.status_code, 404)
+        self.assertNotIn(stale_source, stale.text)
+        self.assertNotIn(stale_target, stale.text)
+        tampered_source = "NoLeakTamperedSource"
+        tampered_target = "NoLeakTamperedTarget"
+        tampered = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": "tampered-parent-id",
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": tampered_source,
+                "target_term": tampered_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(tampered.status_code, 400)
+        self.assertNotIn(tampered_source, tampered.text)
+        self.assertNotIn(tampered_target, tampered.text)
+        missing_parent_source = "NoLeakMissingParentSource"
+        missing_parent_target = "NoLeakMissingParentTarget"
+        missing_parent = client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": missing_parent_source,
+                "target_term": missing_parent_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(missing_parent.status_code, 400)
+        self.assertNotIn(missing_parent_source, missing_parent.text)
+        self.assertNotIn(missing_parent_target, missing_parent.text)
+        store = SQLiteTranslationJobStore(root / "editor-jobs.sqlite3")
+        try:
+            self.assertEqual(
+                store._connection.execute(
+                    "SELECT COUNT(*) FROM document_glossary_revisions"
+                ).fetchone()[0],
+                2,
+            )
+            self.assertEqual(
+                store._connection.execute(
+                    "SELECT COUNT(*) FROM document_glossary_revision_events"
+                ).fetchone()[0],
+                3,
+            )
+        finally:
+            store.close()
+        unauthenticated_source = "NoLeakUnauthenticatedSource"
+        unauthenticated_target = "NoLeakUnauthenticatedTarget"
+        unauthenticated_client = TestClient(
+            create_app(
+                Settings(
+                    admin_owner_password="owner-pass",
+                    admin_session_secret="session-secret",
+                    persistent_jobs_db_path=str(root / "editor-jobs.sqlite3"),
+                    object_storage_root=str(root / "editor-objects"),
+                )
+            )
+        )
+        unauthenticated = unauthenticated_client.post(
+            "/admin/documents/glossary",
+            data={
+                "csrf_token": editor_csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": first_parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": unauthenticated_source,
+                "target_term": unauthenticated_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(unauthenticated.status_code, 303)
+        self.assertNotIn(unauthenticated_source, unauthenticated.text)
+        self.assertNotIn(unauthenticated_target, unauthenticated.text)
+        store = SQLiteTranslationJobStore(root / "editor-jobs.sqlite3")
+        try:
+            self.assertEqual(
+                store._connection.execute(
+                    "SELECT COUNT(*) FROM document_glossary_revisions"
+                ).fetchone()[0],
+                2,
+            )
+            self.assertEqual(
+                store._connection.execute(
+                    "SELECT COUNT(*) FROM document_glossary_revision_events"
+                ).fetchone()[0],
+                3,
+            )
+        finally:
+            store.close()
+        lock_csrf = re.search(r'name="csrf_token" value="([^"]+)"', saved.text)
+        assert lock_csrf is not None
+        locked = client.post(
+            "/admin/documents/glossary/lock",
+            data={
+                "csrf_token": lock_csrf.group(1),
+                "document_custody_id": custody.group(1),
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(locked.status_code, 303)
+        replayed = client.post(
+            "/admin/documents/glossary/lock",
+            data={
+                "csrf_token": lock_csrf.group(1),
+                "document_custody_id": custody.group(1),
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(replayed.status_code, 303)
+        status = client.get(locked.headers["location"])
+        self.assertIn("lock status: active", status.text)
+        self.assertNotIn(raw_source, status.text)
+        self.assertNotIn(raw_target, status.text)
+
     def test_bounded_request_body_rejects_chunked_oversize_before_multipart_parse(
         self,
     ) -> None:
