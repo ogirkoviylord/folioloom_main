@@ -200,6 +200,10 @@ def _create_in_transaction(
         parent_id is not None and (active is None or active["revision_id"] != parent_id)
     ):
         return DocumentGlossaryAuthoringBridgeDenied("glossary_authoring_parent_not_current")
+    if active is not None and _active_revision_is_locked(
+        connection, active, actor, sqlite=sqlite
+    ):
+        return DocumentGlossaryAuthoringBridgeDenied("glossary_authoring_locked")
     duplicate_sql = (
         "SELECT revision_id FROM document_glossary_revisions WHERE document_custody_id = ? "
         "AND snapshot_payload_sha256 = ?"
@@ -318,6 +322,40 @@ def _sqlite_active_row(connection, custody_id):
                           AND event.event_type IN ('superseded', 'revoked'))
         ORDER BY revision.revision_sequence DESC""", (custody_id,)
     ).fetchone()
+
+
+def _active_revision_is_locked(connection, active, actor, *, sqlite):
+    """Check the current revision lock tuple while its authoring lock is held."""
+    if sqlite:
+        return connection.execute(
+            """SELECT 1 FROM document_glossary_lock_attestations WHERE
+            document_custody_id = ? AND revision_id = ? AND approval_id = ?
+            AND snapshot_custody_id = ? AND snapshot_digest = ?
+            AND snapshot_schema_version = ? AND serialization_schema_version = ?
+            AND approval_schema_version = ? AND attestation_schema_version = 1
+            AND actor_id = ? AND actor_role = ? AND authn_schema_version = ? LIMIT 1""",
+            (
+                active["document_custody_id"], active["revision_id"],
+                active["approval_id"], active["snapshot_custody_id"],
+                active["snapshot_payload_sha256"], active["snapshot_schema_version"],
+                active["serialization_schema_version"], GLOSSARY_APPROVAL_SCHEMA_VERSION,
+                actor.actor_id, actor.role, actor.authn_schema_version,
+            ),
+        ).fetchone() is not None
+    return connection.execute(
+        _POSTGRES_ACTIVE_LOCK_SQL,
+        {
+            "document_custody_id": active["document_custody_id"],
+            "revision_id": active["revision_id"], "approval_id": active["approval_id"],
+            "snapshot_custody_id": active["snapshot_custody_id"],
+            "snapshot_digest": active["snapshot_payload_sha256"],
+            "snapshot_schema_version": active["snapshot_schema_version"],
+            "serialization_schema_version": active["serialization_schema_version"],
+            "approval_schema_version": GLOSSARY_APPROVAL_SCHEMA_VERSION,
+            "actor_id": actor.actor_id, "actor_role": actor.role,
+            "authn_schema_version": actor.authn_schema_version,
+        },
+    ).fetchone() is not None
 
 
 def _metadata(row, outcome):
@@ -491,6 +529,17 @@ WHERE revision_id = %(revision_id)s ORDER BY created_at, event_id"""
 _POSTGRES_DUPLICATE_SQL = """SELECT revision_id FROM document_glossary_revisions
 WHERE document_custody_id = %(document_custody_id)s
   AND snapshot_payload_sha256 = %(snapshot_digest)s"""
+_POSTGRES_ACTIVE_LOCK_SQL = """SELECT 1 FROM document_glossary_lock_attestations
+WHERE document_custody_id = %(document_custody_id)s
+  AND revision_id = %(revision_id)s AND approval_id = %(approval_id)s
+  AND snapshot_custody_id = %(snapshot_custody_id)s
+  AND snapshot_digest = %(snapshot_digest)s
+  AND snapshot_schema_version = %(snapshot_schema_version)s
+  AND serialization_schema_version = %(serialization_schema_version)s
+  AND approval_schema_version = %(approval_schema_version)s
+  AND attestation_schema_version = 1
+  AND actor_id = %(actor_id)s AND actor_role = %(actor_role)s
+  AND authn_schema_version = %(authn_schema_version)s LIMIT 1"""
 _POSTGRES_INSERT_SNAPSHOT_SQL = """INSERT INTO glossary_snapshot_custody (custody_id,
 snapshot_payload, snapshot_digest, snapshot_schema_version, retention_mode)
 VALUES (%(custody_id)s, %(snapshot_payload)s, %(snapshot_digest)s,

@@ -1021,6 +1021,71 @@ ROUTE_COVERAGE_MAP = (
         "future_permission": "TBD_WORKBENCH_VIEW",
     },
     {
+        "method": "POST",
+        "path": "/admin/workbench/upload",
+        "handler": "workbench_upload",
+        "sensitivity": "owner_document_original_storage_and_registry_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "direct: document_intake_service",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/select",
+        "handler": "workbench_select_document",
+        "sensitivity": "owner_document_workbench_selection_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "direct: document_selection_service",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "MANAGE_DOCUMENT_INTAKE",
+    },
+    {
+        "method": "GET",
+        "path": "/admin/workbench/studio",
+        "handler": "workbench_document_studio",
+        "sensitivity": "owner_document_glossary_revision_metadata_read",
+        "mutating": False,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "not_applicable_read_only",
+        "audit_coverage": READ_ONLY_AUDIT_NOT_APPLICABLE,
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_DOCUMENT_GLOSSARY_VIEW",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/studio/save",
+        "handler": "workbench_studio_save",
+        "sensitivity": "owner_document_glossary_revision_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "direct: durable_glossary_revision_created",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_DOCUMENT_GLOSSARY_AUTHOR",
+    },
+    {
+        "method": "POST",
+        "path": "/admin/workbench/studio/lock",
+        "handler": "workbench_studio_lock",
+        "sensitivity": "owner_document_glossary_lock_attestation_mutation",
+        "mutating": True,
+        "destructive": False,
+        "session_guard": "direct: _owner_session_or_none",
+        "csrf_guard": "direct: session_manager.verify_csrf",
+        "audit_coverage": "direct: glossary_lock_attested_or_replayed",
+        "route_level_rbac": ROUTE_LEVEL_RBAC_ABSENT,
+        "future_permission": "TBD_DOCUMENT_GLOSSARY_LOCK",
+    },
+    {
         "method": "GET",
         "path": "/admin/workbench/recovery",
         "handler": "workbench_recovery",
@@ -1238,8 +1303,8 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             for entry in ROUTE_COVERAGE_MAP
         }
 
-        self.assertEqual(len(actual), 87)
-        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 38)
+        self.assertEqual(len(actual), 92)
+        self.assertEqual(sum(1 for method, _path in actual if method == "POST"), 42)
         self.assertEqual(actual, mapped)
 
     def test_mutating_destructive_and_sensitive_routes_are_classified(self) -> None:
@@ -1257,7 +1322,7 @@ class AdminRouteCoverageMapTest(unittest.TestCase):
             if (entry["method"], entry["path"]) == ("POST", "/admin/quality/run")
         )
 
-        self.assertEqual(len(mutating), 38)
+        self.assertEqual(len(mutating), 42)
         self.assertEqual(len(destructive), 5)
         self.assertIn("TBD_RAW_DIAGNOSTICS_VIEW", tbd_permissions)
         self.assertIn("TBD_PROVIDER_KEY_MANAGE", tbd_permissions)
