@@ -241,8 +241,9 @@ def create_workbench_router(
     * No provider / runner / cache / Telegram / resolver / job / archive work,
       and no production or release claim. Persistent effects are limited to
       the owner-authorized DOCX custody and glossary revision/lock evidence
-      used by this Workbench slice; this router does not change schema or run
-      migrations.
+      used by this Workbench slice; this Workbench slice adds no new schema or
+      migrations of its own (the shared store helper performs its standard
+      schema-ensure / migrations on open).
     * ``ManualGlossaryApproval`` is still an owner-blocker (GATE1 audit
       C1); locally-approved terms are NOT authoritative approvals.
     """
