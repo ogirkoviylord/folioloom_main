@@ -27,6 +27,9 @@ from translator_service.document_glossary_lock_attestation import (
     DocumentGlossaryLockStatus,
 )
 from translator_service.file_storage import LocalObjectStorage
+from translator_service.glossary_snapshot_serialization import (
+    deserialize_glossary_snapshot_v1,
+)
 from translator_service.persistent_jobs import SQLiteTranslationJobStore
 from translator_service.source_registry_service import SourceRegistryActor
 
@@ -44,6 +47,154 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             role="owner",
             authn_schema_version="admin-session-v1",
         )
+
+    def _workbench_studio_context(self):
+        root = Path(self._temp_dir.name)
+        database_path = root / "workbench-route-jobs.sqlite3"
+        storage_root = root / "workbench-route-objects"
+        client = TestClient(create_app(Settings(
+            admin_owner_password="owner-pass", admin_session_secret="session-secret",
+            persistent_jobs_db_path=str(database_path),
+            object_storage_root=str(storage_root),
+        )))
+        client.post("/admin/login", data={"password": "owner-pass"})
+        library = client.get("/admin/workbench/")
+        csrf = re.search(r'name="csrf_token" value="([^\"]+)"', library.text)
+        assert csrf is not None
+        client.post(
+            "/admin/workbench/upload", data={"csrf_token": csrf.group(1)},
+            files={"file": ("route-cover.docx", _docx_bytes(), "application/octet-stream")},
+            follow_redirects=False,
+        )
+        catalog = client.get("/admin/workbench/")
+        custody = re.search(
+            r'name="document_custody_id" value="([^\"]+)"', catalog.text
+        )
+        assert custody is not None
+        selected = client.post(
+            "/admin/workbench/select",
+            data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)},
+            follow_redirects=False,
+        )
+        studio = client.get(selected.headers["location"])
+        parent = re.search(
+            r'name="expected_parent_revision_id" value="([^\"]+)"', studio.text
+        )
+        assert parent is not None
+        return client, database_path, storage_root, csrf.group(1), custody.group(1), parent.group(1), selected.headers["location"]
+
+    def _workbench_glossary_counts(self, database_path: Path) -> tuple[int, int]:
+        store = SQLiteTranslationJobStore(database_path)
+        try:
+            return tuple(
+                store._connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "document_glossary_revisions",
+                    "document_glossary_revision_events",
+                )
+            )
+        finally:
+            store.close()
+
+    def test_workbench_studio_save_rejects_bad_csrf_without_durable_revision(self) -> None:
+        client, database_path, _, _, custody_id, parent, _ = self._workbench_studio_context()
+        submitted_source = "synthetic-csrf-source"
+        submitted_target = "synthetic-csrf-target"
+
+        response = client.post(
+            "/admin/workbench/studio/save",
+            data={
+                "csrf_token": "invalid-csrf",
+                "document_custody_id": custody_id,
+                "expected_parent_revision_id": parent,
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": submitted_source,
+                "target_term": submitted_target,
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn(submitted_source, response.text)
+        self.assertNotIn(submitted_target, response.text)
+        self.assertEqual(self._workbench_glossary_counts(database_path), (0, 0))
+
+    def test_workbench_studio_save_rejects_unknown_and_foreign_custody_without_write(self) -> None:
+        client, database_path, _, csrf, custody_id, parent, _ = self._workbench_studio_context()
+        foreign_store = SQLiteTranslationJobStore(database_path)
+        try:
+            foreign_store._connection.execute(
+                """UPDATE strict_docx_v3_document_custody
+                SET registry_owner_actor_id = 'foreign-owner'
+                WHERE document_custody_id = ?""",
+                (custody_id,),
+            )
+            foreign_store._connection.commit()
+        finally:
+            foreign_store.close()
+        for denied_custody_id in ("unknown-route-cover-custody", custody_id):
+            with self.subTest(custody_id=denied_custody_id):
+                response = client.post(
+                    "/admin/workbench/studio/save",
+                    data={
+                        "csrf_token": csrf,
+                        "document_custody_id": denied_custody_id,
+                        "expected_parent_revision_id": parent,
+                        "source_language": "en",
+                        "target_language": "ru",
+                        "source_term": "synthetic-denied-source",
+                        "target_term": "synthetic-denied-target",
+                        "entry_type": "term",
+                    },
+                    follow_redirects=False,
+                )
+                self.assertEqual(response.status_code, 404)
+                self.assertNotIn("synthetic-denied-source", response.text)
+                self.assertNotIn("synthetic-denied-target", response.text)
+                self.assertEqual(self._workbench_glossary_counts(database_path), (0, 0))
+
+    def test_workbench_studio_save_prg_and_stale_parent_do_not_create_successor(self) -> None:
+        client, database_path, _, csrf, custody_id, parent, studio_location = self._workbench_studio_context()
+        created = client.post(
+            "/admin/workbench/studio/save",
+            data={
+                "csrf_token": csrf,
+                "document_custody_id": custody_id,
+                "expected_parent_revision_id": parent,
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": "synthetic-first-source",
+                "target_term": "synthetic-first-target",
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(created.status_code, 303)
+        self.assertEqual(created.headers["location"], studio_location)
+        self.assertTrue(created.headers["location"].startswith("/admin/workbench/studio?"))
+        self.assertEqual(self._workbench_glossary_counts(database_path), (1, 1))
+
+        stale = client.post(
+            "/admin/workbench/studio/save",
+            data={
+                "csrf_token": csrf,
+                "document_custody_id": custody_id,
+                "expected_parent_revision_id": parent,
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": "synthetic-stale-source",
+                "target_term": "synthetic-stale-target",
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(stale.status_code, 404)
+        self.assertNotIn("synthetic-stale-source", stale.text)
+        self.assertNotIn("synthetic-stale-target", stale.text)
+        self.assertEqual(self._workbench_glossary_counts(database_path), (1, 1))
 
     def test_ingest_stores_verifies_registers_and_catalogs_owner_docx(self) -> None:
         from translator_service.document_intake import (
@@ -691,6 +842,84 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         self.assertIn("lock status: active", status.text)
         self.assertNotIn(raw_source, status.text)
         self.assertNotIn(raw_target, status.text)
+
+    def test_workbench_library_studio_keeps_durable_author_flow_in_workbench(self) -> None:
+        root = Path(self._temp_dir.name)
+        client = TestClient(create_app(Settings(
+            admin_owner_password="owner-pass", admin_session_secret="session-secret",
+            persistent_jobs_db_path=str(root / "workbench-jobs.sqlite3"),
+            object_storage_root=str(root / "workbench-objects"),
+        )))
+        client.post("/admin/login", data={"password": "owner-pass"})
+        library = client.get("/admin/workbench/")
+        legacy_query = client.get("/admin/workbench/?document=legacy-opaque")
+        self.assertEqual(legacy_query.status_code, 200)
+        self.assertIn("<h1>Library</h1>", legacy_query.text)
+        self.assertNotIn("/admin/workbench/glossary", legacy_query.text)
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', library.text)
+        assert csrf is not None
+        uploaded = client.post("/admin/workbench/upload", data={"csrf_token": csrf.group(1)}, files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")}, follow_redirects=False)
+        self.assertEqual(uploaded.headers["location"], "/admin/workbench/")
+        catalog = client.get(uploaded.headers["location"])
+        custody = re.search(r'name="document_custody_id" value="([^"]+)"', catalog.text)
+        assert custody is not None
+        selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
+        self.assertTrue(selected.headers["location"].startswith("/admin/workbench/studio?"))
+        studio = client.get(selected.headers["location"])
+        self.assertIn("Document Studio", studio.text)
+        self.assertNotIn("Admin Console", studio.text)
+        self.assertIn('id="add-glossary-row"', studio.text)
+        self.assertIn("appendChild(row)", studio.text)
+        parent = re.search(r'name="expected_parent_revision_id" value="([^"]+)"', studio.text)
+        assert parent is not None
+        created = client.post("/admin/workbench/studio/save", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1), "expected_parent_revision_id": parent.group(1), "source_language": "en", "target_language": "ru", "source_term": ["Term", "Second"], "target_term": ["Термин", "Второй"], "entry_type": ["term", "name"]}, follow_redirects=False)
+        self.assertEqual(created.headers["location"], selected.headers["location"])
+        store = SQLiteTranslationJobStore(root / "workbench-jobs.sqlite3")
+        try:
+            payload = store._connection.execute(
+                """SELECT snapshot.snapshot_payload FROM document_glossary_revisions revision
+                JOIN glossary_snapshot_custody snapshot
+                  ON snapshot.custody_id = revision.snapshot_custody_id
+                WHERE revision.document_custody_id = ?""",
+                (custody.group(1),),
+            ).fetchone()[0]
+        finally:
+            store.close()
+        saved_snapshot = deserialize_glossary_snapshot_v1(bytes(payload))
+        self.assertEqual(len(saved_snapshot.entries), 2)
+        self.assertEqual(
+            {entry.category for entry in saved_snapshot.entries}, {"term", "name"}
+        )
+        locked = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
+        self.assertEqual(locked.headers["location"], selected.headers["location"])
+        locked_studio = client.get(locked.headers["location"])
+        self.assertIn("lock state: active", locked_studio.text)
+        self.assertIn("disabled", locked_studio.text)
+        locked_save = client.post(
+            "/admin/workbench/studio/save",
+            data={
+                "csrf_token": csrf.group(1),
+                "document_custody_id": custody.group(1),
+                "expected_parent_revision_id": parent.group(1),
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": "Third",
+                "target_term": "Третий",
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(locked_save.status_code, 404)
+        store = SQLiteTranslationJobStore(root / "workbench-jobs.sqlite3")
+        try:
+            self.assertEqual(
+                store._connection.execute(
+                    "SELECT COUNT(*) FROM document_glossary_revisions"
+                ).fetchone()[0],
+                1,
+            )
+        finally:
+            store.close()
 
     def test_bounded_request_body_rejects_chunked_oversize_before_multipart_parse(
         self,

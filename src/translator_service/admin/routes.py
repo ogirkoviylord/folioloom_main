@@ -227,17 +227,22 @@ def create_workbench_router(
     *,
     glossary_rehearsal_fixture: object | None = None,
 ) -> APIRouter:
-    """Bounded Workbench router for the glossary-first slice (packet §3.1).
+    """Bounded Workbench Library → Document Studio router (packet §3.1).
 
     The router is mounted inside :func:`create_admin_router` so it reuses
-    the same session/CSRF guards as Admin. It owns no persistent state;
-    all mutations are fail-closed at this slice (packet §6, §11).
+    the same Admin session/CSRF guards. Within this narrow owner-only slice it
+    durably registers DOCX sources, saves immutable glossary revisions, and
+    records glossary-lock attestations; invalid or unauthorized mutations
+    fail closed (packet §6, §11).
 
     UI non-claims (mirrored in the helper rail ``About this slice``
     disclosure):
 
-    * No save / provider / runner / cache / Telegram / resolver / job /
-      archive / DB / filesystem evidence root.
+    * No provider / runner / cache / Telegram / resolver / job / archive work,
+      and no production or release claim. Persistent effects are limited to
+      the owner-authorized DOCX custody and glossary revision/lock evidence
+      used by this Workbench slice; this router does not change schema or run
+      migrations.
     * ``ManualGlossaryApproval`` is still an owner-blocker (GATE1 audit
       C1); locally-approved terms are NOT authoritative approvals.
     """
@@ -248,8 +253,10 @@ def create_workbench_router(
         get_or_seed_workbench_session,
     )
     from translator_service.admin.workbench_views import (
+        render_workbench_document_studio,
         render_workbench_future,
         render_workbench_glossary,
+        render_workbench_library,
         render_workbench_recovery,
         render_workbench_select,
     )
@@ -269,6 +276,18 @@ def create_workbench_router(
 
     def _render_future(*, stage: str) -> HTMLResponse:
         return _html(render_workbench_future(stage=stage, csrf_token=""))
+
+    def _studio_location(document_custody_id: str) -> str:
+        return "/admin/workbench/studio?document_custody_id=" + quote(
+            document_custody_id, safe=""
+        )
+
+    def _owner_store_and_storage(session: AdminSession):
+        return (
+            open_persistent_job_store(settings),
+            LocalObjectStorage(settings.object_storage_root),
+            source_registry_actor_from_admin_session(session),
+        )
 
     def _resolve_state(
         document_id: str | None,
@@ -308,18 +327,186 @@ def create_workbench_router(
 
     @router.get("/", response_class=HTMLResponse)
     async def workbench_root(request: Request) -> Response:
-        session = _session_or_none(request, session_manager)
+        session = _owner_session_or_none(request, session_manager)
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        document_id = request.query_params.get("document") or None
-        if not document_id:
-            return RedirectResponse(
-                "/admin/workbench/select", status_code=HTTPStatus.SEE_OTHER
+        store, storage, actor = _owner_store_and_storage(session)
+        try:
+            catalog = catalog_registered_original_docx_sources(
+                store=store, storage=storage, actor=actor
             )
-        return RedirectResponse(
-            f"/admin/workbench/glossary?document={quote(document_id, safe='')}",
-            status_code=HTTPStatus.SEE_OTHER,
+        finally:
+            store.close()
+        return _html(
+            render_workbench_library(
+                csrf_token=session.csrf_token,
+                catalog=() if isinstance(catalog, DocumentIntakeDenied) else catalog,
+            )
         )
+
+    @router.post("/upload", response_class=HTMLResponse)
+    async def workbench_upload(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        maximum_size_bytes = settings.max_upload_mb * 1024 * 1024
+        try:
+            request_body = await _read_bounded_request_body(
+                request, maximum_size_bytes + _MULTIPART_REQUEST_OVERHEAD_BYTES
+            )
+            if request_body is None:
+                return _html("Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            form = await _parse_multipart_body(request, request_body)
+        except (ClientDisconnect, HTTPException, ValueError):
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        try:
+            uploads = form.getlist("file")
+            file_parts = [value for _name, value in form.multi_items() if isinstance(value, UploadFile)]
+            if len(uploads) != 1 or len(file_parts) != 1 or not isinstance(uploads[0], UploadFile):
+                return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+            if not session_manager.verify_csrf(session, str(form.get("csrf_token", ""))):
+                return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+            upload = uploads[0]
+            content = await _read_bounded_upload(upload, maximum_size_bytes)
+            file_name, content_type = upload.filename or "", upload.content_type or ""
+        finally:
+            await form.close()
+        if content is None:
+            return _html("Request too large", status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        store, storage, actor = _owner_store_and_storage(session)
+        try:
+            result = ingest_owner_docx(store=store, storage=storage, actor=actor, file_name=file_name, content_type=content_type, content=content, maximum_size_bytes=maximum_size_bytes)
+        finally:
+            store.close()
+        if isinstance(result, DocumentIntakeDenied):
+            return _html("Invalid DOCX upload", status_code=HTTPStatus.BAD_REQUEST)
+        return RedirectResponse("/admin/workbench/", status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/select", response_class=HTMLResponse)
+    async def workbench_select_document(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        store, storage, actor = _owner_store_and_storage(session)
+        try:
+            selected = select_owner_registered_original_docx_source(
+                store=store, storage=storage, actor=actor,
+                document_custody_id=form.get("document_custody_id", ""),
+            )
+        finally:
+            store.close()
+        if isinstance(selected, DocumentIntakeDenied):
+            return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(
+            _studio_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
+        )
+
+    @router.get("/studio", response_class=HTMLResponse)
+    async def workbench_document_studio(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        custody_id = request.query_params.get("document_custody_id", "")
+        store, storage, actor = _owner_store_and_storage(session)
+        try:
+            selected = select_owner_registered_original_docx_source(
+                store=store, storage=storage, actor=actor, document_custody_id=custody_id
+            )
+            if isinstance(selected, DocumentIntakeDenied):
+                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+            catalog = catalog_registered_original_docx_sources(
+                store=store, storage=storage, actor=actor
+            )
+            entry = next(
+                (
+                    item
+                    for item in catalog
+                    if item.document_custody_id == selected.document_custody_id
+                ),
+                None,
+            ) if not isinstance(catalog, DocumentIntakeDenied) else None
+            if entry is None:
+                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+            revision = read_current_document_glossary_revision(
+                store=store, storage=storage, session=session, document_custody_id=custody_id
+            )
+            if isinstance(revision, DocumentGlossaryAuthoringBridgeDenied):
+                sequence, parent, lock_status = None, None, "not created"
+            else:
+                lock = read_document_glossary_lock_status(
+                    store=store, storage=storage, session=session, document_custody_id=custody_id
+                )
+                if isinstance(lock, DocumentGlossaryLockDenied):
+                    return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+                sequence, parent, lock_status = revision.revision_sequence, revision.revision_id, lock.status
+        finally:
+            store.close()
+        return _html(render_workbench_document_studio(
+            csrf_token=session.csrf_token, document_custody_id=selected.document_custody_id,
+            file_name=entry.file_name, source_size_bytes=selected.source_size_bytes,
+            expected_parent_revision_id=parent, revision_sequence=sequence, lock_status=lock_status,
+        ))
+
+    @router.post("/studio/save", response_class=HTMLResponse)
+    async def workbench_studio_save(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        valid_parent, parent = _parse_document_glossary_expected_parent(form.get("expected_parent_revision_id"))
+        if not valid_parent:
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.BAD_REQUEST)
+        custody_id = form.get("document_custody_id", "")
+        try:
+            snapshot = build_owner_pinned_glossary_snapshot(
+                source_language=form.get("source_language", ""), target_language=form.get("target_language", ""),
+                source_terms=form.getlist("source_term"), target_terms=form.getlist("target_term"),
+                entry_types=form.getlist("entry_type"),
+            )
+        except OwnerGlossaryEditorInputError:
+            return _html("Glossary editor input invalid", status_code=HTTPStatus.BAD_REQUEST)
+        store, storage, _actor = _owner_store_and_storage(session)
+        try:
+            current = read_current_document_glossary_revision(
+                store=store, storage=storage, session=session,
+                document_custody_id=custody_id,
+            )
+            if not isinstance(current, DocumentGlossaryAuthoringBridgeDenied):
+                status = read_document_glossary_lock_status(
+                    store=store, storage=storage, session=session,
+                    document_custody_id=custody_id,
+                )
+                if isinstance(status, DocumentGlossaryLockDenied) or status.status == "active":
+                    return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+            result = author_document_glossary_revision(store=store, storage=storage, session=session, document_custody_id=custody_id, snapshot=snapshot, expected_parent_revision_id=parent)
+        finally:
+            store.close()
+        if isinstance(result, DocumentGlossaryAuthoringBridgeDenied):
+            return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(_studio_location(result.document_custody_id), status_code=HTTPStatus.SEE_OTHER)
+
+    @router.post("/studio/lock", response_class=HTMLResponse)
+    async def workbench_studio_lock(request: Request) -> Response:
+        session = _owner_session_or_none(request, session_manager)
+        if session is None:
+            return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+        form = await _urlencoded_form(request)
+        if not session_manager.verify_csrf(session, form.get("csrf_token")):
+            return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
+        custody_id = form.get("document_custody_id", "")
+        store, storage, _actor = _owner_store_and_storage(session)
+        try:
+            result = attest_document_glossary_lock(store=store, storage=storage, session=session, document_custody_id=custody_id)
+        finally:
+            store.close()
+        if isinstance(result, DocumentGlossaryLockDenied):
+            return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+        return RedirectResponse(_studio_location(result.document_custody_id), status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/select", response_class=HTMLResponse)
     async def workbench_select(request: Request) -> Response:
@@ -741,30 +928,14 @@ def create_admin_router(settings: Settings) -> APIRouter:
 
     @router.get("/workbench-entry", response_class=HTMLResponse)
     async def workbench_entry(request: Request) -> Response:
-        """Owner-only redirect to the Workbench glossary (packet §3.1).
-
-        Admin → Workbench handoff: this is the single calm CTA the
-        packet allows. We mint a small opaque document id so the
-        caller-injected contract has a value to mirror. The Workbench
-        root decides where to redirect based on that id.
-        """
+        """Owner-only redirect to the durable Workbench Library."""
         session = _session_or_none(request, session_manager)
         if session is None:
             return RedirectResponse(
                 "/admin/login", status_code=HTTPStatus.SEE_OTHER
             )
-        # No real caller contract yet. Re-seed this explicitly ephemeral demo
-        # before entering it so Admin re-entry never retains a stale external
-        # context, local terms, or manual approval under the actor key.
-        from translator_service.admin.workbench_session_state import (
-            seed_workbench_session,
-        )
-
-        document_id = f"opaque-{session.actor_id}-local-workbench"
-        seed_workbench_session(document_id=document_id, session_id=session.actor_id)
-        opaque_id = quote(document_id, safe="")
         return RedirectResponse(
-            f"/admin/workbench/?document={opaque_id}",
+            "/admin/workbench/",
             status_code=HTTPStatus.SEE_OTHER,
         )
 
