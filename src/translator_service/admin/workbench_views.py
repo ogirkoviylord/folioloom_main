@@ -1,17 +1,15 @@
-"""Server-rendered Workbench glossary UI (Stage 1 / glossary-first slice).
+"""Server-rendered owner Workbench Library, Studio, and glossary UI.
 
-This module renders the bounded, ephemeral Workbench glossary UI exactly
-as described in ``.hermes/workbench_ui_packet/UI_PACKET_S1_GLOSSARY_FIRST.md``.
-It is intentionally narrow:
+This module renders the bounded owner-facing Workbench surfaces.  Alongside
+the legacy in-memory glossary UI, it renders durable DOCX Library and Studio
+forms whose router handlers own authorized custody, glossary revision, and
+lock-attestation effects.  Rendering itself owns no provider, runner, cache,
+Telegram, resolver, or job execution; it neither changes schema nor runs
+migrations.
 
-* It owns no business logic — :mod:`workbench_session_state` is the only
-  place where state mutates.
-* It must never imply that locally-approved terms are authoritative
-  glossary approvals. ``ManualGlossaryApproval`` is still an owner-blocker
-  (GATE1 audit C1). The README disclosure in the helper rail says so
-  verbatim.
-* It must never invoke the runner, provider, cache, Telegram, resolver,
-  job store, archive, DB or filesystem evidence root (packet §6, §11).
+It must never imply that locally-approved terms are authoritative glossary
+approvals. ``ManualGlossaryApproval`` remains an owner-blocker (GATE1 audit
+C1).
 """
 
 from __future__ import annotations
@@ -1509,32 +1507,13 @@ def render_workbench_future(
     )
 
 
-def render_workbench_root_redirect(
-    *,
-    document_id: str | None,
-    session: object,
-) -> str:
-    """Decide which screen the ``/workbench`` root should redirect to.
-
-    Returns the redirect target string. Kept here so the controller can
-    stay a thin shell.
-    """
-    _ = session  # placeholder_state is unused here
-    if not document_id:
-        return "/admin/workbench/select"
-    # We cannot validate the document id from this slice; treat unknown
-    # ids as recovery (packet §3.1 root rule).
-    if not document_id.strip():
-        return "/admin/workbench/recovery?reason=invalid"
-    return f"/admin/workbench/glossary?document={_safe_attr(document_id)}"
-
-
 __all__ = [
     "WORKBENCH_COPY",
     "WORKBENCH_PLACEHOLDER_STAGES",
+    "render_workbench_document_studio",
     "render_workbench_future",
     "render_workbench_glossary",
+    "render_workbench_library",
     "render_workbench_recovery",
-    "render_workbench_root_redirect",
     "render_workbench_select",
 ]

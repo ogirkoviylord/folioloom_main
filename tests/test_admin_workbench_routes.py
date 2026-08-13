@@ -27,6 +27,7 @@ from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
+from translator_service.admin import workbench_views
 from translator_service.admin.workbench_session_state import WORKBENCH_SESSION_STATE
 from translator_service.api import create_app
 from translator_service.config import Settings
@@ -53,6 +54,22 @@ def _admin_login(client: TestClient) -> str:
 
 
 class WorkbenchRoutesTest(unittest.TestCase):
+    def test_workbench_view_exports_match_current_rendered_surfaces(self) -> None:
+        self.assertEqual(
+            workbench_views.__all__,
+            [
+                "WORKBENCH_COPY",
+                "WORKBENCH_PLACEHOLDER_STAGES",
+                "render_workbench_document_studio",
+                "render_workbench_future",
+                "render_workbench_glossary",
+                "render_workbench_library",
+                "render_workbench_recovery",
+                "render_workbench_select",
+            ],
+        )
+        self.assertNotIn("render_workbench_root_redirect", workbench_views.__all__)
+
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
