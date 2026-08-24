@@ -1,21 +1,20 @@
-"""Server-rendered Workbench glossary UI (Stage 1 / glossary-first slice).
+"""Server-rendered owner Workbench Library, Studio, and glossary UI.
 
-This module renders the bounded, ephemeral Workbench glossary UI exactly
-as described in ``.hermes/workbench_ui_packet/UI_PACKET_S1_GLOSSARY_FIRST.md``.
-It is intentionally narrow:
+This module renders the bounded owner-facing Workbench surfaces.  Alongside
+the legacy in-memory glossary UI, it renders durable DOCX Library and Studio
+forms whose router handlers own authorized custody, glossary revision, and
+lock-attestation effects.  Rendering itself owns no provider, runner, cache,
+Telegram, resolver, or job execution; it neither changes schema nor runs
+migrations.
 
-* It owns no business logic — :mod:`workbench_session_state` is the only
-  place where state mutates.
-* It must never imply that locally-approved terms are authoritative
-  glossary approvals. ``ManualGlossaryApproval`` is still an owner-blocker
-  (GATE1 audit C1). The README disclosure in the helper rail says so
-  verbatim.
-* It must never invoke the runner, provider, cache, Telegram, resolver,
-  job store, archive, DB or filesystem evidence root (packet §6, §11).
+It must never imply that locally-approved terms are authoritative glossary
+approvals. ``ManualGlossaryApproval`` remains an owner-blocker (GATE1 audit
+C1).
 """
 
 from __future__ import annotations
 
+# ruff: noqa: E501
 from collections.abc import Iterable
 from datetime import datetime
 from html import escape
@@ -33,6 +32,7 @@ from translator_service.admin.workbench_session_state import (
     WorkbenchSessionState,
     empty_workbench_session,
 )
+from translator_service.document_intake import OwnerDocumentCatalogEntry
 
 # ---------------------------------------------------------------------------
 # Stage and copy table (packet §4, §5.4)
@@ -1262,6 +1262,104 @@ def render_workbench_select(*, csrf_token: str, injected: bool = False) -> str:
     )
 
 
+def _durable_workbench_page(*, title: str, body: str) -> str:
+    """Render the durable document flow without the legacy ephemeral session UI."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_safe_attr(title)} · FolioLoom Workbench</title>
+  <style>{_workbench_css()}</style>
+</head>
+<body class="workbench">
+  <header class="wb-header" role="banner">
+    <div class="wb-header__brand"><span class="wb-header__eyebrow">FolioLoom</span><span class="wb-header__title">Workbench</span></div>
+    <div class="wb-header__chips"><a class="wb-chip" href="/admin/workbench/">Library</a></div>
+  </header>
+  <div class="wb-shell">
+    <nav class="wb-nav" aria-label="Workbench navigation"><a class="wb-nav__link" href="/admin/workbench/"><span>Library</span></a></nav>
+    <main class="wb-main" aria-label="Workbench main">{body}</main>
+  </div>
+</body>
+</html>"""
+
+
+def render_workbench_library(
+    *, csrf_token: str, catalog: Iterable[OwnerDocumentCatalogEntry]
+) -> str:
+    """Render the owner-owned durable DOCX catalog inside Workbench chrome."""
+    rows = "".join(
+        "<li><strong>"
+        f"{_safe_attr(entry.file_name)}</strong> ({entry.source_size_bytes} bytes)"
+        "<form method=\"post\" action=\"/admin/workbench/select\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
+        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(entry.document_custody_id)}\">"
+        "<button type=\"submit\">Open Document Studio</button></form></li>"
+        for entry in catalog
+    ) or "<li>No durable DOCX documents yet.</li>"
+    body = (
+        "<section class=\"wb-card\"><h1>Library</h1>"
+        "<p>Import a DOCX or open a document in Document Studio.</p>"
+        "<form method=\"post\" action=\"/admin/workbench/upload\" enctype=\"multipart/form-data\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
+        "<label>DOCX file <input type=\"file\" name=\"file\" accept=\".docx\" required></label>"
+        "<button type=\"submit\">Import DOCX</button></form>"
+        f"<h2>Your documents</h2><ul>{rows}</ul></section>"
+    )
+    return _durable_workbench_page(title="Library", body=body)
+
+
+def render_workbench_document_studio(
+    *,
+    csrf_token: str,
+    document_custody_id: str,
+    file_name: str,
+    source_size_bytes: int,
+    expected_parent_revision_id: str | None,
+    revision_sequence: int | None,
+    lock_status: str,
+) -> str:
+    """Render the durable glossary editor in Workbench chrome."""
+    locked = lock_status == "active"
+    disabled = " disabled" if locked else ""
+    parent = expected_parent_revision_id or "no-parent"
+    editor = (
+        "<form method=\"post\" action=\"/admin/workbench/studio/save\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
+        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
+        f"<input type=\"hidden\" name=\"expected_parent_revision_id\" value=\"{_safe_attr(parent)}\">"
+        f"<fieldset{disabled}><legend>Glossary revision</legend>"
+        "<label>Source language <input name=\"source_language\" required></label>"
+        "<label>Target language <input name=\"target_language\" required></label>"
+        "<div id=\"glossary-rows\"><fieldset><legend>Glossary row</legend>"
+        "<label>Source term <input name=\"source_term\" required></label>"
+        "<label>Target term <input name=\"target_term\" required></label>"
+        "<label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>"
+        "</fieldset></div><button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
+        "<button type=\"submit\">Save revision</button></fieldset></form>"
+        "<script>document.getElementById('add-glossary-row').addEventListener('click', function () {"
+        "const row = document.createElement('fieldset');"
+        "row.innerHTML = '<legend>Glossary row</legend><label>Source term <input name=\"source_term\" required></label><label>Target term <input name=\"target_term\" required></label><label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>';"
+        "document.getElementById('glossary-rows').appendChild(row);});</script>"
+    )
+    lock_form = "" if locked else (
+        "<form method=\"post\" action=\"/admin/workbench/studio/lock\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
+        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
+        "<button type=\"submit\">Lock current revision</button></form>"
+    )
+    body = (
+        "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Library</a></p>"
+        "<h1>Document Studio</h1>"
+        f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
+        f"<p>Current revision: {revision_sequence if revision_sequence is not None else 'not created'}; lock state: {_safe_attr(lock_status)}</p>"
+        + ("<p>This glossary is locked and read-only.</p>" if locked else "")
+        + editor + lock_form + "</section>"
+    )
+    return _durable_workbench_page(title="Document Studio", body=body)
+
+
 def render_workbench_glossary(
     *,
     state: WorkbenchSessionState,
@@ -1409,32 +1507,13 @@ def render_workbench_future(
     )
 
 
-def render_workbench_root_redirect(
-    *,
-    document_id: str | None,
-    session: object,
-) -> str:
-    """Decide which screen the ``/workbench`` root should redirect to.
-
-    Returns the redirect target string. Kept here so the controller can
-    stay a thin shell.
-    """
-    _ = session  # placeholder_state is unused here
-    if not document_id:
-        return "/admin/workbench/select"
-    # We cannot validate the document id from this slice; treat unknown
-    # ids as recovery (packet §3.1 root rule).
-    if not document_id.strip():
-        return "/admin/workbench/recovery?reason=invalid"
-    return f"/admin/workbench/glossary?document={_safe_attr(document_id)}"
-
-
 __all__ = [
     "WORKBENCH_COPY",
     "WORKBENCH_PLACEHOLDER_STAGES",
+    "render_workbench_document_studio",
     "render_workbench_future",
     "render_workbench_glossary",
+    "render_workbench_library",
     "render_workbench_recovery",
-    "render_workbench_root_redirect",
     "render_workbench_select",
 ]

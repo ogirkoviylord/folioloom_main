@@ -137,6 +137,42 @@ class DocumentGlossaryAuthoringBridgeTest(unittest.TestCase):
         self.assertEqual(_count(self.store, "document_glossary_revisions"), 1)
         self.assertEqual(_count(self.store, "document_glossary_revision_events"), 1)
 
+    def test_active_lock_rejects_successor_without_durable_write(self):
+        first = author_document_glossary_revision(
+            store=self.store, storage=self.storage, session=self.session,
+            document_custody_id=self.custody_id, snapshot=_snapshot(),
+            expected_parent_revision_id=None,
+        )
+        assert not isinstance(first, DocumentGlossaryAuthoringBridgeDenied)
+        attested = attest_document_glossary_lock(
+            store=self.store, storage=self.storage, session=self.session,
+            document_custody_id=self.custody_id,
+        )
+        self.assertIsInstance(attested, DocumentGlossaryLockAttestation)
+        before = {
+            table: _count(self.store, table)
+            for table in (
+                "glossary_snapshot_custody", "glossary_approvals",
+                "document_glossary_revisions", "document_glossary_revision_events",
+            )
+        }
+
+        result = author_document_glossary_revision(
+            store=self.store, storage=self.storage, session=self.session,
+            document_custody_id=self.custody_id,
+            snapshot=_snapshot(
+                snapshot_id="snapshot-locked", source_canonical="Locked"
+            ),
+            expected_parent_revision_id=first.revision_id,
+        )
+
+        self.assertEqual(
+            result, DocumentGlossaryAuthoringBridgeDenied("glossary_authoring_locked")
+        )
+        self.assertEqual(
+            {table: _count(self.store, table) for table in before}, before
+        )
+
     def test_foreign_custody_is_denied_without_forbidden_writes(self):
         source = self.storage.put_bytes(
             kind=StoredFileKind.ORIGINAL,
@@ -323,6 +359,29 @@ class DocumentGlossaryAuthoringBridgePostgresTest(unittest.TestCase):
         self.assertIn(bridge._POSTGRES_INSERT_APPROVAL_SQL, connection.statements)
         self.assertIn(bridge._POSTGRES_INSERT_REVISION_SQL, connection.statements)
         self.assertIn(bridge._POSTGRES_INSERT_EVENT_SQL, connection.statements)
+
+    def test_author_postgres_rejects_locked_current_revision_before_writes(self):
+        active = _postgres_current_row()
+        active["snapshot_payload_sha256"] = active["snapshot_digest"]
+        connection = _RecordingPostgresConnection([active, {"locked": 1}])
+
+        result = bridge._author_postgres(
+            connection,
+            "document-custody-1",
+            self.actor,
+            b"new snapshot payload",
+            "new-digest",
+            "new-signature",
+            active["revision_id"],
+        )
+
+        self.assertEqual(
+            result, DocumentGlossaryAuthoringBridgeDenied("glossary_authoring_locked")
+        )
+        self.assertIn(bridge._POSTGRES_ACTIVE_LOCK_SQL, connection.statements)
+        self.assertNotIn(bridge._POSTGRES_INSERT_SNAPSHOT_SQL, connection.statements)
+        self.assertNotIn(bridge._POSTGRES_INSERT_REVISION_SQL, connection.statements)
+        self.assertNotIn(bridge._POSTGRES_INSERT_EVENT_SQL, connection.statements)
 
     def test_read_current_postgres_returns_metadata_for_consistent_tuple(self):
         current, lineage, events = _postgres_consistent_lineage()

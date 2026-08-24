@@ -21,14 +21,13 @@ from __future__ import annotations
 import os
 import re
 import unittest
-from datetime import UTC, datetime, timedelta
 from html import unescape
 from tempfile import TemporaryDirectory
-from unittest import mock
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
+from translator_service.admin import workbench_views
 from translator_service.admin.workbench_session_state import WORKBENCH_SESSION_STATE
 from translator_service.api import create_app
 from translator_service.config import Settings
@@ -55,6 +54,22 @@ def _admin_login(client: TestClient) -> str:
 
 
 class WorkbenchRoutesTest(unittest.TestCase):
+    def test_workbench_view_exports_match_current_rendered_surfaces(self) -> None:
+        self.assertEqual(
+            workbench_views.__all__,
+            [
+                "WORKBENCH_COPY",
+                "WORKBENCH_PLACEHOLDER_STAGES",
+                "render_workbench_document_studio",
+                "render_workbench_future",
+                "render_workbench_glossary",
+                "render_workbench_library",
+                "render_workbench_recovery",
+                "render_workbench_select",
+            ],
+        )
+        self.assertNotIn("render_workbench_root_redirect", workbench_views.__all__)
+
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -77,12 +92,10 @@ class WorkbenchRoutesTest(unittest.TestCase):
         match = re.search(r'value="([^"]+)"', self.csrf_token)
         return match.group(1) if match else ""
 
-    def test_workbench_entry_redirects_to_root_when_no_document(self) -> None:
+    def test_workbench_entry_redirects_to_library_root(self) -> None:
         response = self.client.get("/admin/workbench-entry", follow_redirects=False)
         self.assertEqual(response.status_code, 303)
-        self.assertTrue(
-            response.headers["location"].startswith("/admin/workbench/?document=")
-        )
+        self.assertEqual(response.headers["location"], "/admin/workbench/")
 
     def test_workbench_select_renders_empty_state(self) -> None:
         response = self.client.get("/admin/workbench/select")
@@ -955,76 +968,11 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIn("Reopen latest document", response.text)
         self.assertNotIn("Saving is not wired in this slice.", response.text)
 
-    def test_workbench_entry_reopens_local_demo_without_stale_recovery(self) -> None:
-        first_now = datetime(2026, 7, 22, 17, 0, tzinfo=UTC)
-        with mock.patch("translator_service.admin.routes.datetime") as clock:
-            clock.now.side_effect = (first_now, first_now + timedelta(seconds=1))
-            first = self.client.get("/admin/workbench-entry")
-            self.assertEqual(first.status_code, 200)
-            self.assertNotIn("Reopen latest document", first.text)
-            second = self.client.get("/admin/workbench-entry")
-        self.assertEqual(second.status_code, 200)
-        self.assertNotIn("Reopen latest document", second.text)
-        self.assertIn("No terms yet.", second.text)
-
-    def test_workbench_entry_reseeds_local_demo_after_external_document_stales_it(
-        self,
-    ) -> None:
-        first_entry = self.client.get("/admin/workbench-entry")
-        self.assertEqual(first_entry.status_code, 200)
-        canonical_document_id = re.search(
-            r'data-document-id="([^"]+)"', first_entry.text
-        )
-        assert canonical_document_id is not None
-        seeded_state = next(iter(WORKBENCH_SESSION_STATE.values()))
-        added_term, reason = seeded_state.append_term(
-            source="Local only",
-            target="Локально",
-            type_="term",
-            notes="discard on Admin re-entry",
-        )
-        self.assertIsNone(reason)
-        self.assertIsNotNone(added_term)
-
-        stale = self.client.get(
-            "/admin/workbench/glossary?document=external-opaque-document"
-        )
-        self.assertEqual(stale.status_code, 200)
-        self.assertIn("Reopen latest document", stale.text)
-        stale_state = next(iter(WORKBENCH_SESSION_STATE.values()))
-        self.assertEqual(stale_state.approval_state.value, "stale")
-        self.assertEqual(
-            stale_state.document.document_id, "external-opaque-document"
-        )
-
-        reentered = self.client.get("/admin/workbench-entry")
-        self.assertEqual(reentered.status_code, 200)
-        self.assertNotIn("Reopen latest document", reentered.text)
-        self.assertIn("No terms yet.", reentered.text)
-        self.assertIn(
-            f'data-document-id="{canonical_document_id.group(1)}"',
-            reentered.text,
-        )
-        reentered_state = next(iter(WORKBENCH_SESSION_STATE.values()))
-        self.assertEqual(
-            reentered_state.document.document_id,
-            canonical_document_id.group(1),
-        )
-        self.assertEqual(reentered_state.approval_state.value, "ready")
-        self.assertEqual(reentered_state.terms, {})
-        self.assertIsNone(reentered_state.manual_approval)
-
-    def test_workbench_entry_generated_add_term_url_renders_form(self) -> None:
+    def test_workbench_entry_opens_library_without_legacy_glossary_link(self) -> None:
         entry = self.client.get("/admin/workbench-entry")
         self.assertEqual(entry.status_code, 200)
-        add_term_url = re.search(
-            r'data-action="add-term" href="([^"]+)"', entry.text
-        )
-        assert add_term_url is not None
-
-        form_page = self.client.get(unescape(add_term_url.group(1)))
-        self.assertEqual(form_page.status_code, 200)
-        self.assertIn('id="wb-add-term-form"', form_page.text)
+        self.assertIn("<h1>Library</h1>", entry.text)
+        self.assertNotIn("/admin/workbench/glossary", entry.text)
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
