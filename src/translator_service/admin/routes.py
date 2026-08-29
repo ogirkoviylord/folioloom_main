@@ -886,21 +886,31 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return RedirectResponse("/admin/overview", status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/login", response_class=HTMLResponse)
-    async def login_form() -> HTMLResponse:
-        return _html(login_page())
+    async def login_form(request: Request) -> HTMLResponse:
+        next_url = request.query_params.get("next")
+        return _html(
+            login_page(
+                next_url=next_url if _safe_admin_next(next_url) else None
+            )
+        )
 
     @router.post("/login", response_class=HTMLResponse)
     async def login(request: Request) -> Response:
         form = await _urlencoded_form(request)
+        next_url = form.get("next")
+        safe_next_url = next_url if _safe_admin_next(next_url) else None
         try:
             cookie_value = session_manager.login(form.get("password", ""))
         except AdminAuthError:
             return _html(
-                login_page(error="Invalid admin credentials."),
+                login_page(
+                    error="Invalid admin credentials.",
+                    next_url=safe_next_url,
+                ),
                 status_code=HTTPStatus.UNAUTHORIZED,
             )
         response = RedirectResponse(
-            "/admin/overview",
+            safe_next_url or "/admin/overview",
             status_code=HTTPStatus.SEE_OTHER,
         )
         response.set_cookie(
