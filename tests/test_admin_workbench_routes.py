@@ -978,12 +978,36 @@ class WorkbenchRoutesTest(unittest.TestCase):
         entry = self.client.get("/admin/workbench-entry")
         self.assertEqual(entry.status_code, 200)
         self.assertIn("<h1>Project Library</h1>", entry.text)
+        self.assertIn("Start with your book or document", entry.text)
+        self.assertIn("DOCX import is available in this local Workbench.", entry.text)
+        self.assertNotIn("<h1>Library</h1>", entry.text)
+        self.assertNotIn("Document Studio", entry.text)
         self.assertIn(
             '<a class="wb-nav__link" href="/admin/workbench/" aria-current="page">'
             "<span>Project Library</span></a>",
             entry.text,
         )
         self.assertIn("Glossary", entry.text)
+
+    def test_project_library_document_action_routes_through_setup(self) -> None:
+        page = workbench_views.render_workbench_library(
+            csrf_token="csrf-token",
+            catalog=(
+                workbench_views.OwnerDocumentCatalogEntry(
+                    document_custody_id="custody-opaque",
+                    file_name="my-book.docx",
+                    source_size_bytes=42,
+                    source_sha256="0" * 64,
+                ),
+            ),
+        )
+
+        self.assertIn("<h2>Your documents</h2>", page)
+        self.assertIn("my-book.docx", page)
+        self.assertIn("Imported DOCX · 42 bytes", page)
+        self.assertIn("Continue to Document Setup", page)
+        self.assertNotIn("Open Glossary", page)
+        self.assertNotIn("Document Studio", page)
 
     def test_durable_glossary_uses_the_approved_workbench_navigation(self) -> None:
         page = workbench_views.render_workbench_document_studio(
