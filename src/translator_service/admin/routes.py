@@ -275,11 +275,22 @@ def create_workbench_router(
             )
         )
 
-    def _render_future(*, stage: str) -> HTMLResponse:
-        return _html(render_workbench_future(stage=stage, csrf_token=""))
+    def _render_future(*, stage: str, next_href: str | None = None) -> HTMLResponse:
+        return _html(
+            render_workbench_future(
+                stage=stage,
+                csrf_token="",
+                next_href=next_href,
+            )
+        )
 
     def _studio_location(document_custody_id: str) -> str:
         return "/admin/workbench/studio?document_custody_id=" + quote(
+            document_custody_id, safe=""
+        )
+
+    def _setup_location(document_custody_id: str) -> str:
+        return "/admin/workbench/future?stage=document-setup&document_custody_id=" + quote(
             document_custody_id, safe=""
         )
 
@@ -402,7 +413,7 @@ def create_workbench_router(
         if isinstance(selected, DocumentIntakeDenied):
             return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
         return RedirectResponse(
-            _studio_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
+            _setup_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
         )
 
     @router.get("/studio", response_class=HTMLResponse)
@@ -569,7 +580,13 @@ def create_workbench_router(
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         stage = request.query_params.get("stage") or "translate"
-        return _render_future(stage=stage)
+        custody_id = request.query_params.get("document_custody_id", "")
+        next_href = (
+            _studio_location(custody_id)
+            if stage == "document-setup" and custody_id
+            else None
+        )
+        return _render_future(stage=stage, next_href=next_href)
 
     # ------------------------------------------------------------------
     # Mutating POST endpoints — fail-closed at this slice (packet §6).

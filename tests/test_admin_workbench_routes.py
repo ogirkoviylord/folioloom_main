@@ -516,7 +516,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
             self.assertEqual(state.terms[first_term.id].status.value, "approved")
             self.assertEqual(state.terms[second_term.id].status.value, "approved")
 
-    def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
+    def test_workbench_glossary_renders_approved_top_level_navigation(self) -> None:
         response = self.client.get("/admin/workbench/glossary?document=opaque-2")
         self.assertEqual(response.status_code, 200)
         nav_match = re.search(
@@ -527,14 +527,20 @@ class WorkbenchRoutesTest(unittest.TestCase):
         assert nav_match is not None, "Workbench nav not found"
         nav_html = nav_match.group(1)
         link_count = len(re.findall(r'<a class="wb-nav__link"', nav_html))
-        self.assertEqual(link_count, 7)
-        self.assertIn("Glossary", nav_html)
-        self.assertIn("Project Library", nav_html)
-        self.assertIn("Document Setup", nav_html)
-        self.assertIn("Suggestions", nav_html)
-        self.assertIn("Translate", nav_html)
-        self.assertIn("Review", nav_html)
-        self.assertIn("Export", nav_html)
+        self.assertEqual(link_count, 6)
+        labels = re.findall(r"<span>([^<]+)</span>", nav_html)
+        self.assertEqual(
+            labels,
+            [
+                "Project Library",
+                "Document Setup",
+                "Glossary",
+                "Translate",
+                "Review",
+                "Export",
+            ],
+        )
+        self.assertNotIn("Suggestions", nav_html)
 
     def test_empty_add_remains_on_the_local_glossary_surface(self) -> None:
         response = self.client.post(
@@ -971,8 +977,40 @@ class WorkbenchRoutesTest(unittest.TestCase):
     def test_workbench_entry_opens_library_without_legacy_glossary_link(self) -> None:
         entry = self.client.get("/admin/workbench-entry")
         self.assertEqual(entry.status_code, 200)
-        self.assertIn("<h1>Library</h1>", entry.text)
-        self.assertNotIn("/admin/workbench/glossary", entry.text)
+        self.assertIn("<h1>Project Library</h1>", entry.text)
+        self.assertIn(
+            '<a class="wb-nav__link" href="/admin/workbench/" aria-current="page">'
+            "<span>Project Library</span></a>",
+            entry.text,
+        )
+        self.assertIn("Glossary", entry.text)
+
+    def test_durable_glossary_uses_the_approved_workbench_navigation(self) -> None:
+        page = workbench_views.render_workbench_document_studio(
+            csrf_token="csrf-token",
+            document_custody_id="custody-opaque",
+            file_name="example.docx",
+            source_size_bytes=42,
+            expected_parent_revision_id=None,
+            revision_sequence=None,
+            lock_status="not created",
+        )
+        self.assertIn("<h1>Glossary</h1>", page)
+        self.assertNotIn("<h1>Document Studio</h1>", page)
+        for title in (
+            "Project Library",
+            "Document Setup",
+            "Glossary",
+            "Translate",
+            "Review",
+            "Export",
+        ):
+            self.assertIn(title, page)
+        self.assertIn(
+            'href="/admin/workbench/studio?document_custody_id=custody-opaque" '
+            'aria-current="page"><span>Glossary</span></a>',
+            page,
+        )
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
@@ -984,9 +1022,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
 
     def test_workbench_future_renders_per_stage(self) -> None:
         for stage, title in (
-            ("project-library", "Project Library"),
             ("document-setup", "Document Setup"),
-            ("ai-suggestions", "Suggestions"),
             ("translate", "Translate"),
             ("review", "Review"),
             ("export", "Export"),
