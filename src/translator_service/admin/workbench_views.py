@@ -257,6 +257,10 @@ def _workbench_css() -> str:
   font-weight: 600;
 }
 .wb-nav__link:hover { background: var(--wb-line); }
+.wb-nav__link--unavailable {
+  color: var(--wb-ink-soft);
+  cursor: not-allowed;
+}
 .wb-nav__placeholder-tag {
   font-size: 0.6875rem;
   color: var(--wb-ink-soft);
@@ -597,6 +601,7 @@ def _workbench_nav(
     document_id: str | None,
     *,
     glossary_href: str | None = None,
+    document_setup_href: str | None = None,
 ) -> str:
     document_qs = f"?document={_safe_attr(document_id)}" if document_id else ""
     resolved_glossary_href = glossary_href or f"/admin/workbench/glossary{document_qs}"
@@ -606,6 +611,8 @@ def _workbench_nav(
         aria_current_attr = ' aria-current="page"' if active == stage_key else ""
         if stage_key == "project-library":
             href = "/admin/workbench/"
+        elif stage_key == "document-setup":
+            href = _safe_attr(document_setup_href) if document_setup_href else ""
         elif stage_key == "glossary":
             href = _safe_attr(resolved_glossary_href)
         else:
@@ -616,10 +623,17 @@ def _workbench_nav(
             if stage_key in placeholder_keys
             else ""
         )
-        links.append(
-            f'<a class="wb-nav__link" href="{href}"{aria_current_attr}>'
-            f"<span>{_safe_attr(title)}</span>{placeholder_tag}</a>"
-        )
+        if stage_key == "document-setup" and not document_setup_href:
+            links.append(
+                '<span class="wb-nav__link wb-nav__link--unavailable" '
+                'aria-disabled="true">'
+                f"<span>{_safe_attr(title)}</span>{placeholder_tag}</span>"
+            )
+        else:
+            links.append(
+                f'<a class="wb-nav__link" href="{href}"{aria_current_attr}>'
+                f"<span>{_safe_attr(title)}</span>{placeholder_tag}</a>"
+            )
     return f"""
 <nav class="wb-nav" aria-label="Workbench navigation">
   {"".join(links)}
@@ -1290,12 +1304,14 @@ def _durable_workbench_page(
     body: str,
     active: str,
     glossary_href: str | None = None,
+    document_setup_href: str | None = None,
 ) -> str:
     """Render a durable route inside the approved Workbench navigation."""
     nav = _workbench_nav(
         active,
         document_id=None,
         glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -1347,7 +1363,7 @@ def render_workbench_library(
         "<section class=\"wb-card\"><h1>Project Library</h1>"
         "<p>Keep the documents you are preparing for translation together here.</p>"
         "<p>DOCX import is available in this local Workbench. Imported documents "
-        "are kept in its durable document catalog.</p>"
+        "are ready for you to continue working on.</p>"
         "<form method=\"post\" action=\"/admin/workbench/upload\" enctype=\"multipart/form-data\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         "<label>DOCX file <input type=\"file\" name=\"file\" accept=\".docx\" required></label>"
@@ -1371,7 +1387,7 @@ def render_workbench_document_studio(
     revision_sequence: int | None,
     lock_status: str,
 ) -> str:
-    """Render the durable glossary editor in Workbench chrome."""
+    """Render the durable glossary editor with author-facing copy."""
     locked = lock_status == "active"
     disabled = " disabled" if locked else ""
     parent = expected_parent_revision_id or "no-parent"
@@ -1380,7 +1396,7 @@ def render_workbench_document_studio(
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
         f"<input type=\"hidden\" name=\"expected_parent_revision_id\" value=\"{_safe_attr(parent)}\">"
-        f"<fieldset{disabled}><legend>Glossary revision</legend>"
+        f"<fieldset{disabled}><legend>Glossary</legend>"
         "<label>Source language <input name=\"source_language\" required></label>"
         "<label>Target language <input name=\"target_language\" required></label>"
         "<div id=\"glossary-rows\"><fieldset><legend>Glossary row</legend>"
@@ -1388,7 +1404,7 @@ def render_workbench_document_studio(
         "<label>Target term <input name=\"target_term\" required></label>"
         "<label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>"
         "</fieldset></div><button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
-        "<button type=\"submit\">Save revision</button></fieldset></form>"
+        "<button type=\"submit\">Save glossary</button></fieldset></form>"
         "<script>document.getElementById('add-glossary-row').addEventListener('click', function () {"
         "const row = document.createElement('fieldset');"
         "row.innerHTML = '<legend>Glossary row</legend><label>Source term <input name=\"source_term\" required></label><label>Target term <input name=\"target_term\" required></label><label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>';"
@@ -1398,18 +1414,21 @@ def render_workbench_document_studio(
         "<form method=\"post\" action=\"/admin/workbench/studio/lock\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
-        "<button type=\"submit\">Lock current revision</button></form>"
+        "<button type=\"submit\">Make glossary read-only</button></form>"
     )
     glossary_href = (
         "/admin/workbench/studio?document_custody_id="
+        + quote(document_custody_id, safe="")
+    )
+    document_setup_href = (
+        "/admin/workbench/future?stage=document-setup&document_custody_id="
         + quote(document_custody_id, safe="")
     )
     body = (
         "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Project Library</a></p>"
         "<h1>Glossary</h1>"
         f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
-        f"<p>Current revision: {revision_sequence if revision_sequence is not None else 'not created'}; lock state: {_safe_attr(lock_status)}</p>"
-        + ("<p>This glossary is locked and read-only.</p>" if locked else "")
+        + ("<p>This glossary is read-only.</p>" if locked else "")
         + editor + lock_form + "</section>"
     )
     return _durable_workbench_page(
@@ -1417,6 +1436,32 @@ def render_workbench_document_studio(
         body=body,
         active="glossary",
         glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
+    )
+
+
+def render_workbench_document_setup(
+    *,
+    file_name: str,
+    source_size_bytes: int,
+    glossary_href: str,
+    document_setup_href: str,
+) -> str:
+    """Render the selected-document setup placeholder without setup claims."""
+    body = (
+        "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Project Library</a></p>"
+        "<h1>Document Setup</h1>"
+        f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
+        "<p>Document Setup is not in this slice. No setup choices are available yet.</p>"
+        f"<a class=\"wb-button wb-button--primary\" href=\"{_safe_attr(glossary_href)}\">"
+        "Continue to Glossary</a></section>"
+    )
+    return _durable_workbench_page(
+        title="Document Setup",
+        body=body,
+        active="document-setup",
+        glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
     )
 
 
@@ -1571,6 +1616,7 @@ def render_workbench_future(
 __all__ = [
     "WORKBENCH_COPY",
     "WORKBENCH_PLACEHOLDER_STAGES",
+    "render_workbench_document_setup",
     "render_workbench_document_studio",
     "render_workbench_future",
     "render_workbench_glossary",

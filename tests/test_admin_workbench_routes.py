@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import unittest
+from datetime import UTC, datetime, timedelta
 from html import unescape
 from tempfile import TemporaryDirectory
 from urllib.parse import quote
@@ -28,6 +29,9 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 
 from translator_service.admin import workbench_views
+from translator_service.admin.auth import AdminSession, AdminSessionManager
+from translator_service.admin.rbac import AdminRole
+from translator_service.admin.routes import SESSION_COOKIE
 from translator_service.admin.workbench_session_state import WORKBENCH_SESSION_STATE
 from translator_service.api import create_app
 from translator_service.config import Settings
@@ -53,6 +57,21 @@ def _admin_login(client: TestClient) -> str:
     return _csrf_token(overview.text)
 
 
+def _admin_session_cookie(role: AdminRole) -> str:
+    """Create a signed non-login session for authenticated-role route coverage."""
+    return AdminSessionManager(
+        owner_password="owner-pass",
+        session_secret="session-secret",
+    ).dump(
+        AdminSession(
+            actor_id=f"test-{role.value}",
+            role=role,
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            csrf_token="test-csrf-token",
+        )
+    )
+
+
 class WorkbenchRoutesTest(unittest.TestCase):
     def test_workbench_view_exports_match_current_rendered_surfaces(self) -> None:
         self.assertEqual(
@@ -60,6 +79,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
             [
                 "WORKBENCH_COPY",
                 "WORKBENCH_PLACEHOLDER_STAGES",
+                "render_workbench_document_setup",
                 "render_workbench_document_studio",
                 "render_workbench_future",
                 "render_workbench_glossary",
@@ -527,7 +547,12 @@ class WorkbenchRoutesTest(unittest.TestCase):
         assert nav_match is not None, "Workbench nav not found"
         nav_html = nav_match.group(1)
         link_count = len(re.findall(r'<a class="wb-nav__link"', nav_html))
-        self.assertEqual(link_count, 6)
+        self.assertEqual(link_count, 5)
+        self.assertIn(
+            '<span class="wb-nav__link wb-nav__link--unavailable" '
+            'aria-disabled="true"><span>Document Setup</span>',
+            nav_html,
+        )
         labels = re.findall(r"<span>([^<]+)</span>", nav_html)
         self.assertEqual(
             labels,
@@ -1008,6 +1033,31 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertIn("Continue to Document Setup", page)
         self.assertNotIn("Open Glossary", page)
         self.assertNotIn("Document Studio", page)
+        self.assertIn(
+            '<span class="wb-nav__link wb-nav__link--unavailable" '
+            'aria-disabled="true"><span>Document Setup</span>'
+            '<span class="wb-nav__placeholder-tag" aria-label="placeholder">'
+            "not in slice</span></span>",
+            page,
+        )
+        self.assertNotIn(
+            'href="/admin/workbench/future?stage=document-setup"', page
+        )
+        library_main = re.search(r"<main[^>]*>(.*?)</main>", page, re.DOTALL)
+        assert library_main is not None
+        library_visible_text = re.sub(r"<[^>]+>", "", library_main.group(1)).lower()
+        for forbidden_term in (
+            "catalog",
+            "custody",
+            "revision",
+            "lock",
+            "source sha",
+            "source path",
+            "storage",
+            "authorization",
+        ):
+            with self.subTest(forbidden_term=forbidden_term):
+                self.assertNotIn(forbidden_term, library_visible_text)
 
     def test_durable_glossary_uses_the_approved_workbench_navigation(self) -> None:
         page = workbench_views.render_workbench_document_studio(
@@ -1035,6 +1085,32 @@ class WorkbenchRoutesTest(unittest.TestCase):
             'aria-current="page"><span>Glossary</span></a>',
             page,
         )
+        self.assertNotIn("Current revision", page)
+        self.assertNotIn("lock state", page)
+        self.assertNotIn("Document Studio", page)
+
+    def test_document_setup_is_selected_document_placeholder_with_one_continuation(self) -> None:
+        page = workbench_views.render_workbench_document_setup(
+            file_name="my-book.docx",
+            source_size_bytes=42,
+            glossary_href="/admin/workbench/studio?document_custody_id=custody-opaque",
+            document_setup_href=(
+                "/admin/workbench/future?stage=document-setup&"
+                "document_custody_id=custody-opaque"
+            ),
+        )
+
+        self.assertIn("<h1>Document Setup</h1>", page)
+        self.assertIn("Document Setup is not in this slice.", page)
+        self.assertIn("my-book.docx", page)
+        self.assertEqual(page.count("Continue to Glossary"), 1)
+        self.assertNotIn("Document Studio", page)
+        self.assertIn(
+            'href="/admin/workbench/future?stage=document-setup&amp;'
+            'document_custody_id=custody-opaque" aria-current="page">'
+            "<span>Document Setup</span><span",
+            page,
+        )
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
@@ -1046,7 +1122,6 @@ class WorkbenchRoutesTest(unittest.TestCase):
 
     def test_workbench_future_renders_per_stage(self) -> None:
         for stage, title in (
-            ("document-setup", "Document Setup"),
             ("translate", "Translate"),
             ("review", "Review"),
             ("export", "Export"),
@@ -1056,6 +1131,45 @@ class WorkbenchRoutesTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, stage)
                 self.assertIn(title, response.text)
                 self.assertIn("is not part of this slice.", response.text)
+
+    def test_future_placeholders_allow_authenticated_non_owner_sessions(self) -> None:
+        self.client.cookies.clear()
+        self.client.cookies.set(
+            SESSION_COOKIE,
+            _admin_session_cookie(AdminRole.OPERATOR),
+        )
+
+        for stage in ("translate", "review", "export"):
+            with self.subTest(stage=stage):
+                response = self.client.get(f"/admin/workbench/future?stage={stage}")
+                self.assertEqual(response.status_code, 200)
+
+    def test_document_setup_rejects_authenticated_non_owner_session(self) -> None:
+        self.client.cookies.clear()
+        self.client.cookies.set(
+            SESSION_COOKIE,
+            _admin_session_cookie(AdminRole.VIEWER),
+        )
+
+        response = self.client.get(
+            "/admin/workbench/future?stage=document-setup&"
+            "document_custody_id=owner-only-document",
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_document_setup_without_validated_selection_is_not_found(self) -> None:
+        sentinel = "tampered-setup-reference"
+        response = self.client.get(
+            "/admin/workbench/future?stage=document-setup&document_custody_id="
+            + sentinel,
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(sentinel, response.text)
 
     def test_overview_includes_open_workbench_cta(self) -> None:
         response = self.client.get("/admin/overview")

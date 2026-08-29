@@ -878,9 +878,36 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
         self.assertTrue(selected.headers["location"].startswith("/admin/workbench/future?stage=document-setup&"))
         setup = client.get(selected.headers["location"])
-        self.assertIn("Document Setup is not part of this slice.", setup.text)
+        self.assertIn("Document Setup is not in this slice.", setup.text)
+        setup_nav = re.search(
+            r'<a class="wb-nav__link" href="([^"]+)" aria-current="page">'
+            r"<span>Document Setup</span>",
+            setup.text,
+        )
+        assert setup_nav is not None
+        self.assertEqual(setup_nav.group(1).replace("&amp;", "&"), selected.headers["location"])
+        selected_setup = client.get(setup_nav.group(1).replace("&amp;", "&"))
+        self.assertEqual(selected_setup.status_code, 200)
         studio_location = re.search(r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"', setup.text)
         assert studio_location is not None
+        selected_setup_studio_location = re.search(
+            r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"',
+            selected_setup.text,
+        )
+        assert selected_setup_studio_location is not None
+        self.assertEqual(selected_setup_studio_location.group(1), studio_location.group(1))
+        setup_main = re.search(r"<main[^>]*>(.*?)</main>", setup.text, re.DOTALL)
+        assert setup_main is not None
+        setup_visible_text = re.sub(r"<[^>]+>", "", setup_main.group(1))
+        self.assertNotIn("Document Studio", setup_visible_text)
+        self.assertNotIn("document_custody_id", setup_visible_text)
+        self.assertNotIn(custody.group(1), setup_visible_text)
+        tampered_setup = client.get(
+            "/admin/workbench/future?stage=document-setup&"
+            "document_custody_id=tampered-workbench-selection"
+        )
+        self.assertEqual(tampered_setup.status_code, 404)
+        self.assertNotIn("tampered-workbench-selection", tampered_setup.text)
         studio = client.get(studio_location.group(1))
         self.assertIn("<h1>Glossary</h1>", studio.text)
         self.assertNotIn("<h1>Document Studio</h1>", studio.text)
@@ -910,7 +937,8 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         locked = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
         self.assertEqual(locked.headers["location"], studio_location.group(1))
         locked_studio = client.get(locked.headers["location"])
-        self.assertIn("lock state: active", locked_studio.text)
+        self.assertIn("This glossary is read-only.", locked_studio.text)
+        self.assertNotIn("lock state", locked_studio.text)
         self.assertIn("disabled", locked_studio.text)
         locked_save = client.post(
             "/admin/workbench/studio/save",
