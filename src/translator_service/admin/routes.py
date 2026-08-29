@@ -227,7 +227,7 @@ def create_workbench_router(
     *,
     glossary_rehearsal_fixture: object | None = None,
 ) -> APIRouter:
-    """Bounded Workbench Library → Document Studio router (packet §3.1).
+    """Bounded Workbench Project Library → Setup → Glossary router.
 
     The router is mounted inside :func:`create_admin_router` so it reuses
     the same Admin session/CSRF guards. Within this narrow owner-only slice it
@@ -254,6 +254,7 @@ def create_workbench_router(
         get_or_seed_workbench_session,
     )
     from translator_service.admin.workbench_views import (
+        render_workbench_document_setup,
         render_workbench_document_studio,
         render_workbench_future,
         render_workbench_glossary,
@@ -581,11 +582,42 @@ def create_workbench_router(
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         stage = request.query_params.get("stage") or "translate"
         custody_id = request.query_params.get("document_custody_id", "")
-        next_href = (
-            _studio_location(custody_id)
-            if stage == "document-setup" and custody_id
-            else None
-        )
+        if stage == "document-setup":
+            if session.role is not AdminRole.OWNER:
+                return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+            if not custody_id:
+                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+            store, storage, actor = _owner_store_and_storage(session)
+            try:
+                selected = select_owner_registered_original_docx_source(
+                    store=store, storage=storage, actor=actor,
+                    document_custody_id=custody_id,
+                )
+                if isinstance(selected, DocumentIntakeDenied):
+                    return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+                catalog = catalog_registered_original_docx_sources(
+                    store=store, storage=storage, actor=actor
+                )
+                entry = next(
+                    (
+                        item for item in catalog
+                        if item.document_custody_id == selected.document_custody_id
+                    ),
+                    None,
+                ) if not isinstance(catalog, DocumentIntakeDenied) else None
+            finally:
+                store.close()
+            if entry is None:
+                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+            return _html(
+                render_workbench_document_setup(
+                    file_name=entry.file_name,
+                    source_size_bytes=selected.source_size_bytes,
+                    glossary_href=_studio_location(selected.document_custody_id),
+                    document_setup_href=_setup_location(selected.document_custody_id),
+                )
+            )
+        next_href = None
         return _render_future(stage=stage, next_href=next_href)
 
     # ------------------------------------------------------------------
