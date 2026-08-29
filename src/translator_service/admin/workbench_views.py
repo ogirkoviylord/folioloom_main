@@ -1321,24 +1321,38 @@ def _durable_workbench_page(
 def render_workbench_library(
     *, csrf_token: str, catalog: Iterable[OwnerDocumentCatalogEntry]
 ) -> str:
-    """Render the owner-owned durable DOCX catalog inside Workbench chrome."""
-    rows = "".join(
-        "<li><strong>"
-        f"{_safe_attr(entry.file_name)}</strong> ({entry.source_size_bytes} bytes)"
+    """Render imported DOCX documents as the first Workbench screen."""
+    document_cards = "".join(
+        "<li class=\"wb-card\"><strong>"
+        f"{_safe_attr(entry.file_name)}</strong>"
+        f"<p>Imported DOCX · {entry.source_size_bytes} bytes</p>"
         "<form method=\"post\" action=\"/admin/workbench/select\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(entry.document_custody_id)}\">"
-        "<button type=\"submit\">Open Glossary</button></form></li>"
+        "<button type=\"submit\">Continue to Document Setup</button></form></li>"
         for entry in catalog
-    ) or "<li>No durable DOCX documents yet.</li>"
+    )
+    document_list = (
+        f"<h2>Your documents</h2><ul>{document_cards}</ul>"
+        if document_cards
+        else (
+            "<section class=\"wb-empty\" aria-label=\"Empty Project Library\">"
+            "<h2>Start with your book or document</h2>"
+            "<p>No documents have been imported into this Workbench yet. "
+            "Import a DOCX to begin preparing it for translation.</p>"
+            "</section>"
+        )
+    )
     body = (
         "<section class=\"wb-card\"><h1>Project Library</h1>"
-        "<p>Import a DOCX or open its Glossary.</p>"
+        "<p>Keep the documents you are preparing for translation together here.</p>"
+        "<p>DOCX import is available in this local Workbench. Imported documents "
+        "are kept in its durable document catalog.</p>"
         "<form method=\"post\" action=\"/admin/workbench/upload\" enctype=\"multipart/form-data\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         "<label>DOCX file <input type=\"file\" name=\"file\" accept=\".docx\" required></label>"
         "<button type=\"submit\">Import DOCX</button></form>"
-        f"<h2>Your documents</h2><ul>{rows}</ul></section>"
+        f"{document_list}</section>"
     )
     return _durable_workbench_page(
         title="Project Library",
@@ -1549,7 +1563,7 @@ def render_workbench_future(
         title=title,
         state=placeholder_state,
         body=body,
-        active="future",
+        active=stage,
         csrf_token=csrf_token,
     )
 
