@@ -206,17 +206,19 @@ re-review and final PR gate instead.
   material publication, production dependency changes, or scope expansion.
 - Council work must be explicit: GPT-Orchestrator proposal -> GPT-Critic
   self-opposition -> DeepSeek-Critic and MiMo-Critic independent critique when
-  MiMo is in scope -> GPT-Orchestrator synthesis -> owner approval if required
-  -> implementation.
+  MiMo is in scope -> optional MiniMax-Critic independent critique ->
+  GPT-Orchestrator synthesis -> owner approval if required -> implementation.
 - GPT-Critic is an internal planning red-team for GPT-Orchestrator output. It
   does not code, does not make final decisions and does not replace DeepSeek or
   MiMo peer critique.
-- GLM participates only through `glm-council` as an optional independent
-  critic/reviewer. It never receives implementation/coder work, does not review
-  its own work and is not a synthesis, implementation, review or merge gate.
-  Record a failed/absent GLM response as `Unavailable` and continue with the
-  available Council evidence. A specific owner request may require GLM to be
-  attempted for one Council, without changing these role boundaries.
+- MiniMax participates only through `minimax-critic` as an optional independent
+  Council critic for product/technical trade-offs, user consequences,
+  operational gaps and simpler alternatives. It never receives implementation
+  or coder work, does not review its own work and is not a synthesis,
+  implementation, review or merge gate. Record a failed/absent MiniMax response
+  as `Unavailable` and continue with the available Council evidence. A specific
+  owner request may require MiniMax to be attempted for one Council, without
+  changing these role boundaries.
 - For multi-model or council work, GPT-Orchestrator should prepare a bounded
   task packet using `docs/agent-task-packet-template.md`, `DOCUMENT_INDEX.md`
   and targeted `rg` searches before handing work to another model.
