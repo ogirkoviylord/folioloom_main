@@ -586,7 +586,7 @@ def create_workbench_router(
             if session.role is not AdminRole.OWNER:
                 return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
             if not custody_id:
-                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+                return _render_recovery(reason="unresolved-context")
             store, storage, actor = _owner_store_and_storage(session)
             try:
                 selected = select_owner_registered_original_docx_source(
@@ -594,7 +594,7 @@ def create_workbench_router(
                     document_custody_id=custody_id,
                 )
                 if isinstance(selected, DocumentIntakeDenied):
-                    return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+                    return _render_recovery(reason="unresolved-context")
                 catalog = catalog_registered_original_docx_sources(
                     store=store, storage=storage, actor=actor
                 )
@@ -608,7 +608,7 @@ def create_workbench_router(
             finally:
                 store.close()
             if entry is None:
-                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+                return _render_recovery(reason="unresolved-context")
             return _html(
                 render_workbench_document_setup(
                     file_name=entry.file_name,

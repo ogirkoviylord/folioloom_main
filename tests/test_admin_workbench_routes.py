@@ -1089,7 +1089,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertNotIn("lock state", page)
         self.assertNotIn("Document Studio", page)
 
-    def test_document_setup_is_selected_document_placeholder_with_one_continuation(self) -> None:
+    def test_document_setup_orients_without_setup_controls(self) -> None:
         page = workbench_views.render_workbench_document_setup(
             file_name="my-book.docx",
             source_size_bytes=42,
@@ -1101,16 +1101,71 @@ class WorkbenchRoutesTest(unittest.TestCase):
         )
 
         self.assertIn("<h1>Document Setup</h1>", page)
-        self.assertIn("Document Setup is not in this slice.", page)
+        self.assertIn('<section class="wb-card wb-document-setup">', page)
+        self.assertIn(
+            ".wb-document-setup .wb-button { display: inline-block; "
+            "justify-self: start; }",
+            page,
+        )
         self.assertIn("my-book.docx", page)
+        self.assertIn("Source format: DOCX", page)
+        self.assertIn("Review this document, then continue to its glossary.", page)
         self.assertEqual(page.count("Continue to Glossary"), 1)
+        self.assertIn(
+            "Document Setup does not save setup choices or start translation.", page
+        )
+        self.assertIn(
+            "Source language, target language, and AI-assisted glossary terms are not "
+            "part of Document Setup yet.",
+            page,
+        )
+        self.assertIn("Back to Project Library", page)
+        self.assertLess(
+            page.index("Continue to Glossary"),
+            page.index("Back to Project Library"),
+        )
+        self.assertLess(
+            page.index(
+                "Document Setup does not save setup choices or start translation."
+            ),
+            page.index(
+                "Source language, target language, and AI-assisted glossary terms are "
+                "not part of Document Setup yet."
+            ),
+        )
+        for forbidden in (
+            "Source language <input",
+            "Target language <input",
+            "Generate AI glossary",
+            "Save glossary",
+            "Generate glossary",
+            "Start translation",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, page)
         self.assertNotIn("Document Studio", page)
         self.assertIn(
             'href="/admin/workbench/future?stage=document-setup&amp;'
             'document_custody_id=custody-opaque" aria-current="page">'
-            "<span>Document Setup</span><span",
+            "<span>Document Setup</span></a>",
             page,
         )
+        for stage, title in (
+            ("translate", "Translate"),
+            ("review", "Review"),
+            ("export", "Export"),
+        ):
+            with self.subTest(stage=stage):
+                expected_future_nav = (
+                    '<a class="wb-nav__link" '
+                    f'href="/admin/workbench/future?stage={stage}">'
+                    f'<span>{title}</span><span class="wb-nav__placeholder-tag" '
+                    'aria-label="placeholder">not in slice</span></a>'
+                )
+                self.assertIn(
+                    expected_future_nav,
+                    page,
+                )
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
@@ -1160,7 +1215,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/admin/login")
 
-    def test_document_setup_without_validated_selection_is_not_found(self) -> None:
+    def test_document_setup_invalid_context_renders_library_recovery(self) -> None:
         sentinel = "tampered-setup-reference"
         response = self.client.get(
             "/admin/workbench/future?stage=document-setup&document_custody_id="
@@ -1168,8 +1223,24 @@ class WorkbenchRoutesTest(unittest.TestCase):
             follow_redirects=False,
         )
 
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
         self.assertNotIn(sentinel, response.text)
+        self.assertIn("Open Project Library", response.text)
+        self.assertNotIn("Glossary", response.text)
+        self.assertNotIn("/admin/workbench/glossary", response.text)
+        self.assertNotIn("Continue to Glossary", response.text)
+        self.assertNotIn("Source format: DOCX", response.text)
+        self.assertNotIn("Document Setup does not save setup choices", response.text)
+
+    def test_document_setup_missing_context_renders_library_recovery(self) -> None:
+        response = self.client.get("/admin/workbench/future?stage=document-setup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Open Project Library", response.text)
+        self.assertNotIn("Glossary", response.text)
+        self.assertNotIn("/admin/workbench/glossary", response.text)
+        self.assertNotIn("Continue to Glossary", response.text)
+        self.assertNotIn("Source format: DOCX", response.text)
 
     def test_overview_includes_open_workbench_cta(self) -> None:
         response = self.client.get("/admin/overview")
