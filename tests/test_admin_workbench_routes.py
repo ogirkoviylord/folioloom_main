@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import unittest
+from datetime import UTC, datetime, timedelta
 from html import unescape
 from tempfile import TemporaryDirectory
 from urllib.parse import quote
@@ -28,6 +29,9 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 
 from translator_service.admin import workbench_views
+from translator_service.admin.auth import AdminSession, AdminSessionManager
+from translator_service.admin.rbac import AdminRole
+from translator_service.admin.routes import SESSION_COOKIE
 from translator_service.admin.workbench_session_state import WORKBENCH_SESSION_STATE
 from translator_service.api import create_app
 from translator_service.config import Settings
@@ -53,6 +57,21 @@ def _admin_login(client: TestClient) -> str:
     return _csrf_token(overview.text)
 
 
+def _admin_session_cookie(role: AdminRole) -> str:
+    """Create a signed non-login session for authenticated-role route coverage."""
+    return AdminSessionManager(
+        owner_password="owner-pass",
+        session_secret="session-secret",
+    ).dump(
+        AdminSession(
+            actor_id=f"test-{role.value}",
+            role=role,
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            csrf_token="test-csrf-token",
+        )
+    )
+
+
 class WorkbenchRoutesTest(unittest.TestCase):
     def test_workbench_view_exports_match_current_rendered_surfaces(self) -> None:
         self.assertEqual(
@@ -60,6 +79,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
             [
                 "WORKBENCH_COPY",
                 "WORKBENCH_PLACEHOLDER_STAGES",
+                "render_workbench_document_setup",
                 "render_workbench_document_studio",
                 "render_workbench_future",
                 "render_workbench_glossary",
@@ -516,7 +536,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
             self.assertEqual(state.terms[first_term.id].status.value, "approved")
             self.assertEqual(state.terms[second_term.id].status.value, "approved")
 
-    def test_workbench_glossary_renders_seven_nav_entries(self) -> None:
+    def test_workbench_glossary_renders_approved_top_level_navigation(self) -> None:
         response = self.client.get("/admin/workbench/glossary?document=opaque-2")
         self.assertEqual(response.status_code, 200)
         nav_match = re.search(
@@ -527,14 +547,25 @@ class WorkbenchRoutesTest(unittest.TestCase):
         assert nav_match is not None, "Workbench nav not found"
         nav_html = nav_match.group(1)
         link_count = len(re.findall(r'<a class="wb-nav__link"', nav_html))
-        self.assertEqual(link_count, 7)
-        self.assertIn("Glossary", nav_html)
-        self.assertIn("Project Library", nav_html)
-        self.assertIn("Document Setup", nav_html)
-        self.assertIn("Suggestions", nav_html)
-        self.assertIn("Translate", nav_html)
-        self.assertIn("Review", nav_html)
-        self.assertIn("Export", nav_html)
+        self.assertEqual(link_count, 5)
+        self.assertIn(
+            '<span class="wb-nav__link wb-nav__link--unavailable" '
+            'aria-disabled="true"><span>Document Setup</span>',
+            nav_html,
+        )
+        labels = re.findall(r"<span>([^<]+)</span>", nav_html)
+        self.assertEqual(
+            labels,
+            [
+                "Project Library",
+                "Document Setup",
+                "Glossary",
+                "Translate",
+                "Review",
+                "Export",
+            ],
+        )
+        self.assertNotIn("Suggestions", nav_html)
 
     def test_empty_add_remains_on_the_local_glossary_surface(self) -> None:
         response = self.client.post(
@@ -971,8 +1002,170 @@ class WorkbenchRoutesTest(unittest.TestCase):
     def test_workbench_entry_opens_library_without_legacy_glossary_link(self) -> None:
         entry = self.client.get("/admin/workbench-entry")
         self.assertEqual(entry.status_code, 200)
-        self.assertIn("<h1>Library</h1>", entry.text)
-        self.assertNotIn("/admin/workbench/glossary", entry.text)
+        self.assertIn("<h1>Project Library</h1>", entry.text)
+        self.assertIn("Start with your book or document", entry.text)
+        self.assertIn("DOCX import is available in this local Workbench.", entry.text)
+        self.assertNotIn("<h1>Library</h1>", entry.text)
+        self.assertNotIn("Document Studio", entry.text)
+        self.assertIn(
+            '<a class="wb-nav__link" href="/admin/workbench/" aria-current="page">'
+            "<span>Project Library</span></a>",
+            entry.text,
+        )
+        self.assertIn("Glossary", entry.text)
+
+    def test_project_library_document_action_routes_through_setup(self) -> None:
+        page = workbench_views.render_workbench_library(
+            csrf_token="csrf-token",
+            catalog=(
+                workbench_views.OwnerDocumentCatalogEntry(
+                    document_custody_id="custody-opaque",
+                    file_name="my-book.docx",
+                    source_size_bytes=42,
+                    source_sha256="0" * 64,
+                ),
+            ),
+        )
+
+        self.assertIn("<h2>Your documents</h2>", page)
+        self.assertIn("my-book.docx", page)
+        self.assertIn("Imported DOCX · 42 bytes", page)
+        self.assertIn("Continue to Document Setup", page)
+        self.assertNotIn("Open Glossary", page)
+        self.assertNotIn("Document Studio", page)
+        self.assertIn(
+            '<span class="wb-nav__link wb-nav__link--unavailable" '
+            'aria-disabled="true"><span>Document Setup</span>'
+            '<span class="wb-nav__placeholder-tag" aria-label="placeholder">'
+            "not in slice</span></span>",
+            page,
+        )
+        self.assertNotIn(
+            'href="/admin/workbench/future?stage=document-setup"', page
+        )
+        library_main = re.search(r"<main[^>]*>(.*?)</main>", page, re.DOTALL)
+        assert library_main is not None
+        library_visible_text = re.sub(r"<[^>]+>", "", library_main.group(1)).lower()
+        for forbidden_term in (
+            "catalog",
+            "custody",
+            "revision",
+            "lock",
+            "source sha",
+            "source path",
+            "storage",
+            "authorization",
+        ):
+            with self.subTest(forbidden_term=forbidden_term):
+                self.assertNotIn(forbidden_term, library_visible_text)
+
+    def test_durable_glossary_uses_the_approved_workbench_navigation(self) -> None:
+        page = workbench_views.render_workbench_document_studio(
+            csrf_token="csrf-token",
+            document_custody_id="custody-opaque",
+            file_name="example.docx",
+            source_size_bytes=42,
+            expected_parent_revision_id=None,
+            revision_sequence=None,
+            lock_status="not created",
+        )
+        self.assertIn("<h1>Glossary</h1>", page)
+        self.assertNotIn("<h1>Document Studio</h1>", page)
+        for title in (
+            "Project Library",
+            "Document Setup",
+            "Glossary",
+            "Translate",
+            "Review",
+            "Export",
+        ):
+            self.assertIn(title, page)
+        self.assertIn(
+            'href="/admin/workbench/studio?document_custody_id=custody-opaque" '
+            'aria-current="page"><span>Glossary</span></a>',
+            page,
+        )
+        self.assertNotIn("Current revision", page)
+        self.assertNotIn("lock state", page)
+        self.assertNotIn("Document Studio", page)
+
+    def test_document_setup_orients_without_setup_controls(self) -> None:
+        page = workbench_views.render_workbench_document_setup(
+            file_name="my-book.docx",
+            source_size_bytes=42,
+            glossary_href="/admin/workbench/studio?document_custody_id=custody-opaque",
+            document_setup_href=(
+                "/admin/workbench/future?stage=document-setup&"
+                "document_custody_id=custody-opaque"
+            ),
+        )
+
+        self.assertIn("<h1>Document Setup</h1>", page)
+        self.assertIn('<section class="wb-card wb-document-setup">', page)
+        self.assertIn(
+            ".wb-document-setup .wb-button { display: inline-block; "
+            "justify-self: start; }",
+            page,
+        )
+        self.assertIn("my-book.docx", page)
+        self.assertIn("Source format: DOCX", page)
+        self.assertIn("Review this document, then continue to its glossary.", page)
+        self.assertEqual(page.count("Continue to Glossary"), 1)
+        self.assertIn(
+            "Document Setup does not save setup choices or start translation.", page
+        )
+        self.assertIn(
+            "Source language, target language, and AI-assisted glossary terms are not "
+            "part of Document Setup yet.",
+            page,
+        )
+        self.assertIn("Back to Project Library", page)
+        self.assertLess(
+            page.index("Continue to Glossary"),
+            page.index("Back to Project Library"),
+        )
+        self.assertLess(
+            page.index(
+                "Document Setup does not save setup choices or start translation."
+            ),
+            page.index(
+                "Source language, target language, and AI-assisted glossary terms are "
+                "not part of Document Setup yet."
+            ),
+        )
+        for forbidden in (
+            "Source language <input",
+            "Target language <input",
+            "Generate AI glossary",
+            "Save glossary",
+            "Generate glossary",
+            "Start translation",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, page)
+        self.assertNotIn("Document Studio", page)
+        self.assertIn(
+            'href="/admin/workbench/future?stage=document-setup&amp;'
+            'document_custody_id=custody-opaque" aria-current="page">'
+            "<span>Document Setup</span></a>",
+            page,
+        )
+        for stage, title in (
+            ("translate", "Translate"),
+            ("review", "Review"),
+            ("export", "Export"),
+        ):
+            with self.subTest(stage=stage):
+                expected_future_nav = (
+                    '<a class="wb-nav__link" '
+                    f'href="/admin/workbench/future?stage={stage}">'
+                    f'<span>{title}</span><span class="wb-nav__placeholder-tag" '
+                    'aria-label="placeholder">not in slice</span></a>'
+                )
+                self.assertIn(
+                    expected_future_nav,
+                    page,
+                )
 
     def test_workbench_primary_link_keeps_visible_white_text(self) -> None:
         response = self.client.get("/admin/workbench/recovery?reason=stale")
@@ -984,9 +1177,6 @@ class WorkbenchRoutesTest(unittest.TestCase):
 
     def test_workbench_future_renders_per_stage(self) -> None:
         for stage, title in (
-            ("project-library", "Project Library"),
-            ("document-setup", "Document Setup"),
-            ("ai-suggestions", "Suggestions"),
             ("translate", "Translate"),
             ("review", "Review"),
             ("export", "Export"),
@@ -996,6 +1186,61 @@ class WorkbenchRoutesTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, stage)
                 self.assertIn(title, response.text)
                 self.assertIn("is not part of this slice.", response.text)
+
+    def test_future_placeholders_allow_authenticated_non_owner_sessions(self) -> None:
+        self.client.cookies.clear()
+        self.client.cookies.set(
+            SESSION_COOKIE,
+            _admin_session_cookie(AdminRole.OPERATOR),
+        )
+
+        for stage in ("translate", "review", "export"):
+            with self.subTest(stage=stage):
+                response = self.client.get(f"/admin/workbench/future?stage={stage}")
+                self.assertEqual(response.status_code, 200)
+
+    def test_document_setup_rejects_authenticated_non_owner_session(self) -> None:
+        self.client.cookies.clear()
+        self.client.cookies.set(
+            SESSION_COOKIE,
+            _admin_session_cookie(AdminRole.VIEWER),
+        )
+
+        response = self.client.get(
+            "/admin/workbench/future?stage=document-setup&"
+            "document_custody_id=owner-only-document",
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_document_setup_invalid_context_renders_library_recovery(self) -> None:
+        sentinel = "tampered-setup-reference"
+        response = self.client.get(
+            "/admin/workbench/future?stage=document-setup&document_custody_id="
+            + sentinel,
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(sentinel, response.text)
+        self.assertIn("Open Project Library", response.text)
+        self.assertNotIn("Glossary", response.text)
+        self.assertNotIn("/admin/workbench/glossary", response.text)
+        self.assertNotIn("Continue to Glossary", response.text)
+        self.assertNotIn("Source format: DOCX", response.text)
+        self.assertNotIn("Document Setup does not save setup choices", response.text)
+
+    def test_document_setup_missing_context_renders_library_recovery(self) -> None:
+        response = self.client.get("/admin/workbench/future?stage=document-setup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Open Project Library", response.text)
+        self.assertNotIn("Glossary", response.text)
+        self.assertNotIn("/admin/workbench/glossary", response.text)
+        self.assertNotIn("Continue to Glossary", response.text)
+        self.assertNotIn("Source format: DOCX", response.text)
 
     def test_overview_includes_open_workbench_cta(self) -> None:
         response = self.client.get("/admin/overview")
